@@ -14,7 +14,7 @@ from dataManager import get_directory_size
 class Job:
     """
     NB This does not find slurm jobs! It checks the processes running on the 
-    cluster and finds all instances of CrystalSimulation running.
+    cluster and finds all instances of MTS2D running.
     """
     paris_zone = ZoneInfo("Europe/Paris")
     gmt_zone = ZoneInfo("Europe/London")

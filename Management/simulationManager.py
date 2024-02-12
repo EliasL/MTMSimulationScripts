@@ -29,7 +29,7 @@ class SimulationManager:
 
 
         # Program path
-        self.program_path = self.build_path + "CrystalSimulation"
+        self.program_path = self.build_path + "MTS2D"
          
         # Generate conf file path and name
         self.conf_file = self.configObj.write_to_file(self.build_path)
