@@ -57,7 +57,8 @@ class DataManager:
                 server = future_to_server[future]
                 try:
                     folders_and_sizes = future.result()
-                    self.data[server] = folders_and_sizes
+                    if folders_and_sizes:
+                        self.data[server] = folders_and_sizes
                 except Exception as exc:
                     print(f'{server} generated an exception: {exc}')
 
@@ -103,13 +104,10 @@ class DataManager:
                 stdin, stdout, stderr = ssh.exec_command(delete_command)
                 # Check for errors
                 errors = stderr.read().decode().strip()
-            else:
-                errors = None
-
-            if errors:
-                print(f"Error deleting {folder} on {server}: {errors}")
-            else:
-                print(f"Successfully deleted {folder} on {server}")
+                if errors:
+                    print(f"Error deleting {folder} on {server}: {errors}")
+                else:
+                    print(f"Successfully deleted {folder} on {server}")
 
     def parse_and_group_seeds(self, folders_and_sizes):
         folder_paths, sizes = folders_and_sizes
@@ -265,4 +263,4 @@ if __name__ == "__main__":
     dm = DataManager()
     dm.findData()
     dm.printData()
-    #dm.delete_all_found_data(dryRun=False)
+    dm.delete_all_found_data(dryRun=False)

@@ -76,8 +76,33 @@ def speed_tests():
                 print(f"Config: {config_id}, Times: {times}, Average: {avg_time}")
             else:
                 print(f"Config: {config_id} encountered an error during execution.")
+
+def baseSpeed():
+    # Warmup run
+    manager = SimulationManager(SimulationConfig()) # Default config values
+    manager.runSimulation()
     
+    # With writing
+    #   1:12
+    # Without writing
+    #   0:46
+    # Wihout csv
+    #   1:04
+    # Without vtu
+    #   1:17 
+    # With spdlog csv
+    #   0:39
+    # With spdlog utv
+    # 
+
+    config = SimulationConfig(nx=10, ny=10, startLoad=0.15, nrThreads=4,
+                          loadIncrement=0.00001, maxLoad=1) 
+    manager = SimulationManager(config)
+    nrRuns = 1
+    times = [manager.runSimulation(build=False) for _ in range(nrRuns)]
+    time = sum(times)/nrRuns
+    print(time)
 
 if __name__ == "__main__":
     print("Starting benchmark run...")
-    speed_tests()
+    baseSpeed()

@@ -10,7 +10,7 @@ class SimulationManager:
         self.outputPath = findOutputPath() if outputPath is None else outputPath
 
         self.useProfiling = useProfiling        
-        self.project_path = str(Path(__file__).resolve().parent.parent)
+        self.project_path = str(Path(__file__).resolve().parent.parent.parent)
         # Change the working directory
         os.chdir(self.project_path)
 
@@ -65,7 +65,8 @@ class SimulationManager:
     
 
     def plot(self):
-        plot_script = os.path.join(self.project_path, "Plotting/plotAll.py")
+        #TODO this should just import the relevant functions
+        plot_script = os.path.join(self.project_path, "SimulationScripts/Plotting/plotAll.py")
         plot_command = f"python3 {plot_script} {self.conf_file} {self.outputPath}"
         run_command(plot_command)
         
