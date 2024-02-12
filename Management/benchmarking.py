@@ -82,18 +82,13 @@ def baseSpeed():
     manager = SimulationManager(SimulationConfig()) # Default config values
     manager.runSimulation()
     
-    # With writing
-    #   1:12
     # Without writing
-    #   0:46
-    # Wihout csv
-    #   1:04
-    # Without vtu
-    #   1:17 
-    # With spdlog csv
+    #   0:38
+    # With spdlog csv and no vtu
     #   0:39
-    # With spdlog utv
-    # 
+    # With spdlog csv and vtu
+    #   0:42
+
 
     config = SimulationConfig(nx=10, ny=10, startLoad=0.15, nrThreads=4,
                           loadIncrement=0.00001, maxLoad=1) 
@@ -102,6 +97,7 @@ def baseSpeed():
     times = [manager.runSimulation(build=False) for _ in range(nrRuns)]
     time = sum(times)/nrRuns
     print(time)
+    manager.plot()
 
 if __name__ == "__main__":
     print("Starting benchmark run...")
