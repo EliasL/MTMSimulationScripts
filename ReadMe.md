@@ -1,1 +1,1 @@
-These scripts are tools to manage the Mesoscopic Tenrosial Simulation (MTS)
+These scripts are tools to manage the Mesoscopic Tensorial Simulation (MTS)
