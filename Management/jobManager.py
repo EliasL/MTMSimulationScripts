@@ -91,10 +91,13 @@ class Job:
                 # Manually adjust for timezone
                 timestamp = timestamp.replace(tzinfo=self.gmt_zone)
                 self.progress_timestamp = timestamp
-
-            # Remove all contents within square brackets from the log line
-            cleaned_log_line = re.sub(r"\[.*?\]", "", second_last_line).strip()
-            self.progress = cleaned_log_line
+            if not '[' in second_last_line:
+                # This means that we are not getting propper progress updates yet
+                self.progress = "..."
+            else:
+                # Remove all contents within square brackets from the log line
+                cleaned_log_line = re.sub(r"\[.*?\]", "", second_last_line).strip()
+                self.progress = cleaned_log_line
 
 
 

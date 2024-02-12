@@ -33,9 +33,9 @@ class DataManager:
         if folder_name == '':
             return []
 
-        # Warning if the folder is not 2DCS_output
-        if folder_name != "2DCS_output":
-            print(f"Warning: The folder in {data_path} on {server} is not called 2DCS_output. Found: {folder_name}")
+        # Warning if the folder is not MTS2D_output
+        if folder_name != "MTS2D_output":
+            print(f"Warning: The folder in {data_path} on {server} is not called MTS2D_output. Found: {folder_name}")
 
         # List all folders within the output folder
         fullPath=f"{data_path}/{folder_name}"

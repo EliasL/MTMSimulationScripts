@@ -132,7 +132,7 @@ def run_command(command, echo=True):
 
     return process.returncode
 
-def findOutputPath(logging=True, createOutputFolder=True, outputFolderName="2DCS_output"):
+def findOutputPath(logging=True, createOutputFolder=True, outputFolderName="MTS2D_output"):
     # Define the paths to check
     paths = ["/media/elias/dataStorage/", "/data2/elundheim/", "/data/elundheim/"]
 
