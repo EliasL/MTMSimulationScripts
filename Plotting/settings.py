@@ -12,4 +12,4 @@ def parse_cpp_header(header_path):
     return settings
 
 # Add Management to sys.path (used to import files)
-settings = parse_cpp_header(str(Path(__file__).resolve().parent.parent) + '/src/settings.h')
+settings = parse_cpp_header(str(Path(__file__).resolve().parent.parent.parent) + '/src/settings.h')
