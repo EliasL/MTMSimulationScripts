@@ -6,7 +6,7 @@ import humanize
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from runOnCluster import queue_remote_job, find_outpath_on_server
-from clusterStatus import find_server, Servers
+from clusterStatus import find_server, Servers, get_server_short_name
 from connectToCluster import uploadProject, connectToCluster
 from configGenerator import SimulationConfig
 from dataManager import get_directory_size
@@ -105,15 +105,15 @@ class Job:
             )
         else:
             time_since_update = "N/A"
-        return (f"Job: {self.name}\n"
-                f"\tServer: {self.server}\n"
+        return (
+                f"Job {self.p_id}: {self.name} on {get_server_short_name(self.server)}\n"
                 #f"\tCommand: {self.command}\n"
                 f"\tTime Running: {self.timeRunning}\n"
                 f"\tProgress: {self.progress}\n"
                 f"\tTime since update: {time_since_update}\n"
                 f"\tOutput Path: {self.output_path}\n"
                 f"\tData : {self.dataSize}\n"
-                f"\tID: {self.p_id}\n")
+            )
     
 
 class JobManager:
@@ -125,7 +125,7 @@ class JobManager:
     def find_jobs_on_server(self, server):
         local_jobs = []
         ssh = connectToCluster(server, False)
-        command = f"ps -eo pid,etime,cmd | grep [C]rystalSimulation | grep -v '/bin/sh'"
+        command = f"ps -eo pid,etime,cmd | grep [M]TS2D | grep -v '/bin/sh'"
         stdin, stdout, stderr = ssh.exec_command(command)
         stdout_lines = stdout.read().decode('utf-8').strip().split('\n')
         # Filter out empty lines
@@ -157,15 +157,14 @@ class JobManager:
 
 
 if __name__ == "__main__":
-    minNrThreads = 40
-    # server = find_server(minNrThreads)
-    # server = Servers.condorcet
-    # uploadProject(server)
+    minNrThreads = 50
     script = "benchmarking.py"
     script = "runSimulations.py"
-    command=f"python3 /home/elundheim/simulation/Management/{script}"
+    command=f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
 
+    # server = find_server(minNrThreads)
+    # uploadProject(server)
     #jobId = queue_remote_job(server, command, "100x100", minNrThreads)
+    
     j=JobManager()
-    #j.find_jobs_on_server("lagrange.pmmh-cluster.espci.fr")
     j.findJobs()

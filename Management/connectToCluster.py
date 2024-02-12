@@ -39,7 +39,7 @@ def uploadProject(cluster_address=Servers.default):
             "--exclude", ".git",
             "--exclude", "build",
             "--exclude", "build-release",
-            "/home/elias/Work/PhD/Code/1D-version1/",
+            "/home/elias/Work/PhD/Code/MTS2D/",
             f"elundheim@{cluster_address}:/home/elundheim/simulation/"
         ]
         
@@ -48,7 +48,7 @@ def uploadProject(cluster_address=Servers.default):
         print("Project folder successfully uploaded.")
         
     except subprocess.CalledProcessError as e:
-        print(f"An error occurred while uploading the project: {e}")
+        raise(Exception(f"An error occurred while uploading the project: {e}"))
 
 def connectToCluster(cluster_address=Servers.default, verbose=True):
 

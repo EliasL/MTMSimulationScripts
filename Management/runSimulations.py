@@ -19,7 +19,16 @@ configs = ConfigGenerator.generate_over_seeds(seeds, nx=100, ny=100, startLoad=0
 
 #Build and test (Fail early)
 manager = SimulationManager(SimulationConfig())
-manager.runSimulation()
+try:
+    manager.runSimulation()
+except Exception as e:     
+    Warning(e)
+    manager.clean()
+    try:
+        manager.runSimulation()
+    except Exception as e:
+        raise(Exception(e))
+    
 
 with Pool(processes=len(seeds)) as pool: 
      results = pool.map(task, configs)

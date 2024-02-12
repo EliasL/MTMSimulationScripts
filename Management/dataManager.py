@@ -159,7 +159,32 @@ class DataManager:
 
         return final_grouped_folders
 
+    def clean_projects_on_servers(self):
+        """
+        Deletes the simulation folder in the home directory on all the servers in parallel.
+        """
 
+        def clean_folder_on_server(server):
+            """
+            Connects to the server and deletes the simulation folder.
+            """
+            try:
+                ssh = connectToCluster(server, False)
+                command = "rm -rf ~/simulation"  # Adjust the path as needed
+                ssh.exec_command(command)
+                print(f"Successfully cleaned simulation folder on {server}")
+            except Exception as e:
+                print(f"Error cleaning simulation folder on {server}: {e}")
+
+        # Use ThreadPoolExecutor to execute clean_folder_on_server in parallel across all servers
+        with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+            future_to_server = {executor.submit(clean_folder_on_server, server): server for server in Servers.servers}
+            for future in as_completed(future_to_server):
+                server = future_to_server[future]
+                try:
+                    future.result()  # We're just checking for exceptions here
+                except Exception as exc:
+                    print(f'{server} generated an exception: {exc}')
 
 
 def get_directory_size(ssh, remote_directory_path):
@@ -261,6 +286,7 @@ def sum_folder_sizes(str_list):
 
 if __name__ == "__main__":
     dm = DataManager()
+    #dm.clean_projects_on_servers()
     dm.findData()
     dm.printData()
-    dm.delete_all_found_data(dryRun=False)
+    #dm.delete_all_found_data(dryRun=False)

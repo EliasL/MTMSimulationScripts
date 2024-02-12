@@ -26,7 +26,7 @@ def find_outpath_on_server(server_hostname):
     connect_kwargs = {"key_filename": SERVER_KEY_PATH}  # Path to your SSH private key
     with Connection(host=server_hostname, user=SERVER_USER, connect_kwargs=connect_kwargs) as c:
         # Execute the remote command (your Python script)
-        result = c.run(f'python3 -u /home/elundheim/simulation/Management/simulationManager.py', hide=True, warn=True)
+        result = c.run(f'python3 -u /home/elundheim/simulation/SimulationScripts/Management/simulationManager.py', hide=True, warn=True)
     return result.stdout.strip()
 
 def run_remote_command(server_hostname, command):
@@ -46,7 +46,7 @@ def run_remote_command(server_hostname, command):
             print(f"Script execution failed: {result.stderr}")
 
 def queue_remote_job(server_hostname, command, job_name, nrThreads):
-    outPath="/home/elundheim/simulation/Job/"
+    outPath="/home/elundheim/simulation/JobOutput/"
     output_file = outPath + f"log-{job_name}.out"
     error_file = outPath + f"err-{job_name}.err"
     # Establish the SSH connection
@@ -63,7 +63,7 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
             {command}
         """).strip()
         # Create the batch script on the server
-        batch_script_path = "/home/elundheim/simulation/Job/" + job_name + ".sh"
+        batch_script_path = outPath + job_name + ".sh"
         c.run(f'echo "{batch_script}" > {batch_script_path}')
         
         # Submit the batch script to Slurm
@@ -91,7 +91,7 @@ if __name__ == "__main__":
     # Upload/sync the project
     uploadProject(server)
     # Choose script to run
-    script_path = '/home/elundheim/simulation/Management/benchmarking.py'
+    script_path = '/home/elundheim/simulation/SimulationScripts/Management/benchmarking.py'
     # Generate sbatch script
 
     # Queue the script on the server

@@ -1,6 +1,7 @@
 from pathlib import Path
 import subprocess
 import time
+import shutil
 import os
 
 class SimulationManager:
@@ -54,6 +55,25 @@ class SimulationManager:
         duration = end_time - start_time
         return duration
 
+
+    def clean(self):
+        # Print a message to indicate the cleaning process has started
+        print("Cleaning...")
+        
+        # Construct the full path to the build directory
+        build_dir_path = os.path.join(self.project_path, self.build_folder)
+        
+        # Check if the build directory exists
+        if os.path.exists(build_dir_path):
+            # Use shutil.rmtree to remove the directory and all its contents
+            shutil.rmtree(build_dir_path)
+            print(f"Removed build directory: {build_dir_path}")
+        else:
+            print(f"Build directory does not exist: {build_dir_path}")
+        
+        # Optionally, recreate the build directory to maintain structure
+        os.makedirs(build_dir_path)
+        print(f"Recreated build directory: {build_dir_path}")
 
     def _build(self):
         print("Building...")
