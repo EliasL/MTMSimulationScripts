@@ -106,26 +106,29 @@ class Job:
             time_since_update = humanize.naturaltime(
                 datetime.now(self.paris_zone) - self.progress_timestamp
             )
+            formatted_time = self.progress_timestamp.strftime('%H:%M:%S')
+            timeUpdate = f"{formatted_time}, {time_since_update}"
         else:
-            time_since_update = "N/A"
+            timeUpdate = '...'
         return (
                 f"Job {self.p_id}: {self.name} on {get_server_short_name(self.server)}\n"
                 #f"\tCommand: {self.command}\n"
-                f"\tTime Running: {self.timeRunning}\n"
-                f"\tProgress: {self.progress}\n"
-                f"\tTime since update: {time_since_update}\n"
-                f"\tOutput Path: {self.output_path}\n"
-                f"\tData : {self.dataSize}\n"
+                f"  Time Running: {self.timeRunning}\n"
+                f"  Progress: {self.progress}\n"
+                f"  Time since update: {timeUpdate}\n"
+                f"  Output Path: {self.output_path}\n"
+                f"  Data : {self.dataSize}\n"
             )
     
 
 class JobManager:
     def __init__(self) -> None:        
-        self.jobs = []
+        self.processes = []
+        self.slurmJobs = []
         self.user="elundheim"
 
     # Function to be executed in each thread
-    def find_jobs_on_server(self, server):
+    def find_processes_on_server(self, server):
         local_jobs = []
         ssh = connectToCluster(server, False)
         command = f"ps -eo pid,etime,cmd | grep [M]TS2D | grep -v '/bin/sh'"
@@ -140,34 +143,81 @@ class JobManager:
             local_jobs.append(Job(ssh, p_id, server, time_running))
         return local_jobs
     
-    def findJobs(self):
-        # Use ThreadPoolExecutor to execute find_jobs_on_server in parallel across all servers
+    def find_slurm_jobs_on_server(self, server):
+        slurm_jobs = []
+        ssh = connectToCluster(server, False)
+        # Use squeue to list jobs for the user, outputting only the job ID
+        command = f"squeue -u {self.user} -h -o %A"
+        stdin, stdout, stderr = ssh.exec_command(command)
+        stdout_lines = stdout.read().decode('utf-8').strip().split('\n')
+        # Filter out empty lines
+        stdout_lines = [line for line in stdout_lines if line.strip()]
+        for line in stdout_lines:
+            job_id = line.strip()  # Slurm job ID
+            slurm_jobs.append((server,job_id))
+        return slurm_jobs
+    
+    # Generalized method for executing a command on all servers in parallel
+    def execute_command_on_servers(self, command_function):
+        results = []
         with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
-            # Submit all servers to the executor
-            future_to_server = {executor.submit(self.find_jobs_on_server, server): server for server in Servers.servers}
+            future_to_server = {executor.submit(command_function, server): server for server in Servers.servers}
             for future in as_completed(future_to_server):
                 server = future_to_server[future]
                 try:
-                    self.jobs.extend(future.result())
+                    result = future.result()
+                    if result is not None:
+                        results.extend(result)
                 except Exception as exc:
                     print(f'{server} generated an exception: {exc}')
+        return results
 
-        for job in self.jobs:
-            print(job)
-        if not self.jobs:
+    def getProcesses(self):
+        self.processes = self.execute_command_on_servers(self.find_processes_on_server)
+
+        if not self.processes:
             print("No jobs found")
+        else:
+            for process in self.processes:
+                print(process)
+            print(f"Found {len(self.processes)} processes.")
+
+    def getSlurmJobs(self):
+        self.slurmJobs = self.execute_command_on_servers(self.find_slurm_jobs_on_server)
+        [print(job) for job in self.slurmJobs]
 
 
+    def cancel_job_on_server(self, server, job_id):
+        """Function to cancel a job on a specific server."""
+        try:
+            ssh = connectToCluster(server, False)
+            command = f"scancel {job_id}"
+            ssh.exec_command(command)
+            print(f"Cancelled job {job_id} on {server}")
+        except Exception as exc:
+            print(f"Error canceling job {job_id} on {server}: {exc}")
+
+    def cancelAllJobs(self):
+        """Cancel all Slurm jobs listed in self.slurmJobs."""
+        for server, job_id in self.slurmJobs:
+            print(f"Are you sure you want to cancle job {job_id} on {server}?:") 
+            if input(f"yes/no : ")!="yes":
+                continue
+            else:
+                self.cancel_job_on_server(server, job_id)
 
 if __name__ == "__main__":
-    minNrThreads = 50
+    minNrThreads = 80
     script = "benchmarking.py"
     script = "runSimulations.py"
     command=f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
+    
+    j=JobManager()
+    # j.getSlurmJobs()
+    # j.cancelAllJobs()
 
     # server = find_server(minNrThreads)
     # uploadProject(server)
     # jobId = queue_remote_job(server, command, "100x100", minNrThreads)
     
-    j=JobManager()
-    j.findJobs()
+    j.getProcesses()
