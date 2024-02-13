@@ -167,7 +167,7 @@ if __name__ == "__main__":
 
     # server = find_server(minNrThreads)
     # uploadProject(server)
-    #jobId = queue_remote_job(server, command, "100x100", minNrThreads)
+    # jobId = queue_remote_job(server, command, "100x100", minNrThreads)
     
     j=JobManager()
     j.findJobs()
