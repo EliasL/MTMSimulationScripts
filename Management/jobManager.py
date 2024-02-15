@@ -111,13 +111,11 @@ class Job:
         else:
             timeUpdate = '...'
         return (
-                f"Job {self.p_id}: {self.name} on {get_server_short_name(self.server)}\n"
+                f"P_ID {self.p_id}: {self.name} on {get_server_short_name(self.server)}\n"
                 #f"\tCommand: {self.command}\n"
-                f"  Time Running: {self.timeRunning}\n"
                 f"  Progress: {self.progress}\n"
                 f"  Time since update: {timeUpdate}\n"
-                f"  Output Path: {self.output_path}\n"
-                f"  Data : {self.dataSize}\n"
+                f"  {self.output_path} : {self.dataSize}\n"
             )
     
 

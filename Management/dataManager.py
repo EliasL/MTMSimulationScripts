@@ -249,6 +249,7 @@ def convert_to_bytes(value, unit):
     return value * parse_unit(unit)
 
 def sum_folder_sizes(str_list):
+    #TODO does not work
     # Initialize total bytes
     total_bytes = 0
     denominator = ""  # To store the common denominator part for later use
