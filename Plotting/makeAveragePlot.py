@@ -41,10 +41,9 @@ def make_average_plot(filePaths):
         # Read the CSV data into a DataFrame
         df = pd.read_csv(filePath, usecols=['Load', 'Avg. energy'], dtype={'Load': 'float64', 'Avg. energy': 'float64'})
         dfs.append(df)
-        nrCorrections = re.search(r"m(\d+)s", filePath).group(1) 
 
         # Plot individual run
-        plt.plot(df['Load'], df['Avg. energy'], label=f'M: {nrCorrections}', alpha=0.5) 
+        plt.plot(df['Load'], df['Avg. energy'], label=f'seed: {i}', alpha=0.5) 
 
     # Concatenate all DataFrames for average calculation
     combined_df = pd.concat(dfs)
@@ -63,5 +62,5 @@ def make_average_plot(filePaths):
     plt.grid(True)
 
     # Save the plot
-    visuals_folder = str(Path(__file__).resolve().parent.parent / 'Visuals')
-    plt.savefig(visuals_folder+f"/RunCollections/CompareNrOfCorrections_{configs[0].generate_name(False)}.pdf")
+    visuals_folder = str(Path(__file__).resolve().parent.parent / 'Plots')
+    plt.savefig(visuals_folder+f"/Seeds/CompareNrOfCorrections_{configs[0].generate_name(False)}.pdf")

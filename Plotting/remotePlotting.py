@@ -8,6 +8,7 @@ from makeAveragePlot import make_average_plot
 sys.path.append(str(Path(__file__).resolve().parent.parent / 'Management'))
 # Now we can import from Management
 from connectToCluster import connectToCluster, Servers, get_server_short_name
+from configGenerator import ConfigGenerator
 
 
 
@@ -22,18 +23,7 @@ def get_csv_from_server(server, configs):
     user="elundheim"
     data_path = os.path.join(base_dir, user)
 
-    # Navigate to the base_dir and get the first folder name
-    command = f"cd /{data_path}; ls -d */ | head -n 1"
-    stdin, stdout, stderr = ssh.exec_command(command)
-    folder_name = stdout.read().strip().decode().rstrip('/')
-    
-    # If there is no data, we can return nothing now
-    if folder_name == '':
-        return []
-
-    # Warning if the folder is not MTS2D_output
-    if folder_name != "MTS2D_output":
-        print(f"Warning: The folder in {data_path} on {server} is not called MTS2D_output. Found: {folder_name}")
+    folder_name = "MTS2D_output"
 
     # List all folders within the output folder
     command = f"cd /{data_path}/{folder_name}; ls -d */"
@@ -47,6 +37,7 @@ def get_csv_from_server(server, configs):
              's100x100l0.15,1e-05,0.7t1n0.05m3s0',
              's100x100l0.15,1e-05,0.7t1n0.05m5s0',
              's100x100l0.15,1e-05,0.7t1n0.05m7s0']
+    names = [config.generate_name(False) for config in configs]
 
     newPaths = []
     sftp = ssh.open_sftp()
@@ -78,8 +69,14 @@ def get_csv_files(configs):
                 print(f'{server} generated an exception: {exc}')
     # Flatten the paths
     newPaths = [path for sublist in newPaths for path in sublist]
-
-    make_average_plot(newPaths)    
+    if newPaths:
+        make_average_plot(newPaths)    
+    else:
+        print("No files found")
 
 if __name__ == "__main__":
-    get_csv_files("test")
+
+    seeds = range(0,10)
+    configs = ConfigGenerator.generate_over_seeds(seeds, nx=100, ny=100, startLoad=0.15, 
+                            loadIncrement=0.0001, maxLoad=1, nrThreads=4) 
+    get_csv_files(configs)
