@@ -50,9 +50,9 @@ class SimulationManager:
 
         # Stop the timer right after the command completes
         end_time = time.time()
-
         # Calculate the duration
         duration = end_time - start_time
+
         return duration
 
 

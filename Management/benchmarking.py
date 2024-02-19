@@ -88,7 +88,8 @@ def baseSpeed():
     #   0:39
     # With spdlog csv and vtu
     #   0:42
-
+    # With private nodes
+    #   0:37
 
     config = SimulationConfig(nx=10, ny=10, startLoad=0.15, nrThreads=4,
                           loadIncrement=0.00001, maxLoad=1) 
