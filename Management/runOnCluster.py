@@ -3,12 +3,10 @@ from fabric import Connection
 import textwrap
 
 SERVER_USER = 'elundheim'
-SERVER_KEY_PATH = "/home/elias/.ssh/id_rsa"
 
 def run_remote_script(server_hostname, script_path):
     # Establish the SSH connection
-    connect_kwargs = {"key_filename": SERVER_KEY_PATH}  # Path to your SSH private key
-    with Connection(host=server_hostname, user=SERVER_USER, connect_kwargs=connect_kwargs) as c:
+    with Connection(host=server_hostname, user=SERVER_USER) as c:
         # Execute the remote command (your Python script)
         result = c.run(f'python3 -u {script_path}', hide=False, warn=True)
 
@@ -23,16 +21,14 @@ def run_remote_script(server_hostname, script_path):
 
 def find_outpath_on_server(server_hostname):
     # Establish the SSH connection
-    connect_kwargs = {"key_filename": SERVER_KEY_PATH}  # Path to your SSH private key
-    with Connection(host=server_hostname, user=SERVER_USER, connect_kwargs=connect_kwargs) as c:
+    with Connection(host=server_hostname, user=SERVER_USER) as c:
         # Execute the remote command (your Python script)
         result = c.run(f'python3 -u /home/elundheim/simulation/SimulationScripts/Management/simulationManager.py', hide=True, warn=True)
     return result.stdout.strip()
 
 def run_remote_command(server_hostname, command):
     # Establish the SSH connection
-    connect_kwargs = {"key_filename": SERVER_KEY_PATH}  # Path to your SSH private key
-    with Connection(host=server_hostname, user=SERVER_USER, connect_kwargs=connect_kwargs) as c:
+    with Connection(host=server_hostname, user=SERVER_USER) as c:
         # Execute the remote command (your Python script)
         result = c.run(command, hide=False, warn=True)
 
@@ -50,8 +46,7 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
     output_file = outPath + f"log-{job_name}.out"
     error_file = outPath + f"err-{job_name}.err"
     # Establish the SSH connection
-    connect_kwargs = {"key_filename": SERVER_KEY_PATH}  # Path to your SSH private key
-    with Connection(host=server_hostname, user=SERVER_USER, connect_kwargs=connect_kwargs) as c:
+    with Connection(host=server_hostname, user=SERVER_USER) as c:
         # Create a batch script content
         batch_script = textwrap.dedent(f"""
             #!/bin/bash

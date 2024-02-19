@@ -53,7 +53,6 @@ def uploadProject(cluster_address=Servers.default):
 def connectToCluster(cluster_address=Servers.default, verbose=True):
 
     username = "elundheim"
-    key_filename = "/home/elias/.ssh/id_rsa" 
 
     # Step 1: Establish an SSH connection to the cluster using Paramiko.
     ssh = SSHClient()
@@ -62,7 +61,7 @@ def connectToCluster(cluster_address=Servers.default, verbose=True):
 
     try:
         # Connect using the private key instead of a password
-        ssh.connect(cluster_address, username=username, key_filename=key_filename)
+        ssh.connect(cluster_address, username=username)
         if verbose:
             print(f"SSH connection established to {cluster_address}.")
     except AuthenticationException:

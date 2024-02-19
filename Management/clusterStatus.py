@@ -73,18 +73,18 @@ def colorize(value, good_value, bad_value):
 
 def display_server_info(server_info):
     data = []
-    for nr, (server, info) in enumerate(server_info.items(), start=1):
+    for server, info in server_info.items():
         if isinstance(info, str):  # Error handling case
-            data.append([nr, server, "Error", info, "N/A"])
+            data.append([server, "Error", info, "N/A"])
             continue
         server_short_name = get_server_short_name(server)
         nr_unused_cores = f"{info.nrFreeCores}/{info.nrTotalCores}"
         colored_cores = colorize(info.nrFreeCores, 50, 15) + f"/{info.nrTotalCores}"
         jobs_running = info.nrJobsRunning
         jobs_waiting = colorize(info.nrJobsWaitingInQueue, 0, 2)
-        data.append([nr, server_short_name, colored_cores, jobs_running, jobs_waiting])
+        data.append([server_short_name, colored_cores, jobs_running, jobs_waiting])
 
-    headers = ['Nr', 'Server', 'Free Cores', 'Jobs Running', 'Jobs Waiting']
+    headers = ['Server', 'Free Cores', 'Jobs Running', 'Jobs Waiting']
     print(tabulate(data, headers=headers, tablefmt='grid'))
 
 def task(server):
