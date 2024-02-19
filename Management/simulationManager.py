@@ -11,7 +11,7 @@ class SimulationManager:
         self.outputPath = findOutputPath() if outputPath is None else outputPath
 
         self.useProfiling = useProfiling        
-        self.project_path = str(Path(__file__).resolve().parent.parent.parent)
+        self.project_path = str(Path(__file__).resolve().parent.parent.parent)+'/MTS2D'
         # Change the working directory
         os.chdir(self.project_path)
 
@@ -134,7 +134,7 @@ def run_command(command, echo=True):
 
 def findOutputPath(logging=True, createOutputFolder=True, outputFolderName="MTS2D_output"):
     # Define the paths to check
-    paths = ["/media/elias/dataStorage/", "/data2/elundheim/", "/data/elundheim/"]
+    paths = ["/Volumes/data/","/media/elias/dataStorage/", "/data2/elundheim/", "/data/elundheim/"]
 
     # Initialize a variable to store the chosen path
     chosen_path = None
