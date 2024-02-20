@@ -23,10 +23,10 @@ def get_csv_from_server(server, configs):
     user="elundheim"
     data_path = os.path.join(base_dir, user)
 
-    folder_name = "MTS2D_output"
+    remote_folder_name = "MTS2D_output"
 
     # List all folders within the output folder
-    command = f"cd /{data_path}/{folder_name}; ls -d */"
+    command = f"cd /{data_path}/{remote_folder_name}; ls -d */"
     stdin, stdout, stderr = ssh.exec_command(command)
     folders = stdout.read().strip().decode().split('\n')
     folders = [folder.rstrip('/') for folder in folders]  # Clean up folder names
@@ -41,11 +41,13 @@ def get_csv_from_server(server, configs):
 
     newPaths = []
     sftp = ssh.open_sftp()
+    folder_path = "/tmp/MTS2"
+    os.makedirs(folder_path, exist_ok=True)  # This line ensures the MTS2 folder is created
     for name in names:
         #name = config.generate_name(withExtension=False)
         if name in folders:
-            remote_file_path = f"{data_path}/{folder_name}/{name}/macroData.csv"
-            local_file_path = os.path.join("/tmp/MTS2", f"{name}.csv")  # Temporary path on the local PC
+            remote_file_path = f"{data_path}/{remote_folder_name}/{name}/macroData.csv"
+            local_file_path = os.path.join(folder_path, f"{name}.csv")  # Temporary path on the local PC
             sftp.get(remote_file_path, local_file_path)  # Download the file
             newPaths.append(local_file_path)
 
@@ -69,14 +71,15 @@ def get_csv_files(configs):
                 print(f'{server} generated an exception: {exc}')
     # Flatten the paths
     newPaths = [path for sublist in newPaths for path in sublist]
-    if newPaths:
-        make_average_plot(newPaths)    
-    else:
-        print("No files found")
+    return newPaths
 
 if __name__ == "__main__":
 
     seeds = range(0,10)
     configs = ConfigGenerator.generate_over_seeds(seeds, nx=100, ny=100, startLoad=0.15, 
-                            loadIncrement=0.0001, maxLoad=1, nrThreads=4) 
-    get_csv_files(configs)
+                            loadIncrement=0.00001, maxLoad=1, nrThreads=4) 
+    paths = get_csv_files(configs)
+    if paths:
+        make_average_plot("seeds", paths)    
+    else:
+        print("No files found")

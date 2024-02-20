@@ -250,6 +250,7 @@ def convert_to_bytes(value, unit):
 
 def sum_folder_sizes(str_list):
     #TODO does not work
+    # Maybe it does work?
     # Initialize total bytes
     total_bytes = 0
     denominator = ""  # To store the common denominator part for later use
@@ -287,7 +288,7 @@ def sum_folder_sizes(str_list):
 
 if __name__ == "__main__":
     dm = DataManager()
-    #dm.clean_projects_on_servers()
+    # dm.clean_projects_on_servers()
     dm.findData()
     dm.printData()
     #dm.delete_all_found_data(dryRun=False)

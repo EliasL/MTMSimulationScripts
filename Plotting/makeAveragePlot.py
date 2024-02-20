@@ -29,7 +29,7 @@ outPath = "/media/elias/dataStorage/output/"
 macroPath = f"/{settings['MACRODATANAME']}.csv"
 filePaths = [outPath + config.generate_name(False) + macroPath for config in configs]
 
-def make_average_plot(filePaths):
+def make_average_plot(name, filePaths):
     # Initialize a list to store DataFrames for each run
     dfs = []
 
@@ -63,4 +63,5 @@ def make_average_plot(filePaths):
 
     # Save the plot
     visuals_folder = str(Path(__file__).resolve().parent.parent / 'Plots')
-    plt.savefig(visuals_folder+f"/Seeds/CompareNrOfCorrections_{configs[0].generate_name(False)}.pdf")
+    fileName = Path(filePaths[0]).stem
+    plt.savefig(visuals_folder+f"/Seeds/{name}_{fileName}.pdf")

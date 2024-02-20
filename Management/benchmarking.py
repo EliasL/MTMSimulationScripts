@@ -13,8 +13,8 @@ def thread_benchmark():
         
 
     threads = [1, 10, 20, 30, 32, 34, 40, 50, 60, 63, 64]
-    threads = [1,4]
-    configs = ConfigGenerator.generateOverThreads(threads, nx=10, ny=10, startLoad=0.15, 
+    threads = [1,2,3,4]
+    configs = ConfigGenerator.generate_over_threads(threads, nx=50, ny=50, startLoad=0.15, 
                             loadIncrement=0.001, maxLoad=1)
 
     # Real runs
@@ -81,7 +81,8 @@ def baseSpeed():
     # Warmup run
     manager = SimulationManager(SimulationConfig()) # Default config values
     manager.runSimulation()
-    
+
+    # linux    
     # Without writing
     #   0:38
     # With spdlog csv and no vtu
@@ -91,15 +92,27 @@ def baseSpeed():
     # With private nodes
     #   0:37
 
-    config = SimulationConfig(nx=10, ny=10, startLoad=0.15, nrThreads=4,
+    #mac
+    # With private nodes
+    #   0:58
+    # With 1 thread instead of 4
+    #   0:22
+    # No log, 1 thread
+    #   0:22
+    # Very nice! Logging takes up no time.
+
+
+
+
+    config = SimulationConfig(nx=10, ny=10, startLoad=0.15, nrThreads=1,
                           loadIncrement=0.00001, maxLoad=1) 
     manager = SimulationManager(config)
     nrRuns = 1
     times = [manager.runSimulation(build=False) for _ in range(nrRuns)]
     time = sum(times)/nrRuns
     print(time)
-    manager.plot()
+    #manager.plot()
 
 if __name__ == "__main__":
     print("Starting benchmark run...")
-    baseSpeed()
+    thread_benchmark()

@@ -42,11 +42,20 @@ def run_remote_command(server_hostname, command):
             print(f"Script execution failed: {result.stderr}")
 
 def queue_remote_job(server_hostname, command, job_name, nrThreads):
-    outPath="/home/elundheim/simulation/JobOutput/"
+    base_path = "/home/elundheim/simulation/MTS2D/"
+    outPath = base_path + "JobOutput/"
     output_file = outPath + f"log-{job_name}.out"
     error_file = outPath + f"err-{job_name}.err"
+    
     # Establish the SSH connection
     with Connection(host=server_hostname, user=SERVER_USER) as c:
+        # Check if the simulation directory exists
+        if c.run(f'test -d {base_path}', warn=True).failed:
+            raise Exception(f"The directory {base_path} does not exist.")
+        
+        # Ensure the JobOutput directory exists
+        c.run(f'mkdir -p {outPath}')
+        
         # Create a batch script content
         batch_script = textwrap.dedent(f"""
             #!/bin/bash
@@ -57,6 +66,7 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
             #SBATCH --error={error_file}
             {command}
         """).strip()
+        
         # Create the batch script on the server
         batch_script_path = outPath + job_name + ".sh"
         c.run(f'echo "{batch_script}" > {batch_script_path}')
@@ -69,15 +79,16 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
             print("Batch script submitted successfully.")
             print(result.stdout)  # This will include the Slurm job ID
             # Extract the Slurm job ID from the result
-            job_id_line = result.stdout.strip().split()[-1]
             try:
+                job_id_line = result.stdout.strip().split()[-1]
                 slurm_job_id = int(job_id_line)
+                return slurm_job_id  # Return the Slurm job ID
             except ValueError as e:
-                raise(Exception(f"Error parsing jobID: {e}"))
+                raise Exception(f"Error parsing jobID: {e}")
         else:
             print(f"Batch script submission failed: {result.stderr}")
+            return None
 
-    return slurm_job_id  # Return the Slurm job ID
 
 
 if __name__ == "__main__":
