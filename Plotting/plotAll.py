@@ -5,26 +5,10 @@ from settings import settings
 import sys
 from pathlib import Path
 
-# Add Management to sys.path (used to import files)
-sys.path.append(str(Path(__file__).resolve().parent.parent / 'Management'))
-# Now we can import from Management
-from simulationManager import findOutputPath
 
-
-if __name__ == "__main__":
-
-    if len(sys.argv) < 2:
-        raise Exception("Config file is required!")
-        
-
-    # We expect the argument to be path/name.conf, and we want just the name
-    subfolderName = Path(sys.argv[1]).stem
-    if len(sys.argv) < 3:
-        print("Attempting to automatically find output path")
-        dataPath = findOutputPath()
-    else:
-        dataPath = sys.argv[2]
-    
+def plotAll(configFile, dataPath):
+        # We expect the argument to be path/name.conf, and we want just the name
+    subfolderName = Path(configFile).stem
     collection = f"{settings['COLLECTIONNAME']}.pvd"
     macroData = f"{settings['MACRODATANAME']}.csv"
 
@@ -35,3 +19,21 @@ if __name__ == "__main__":
 
     # energyGridName = "energy_grid.csv"
     # makeEnergyField(path, energyGridName)
+
+
+if __name__ == "__main__":
+    # Add Management to sys.path (used to import files)
+    sys.path.append(str(Path(__file__).resolve().parent.parent / 'Management'))
+    # Now we can import from Management
+    from simulationManager import findOutputPath
+
+    if len(sys.argv) < 2:
+        raise Exception("Config file is required!")
+
+    if len(sys.argv) < 3:
+        print("Attempting to automatically find output path")
+        dataPath = findOutputPath()
+    else:
+        dataPath = sys.argv[2]
+
+    plotAll(sys.argv[1], dataPath)

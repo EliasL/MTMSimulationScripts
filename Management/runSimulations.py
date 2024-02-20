@@ -13,22 +13,23 @@ def task(config):
     return time
 
 
-seeds = range(0,10)
-configs = ConfigGenerator.generate_over_seeds(seeds, nx=100, ny=100, startLoad=0.15, 
-                          loadIncrement=0.0001, maxLoad=1, nrThreads=4) 
+if __name__ == '__main__':
+    seeds = range(0,10)
+    configs = ConfigGenerator.generate_over_seeds(seeds, nx=100, ny=100, startLoad=0.15, 
+                            loadIncrement=0.00001, maxLoad=1, nrThreads=1) 
 
-#Build and test (Fail early)
-manager = SimulationManager(SimulationConfig())
-try:
-    manager.runSimulation()
-except Exception as e:     
-    Warning(e)
-    manager.clean()
+    #Build and test (Fail early)
+    manager = SimulationManager(SimulationConfig())
     try:
         manager.runSimulation()
-    except Exception as e:
-        raise(Exception(e))
-    
+    except Exception as e:     
+        Warning(e)
+        manager.clean()
+        try:
+            manager.runSimulation()
+        except Exception as e:
+            raise(Exception(e))
+        
 
-with Pool(processes=len(seeds)) as pool: 
-     results = pool.map(task, configs)
+    with Pool(processes=len(seeds)) as pool: 
+        results = pool.map(task, configs)

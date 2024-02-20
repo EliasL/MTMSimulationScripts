@@ -3,6 +3,12 @@ import subprocess
 import time
 import shutil
 import os
+import sys
+import platform
+
+# Add Management to sys.path (used to import files)
+sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
+from plotAll import plotAll
 
 class SimulationManager:
     
@@ -10,8 +16,10 @@ class SimulationManager:
         self.configObj = configObj
         self.outputPath = findOutputPath() if outputPath is None else outputPath
 
-        self.useProfiling = useProfiling        
-        self.project_path = str(Path(__file__).resolve().parent.parent.parent)+'/MTS2D'
+        self.useProfiling = useProfiling 
+        self.parent_folder = str(Path(__file__).resolve().parent.parent.parent)
+        self.project_path = os.path.join(self.parent_folder, 'MTS2D')
+        self.script_path = os.path.join(self.parent_folder, 'SimulationScripts')
         # Change the working directory
         os.chdir(self.project_path)
 
@@ -25,7 +33,7 @@ class SimulationManager:
         self.build_path = os.path.join(self.project_path, self.build_folder)
      
         # I think it is better to always use release
-        build_type = "Release"#"Debug" if self.useProfiling else "Release"
+        build_type = "Debug" if self.useProfiling else "Release"
         self.build_command = f"cd {self.build_folder} && cmake -DCMAKE_BUILD_TYPE={build_type} .. && make"
 
 
@@ -36,7 +44,7 @@ class SimulationManager:
         self.conf_file = self.configObj.write_to_file(self.build_path)
         # Generate command to run simulation
         self.simulation_command = f"{self.program_path} {self.conf_file} {self.outputPath}"
-        if self.useProfiling:
+        if self.useProfiling and platform.system() == 'Linux':
             self.simulation_command = "valgrind --tool=callgrind " + self.simulation_command
 
 
@@ -85,10 +93,7 @@ class SimulationManager:
     
 
     def plot(self):
-        #TODO this should just import the relevant functions
-        plot_script = os.path.join(self.project_path, "SimulationScripts/Plotting/plotAll.py")
-        plot_command = f"python3 {plot_script} {self.conf_file} {self.outputPath}"
-        run_command(plot_command)
+        plotAll(self.conf_file, self.outputPath)
         
 
 # The reason why this is so complicated is that if we simply use .readline(), it
