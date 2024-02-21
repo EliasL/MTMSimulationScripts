@@ -13,6 +13,8 @@ class Servers:
     fourier = "fourier.pmmh-cluster.espci.fr"
     descartes = "descartes.pmmh-cluster.espci.fr"
 
+    local_path_mac = "/Volumes/data/"
+
     # List of server variables for iteration or list-like access
     servers = [
         galois,
@@ -25,6 +27,9 @@ class Servers:
         fourier,
         descartes
     ]
+
+    # If we want to search all the servers including the local storage, we can do that
+    serversAndLocal = servers + [local_path_mac]
 
     # Default server
     default = galois

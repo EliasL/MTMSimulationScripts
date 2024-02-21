@@ -63,5 +63,13 @@ def make_average_plot(name, filePaths):
 
     # Save the plot
     visuals_folder = str(Path(__file__).resolve().parent.parent / 'Plots')
-    fileName = Path(filePaths[0]).stem
-    plt.savefig(visuals_folder+f"/Seeds/{name}_{fileName}.pdf")
+
+    # Local paths will be called macroData
+    fileName = Path(filePaths[0]).parent.name
+    if fileName == "macroData":
+        # but downloaded files will be called the config name
+        fileName = Path(filePaths[0].stem)
+    
+    filePath = visuals_folder+f"/Seeds/{name}_{fileName}.pdf" 
+    plt.savefig(filePath)
+    print(f"saved figure to {filePath}")
