@@ -31,7 +31,9 @@ def thread_benchmark():
     plt.title("Runtime over number of threads")
     plt.xlabel("Number of threads")
     plt.ylabel("Time (s)")
-    plt.savefig(outpath + "/Thread effect 100x100.pdf")
+    path = outpath + f"/Thread_effect_{configs[0].generate_name(False)}.pdf"
+    plt.savefig(path)
+    print(f"Figure saved at {path}")
 
 def task(args):
     config, run_id = args # Unpack arguments

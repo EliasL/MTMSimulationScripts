@@ -10,6 +10,11 @@ class ServerInfo:
         self.nrJobsRunning=0
         self.nrJobsWaitingInQueue=0
         self.theNodeCanAcceptMoreJobs=False
+        self.totalRAM = 0  # GB
+        self.usedRAM = 0  # GB
+        self.freeRAM = 0 # GB
+
+        self.totalScore = 0
 
 def get_server_info(ssh_client):
     # Create a ServerInfo object
@@ -44,32 +49,73 @@ def get_server_info(ssh_client):
     # Adjust this based on how you define exclusivity or constraints in your jobs
     si.theNodeCanAcceptMoreJobs = 'exclusive' not in exclusive_job_settings
 
+    # Get total RAM in GB
+    stdin, stdout, stderr = ssh_client.exec_command("free -m | grep Mem: | awk '{print $2}'")
+    si.totalRAM = round(int(stdout.read().decode().strip())/1000)
+
+    # Get used RAM in GB (total - free)
+    stdin, stdout, stderr = ssh_client.exec_command("free -m | grep Mem: | awk '{print $3}'")
+    si.usedRAM = round(int(stdout.read().decode().strip())/1000)
+    si.freeRAM = si.totalRAM - si.usedRAM
+
     return si
 
 # Function to add color based on the value
-def colorize(value, good_value, bad_value):
+def colorize(value, good_value, bad_value, string=None):
     # Attempt to safely evaluate the expression to a float
     evaluated_value = eval(str(value))
     if evaluated_value is None:
         return "Invalid input"
 
+    score = 0 # -1 bad, 0 ok, +1 good
+
     # Determine coloring based on comparison with good and bad values
     if good_value < bad_value:  # Lower values are better
         if evaluated_value <= good_value:
             color = "\033[92m"  # Green
+            score = 1
         elif evaluated_value >= bad_value:
             color = "\033[91m"  # Red
+            score = -1
         else:
             color = "\033[93m"  # Yellow
     else:  # Higher values are better
         if evaluated_value >= good_value:
             color = "\033[92m"  # Green
+            score = 1
         elif evaluated_value <= bad_value:
             color = "\033[91m"  # Red
+            score = -1
         else:
             color = "\033[93m"  # Yellow
+    if string:
+        return f"{color}{string}\033[0m", score 
+    else:
+        return f"{color}{value}\033[0m", score
 
-    return f"{color}{value}\033[0m"
+def score_and_color_server(info):
+    total_score = 0
+    
+    # Define the metrics to evaluate
+    metrics = {
+        'Free Cores': (info.nrFreeCores, info.nrTotalCores, 50, 15),
+        'GB RAM': (info.freeRAM, info.totalRAM, 50, 15),
+        'Jobs R': (info.nrJobsRunning, None, 2, 10),
+        'Jobs W': (info.nrJobsWaitingInQueue, None, 0, 2),
+    }
+    
+    results = []
+    headers = []
+    
+    for label, (value, total, good_value, bad_value) in metrics.items():
+        if total:
+            colorized_value, score = colorize(value, good_value, bad_value, f"{value}/{total}")
+        else:
+            colorized_value, score = colorize(value, good_value, bad_value)
+        total_score += score
+        results.append(colorized_value)
+        headers.append(label)
+    return results, headers, total_score
 
 def display_server_info(server_info):
     data = []
@@ -77,15 +123,22 @@ def display_server_info(server_info):
         if isinstance(info, str):  # Error handling case
             data.append([server, "Error", info, "N/A"])
             continue
-        server_short_name = get_server_short_name(server)
-        nr_unused_cores = f"{info.nrFreeCores}/{info.nrTotalCores}"
-        colored_cores = colorize(info.nrFreeCores, 50, 15) + f"/{info.nrTotalCores}"
-        jobs_running = info.nrJobsRunning
-        jobs_waiting = colorize(info.nrJobsWaitingInQueue, 0, 2)
-        data.append([server_short_name, colored_cores, jobs_running, jobs_waiting])
+        
+        name = get_server_short_name(server)
+        
+        results, headers, total_score = score_and_color_server(info)
+        
+        # Insert the server name in the front
+        results.insert(0, colorize(total_score, 1,-1, name)[0])
+        headers.insert(0, "Server")
+        info.totalScore = total_score
+        # Append results with total_score for sorting
+        data.append((total_score, results))
 
-    headers = ['Server', 'Free Cores', 'Jobs Running', 'Jobs Waiting']
-    print(tabulate(data, headers=headers, tablefmt='grid'))
+    # Sort by total_score, then extract sorted results
+    sorted_data = [item[1] for item in sorted(data, key=lambda x: x[0], reverse=True)]
+
+    print(tabulate(sorted_data, headers=headers, tablefmt='grid'))
 
 def task(server):
     try:
@@ -115,7 +168,7 @@ def get_all_server_info(servers=Servers.servers):
 
     return server_info
 
-def find_server(minNrThreads):
+def find_server(minNrThreads=16, minRAM=16):
     print("Finding available server...")
     server_info = get_all_server_info()
 
@@ -123,15 +176,17 @@ def find_server(minNrThreads):
     for server, info in server_info.items():
         if isinstance(info, str):  # Skip servers with errors
             continue
-        if info.nrFreeCores >= minNrThreads and info.theNodeCanAcceptMoreJobs:
+        if (info.nrFreeCores >= minNrThreads and
+            info.freeRAM >= minRAM and 
+            info.theNodeCanAcceptMoreJobs):
             eligible_servers.append((server, info))
 
     if not eligible_servers:
-        print("No server currently meets the core requirement and can accept more jobs.")
+        print("No server currently meets the requirements.")
         return None
 
-    # Choose the server with the fewest jobs in the queue
-    server, info = min(eligible_servers, key=lambda x: x[1].nrJobsWaitingInQueue)
+    # Choose the server with the best score
+    server, info = max(eligible_servers, key=lambda x: score_and_color_server(x[1])[2])
     print(f"Selected {get_server_short_name(server)} with {info.nrJobsWaitingInQueue} jobs in the queue.")
     return server
 

@@ -103,8 +103,8 @@ def run_command(command, echo=True):
         # Simply print the command without colors or formatting
         print("Executing command:", command)
 
-    # Start the process
-    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, env=os.environ)
 
     # Buffer to store the output until we hit a line ending
     output_buffer = bytearray()

@@ -60,7 +60,7 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
         batch_script = textwrap.dedent(f"""
             #!/bin/bash
             #SBATCH --job-name={job_name}
-            #SBATCH --time=3-06:00:00
+            #SBATCH --time=30-00:00:00
             #SBATCH --ntasks={nrThreads}
             #SBATCH --output={output_file}
             #SBATCH --error={error_file}

@@ -129,6 +129,7 @@ class JobManager:
     def find_processes_on_server(self, server):
         local_jobs = []
         ssh = connectToCluster(server, False)
+        # The [M] is so that we don't find the grep process searching for MTS2D
         command = f"ps -eo pid,etime,cmd | grep [M]TS2D | grep -v '/bin/sh'"
         stdin, stdout, stderr = ssh.exec_command(command)
         stdout_lines = stdout.read().decode('utf-8').strip().split('\n')
@@ -205,9 +206,9 @@ class JobManager:
                 self.cancel_job_on_server(server, job_id)
 
 if __name__ == "__main__":
-    minNrThreads = 4
-    script = "runSimulations.py"
+    minNrThreads = 11
     script = "benchmarking.py"
+    script = "runSimulations.py"
     server = Servers.galois
     server2 = Servers.condorcet
     command=f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
@@ -216,9 +217,7 @@ if __name__ == "__main__":
     # j.getSlurmJobs()
     # j.cancelAllJobs()
 
-    # server = find_server(minNrThreads)
-    # uploadProject(server)
-    # uploadProject(server2)
-    # jobId = queue_remote_job(server, command, "bench", minNrThreads)
-    # jobId = queue_remote_job(server2, command, "bench", minNrThreads)
+    #server = find_server(minNrThreads)
+    #uploadProject(server)
+    #jobId = queue_remote_job(server, command, "400,vlong", minNrThreads)
     j.getProcesses()

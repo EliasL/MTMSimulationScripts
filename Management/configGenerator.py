@@ -145,7 +145,6 @@ if __name__ == "__main__":
     import os
 
     conf = SimulationConfig()
-    conf.showProgress=2
     conf.loadIncrement=0.005
     conf.maxLoad=1
     path = conf.write_to_file('build/')
