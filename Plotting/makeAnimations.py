@@ -2,7 +2,7 @@ import subprocess
 import os
 
 from settings import settings
-from vtkFunctions import *
+from pyplotFunctions import makeImages
 
 def select_vtu_files(vtu_files, nrSteps):
     # Always include the first and last frames
@@ -56,7 +56,8 @@ def makeAnimations(path, pvd_file):
         fps = len(vtu_files)/7
 
     nrNodes, nrElements = getDataSize(dataPath, vtu_files)
-    makeImages(framePath, dataPath, vtu_files)
+
+    makeImages(framePath, vtu_files)
     
     print("Creating animations...")
 

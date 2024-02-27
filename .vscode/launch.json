@@ -10,6 +10,13 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "Python Debugger: Run simulation",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "Management/runSimulation.py",
+            "console": "integratedTerminal"
         }
     ]
 }

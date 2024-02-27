@@ -14,6 +14,7 @@ def plotAll(configFile, dataPath):
 
     path = dataPath+subfolderName+'/'
 
+    print(f"Plotting at {path}")
     makeSinglePlot(path+macroData)
     makeAnimations(path, collection)
 

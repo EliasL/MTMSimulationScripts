@@ -133,6 +133,11 @@ class JobManager:
         command = f"ps -eo pid,etime,cmd | grep [M]TS2D | grep -v '/bin/sh'"
         stdin, stdout, stderr = ssh.exec_command(command)
         stdout_lines = stdout.read().decode('utf-8').strip().split('\n')
+
+        if 'CMakeFiles' in stdout_lines[0]:
+            s = get_server_short_name(server)
+            return [f"{s}:\n  Building..."]
+
         # Filter out empty lines
         stdout_lines = [line for line in stdout_lines if line.strip()]
         for line in stdout_lines:
@@ -206,7 +211,7 @@ class JobManager:
                 self.cancel_job_on_server(server, job_id)
 
 if __name__ == "__main__":
-    minNrThreads = 11
+    minNrThreads = 21
     script = "benchmarking.py"
     script = "runSimulations.py"
     server = Servers.galois
@@ -214,10 +219,10 @@ if __name__ == "__main__":
     command=f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
     
     j=JobManager()
-    # j.getSlurmJobs()
-    # j.cancelAllJobs()
+    j.getSlurmJobs()
+    j.cancelAllJobs()
 
-    #server = find_server(minNrThreads)
-    #uploadProject(server)
-    #jobId = queue_remote_job(server, command, "400,vlong", minNrThreads)
+    # server = find_server(minNrThreads)
+    # uploadProject(server)
+    # jobId = queue_remote_job(server, command, "400,vlong", minNrThreads)
     j.getProcesses()

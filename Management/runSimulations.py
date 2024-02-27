@@ -7,7 +7,7 @@ def task(config):
     try:
         manager = SimulationManager(config)
         time = manager.runSimulation(False)
-        manager.plot()
+        #manager.plot()
     except Exception as e:
         return f"Error: {e}"
     return time
@@ -15,8 +15,8 @@ def task(config):
 
 if __name__ == '__main__':
     seeds = range(0,10)
-    configs = ConfigGenerator.generate_over_seeds(seeds, nx=400, ny=400, startLoad=0.15, 
-                            loadIncrement=0.00001, maxLoad=1, nrThreads=1) 
+    configs = ConfigGenerator.generate_over_seeds(seeds, nx=300, ny=300, startLoad=0.15, 
+                            loadIncrement=0.00001, maxLoad=1, nrThreads=2) 
 
     #Build and test (Fail early)
     manager = SimulationManager(SimulationConfig())
