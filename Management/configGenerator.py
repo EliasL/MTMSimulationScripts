@@ -23,6 +23,7 @@ class SimulationConfig:
 
         # Tolerances and Iterations
         self.nrCorrections = 10 # Default = 10
+        self.scale  = 1.0 # Default = 1.0
         self.epsg = 0.0  # Default = 0.0
         self.epsf = 0.0  # Default = 0.0
         self.epsx = 0.0  # Default = 0.0
@@ -49,6 +50,8 @@ class SimulationConfig:
             name += f"n{self.noise}"
         if self.nrCorrections != 10:
             name += f"m{self.nrCorrections}"
+        if self.scale != 1:
+            name += f"s{self.scale}"
         if self.epsg != 0.0:
             name += f"EpsG{self.epsg}"
         if self.epsf != 0.0:
@@ -145,7 +148,9 @@ if __name__ == "__main__":
     import os
 
     conf = SimulationConfig()
-    conf.loadIncrement=0.005
+    conf.loadIncrement=0.00001
+    conf.nx=20
+    conf.ny=20
     conf.maxLoad=1
     path = conf.write_to_file('build/')
     # Extract the directory part from the original path

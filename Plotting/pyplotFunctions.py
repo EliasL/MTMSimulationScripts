@@ -1,9 +1,15 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.tri as mtri
+import matplotlib.colors as mcolors
 from vtk import vtkXMLUnstructuredGridReader
 from vtk.util.numpy_support import vtk_to_numpy
 from tqdm import tqdm
+
+from multiprocessing import Pool
+import os
+
+from dataFunctions import getDataFromName
 
 def read_vtu_data(vtu_file_path):
     # Create a reader for the VTU file
@@ -30,30 +36,118 @@ def read_vtu_data(vtu_file_path):
     connectivity = _connectivity.reshape(-1, 4)[:, 1:]
     return nodes, stress_field, energy_field, connectivity
 
-def makeImages(framePath, vtu_files):
-    for frame_index, vtu_file in enumerate(tqdm(vtu_files)):
-        nodes, stress_field, energy_field, connectivity = read_vtu_data(vtu_file)
-        magnitude = np.linalg.norm(stress_field, axis=1)
-        # Extract x and y coordinates from nodes
-        x, y = nodes[:,0], nodes[:,1]
+def precalculate_global_stress_range(vtu_files, useEnergy=True):
+    global_min, global_max = np.inf, -np.inf
+    for vtu_file in vtu_files:
+        _, stress_field, energy_field, _ = read_vtu_data(vtu_file)
+        if useEnergy:
+            min_energy, max_energy = energy_field.min(), energy_field.max()
+            global_min, global_max = min(global_min, min_energy), max(global_max, max_energy)
 
-        # Use connectivity for triangles
-        triangles = connectivity
+        else:
+            magnitude = np.linalg.norm(stress_field, axis=1)
+            min_stress, max_stress = magnitude.min(), magnitude.max()
+            global_min, global_max = min(global_min, min_stress), max(global_max, max_stress)
+    return global_min, global_max
 
-        # Create triangulation
-        triang = mtri.Triangulation(x, y, triangles)
+# This is a conceptual approach and might need adjustments to fit your specific data structure
+def cell_energy_to_node_energy(nodes, energy_field, connectivity):
+    node_energy = np.zeros(len(nodes))
+    node_count = np.zeros(len(nodes))
 
-        # Set up the figure
-        fig, ax = plt.subplots(nrows=1, ncols=1)
+    for cell_index, cell in enumerate(connectivity):
+        for node_index in cell:
+            node_energy[node_index] += energy_field[cell_index]
+            node_count[node_index] += 1
 
-        # Plot the triangulation.
-        ax.tricontourf(triang, magnitude)
-        ax.triplot(triang, 'ko-')
-        ax.set_title('Triangular grid')
+    # Avoid division by zero for isolated nodes if any (shouldn't happen in a well-defined mesh)
+    if (node_count == 0).any():
+        raise(Exception("Invalid Mesh"))
+    node_energy /= node_count
 
-        fig.tight_layout()
-        path = f"{framePath}/frame_{frame_index:04d}.png"
-        plt.show()
+    return node_energy
 
-if __name__ == "__main__":
-    makeImages(None, '/Volumes/data/MTS2D_output/s10x10l0.15,0.001,1t1s0/data/s10x10l0.15,0.001,1t1s0_load=0.375_.45.vtu')
+def get_axis_limits(vtu_files):
+    x_min, x_max, y_min, y_max = float('inf'), float('-inf'), float('inf'), float('-inf')
+    for vtu_file in [vtu_files[0],vtu_files[-1]]: #Remove [[-1]] to search through everything if desired
+        nodes, _, _, _ = read_vtu_data(vtu_file)
+        x_min = min(x_min, nodes[:, 0].min())
+        x_max = max(x_max, nodes[:, 0].max())
+        y_min = min(y_min, nodes[:, 1].min())
+        y_max = max(y_max, nodes[:, 1].max())
+    return x_min, x_max, y_min, y_max
+
+# Use this function to set axis limits in your plot_frame function
+def plot_frame(args):
+    framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
+
+    nodes, stress_field, energy_field, connectivity = read_vtu_data(vtu_file)
+    magnitude = np.linalg.norm(stress_field, axis=1)
+    node_energy = cell_energy_to_node_energy(nodes, energy_field, connectivity)
+
+    x, y = nodes[:,0], nodes[:,1]
+    triangles = connectivity
+    
+    dpi = 200
+    width = 2000
+    height = 1000
+    fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
+    ax.set_aspect('equal')
+    
+    triang = mtri.Triangulation(x, y, triangles)
+    cmap_colors = [
+                (0.0, (0.29, 0.074, 0.38)),
+                (0.07, "#0052cc"),
+                (0.3, "#ff6f61"),
+                (0.9, "orange"),
+                (1.0, "red")]
+
+    # Create a color map from the list of colors and positions
+    custom_cmap = mcolors.LinearSegmentedColormap.from_list("custom_cmap", cmap_colors,N=512)
+
+    # Define a normalization that highlights small energy changes
+    gamma = 1  # Adjust this parameter as needed to highlight small energy changes
+    norm = mcolors.PowerNorm(gamma=gamma, vmin=global_min, vmax=global_max)
+
+    # Apply the custom colormap and normalization to the tripcolor plot
+    contour = ax.tripcolor(triang, facecolors=energy_field, norm=norm, cmap=custom_cmap)
+
+    # Create a color bar
+    cbar = fig.colorbar(contour, shrink=0.7)
+    cbar.set_label('Cell Energy')
+    cbar.ax.tick_params(labelsize=8)
+
+    # Mesh
+    #ax.triplot(triang, 'w-', linewidth=0.2, alpha=0.3)
+
+    # Setting the axis limits
+    x_min, x_max, y_min, y_max = axis_limits
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    
+    metadata = getDataFromName(vtu_file)
+    average_energy = sum(energy_field) / len(energy_field) if energy_field is not None else 0
+    lines = [
+        f"State: {metadata['name']}",
+        f"Frame: {frame_index}, " +
+        f"Load: {float(metadata['load']):.3f}",
+        #f"Average Energy: {average_energy:.2f}"
+    ]
+    ax.set_title("\n".join(lines))
+    ax.set_xticks([])
+    ax.set_yticks([])
+    
+    
+    path = f"{framePath}/frame_{frame_index:04d}.png"
+    plt.savefig(path, bbox_inches='tight', pad_inches=0)
+
+    plt.close(fig)
+
+def makeImages(framePath, vtu_files, num_processes=None):
+    # Assuming vtu_files is defined, calculate global axis limits
+    axis_limits = get_axis_limits(vtu_files)
+    global_min, global_max = precalculate_global_stress_range(vtu_files)
+    args_list = [(framePath, vtu_file, frame_index, global_min, global_max, axis_limits) for frame_index, vtu_file in enumerate(vtu_files)]
+    
+    with Pool(processes=num_processes) as pool:
+        list(tqdm(pool.imap(plot_frame, args_list), total=len(vtu_files)))

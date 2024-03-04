@@ -5,14 +5,14 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "Current File",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal"
         },
         {
-            "name": "Python Debugger: Run simulation",
+            "name": "Run simulation",
             "type": "debugpy",
             "request": "launch",
             "program": "Management/runSimulation.py",
