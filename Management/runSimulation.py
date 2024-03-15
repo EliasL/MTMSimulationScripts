@@ -4,8 +4,8 @@ if __name__ == "__main__":
     from configGenerator import ConfigGenerator, SimulationConfig
 
 
-    config = SimulationConfig(nx=10, ny=10, startLoad=0.15, nrThreads=1,
-                            loadIncrement=0.001, maxLoad=1)
+    config = SimulationConfig(nx=50, ny=50, startLoad=0.15, nrThreads=4,
+                            loadIncrement=0.0001, maxLoad=1)
 
     manager = SimulationManager(config)
     manager.runSimulation()

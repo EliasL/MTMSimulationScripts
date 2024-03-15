@@ -143,7 +143,7 @@ def plot_frame(args):
 
     plt.close(fig)
 
-def makeImages(framePath, vtu_files, num_processes=None):
+def makeImages(framePath, vtu_files, num_processes=10):
     # Assuming vtu_files is defined, calculate global axis limits
     axis_limits = get_axis_limits(vtu_files)
     global_min, global_max = precalculate_global_stress_range(vtu_files)

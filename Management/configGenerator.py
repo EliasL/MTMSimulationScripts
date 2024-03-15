@@ -9,11 +9,12 @@ class SimulationConfig:
 
     def __init__(self, **kwargs):
         # Simulation Settings
-        self.nx = 10  # Default = 10
-        self.ny = 10  # Default = 10
+        self.rows = 10  # Default = 10
+        self.cols = 10  # Default = 10
         self.nrThreads = 1  # Default = 1
         self.seed = 0 # Default = 0
         self.plasticityEventThreshold = 0.2 # Default 0.2
+        self.usingPBC = 1 # Default 1
 
         # Loading parameters
         self.startLoad = 0.0  # Default = 0.0
@@ -41,7 +42,7 @@ class SimulationConfig:
 
     def generate_name(self, withExtension=True):
         name = (
-            f"s{self.nx}x{self.ny}"+
+            f"s{self.rows}x{self.cols}"+ ("FBC" if self.usingPBC==0 else "PBC") +
             f"l{self.startLoad},{self.loadIncrement},{self.maxLoad}"+
             f"t{self.nrThreads}"
         )
@@ -148,10 +149,11 @@ if __name__ == "__main__":
     import os
 
     conf = SimulationConfig()
-    conf.loadIncrement=0.00001
-    conf.nx=20
-    conf.ny=20
-    conf.maxLoad=1
+    conf.startLoad=0.15
+    conf.loadIncrement=0.01
+    conf.rows=4
+    conf.cols=4
+    conf.maxLoad=0.25
     path = conf.write_to_file('build/')
     # Extract the directory part from the original path
     directory = os.path.dirname(path)

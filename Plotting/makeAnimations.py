@@ -95,14 +95,14 @@ def makeAnimations(path, pvd_file):
     # Release everything if job is finished
     out.release()
 
-    print("Making Gif...")
-    frames = []
-    for image_path in images:
-        frame = imageio.imread(image_path)
-        frames.append(frame)
+    # print("Making Gif...")
+    # frames = []
+    # for image_path in images:
+    #     frame = imageio.imread(image_path)
+    #     frames.append(frame)
 
-    # Save the frames as a GIF
-    imageio.mimsave(outputGif, frames, 'GIF', duration = 1/fps, loop=0)
+    # # Save the frames as a GIF
+    # imageio.mimsave(outputGif, frames, 'GIF', duration = 1/fps, loop=0)
 if __name__ == "__main__":
     output = '/Volumes/data/MTS2D_output/s100x100l0.15,0.001,1t3s0/'
 
