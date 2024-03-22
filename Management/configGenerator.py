@@ -8,13 +8,15 @@ class SimulationConfig:
     """
 
     def __init__(self, **kwargs):
+
         # Simulation Settings
+        
         self.rows = 10  # Default = 10
         self.cols = 10  # Default = 10
         self.nrThreads = 1  # Default = 1
         self.seed = 0 # Default = 0
         self.plasticityEventThreshold = 0.2 # Default 0.2
-        self.usingPBC = 1 # Default 1
+        self.scenario = "simpleShearFixedBoundary" # Default simpleShearFixedBoundary
 
         # Loading parameters
         self.startLoad = 0.0  # Default = 0.0
@@ -42,7 +44,8 @@ class SimulationConfig:
 
     def generate_name(self, withExtension=True):
         name = (
-            f"s{self.rows}x{self.cols}"+ ("FBC" if self.usingPBC==0 else "PBC") +
+            self.scenario + ","
+            f"s{self.rows}x{self.cols}"+
             f"l{self.startLoad},{self.loadIncrement},{self.maxLoad}"+
             f"t{self.nrThreads}"
         )
@@ -150,10 +153,10 @@ if __name__ == "__main__":
 
     conf = SimulationConfig()
     conf.startLoad=0.15
-    conf.loadIncrement=0.01
-    conf.rows=4
-    conf.cols=4
-    conf.maxLoad=0.25
+    conf.loadIncrement=0.001
+    conf.rows=5
+    conf.cols=5
+    conf.maxLoad=1
     path = conf.write_to_file('build/')
     # Extract the directory part from the original path
     directory = os.path.dirname(path)
