@@ -4,6 +4,7 @@ import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
 from vtk import vtkXMLUnstructuredGridReader
 from vtk.util.numpy_support import vtk_to_numpy
+from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 
 from multiprocessing import Pool
@@ -36,18 +37,27 @@ def read_vtu_data(vtu_file_path):
     connectivity = _connectivity.reshape(-1, 4)[:, 1:]
     return nodes, stress_field, energy_field, connectivity
 
-def precalculate_global_stress_range(vtu_files, useEnergy=True):
+def precalculate_global_stress_range(vtu_files):
     global_min, global_max = np.inf, -np.inf
     for vtu_file in vtu_files:
         _, stress_field, energy_field, _ = read_vtu_data(vtu_file)
-        if useEnergy:
-            min_energy, max_energy = energy_field.min(), energy_field.max()
-            global_min, global_max = min(global_min, min_energy), max(global_max, max_energy)
+        min_energy, max_energy = energy_field.min(), energy_field.max()
+        global_min, global_max = min(global_min, min_energy), max(global_max, max_energy)
+    return global_min, global_max
 
-        else:
-            magnitude = np.linalg.norm(stress_field, axis=1)
-            min_stress, max_stress = magnitude.min(), magnitude.max()
-            global_min, global_max = min(global_min, min_stress), max(global_max, max_stress)
+def get_energy_and_stress_range(vtu_file):
+    _, stress_field, energy_field, _ = read_vtu_data(vtu_file)
+    min_energy, max_energy = energy_field.min(), energy_field.max()
+    return min_energy,max_energy
+
+def precalculate_global_stress_range_parallel(vtu_files):
+    global_min, global_max = np.inf, -np.inf
+    with ProcessPoolExecutor() as executor:
+        results = executor.map(get_energy_and_stress_range, vtu_files)
+        
+        for min_val, max_val in results:
+            global_min, global_max = min(global_min, min_val), max(global_max, max_val)
+
     return global_min, global_max
 
 # This is a conceptual approach and might need adjustments to fit your specific data structure
@@ -146,7 +156,8 @@ def plot_frame(args):
 def makeImages(framePath, vtu_files, num_processes=10):
     # Assuming vtu_files is defined, calculate global axis limits
     axis_limits = get_axis_limits(vtu_files)
-    global_min, global_max = precalculate_global_stress_range(vtu_files)
+    # global_min, global_max = precalculate_global_stress_range(vtu_files)
+    global_min, global_max = precalculate_global_stress_range_parallel(vtu_files)
     args_list = [(framePath, vtu_file, frame_index, global_min, global_max, axis_limits) for frame_index, vtu_file in enumerate(vtu_files)]
     
     with Pool(processes=num_processes) as pool:

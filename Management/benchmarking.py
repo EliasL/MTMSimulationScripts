@@ -14,7 +14,7 @@ def thread_benchmark():
 
     threads = [1, 10, 20, 30, 32, 34, 40, 50, 60, 63, 64]
     threads = [1,2,3,4]
-    configs = ConfigGenerator.generate_over_threads(threads, nx=50, ny=50, startLoad=0.15, 
+    configs = ConfigGenerator.generate_over_threads(threads, rows=50, cols=50, startLoad=0.15, 
                             loadIncrement=0.001, maxLoad=1)
 
     # Real runs
@@ -52,7 +52,7 @@ def speed_tests():
     
     nrCorrections = [1, 3, 5, 7, 10]
     configs = ConfigGenerator.generate_over_("nrCorrections", nrCorrections,
-                                                nx=100, ny=100, startLoad=0.15,
+                                                rows=100, cols=100, startLoad=0.15,
                                                 loadIncrement=0.00001, maxLoad=0.7,
                                                 threads=1)
     
@@ -106,7 +106,7 @@ def baseSpeed():
 
 
 
-    config = SimulationConfig(nx=10, ny=10, startLoad=0.15, nrThreads=1,
+    config = SimulationConfig(rows=10, cols=10, startLoad=0.15, nrThreads=1,
                           loadIncrement=0.00001, maxLoad=1) 
     manager = SimulationManager(config)
     nrRuns = 1
@@ -117,4 +117,5 @@ def baseSpeed():
 
 if __name__ == "__main__":
     print("Starting benchmark run...")
-    thread_benchmark()
+    baseSpeed()
+    # thread_benchmark()

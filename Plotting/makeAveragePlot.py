@@ -15,13 +15,13 @@ from configGenerator import ConfigGenerator
 # In order to find the folders, we use the name generator in ConfigGenerator
 
 seeds = range(0,11)
-configs = ConfigGenerator.generate_over_seeds(seeds, nx=100, ny=100, startLoad=0.15, 
+configs = ConfigGenerator.generate_over_seeds(seeds, rows=100, cols=100, startLoad=0.15, 
                           loadIncrement=0.00001, maxLoad=1)
 
 
 nrCorrections = [1, 3, 5, 7, 10]
 configs = ConfigGenerator.generate_over_("nrCorrections", nrCorrections,
-                                            nx=100, ny=100, startLoad=0.15,
+                                            rows=100, cols=100, startLoad=0.15,
                                             loadIncrement=0.00001, maxLoad=0.7,
                                             nrThreads=1)
 

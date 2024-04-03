@@ -156,7 +156,7 @@ if __name__ == "__main__":
     conf.loadIncrement=0.001
     conf.rows=5
     conf.cols=5
-    conf.maxLoad=1
+    conf.maxLoad=0.2
     path = conf.write_to_file('build/')
     # Extract the directory part from the original path
     directory = os.path.dirname(path)

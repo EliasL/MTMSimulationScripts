@@ -40,7 +40,6 @@ def makeAnimations(path, pvd_file):
 
     # we don't want every frame to be created, so in order to find out what
     # frames should be drawn, we first check how much load change there is
-    print(vtu_files[0])
     first = getDataFromName(vtu_files[0])    
     last = getDataFromName(vtu_files[-1])    
     loadChange = float(last['load']) - float(first['load'])

@@ -93,7 +93,7 @@ def get_csv_files(configs):
 if __name__ == "__main__":
 
     seeds = range(0,10)
-    configs = ConfigGenerator.generate_over_seeds(seeds, nx=100, ny=100, startLoad=0.15, 
+    configs = ConfigGenerator.generate_over_seeds(seeds, rows=100, cols=100, startLoad=0.15, 
                             loadIncrement=0.00001, maxLoad=1, nrThreads=1) 
     paths = get_csv_files(configs)
     if paths:
