@@ -3,11 +3,13 @@ from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from connectToCluster import connectToCluster, Servers, get_server_short_name
 from tabulate import tabulate 
+import subprocess
+import os
+
 
 """
 Search through all the servers and identify all the data in all the servers
 """
-import os
 
 class DataManager:
     def __init__(self) -> None:        
@@ -48,11 +50,31 @@ class DataManager:
 
         # Save the list of folders and sizes in data dictionary
         return folders, dataSize
+    
+    def find_data_on_disk(self, path):
+        # Construct the path to the MTS2D_output directory
+        mts_output_path = os.path.join(path, "MTS2D_output")
+
+        # Check if MTS2D_output exists
+        if not os.path.isdir(mts_output_path):
+            raise FileNotFoundError(f"The directory {mts_output_path} does not exist.")
+
+        # List all folders within the MTS2D_output folder
+        folders = next(os.walk(mts_output_path))[1]
+        folders = [os.path.join(mts_output_path, folder) for folder in folders]  # Clean up folder names
+
+        dataSize = [get_directory_size(None, folder) for folder in folders]
+
+        # Save the list of folders and sizes in data dictionary
+        return folders, dataSize
+
 
     def findData(self):
-        # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
-        with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+        # Use ThreadPoolExecutor to execute find_data_on_server in
+        # parallel across all servers pluss one to find the data stored locally
+        with ThreadPoolExecutor(max_workers=len(Servers.servers)+1) as executor:
             future_to_server = {executor.submit(self.find_data_on_server, server): server for server in Servers.servers}
+            future_to_server[executor.submit(self.find_data_on_disk, "/Volumes/data")] = "Local ssd"
             for future in as_completed(future_to_server):
                 server = future_to_server[future]
                 try:
@@ -61,6 +83,7 @@ class DataManager:
                         self.data[server] = folders_and_sizes
                 except Exception as exc:
                     print(f'{server} generated an exception: {exc}')
+        
 
     def printData(self):
         table_data = []
@@ -157,6 +180,9 @@ class DataManager:
             for folder, size in folders:
                 final_grouped_folders.append((folder, size))
 
+        # Sort the folders by size, largest first
+        final_grouped_folders.sort(key=lambda x: parse_size(x[1]), reverse=True)
+
         return final_grouped_folders
 
     def clean_projects_on_servers(self):
@@ -187,44 +213,69 @@ class DataManager:
                     print(f'{server} generated an exception: {exc}')
 
 
-def get_directory_size(ssh, remote_directory_path):
-    # Command to calculate the total size of the directory in a human-readable format
-    du_command = f"du -sh {remote_directory_path}"
-    # Command to get the free space available on the disk in a human-readable format
-    df_command = f"df -h {remote_directory_path} | awk 'NR==2{{print $4}}'"
-    
-    # Execute the du command via SSH for directory size
-    stdin, stdout, stderr = ssh.exec_command(du_command)
-    # Read the command output
-    du_output = stdout.read().decode('utf-8').strip()
-    # Error handling for du
-    du_error = stderr.read().decode('utf-8').strip()
-    if du_error:
-        print(f"Error calculating directory size: {du_error}")
-        return None
+def get_directory_size(ssh, path):
+    if ssh is None:  # Local directory path
+        du_command = f"du -sh {path}"
+        df_command = f"df -h {path} | awk 'NR==2{{print $4}}'"
+
+        # Execute the du command locally for directory size
+        du_process = subprocess.run(['du', '-sh', path], stdout=subprocess.PIPE, text=True)
+        du_output = du_process.stdout.strip()
+
+        # Execute the df command locally for free disk space
+        df_process = subprocess.run(['df', '-H', path], stdout=subprocess.PIPE, text=True)
+        df_output_lines = df_process.stdout.split('\n')
+        for line in df_output_lines:
+            if line:
+                columns = line.split()
+                # Assuming the 'Mounted on' is the last column
+                mount_point = columns[-1]
+                if path.startswith(mount_point):
+                    # Found the matching mount point, return the whole line or specific data
+                    free_space = columns[3]
+        def convert_gb_to_tb(size_str):
+            # Match the numeric part and the unit (G)
+            match = re.match(r'(\d+)(G)', size_str)
+            if match:
+                size_gb = int(match.group(1))
+                # Convert GB to TB, keeping one decimal place
+                size_tb = round(size_gb / 1024, 1)
+                return f'{size_tb}T'
+            return size_str            
+        # Mac chooses 3990GB over switching to TB which was very annoying
+        free_space = convert_gb_to_tb(free_space)
+
+    else:  # SSH connection object
+        du_command = f"du -sh {path}"
+        df_command = f"df -h {path} | awk 'NR==2{{print $4}}'"
+
+        # Execute the du command via SSH for directory size
+        stdin, stdout, stderr = ssh.exec_command(du_command)
+        du_output = stdout.read().decode('utf-8').strip()
+        du_error = stderr.read().decode('utf-8').strip()
+        if du_error:
+            print(f"Error calculating directory size: {du_error}")
+            return None
+
+        # Execute the df command via SSH for free disk space
+        stdin, stdout, stderr = ssh.exec_command(df_command)
+        df_output = stdout.read().decode('utf-8').strip()
+        df_error = stderr.read().decode('utf-8').strip()
+        if df_error:
+            print(f"Error getting free disk space: {df_error}")
+            return None
+        free_space = df_output
+
     # Extract the size part from du output
     size = du_output.split("\t")[0]
-    
-    # Execute the df command via SSH for free disk space
-    stdin, stdout, stderr = ssh.exec_command(df_command)
-    # Read the command output for df
-    df_output = stdout.read().decode('utf-8').strip()
-    # Error handling for df
-    df_error = stderr.read().decode('utf-8').strip()
-    if df_error:
-        print(f"Error getting free disk space: {df_error}")
-        return None
-    
-    # df output is already in the correct format
-    free_space = df_output
     frac = f"{size}B/{free_space}B"
     return f"{frac} ({round(calculate_fraction_percentage(frac),1)}%)"
 
 
 def parse_unit(unit):
     """Convert unit to the corresponding number of bytes."""
-    units = {"KB":10**3, "MB":10**6, "GB": 10**9, "TB": 10**12, "MB": 10**6, "PB": 10**15}
-    return units.get(unit.upper(), 0)
+    size_map = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4, "PB": 1024**5}
+    return size_map.get(unit.upper(), 1)
 
 def calculate_fraction_percentage(input_str):
     """Calculate the fraction as a percentage with unit conversions."""
@@ -247,6 +298,21 @@ def calculate_fraction_percentage(input_str):
 def convert_to_bytes(value, unit):
     """Convert a value with a unit to bytes."""
     return value * parse_unit(unit)
+
+def parse_size(size_str):
+    """
+    size_str (str): The size string, e.g., "18MB/3.9TB (0.0%)"
+    
+    Returns:
+    int: The size in bytes.
+    """
+    match = re.match(r"(\d+(?:\.\d+)?)(B|KB|MB|GB|TB|PB)", size_str.split("/")[0])
+    if match:
+        used_size, unit = match.groups()
+        used_size = float(used_size) * parse_unit(unit)
+        return int(used_size)
+    else:
+        raise(Exception("Units not found"))
 
 def sum_folder_sizes(str_list):
     #TODO does not work
