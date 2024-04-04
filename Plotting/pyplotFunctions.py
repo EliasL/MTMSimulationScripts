@@ -8,7 +8,6 @@ from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
 
 from multiprocessing import Pool
-import os
 
 from dataFunctions import getDataFromName
 
@@ -36,6 +35,32 @@ def read_vtu_data(vtu_file_path):
     # We reshape into 4 long arrays, and then drop the column of 3s
     connectivity = _connectivity.reshape(-1, 4)[:, 1:]
     return nodes, stress_field, energy_field, connectivity
+
+def read_vtu_property(vtu_file_path, property_name, pointProperty=False, cellProperty=False):
+    # Create a reader for the VTU file
+    reader = vtkXMLUnstructuredGridReader()
+    reader.SetFileName(vtu_file_path)
+    reader.Update()
+
+    # Get the 'vtkUnstructuredGrid' object from the reader
+    mesh = reader.GetOutput()
+
+    if(property_name=="nodePos"):
+        return vtk_to_numpy(mesh.GetPoints().GetData())
+    
+    if(property_name=="connectivity"):
+        # Extract Connectivity
+        _connectivity = vtk_to_numpy(mesh.GetCells().GetData())
+        # _connectivity is in a special format: 3 a b c 3 d e f 3 ...
+        # We reshape into 4 long arrays, and then drop the column of 3s
+        return _connectivity.reshape(-1, 4)[:, 1:]
+
+    if pointProperty:
+        return vtk_to_numpy(mesh.GetPointData().GetArray(property_name))
+    if cellProperty:
+        return vtk_to_numpy(mesh.GetCellData().GetArray(property_name))
+    raise(Exception("No property type chosen. Set either point- or cell-Property to True"))
+
 
 def precalculate_global_stress_range(vtu_files):
     global_min, global_max = np.inf, -np.inf
@@ -77,6 +102,7 @@ def cell_energy_to_node_energy(nodes, energy_field, connectivity):
 
     return node_energy
 
+# Use this function to set axis limits in your plot_frame function
 def get_axis_limits(vtu_files):
     x_min, x_max, y_min, y_max = float('inf'), float('-inf'), float('inf'), float('-inf')
     for vtu_file in [vtu_files[0],vtu_files[-1]]: #Remove [[-1]] to search through everything if desired
@@ -87,24 +113,62 @@ def get_axis_limits(vtu_files):
         y_max = max(y_max, nodes[:, 1].max())
     return x_min, x_max, y_min, y_max
 
-# Use this function to set axis limits in your plot_frame function
-def plot_frame(args):
+def base_plot(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
-
-    nodes, stress_field, energy_field, connectivity = read_vtu_data(vtu_file)
-    magnitude = np.linalg.norm(stress_field, axis=1)
-    node_energy = cell_energy_to_node_energy(nodes, energy_field, connectivity)
-
-    x, y = nodes[:,0], nodes[:,1]
-    triangles = connectivity
     
     dpi = 200
     width = 2000
     height = 1000
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
     ax.set_aspect('equal')
+
+    # Setting the axis limits
+    x_min, x_max, y_min, y_max = axis_limits
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
     
-    triang = mtri.Triangulation(x, y, triangles)
+    metadata = getDataFromName(vtu_file)
+    lines = [
+        f"State: {metadata['name']}",
+        f"Frame: {frame_index}, " +
+        f"Load: {float(metadata['load']):.3f}",
+    ]
+    ax.set_title("\n".join(lines))
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    return ax, fig
+
+
+def plot_nodes(args):
+    framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
+
+    ax, fig = base_plot(args)
+    
+    nodes, stress_field, energy_field, connectivity = read_vtu_data(vtu_file)
+
+
+    x, y = nodes[:,0], nodes[:,1]
+    
+    ax.scatter(x, y, s=20, c='blue', marker='o', alpha=1)  # 's' is the size, 'c' is the color
+ 
+
+    path = f"{framePath}/frame_{frame_index:04d}.png"
+    plt.savefig(path, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
+
+    return path
+
+def plot_mesh(args):
+    framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
+    
+    ax, fig = base_plot(args)
+
+    nodes, stress_field, energy_field, connectivity = read_vtu_data(vtu_file)
+
+    x, y = nodes[:,0], nodes[:,1]
+    
+    triang = mtri.Triangulation(x, y, connectivity)
     cmap_colors = [
                 (0.0, (0.29, 0.074, 0.38)),
                 (0.07, "#0052cc"),
@@ -127,33 +191,17 @@ def plot_frame(args):
     cbar.set_label('Cell Energy')
     cbar.ax.tick_params(labelsize=8)
 
-    # Mesh
+    # wire mesh
     #ax.triplot(triang, 'w-', linewidth=0.2, alpha=0.3)
-
-    # Setting the axis limits
-    x_min, x_max, y_min, y_max = axis_limits
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
-    
-    metadata = getDataFromName(vtu_file)
-    average_energy = sum(energy_field) / len(energy_field) if energy_field is not None else 0
-    lines = [
-        f"State: {metadata['name']}",
-        f"Frame: {frame_index}, " +
-        f"Load: {float(metadata['load']):.3f}",
-        #f"Average Energy: {average_energy:.2f}"
-    ]
-    ax.set_title("\n".join(lines))
-    ax.set_xticks([])
-    ax.set_yticks([])
-    
     
     path = f"{framePath}/frame_{frame_index:04d}.png"
     plt.savefig(path, bbox_inches='tight', pad_inches=0)
-
     plt.close(fig)
 
-def makeImages(framePath, vtu_files, num_processes=10):
+    return path
+
+def makeImages(frameFunction, framePath, vtu_files, num_processes=10):
+    print("Creating frames...")
     # Assuming vtu_files is defined, calculate global axis limits
     axis_limits = get_axis_limits(vtu_files)
     # global_min, global_max = precalculate_global_stress_range(vtu_files)
@@ -161,4 +209,6 @@ def makeImages(framePath, vtu_files, num_processes=10):
     args_list = [(framePath, vtu_file, frame_index, global_min, global_max, axis_limits) for frame_index, vtu_file in enumerate(vtu_files)]
     
     with Pool(processes=num_processes) as pool:
-        list(tqdm(pool.imap(plot_frame, args_list), total=len(vtu_files)))
+        image_paths = list(tqdm(pool.imap(frameFunction, args_list), total=len(vtu_files)))
+    
+    return image_paths

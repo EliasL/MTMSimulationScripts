@@ -3,7 +3,7 @@ tell application "iTerm"
     create window with default profile
     tell the first window
         -- Set the window size: {x, y, width, height}
-        set the bounds to {50, 50, 1600, 600}
+        set the bounds to {50, 50, 1800, 600}
         -- Split into three panes
         tell current session of current tab
             split vertically with default profile

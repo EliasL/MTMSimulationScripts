@@ -147,9 +147,24 @@ class ConfigGenerator:
     @staticmethod
     def generate_over_seeds(seeds, **kwargs):
         return [SimulationConfig(seed=seed, **kwargs) for seed in seeds]
-    
+
+
+def get_custom_configs(scenario):
+    if scenario == "periodicBoundaryTest":
+        conf = SimulationConfig()
+        conf.startLoad=0
+        conf.loadIncrement=0.00001
+        conf.rows=4
+        conf.cols=4
+        conf.maxLoad=1
+        conf.scenario = scenario
+        return conf
+        
+
 if __name__ == "__main__":
     import os
+    import sys
+
 
     conf = SimulationConfig()
     conf.startLoad=0.15
@@ -157,6 +172,14 @@ if __name__ == "__main__":
     conf.rows=5
     conf.cols=5
     conf.maxLoad=0.2
+
+    if len(sys.argv) >= 2:
+        scenario = sys.argv[1]
+        conf.scenario = scenario
+        # if there is a complete custom scenario, we replace the config
+        if get_custom_configs(scenario) is not None:
+            conf = get_custom_configs(scenario)
+    
     path = conf.write_to_file('build/')
     # Extract the directory part from the original path
     directory = os.path.dirname(path)
