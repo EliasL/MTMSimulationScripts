@@ -11,67 +11,50 @@ from multiprocessing import Pool
 
 from dataFunctions import getDataFromName
 
-def read_vtu_data(vtu_file_path):
-    # Create a reader for the VTU file
-    reader = vtkXMLUnstructuredGridReader()
-    reader.SetFileName(vtu_file_path)
-    reader.Update()
+class VTUData:
+    def __init__(self, vtu_file_path):
+        self.vtu_file_path = vtu_file_path
+        self.mesh = self._read_vtu_file()
 
-    # Get the 'vtkUnstructuredGrid' object from the reader
-    mesh = reader.GetOutput()
+    def _read_vtu_file(self):
+        # Create a reader for the VTU file
+        reader = vtkXMLUnstructuredGridReader()
+        reader.SetFileName(self.vtu_file_path)
+        reader.Update()
 
-    # Extract Nodes
-    nodes = vtk_to_numpy(mesh.GetPoints().GetData())
+        # Get the 'vtkUnstructuredGrid' object from the reader
+        return reader.GetOutput()
 
-    # Extract Stress Field
-    stress_field = vtk_to_numpy(mesh.GetPointData().GetArray("stress_field"))
+    def get_nodes(self):
+        return vtk_to_numpy(self.mesh.GetPoints().GetData())
 
-    # Extract Energy Field
-    energy_field = vtk_to_numpy(mesh.GetCellData().GetArray("energy_field"))
+    def get_stress_field(self):
+        return vtk_to_numpy(self.mesh.GetPointData().GetArray("stress_field"))
 
-    # Extract Connectivity
-    _connectivity = vtk_to_numpy(mesh.GetCells().GetData())
-    # _connectivity is in a special format: 3 a b c 3 d e f 3 ...
-    # We reshape into 4 long arrays, and then drop the column of 3s
-    connectivity = _connectivity.reshape(-1, 4)[:, 1:]
-    return nodes, stress_field, energy_field, connectivity
+    def get_energy_field(self):
+        return vtk_to_numpy(self.mesh.GetCellData().GetArray("energy_field"))
 
-def read_vtu_property(vtu_file_path, property_name, pointProperty=False, cellProperty=False):
-    # Create a reader for the VTU file
-    reader = vtkXMLUnstructuredGridReader()
-    reader.SetFileName(vtu_file_path)
-    reader.Update()
+    def get_fixed_status(self):
+        return vtk_to_numpy(self.mesh.GetPointData().GetArray("fixed"))
 
-    # Get the 'vtkUnstructuredGrid' object from the reader
-    mesh = reader.GetOutput()
-
-    if(property_name=="nodePos"):
-        return vtk_to_numpy(mesh.GetPoints().GetData())
-    
-    if(property_name=="connectivity"):
+    def get_connectivity(self):
         # Extract Connectivity
-        _connectivity = vtk_to_numpy(mesh.GetCells().GetData())
+        _connectivity = vtk_to_numpy(self.mesh.GetCells().GetData())
         # _connectivity is in a special format: 3 a b c 3 d e f 3 ...
         # We reshape into 4 long arrays, and then drop the column of 3s
-        return _connectivity.reshape(-1, 4)[:, 1:]
-
-    if pointProperty:
-        return vtk_to_numpy(mesh.GetPointData().GetArray(property_name))
-    if cellProperty:
-        return vtk_to_numpy(mesh.GetCellData().GetArray(property_name))
-    raise(Exception("No property type chosen. Set either point- or cell-Property to True"))
-
+        connectivity = _connectivity.reshape(-1, 4)[:, 1:]
+        return connectivity
 
 def precalculate_global_stress_range(vtu_files):
     global_min, global_max = np.inf, -np.inf
     for vtu_file in vtu_files:
-        _, stress_field, energy_field, _ = read_vtu_data(vtu_file)
+        energy_field = VTUData(vtu_file).get_energy_field()
         min_energy, max_energy = energy_field.min(), energy_field.max()
         global_min, global_max = min(global_min, min_energy), max(global_max, max_energy)
     return global_min, global_max
 
 def get_energy_and_stress_range(vtu_file):
-    _, stress_field, energy_field, _ = read_vtu_data(vtu_file)
+    energy_field = VTUData(vtu_file).get_energy_field()
     min_energy, max_energy = energy_field.min(), energy_field.max()
     return min_energy,max_energy
 
@@ -106,12 +89,31 @@ def cell_energy_to_node_energy(nodes, energy_field, connectivity):
 def get_axis_limits(vtu_files):
     x_min, x_max, y_min, y_max = float('inf'), float('-inf'), float('inf'), float('-inf')
     for vtu_file in [vtu_files[0],vtu_files[-1]]: #Remove [[-1]] to search through everything if desired
-        nodes, _, _, _ = read_vtu_data(vtu_file)
+        nodes = VTUData(vtu_file).get_nodes()
         x_min = min(x_min, nodes[:, 0].min())
         x_max = max(x_max, nodes[:, 0].max())
         y_min = min(y_min, nodes[:, 1].min())
         y_max = max(y_max, nodes[:, 1].max())
     return x_min, x_max, y_min, y_max
+
+def add_padding(axis_limits, padding_ratio):
+    # Define your axis limits
+    x_min, x_max, y_min, y_max = axis_limits
+
+    # Calculate padding amounts
+    x_range = x_max - x_min
+    y_range = y_max - y_min
+    x_padding = x_range * padding_ratio
+    y_padding = y_range * padding_ratio
+
+    # Adjusted axis limits with padding
+    adjusted_x_min = x_min - x_padding
+    adjusted_x_max = x_max + x_padding
+    adjusted_y_min = y_min - y_padding
+    adjusted_y_max = y_max + y_padding
+
+    return adjusted_x_min, adjusted_x_max, adjusted_y_min, adjusted_y_max
+
 
 def base_plot(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
@@ -123,7 +125,7 @@ def base_plot(args):
     ax.set_aspect('equal')
 
     # Setting the axis limits
-    x_min, x_max, y_min, y_max = axis_limits
+    x_min, x_max, y_min, y_max = add_padding(axis_limits, 0.03)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     
@@ -145,15 +147,15 @@ def plot_nodes(args):
 
     ax, fig = base_plot(args)
     
-    nodes, stress_field, energy_field, connectivity = read_vtu_data(vtu_file)
-
-
+    data = VTUData(vtu_file)
+    nodes = data.get_nodes()
+    fixed = data.get_fixed_status()
+    color = np.where(fixed==1, 'red', 'blue')
     x, y = nodes[:,0], nodes[:,1]
     
-    ax.scatter(x, y, s=20, c='blue', marker='o', alpha=1)  # 's' is the size, 'c' is the color
+    ax.scatter(x, y, s=20, c=color, marker='o', alpha=1)  # 's' is the size, 'c' is the color
  
-
-    path = f"{framePath}/frame_{frame_index:04d}.png"
+    path = f"{framePath}/node_frame_{frame_index:04d}.png"
     plt.savefig(path, bbox_inches='tight', pad_inches=0)
     plt.close(fig)
 
@@ -164,7 +166,10 @@ def plot_mesh(args):
     
     ax, fig = base_plot(args)
 
-    nodes, stress_field, energy_field, connectivity = read_vtu_data(vtu_file)
+    data = VTUData(vtu_file)
+    nodes = data.get_nodes()
+    energy_field = data.get_energy_field()
+    connectivity = data.get_connectivity()
 
     x, y = nodes[:,0], nodes[:,1]
     
@@ -194,14 +199,13 @@ def plot_mesh(args):
     # wire mesh
     #ax.triplot(triang, 'w-', linewidth=0.2, alpha=0.3)
     
-    path = f"{framePath}/frame_{frame_index:04d}.png"
+    path = f"{framePath}/mesh_frame_{frame_index:04d}.png"
     plt.savefig(path, bbox_inches='tight', pad_inches=0)
     plt.close(fig)
 
     return path
 
 def makeImages(frameFunction, framePath, vtu_files, num_processes=10):
-    print("Creating frames...")
     # Assuming vtu_files is defined, calculate global axis limits
     axis_limits = get_axis_limits(vtu_files)
     # global_min, global_max = precalculate_global_stress_range(vtu_files)

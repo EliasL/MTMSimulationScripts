@@ -28,7 +28,7 @@ def select_vtu_files(vtu_files, nrSteps):
     return selected_files
 
 def framesToMp4(frames, outFile, fps): 
-    print("Creating mp4...")
+    print(f"Creating {outFile}")
     # Determine the width and height from the first image
     image_path = frames[0]
     frame = cv2.imread(image_path)
@@ -46,15 +46,15 @@ def framesToMp4(frames, outFile, fps):
     # Release everything if job is finished
     out.release()
  
-def framesToGif(frames, outfile, fps):
-    print("Making Gif...")
+def framesToGif(frames, outFile, fps):
+    print(f"Making {outFile} Gif...")
     frames = []
     for image_path in frames:
         frame = imageio.imread(image_path)
         frames.append(frame)
 
     # Save the frames as a GIF
-    imageio.mimsave(outfile, frames, 'GIF', duration = 1/fps, loop=0)
+    imageio.mimsave(outFile, frames, 'GIF', duration = 1/fps, loop=0)
 
  
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
@@ -87,12 +87,15 @@ def makeAnimations(path, pvd_file):
         # We will make the video last 7 seconds
         fps = len(vtu_files)/7
 
-    images = makeImages(plot_mesh, framePath, vtu_files)
+    print(f"Creating frames ...")
+    mesh_images = makeImages(plot_mesh, framePath, vtu_files)
+    node_images = makeImages(plot_nodes, framePath, vtu_files)
 
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
-    outPath = path+path.split('/')[-2]+'_video.mp4'
-    framesToMp4(images, outPath, fps)
+    for images, fileName in zip([mesh_images, node_images],["mesh", "nodes"]):
+        outPath = path+path.split('/')[-2]+f'_{fileName}_video.mp4'
+        framesToMp4(images, outPath, fps)
 
 if __name__ == "__main__":
     output = '/Volumes/data/MTS2D_output/s100x100l0.15,0.001,1t3s0/'
