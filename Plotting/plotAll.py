@@ -15,7 +15,7 @@ def plotAll(configFile, dataPath):
     path = dataPath+subfolderName+'/'
 
     print(f"Plotting at {path}")
-    makeSinglePlot(path+macroData)
+    makeSinglePlot(path+macroData, subfolderName+"_energy.pdf")
     makeAnimations(path, collection)
 
     # energyGridName = "energy_grid.csv"

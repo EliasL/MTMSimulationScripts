@@ -211,18 +211,19 @@ class JobManager:
                 self.cancel_job_on_server(server, job_id)
 
 if __name__ == "__main__":
-    minNrThreads = 21
+    minNrThreads = 4
     script = "benchmarking.py"
-    script = "runSimulations.py"
-    server = Servers.galois
+    script = "runSimulation.py"
     server2 = Servers.condorcet
+    server = Servers.galois
     command=f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
     
     j=JobManager()
     j.getSlurmJobs()
-    j.cancelAllJobs()
-
-    # server = find_server(minNrThreads)
-    # uploadProject(server)
-    # jobId = queue_remote_job(server, command, "400,vlong", minNrThreads)
     j.getProcesses()
+
+    if True:
+        # server = find_server(minNrThreads)
+        uploadProject(server)
+        jobId = queue_remote_job(server, command, "60,long", minNrThreads)
+        j.getProcesses()

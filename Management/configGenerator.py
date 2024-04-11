@@ -11,29 +11,29 @@ class SimulationConfig:
 
         # Simulation Settings
         
-        self.rows = 10  # Default = 10
-        self.cols = 10  # Default = 10
-        self.nrThreads = 1  # Default = 1
-        self.seed = 0 # Default = 0
-        self.plasticityEventThreshold = 0.2 # Default 0.2
-        self.scenario = "simpleShearFixedBoundary" # Default simpleShearFixedBoundary
+        self.rows = 10 
+        self.cols = 10 
+        self.nrThreads = 1 
+        self.seed = 0
+        self.plasticityEventThreshold = 0.2
+        self.scenario = "simpleShearPeriodicBoundary"
 
         # Loading parameters
-        self.startLoad = 0.0  # Default = 0.0
-        self.loadIncrement = 0.01  # Default = 0.01
-        self.maxLoad = 1.0  # Default = 1.0
-        self.noise = 0.05 # Default = 0.05
+        self.startLoad = 0.0 
+        self.loadIncrement = 0.01 
+        self.maxLoad = 1.0 
+        self.noise = 0.05
 
         # Tolerances and Iterations
-        self.nrCorrections = 10 # Default = 10
-        self.scale  = 1.0 # Default = 1.0
-        self.epsg = 0.0  # Default = 0.0
-        self.epsf = 0.0  # Default = 0.0
-        self.epsx = 0.0  # Default = 0.0
-        self.maxIterations = 0  # Default = 0 (Translates to unlimited iterations)
+        self.nrCorrections = 10
+        self.scale  = 1.0
+        self.epsg = 0.0 
+        self.epsf = 0.0 
+        self.epsx = 0.0 
+        self.maxIterations = 0 
 
         # Logging settings
-        self.showProgress = 1 # Default 1 (Can be either 0, 1 or 2. Nothing, minimal, and progress bar)
+        self.showProgress = 1
 
         # Update with any provided keyword arguments
         for key, value in kwargs.items():
@@ -41,6 +41,17 @@ class SimulationConfig:
                 setattr(self, key, value)
             else:
                 raise(AttributeError(f"Unkown keyword: {key}"))
+        self.validate();
+    
+    def validate(self, name=None):
+        # we don't allow any '_' characters in the name
+        if(name is None):
+            name = self.generate_name(True)
+        
+        count = name.count('_')
+        if count !=0:
+            raise(AttributeError("The name is not allowed to contain '_'!"))
+        return True
 
     def generate_name(self, withExtension=True):
         name = (
@@ -74,6 +85,7 @@ class SimulationConfig:
             # Add file extension
             name += ".conf"
 
+        self.validate(name)
         return name
     
     def get_path_and_name(self, path, withExtension=True):
@@ -150,8 +162,8 @@ class ConfigGenerator:
 
 
 def get_custom_configs(scenario):
+    conf = SimulationConfig()
     if scenario == "periodicBoundaryTest":
-        conf = SimulationConfig()
         conf.startLoad=0
         conf.loadIncrement=0.00001
         conf.rows=4
@@ -159,6 +171,12 @@ def get_custom_configs(scenario):
         conf.maxLoad=1
         conf.scenario = scenario
         return conf
+    if scenario == "singleDislocation":
+        conf = SimulationConfig(rows=6, cols=6, startLoad=0.0, nrThreads=6,
+                    loadIncrement=0.00001, maxLoad=0.001,
+                    scenario="singleDislocation")
+        return conf
+        
         
 
 if __name__ == "__main__":
@@ -168,9 +186,9 @@ if __name__ == "__main__":
 
     conf = SimulationConfig()
     conf.startLoad=0.15
-    conf.loadIncrement=0.001
-    conf.rows=5
-    conf.cols=5
+    conf.loadIncrement=0.0001
+    conf.rows=10
+    conf.cols=10
     conf.maxLoad=0.2
 
     if len(sys.argv) >= 2:

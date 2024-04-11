@@ -4,9 +4,9 @@ if __name__ == "__main__":
     from configGenerator import ConfigGenerator, SimulationConfig
 
 
-    config = SimulationConfig(rows=14, cols=14, startLoad=0, nrThreads=1,
-                            loadIncrement=0.00001, maxLoad=1,
-                            scenario="periodicBoundaryTest")
+    config = SimulationConfig(rows=30, cols=30, startLoad=0.15, nrThreads=4,
+                            loadIncrement=0.0001, maxLoad=1,
+                            scenario="simpleShearPeriodicBoundary")
 
     manager = SimulationManager(config)
     manager.runSimulation()

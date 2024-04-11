@@ -94,6 +94,7 @@ class SimulationManager:
 
     def plot(self):
         plotAll(self.conf_file, self.outputPath)
+        pass
         
 
 # The reason why this is so complicated is that if we simply use .readline(), it

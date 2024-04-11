@@ -92,12 +92,14 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
 
 
 if __name__ == "__main__":
+    # This can be used to run something on the server, but don't use this
+    # to run a job. Use JobManager.
     # Choose which server to run on
-    server = Servers.servers[4]
+    server = Servers.condorcet
     # Upload/sync the project
     uploadProject(server)
     # Choose script to run
-    script_path = '/home/elundheim/simulation/SimulationScripts/Management/benchmarking.py'
+    script_path = '/home/elundheim/simulation/SimulationScripts/Management/runSimulation.py'
     # Generate sbatch script
 
     # Queue the script on the server
