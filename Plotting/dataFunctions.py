@@ -10,7 +10,7 @@ def parse_pvd_file(path, pvd_file):
 
     return vtu_files
 
-def getDataFromName(nameOrPath):
+def get_data_from_name(nameOrPath):
     # Split the filename by underscores
     fileName = nameOrPath.split('/')[-1]
     parts = fileName.split('_')

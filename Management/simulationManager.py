@@ -6,10 +6,6 @@ import os
 import sys
 import platform
 
-# Add Management to sys.path (used to import files)
-sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
-from plotAll import plotAll
-
 class SimulationManager:
     
     def __init__(self, configObj, outputPath=None, debugBuild=False, useProfiling=False):
@@ -93,6 +89,11 @@ class SimulationManager:
     
 
     def plot(self):
+        # We import this inside the function so that we can choose not to import
+        # if we don't want to plot
+        # Add Management to sys.path (used to import files)
+        sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
+        from plotAll import plotAll
         plotAll(self.conf_file, self.outputPath)
         pass
         

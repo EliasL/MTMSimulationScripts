@@ -15,7 +15,7 @@ class SimulationConfig:
         self.cols = 10 
         self.nrThreads = 1 
         self.seed = 0
-        self.plasticityEventThreshold = 0.2
+        self.plasticityEventThreshold = 0.1
         self.scenario = "simpleShearPeriodicBoundary"
 
         # Loading parameters
@@ -75,7 +75,7 @@ class SimulationConfig:
             name += f"EpsX{self.epsx}"
         if self.maxIterations != 0:
             name += f"MaxIter{self.maxIterations}"
-        if self.plasticityEventThreshold != 0.2:
+        if self.plasticityEventThreshold != 0.1:
             name += f"PET{self.plasticityEventThreshold}"
 
         # We always add the seed at the very end
@@ -184,21 +184,23 @@ if __name__ == "__main__":
     import sys
 
 
-    conf = SimulationConfig()
-    conf.startLoad=0.15
-    conf.loadIncrement=0.0001
-    conf.rows=10
-    conf.cols=10
-    conf.maxLoad=0.2
+    config = SimulationConfig()
+    config.startLoad=0.15
+    config.loadIncrement=0.001
+    config.rows=30
+    config.cols=30
+    config.maxLoad=1
 
     if len(sys.argv) >= 2:
         scenario = sys.argv[1]
-        conf.scenario = scenario
+        config.scenario = scenario
         # if there is a complete custom scenario, we replace the config
         if get_custom_configs(scenario) is not None:
-            conf = get_custom_configs(scenario)
+            config = get_custom_configs(scenario)
     
-    path = conf.write_to_file('build/')
+
+
+    path = config.write_to_file('build/')
     # Extract the directory part from the original path
     directory = os.path.dirname(path)
     

@@ -86,7 +86,7 @@ def makeEnergyField(csv_file):
 
     # Set the minimum and maximum values for the color bar
     min_energy = energy_grid.min()  # Replace with your desired minimum value
-    max_energy = 0.2  # Replace with your desired maximum value
+    max_energy = 4.16  # Replace with your desired maximum value
 
     img = ax.imshow(energy_grid, cmap='viridis', origin='lower', vmin=min_energy, vmax=max_energy)
 
@@ -111,8 +111,8 @@ def makeEnergyField(csv_file):
     default_font_size = plt.rcParams['font.size']  # Fetch default font size
     cbar.ax.set_title(f'Capped at ${max_energy}$', fontsize=default_font_size)
     nbs = u'\u00A0'  #non-breaking-space
-    ax.set_xlabel(f'← Tall {nbs*7} $T$(Length ratio) {nbs*7} Wide →')
-    ax.set_ylabel(f'← Large angle {nbs*7} $T$(Length ratio and $\\theta - \\pi/2$) {nbs*7} Small angle →')
+    ax.set_xlabel(f'← Tall {nbs*7} $P_x$(Length ratio) {nbs*7} Wide →')
+    ax.set_ylabel(f'← Large angle {nbs*7} $P_y$(Length ratio and $\\theta - \\pi/2$) {nbs*7} Small angle →')
     ax.set_title('Energy field in a Poincaré disk')
 
     path = os.path.dirname(csv_file)
@@ -174,8 +174,8 @@ def make3DEnergyField(csv_file):
     cbar.ax.text(1.4, max_energy, f'Capped at {max_energy}', va='center')  # text annotation
 
     # Set labels
-    ax.set_xlabel('$T$(Length ratio)')
-    ax.set_ylabel(f'← Large angle $T$(Length ratio and $θ - π/2$) Small angle →')
+    ax.set_xlabel('$P$(Length ratio)')
+    ax.set_ylabel(f'← Large angle $P$(Length ratio and $θ - π/2$) Small angle →')
     ax.set_zlabel('Energy')
     ax.set_title('Energy Surface Plot')
 

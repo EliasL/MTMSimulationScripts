@@ -53,8 +53,8 @@ def uploadProject(cluster_address="Servers.default"):
             "--exclude", ".git",
             "--exclude", "build",
             "--exclude", "build-release",
-            "--exclude", "libs/*-build",
-            "--exclude", "libs/*-subbuild",
+            "--exclude", "libs/**-build",
+            "--exclude", "libs/**-subbuild",
             "--exclude", "Visuals/",
             "/Users/eliaslundheim/work/PhD/MTS2D/",
             f"elundheim@{cluster_address}:/home/elundheim/simulation/MTS2D/"

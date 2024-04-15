@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import pandas as pd
 import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
@@ -9,7 +10,7 @@ from tqdm import tqdm
 
 from multiprocessing import Pool
 
-from dataFunctions import getDataFromName
+from dataFunctions import get_data_from_name
 
 class VTUData:
     def __init__(self, vtu_file_path):
@@ -45,28 +46,15 @@ class VTUData:
         connectivity = _connectivity.reshape(-1, 4)[:, 1:]
         return connectivity
 
-def precalculate_global_stress_range(vtu_files):
-    global_min, global_max = np.inf, -np.inf
-    for vtu_file in vtu_files:
-        energy_field = VTUData(vtu_file).get_energy_field()
-        min_energy, max_energy = energy_field.min(), energy_field.max()
-        global_min, global_max = min(global_min, min_energy), max(global_max, max_energy)
-    return global_min, global_max
+def get_energy_range(vtu_files, cvs_file):
 
-def get_energy_and_stress_range(vtu_file):
-    energy_field = VTUData(vtu_file).get_energy_field()
-    min_energy, max_energy = energy_field.min(), energy_field.max()
+    df = pd.read_csv(cvs_file, usecols=['Max. energy'], dtype={'Max. energy': 'float64'})
+    max_energy = df['Max. energy'].max()
+    # We assume that the minimum energy throughout the whole run is the minimum 
+    # of the initial state 
+    energy_field = VTUData(vtu_files[0]).get_energy_field()
+    min_energy = energy_field.min()
     return min_energy,max_energy
-
-def precalculate_global_stress_range_parallel(vtu_files):
-    global_min, global_max = np.inf, -np.inf
-    with ProcessPoolExecutor() as executor:
-        results = executor.map(get_energy_and_stress_range, vtu_files)
-        
-        for min_val, max_val in results:
-            global_min, global_max = min(global_min, min_val), max(global_max, max_val)
-
-    return global_min, global_max
 
 # This is a conceptual approach and might need adjustments to fit your specific data structure
 def cell_energy_to_node_energy(nodes, energy_field, connectivity):
@@ -129,7 +117,7 @@ def base_plot(args):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     
-    metadata = getDataFromName(vtu_file)
+    metadata = get_data_from_name(vtu_file)
     lines = [
         f"State: {metadata['name']}",
         f"Frame: {frame_index}, " +
@@ -205,11 +193,11 @@ def plot_mesh(args):
 
     return path
 
-def makeImages(frameFunction, framePath, vtu_files, num_processes=10):
+def make_images(frameFunction, framePath, vtu_files, macro_data, num_processes=10):
     # Assuming vtu_files is defined, calculate global axis limits
     axis_limits = get_axis_limits(vtu_files)
     # global_min, global_max = precalculate_global_stress_range(vtu_files)
-    global_min, global_max = precalculate_global_stress_range_parallel(vtu_files)
+    global_min, global_max = get_energy_range(vtu_files, macro_data)
     args_list = [(framePath, vtu_file, frame_index, global_min, global_max, axis_limits) for frame_index, vtu_file in enumerate(vtu_files)]
     
     with Pool(processes=num_processes) as pool:

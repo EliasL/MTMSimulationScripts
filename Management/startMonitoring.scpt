@@ -19,7 +19,7 @@ tell application "iTerm"
         end tell
         -- Navigate to the third pane and run the command
         tell third session of current tab
-            write text "python /Users/eliaslundheim/work/PhD/SimulationScripts/Management/jobManager.py"
+            write text "python /Users/eliaslundheim/work/PhD/SimulationScripts/Management/jobManager.py true"
         end tell
     end tell
 end tell

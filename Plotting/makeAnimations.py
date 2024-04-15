@@ -4,8 +4,9 @@ import imageio.v2 as imageio  # Adjusted import here
 
 
 from settings import settings
-from pyplotFunctions import makeImages, plot_mesh, plot_nodes
-from dataFunctions import parse_pvd_file, getDataFromName
+from pyplotFunctions import make_images, plot_mesh, plot_nodes
+from dataFunctions import parse_pvd_file, get_data_from_name
+from makePvd import create_collection
 
 # This function selects a subset of the vtu files to speed up the animation
 # process. (For example, if the video would be 2 hours long, or have a fps of
@@ -58,19 +59,20 @@ def framesToGif(frames, outFile, fps):
 
  
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
-def makeAnimations(path, pvd_file):
+def makeAnimations(path, macro_data, pvd_file):
    
     framePath = path + settings["FRAMEFOLDERPATH"]  
     if(not os.path.exists(path+pvd_file)):
         print(f"No file found at: {path+pvd_file}")
-        return
+        print("Creating pvd file...")
+        create_collection(path+settings["DATAFOLDERPATH"])
     
     vtu_files = parse_pvd_file(path, pvd_file)
 
     # we don't want every frame to be created, so in order to find out what
     # frames should be drawn, we first check how much load change there is
-    first = getDataFromName(vtu_files[0])    
-    last = getDataFromName(vtu_files[-1])    
+    first = get_data_from_name(vtu_files[0])    
+    last = get_data_from_name(vtu_files[-1])    
     loadChange = float(last['load']) - float(first['load'])
 
     # Length of video in seconds
@@ -88,8 +90,8 @@ def makeAnimations(path, pvd_file):
         fps = len(vtu_files)/7
 
     print(f"Creating frames ...")
-    mesh_images = makeImages(plot_mesh, framePath, vtu_files)
-    node_images = makeImages(plot_nodes, framePath, vtu_files)
+    mesh_images = make_images(plot_mesh, framePath, vtu_files, macro_data)
+    node_images = make_images(plot_nodes, framePath, vtu_files, macro_data)
 
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
