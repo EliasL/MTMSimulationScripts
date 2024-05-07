@@ -103,11 +103,8 @@ def baseSpeed():
     #   0:22
     # Very nice! Logging takes up no time.
 
-
-
-
     config = SimulationConfig(rows=10, cols=10, startLoad=0.15, nrThreads=1,
-                          loadIncrement=0.00001, maxLoad=1) 
+                          loadIncrement=0.00001, maxLoad=1,scenario="simpleShearFixedBoundary") 
     manager = SimulationManager(config)
     nrRuns = 1
     times = [manager.runSimulation(build=False) for _ in range(nrRuns)]
@@ -115,7 +112,16 @@ def baseSpeed():
     print(time)
     #manager.plot()
 
+def resume_simulation_midway():
+    config = SimulationConfig(rows=10, cols=10, startLoad=0.15, nrThreads=4,
+                    loadIncrement=0.00001, maxLoad=1)
+    manager = SimulationManager(config)
+    manager.runSimulation() 
+    manager.resumeSimulation()
+    manager.plot() 
+
 if __name__ == "__main__":
     print("Starting benchmark run...")
     baseSpeed()
+    #resume_simulation_midway()
     # thread_benchmark()

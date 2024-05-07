@@ -39,20 +39,20 @@ def make_average_plot(name, filePaths):
     # Loop through each file path to read CSV data
     for (i,filePath) in enumerate(filePaths):
         # Read the CSV data into a DataFrame
-        df = pd.read_csv(filePath, usecols=['Load', 'Avg. energy'], dtype={'Load': 'float64', 'Avg. energy': 'float64'})
+        df = pd.read_csv(filePath, usecols=['Load', 'Avg energy'], dtype={'Load': 'float64', 'Avg energy': 'float64'})
         dfs.append(df)
 
         # Plot individual run
-        plt.plot(df['Load'], df['Avg. energy'], label=f'seed: {i}', alpha=0.5) 
+        plt.plot(df['Load'], df['Avg energy'], label=f'seed: {i}', alpha=0.5) 
 
     # Concatenate all DataFrames for average calculation
     combined_df = pd.concat(dfs)
 
-    # Group by Load and calculate mean of Avg. energy for the average plot
-    average_df = combined_df.groupby('Load')['Avg. energy'].mean().reset_index()
+    # Group by Load and calculate mean of Avg energy for the average plot
+    average_df = combined_df.groupby('Load')['Avg energy'].mean().reset_index()
 
     # Plot combined average with a distinct color and label
-    plt.plot(average_df['Load'], average_df['Avg. energy'], label='Average', color='black', linewidth=2)
+    plt.plot(average_df['Load'], average_df['Avg energy'], label='Average', color='black', linewidth=2)
 
     # Customize the plot
     plt.xlabel('Load')

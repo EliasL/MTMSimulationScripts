@@ -5,6 +5,15 @@ import shutil
 import os
 import sys
 import platform
+import glob
+
+
+
+
+# Add Management to sys.path (used to import files)
+sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
+# Now we can import from Management
+from settings import settings
 
 class SimulationManager:
     
@@ -38,10 +47,11 @@ class SimulationManager:
          
         # Generate conf file path and name
         self.conf_file = self.configObj.write_to_file(self.build_path)
+        self.subfolderName = Path(self.conf_file).stem
         # Generate command to run simulation
         self.simulation_command = f"{self.program_path} {self.conf_file} {self.outputPath}"
         if self.useProfiling and platform.system() == 'Linux':
-            self.simulation_command = "valgrind --tool=callgrind " + self.simulation_command
+            self.simulation_command = f"valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes {self.simulation_command}"
 
 
     def runSimulation(self, build=True):
@@ -58,6 +68,54 @@ class SimulationManager:
         duration = end_time - start_time
 
         return duration
+    
+    def resumeSimulation(self, index = 0, name=None, build=True):
+        if build:
+            self._build()
+
+        #if the name is set, we search for that file name,
+        # otherwise, we sort the files by date created and choose the newest 
+        # (index 0)
+        dumpFile = self.findDumpFile(index, name)
+
+        start_time = time.time()
+        run_command(f"{self.program_path} {dumpFile}")
+        # Stop the timer right after the command completes
+        end_time = time.time()
+        # Calculate the duration
+        duration = end_time - start_time
+
+        return duration
+
+    def findDumpFile(self, index=0, name=None):
+        """
+        Find the dump file in the specified folder by name or by index after sorting by creation date.
+
+        :param index: Index of the file to retrieve after sorting by creation date (default newest).
+        :param name: Name of the dump file to find. If specified, index is ignored.
+        :param dumpFolderPath: Path to the directory containing the dump files.
+        :return: Path to the dump file.
+        """
+
+        dumpFolderPath = os.path.join(self.outputPath, self.subfolderName, settings['DUMPFOLDERPATH'])
+
+        # Check if a specific file name is given
+        if name:
+            # Search for the file with the given name
+            for file in glob.glob(os.path.join(dumpFolderPath, '*')):
+                if name in os.path.basename(file):
+                    return file
+            raise FileNotFoundError(f"No file named {name} found in {dumpFolderPath}")
+
+        # If no specific file name is given, sort files by creation time
+        files = list(filter(os.path.isfile, glob.iglob(os.path.join(dumpFolderPath, '*'))))
+        files.sort(key=os.path.getmtime, reverse=True)  # Sort files by modification time, newest first
+
+        # Return the file at the specified index
+        try:
+            return files[index]
+        except IndexError:
+            raise IndexError(f"No file at index {index}. Only {len(files)} files available in {dumpFolderPath}.")
 
 
     def clean(self):

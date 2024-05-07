@@ -48,8 +48,8 @@ class VTUData:
 
 def get_energy_range(vtu_files, cvs_file):
 
-    df = pd.read_csv(cvs_file, usecols=['Max. energy'], dtype={'Max. energy': 'float64'})
-    max_energy = df['Max. energy'].max()
+    df = pd.read_csv(cvs_file, usecols=['Max energy'])
+    max_energy = df['Max energy'].max()
     # We assume that the minimum energy throughout the whole run is the minimum 
     # of the initial state 
     energy_field = VTUData(vtu_files[0]).get_energy_field()
@@ -74,15 +74,16 @@ def cell_energy_to_node_energy(nodes, energy_field, connectivity):
     return node_energy
 
 # Use this function to set axis limits in your plot_frame function
-def get_axis_limits(vtu_files):
-    x_min, x_max, y_min, y_max = float('inf'), float('-inf'), float('inf'), float('-inf')
-    for vtu_file in [vtu_files[0],vtu_files[-1]]: #Remove [[-1]] to search through everything if desired
-        nodes = VTUData(vtu_file).get_nodes()
-        x_min = min(x_min, nodes[:, 0].min())
-        x_max = max(x_max, nodes[:, 0].max())
-        y_min = min(y_min, nodes[:, 1].min())
-        y_max = max(y_max, nodes[:, 1].max())
+def get_axis_limits(cvs_file):
+    df = pd.read_csv(cvs_file, usecols=['maxX', 'minX', 'maxY', 'minY'])
+    
+    x_max = df['maxX'].max()
+    x_min = df['minX'].min()
+    y_max = df['maxY'].max()
+    y_min = df['minY'].min()
+    
     return x_min, x_max, y_min, y_max
+
 
 def add_padding(axis_limits, padding_ratio):
     # Define your axis limits
@@ -106,7 +107,7 @@ def add_padding(axis_limits, padding_ratio):
 def base_plot(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
     
-    dpi = 200
+    dpi = 250
     width = 2000
     height = 1000
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
@@ -129,7 +130,6 @@ def base_plot(args):
 
     return ax, fig
 
-
 def plot_nodes(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
 
@@ -141,13 +141,27 @@ def plot_nodes(args):
     color = np.where(fixed==1, 'red', 'blue')
     x, y = nodes[:,0], nodes[:,1]
     
-    ax.scatter(x, y, s=20, c=color, marker='o', alpha=1)  # 's' is the size, 'c' is the color
- 
+    # Calculate grid size
+    dims = get_data_from_name(vtu_file)['dims']
+    # We use the y axis because it will be closest to the real size.
+    grid_size = (axis_limits[3] - axis_limits[2])/float(dims[1])
+
+    # Calculate frame size and DPI
+    inches_per_data_unit = fig.dpi * (fig.get_size_inches()[1] / (axis_limits[3] - axis_limits[2]))
+
+    # Calculate circle size in points, considering 's' as the area in points squared
+    circle_diameter = 0.25 * grid_size  # Adjust the 0.25 factor as necessary to prevent overlap
+    circle_radius = circle_diameter / 2
+    circle_point_size = (circle_radius * inches_per_data_unit)**2  # Area in points squared
+    
+    ax.scatter(x, y, s=circle_point_size, c=color, marker='o', alpha=1)  # 's' is the area of the circle
+    
     path = f"{framePath}/node_frame_{frame_index:04d}.png"
     plt.savefig(path, bbox_inches='tight', pad_inches=0)
     plt.close(fig)
 
     return path
+
 
 def plot_mesh(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
@@ -195,11 +209,10 @@ def plot_mesh(args):
 
 def make_images(frameFunction, framePath, vtu_files, macro_data, num_processes=10):
     # Assuming vtu_files is defined, calculate global axis limits
-    axis_limits = get_axis_limits(vtu_files)
+    axis_limits = get_axis_limits(macro_data)
     # global_min, global_max = precalculate_global_stress_range(vtu_files)
     global_min, global_max = get_energy_range(vtu_files, macro_data)
     args_list = [(framePath, vtu_file, frame_index, global_min, global_max, axis_limits) for frame_index, vtu_file in enumerate(vtu_files)]
-    
     with Pool(processes=num_processes) as pool:
         image_paths = list(tqdm(pool.imap(frameFunction, args_list), total=len(vtu_files)))
     

@@ -13,14 +13,15 @@ class SimulationConfig:
         
         self.rows = 10 
         self.cols = 10 
+        self.usingPBC = 1 # 0=False, 1=True
+        self.scenario = "simpleShearPeriodicBoundary"
         self.nrThreads = 1 
         self.seed = 0
         self.plasticityEventThreshold = 0.1
-        self.scenario = "simpleShearPeriodicBoundary"
 
         # Loading parameters
         self.startLoad = 0.0 
-        self.loadIncrement = 0.01 
+        self.loadIncrement = 0.00001 
         self.maxLoad = 1.0 
         self.noise = 0.05
 
@@ -58,6 +59,7 @@ class SimulationConfig:
             self.scenario + ","
             f"s{self.rows}x{self.cols}"+
             f"l{self.startLoad},{self.loadIncrement},{self.maxLoad}"+
+            f"{'PBC' if self.usingPBC == 1 else 'NPBC'}"+
             f"t{self.nrThreads}"
         )
         # Conditionally append tolerances and iterations if they are not default
@@ -162,22 +164,20 @@ class ConfigGenerator:
 
 
 def get_custom_configs(scenario):
-    conf = SimulationConfig()
     if scenario == "periodicBoundaryTest":
-        conf.startLoad=0
-        conf.loadIncrement=0.00001
-        conf.rows=4
-        conf.cols=4
-        conf.maxLoad=1
-        conf.scenario = scenario
-        return conf
+        return SimulationConfig(rows=4, cols=4, startLoad=0.0, nrThreads=4,
+                    loadIncrement=0.0001, maxLoad=1,
+                    scenario="periodicBoundaryTest")
+        
     if scenario == "singleDislocation":
-        conf = SimulationConfig(rows=6, cols=6, startLoad=0.0, nrThreads=6,
+        return SimulationConfig(rows=6, cols=6, startLoad=0.0, nrThreads=6,
                     loadIncrement=0.00001, maxLoad=0.001,
                     scenario="singleDislocation")
-        return conf
         
-        
+    if scenario == "longSim": 
+        return SimulationConfig(rows=60, cols=60, startLoad=0.15, nrThreads=4,
+                                loadIncrement=0.001, maxLoad=20,
+                                scenario="resettingSimpleShearPeriodicBoundary")    
 
 if __name__ == "__main__":
     import os
@@ -185,12 +185,10 @@ if __name__ == "__main__":
 
 
     config = SimulationConfig()
-    config.startLoad=0.15
-    config.loadIncrement=0.001
-    config.rows=30
-    config.cols=30
+    config.loadIncrement=0.00001
     config.maxLoad=1
-
+    config.rows=3
+    config.cols=3
     if len(sys.argv) >= 2:
         scenario = sys.argv[1]
         config.scenario = scenario
@@ -198,8 +196,6 @@ if __name__ == "__main__":
         if get_custom_configs(scenario) is not None:
             config = get_custom_configs(scenario)
     
-
-
     path = config.write_to_file('build/')
     # Extract the directory part from the original path
     directory = os.path.dirname(path)

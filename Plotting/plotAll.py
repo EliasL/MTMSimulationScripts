@@ -1,12 +1,12 @@
 from makeAnimations import makeAnimations
-from makePlots import makeSinglePlot
+from makePlots import makeEnergyPlot, makeItterationsPlot
 from makeEnergyField import makeEnergyField
 from settings import settings
 import sys
 from pathlib import Path
 
 
-def plotAll(configFile, dataPath):
+def plotAll(configFile, dataPath, noVideo=False):
         # We expect the argument to be path/name.conf, and we want just the name
     subfolderName = Path(configFile).stem
     collection = f"{settings['COLLECTIONNAME']}.pvd"
@@ -15,8 +15,10 @@ def plotAll(configFile, dataPath):
     path = dataPath+subfolderName+'/'
 
     print(f"Plotting at {path}")
-    makeSinglePlot(path+macroData, subfolderName+"_energy.pdf")
-    makeAnimations(path, macroData, collection)
+    makeEnergyPlot(path+macroData, subfolderName+"_energy.pdf")
+    makeItterationsPlot(path+macroData, subfolderName+"_itterations.pdf")
+    if not noVideo:
+        makeAnimations(path, path+macroData, collection)
 
     # energyGridName = "energy_grid.csv"
     # makeEnergyField(path, energyGridName)
@@ -36,5 +38,10 @@ if __name__ == "__main__":
         dataPath = findOutputPath()
     else:
         dataPath = sys.argv[2]
+    
+    noVideo=False
+    if len(sys.argv)>=4:
+        noVideo = sys.argv[3]=="noVideo"
 
-    plotAll(sys.argv[1], dataPath)
+ 
+    plotAll(sys.argv[1], dataPath, noVideo)

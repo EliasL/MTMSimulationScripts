@@ -89,13 +89,10 @@ def makeAnimations(path, macro_data, pvd_file):
         # We will make the video last 7 seconds
         fps = len(vtu_files)/7
 
-    print(f"Creating frames ...")
-    mesh_images = make_images(plot_mesh, framePath, vtu_files, macro_data)
-    node_images = make_images(plot_nodes, framePath, vtu_files, macro_data)
-
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
-    for images, fileName in zip([mesh_images, node_images],["mesh", "nodes"]):
+    for function, fileName in zip([plot_mesh, plot_nodes],["mesh", "nodes"]):
+        images = make_images(function, framePath, vtu_files, macro_data)
         outPath = path+path.split('/')[-2]+f'_{fileName}_video.mp4'
         framesToMp4(images, outPath, fps)
 
