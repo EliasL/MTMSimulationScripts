@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+import sys
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -10,6 +12,10 @@ from clusterStatus import find_server, Servers, get_server_short_name
 from connectToCluster import uploadProject, connectToCluster
 from configGenerator import SimulationConfig
 from dataManager import get_directory_size
+
+sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
+# Now we can import from Management
+from settings import settings
 
 class Job:
     """
@@ -25,7 +31,8 @@ class Job:
         self.p_id=processID
         self.command=""
         self.server=server
-        self.progress=0
+        self.timeEstimation=""
+        self.progress=""
         self.progress_timestamp=None
         self.dataSize=0
         self.output_path=""
@@ -39,16 +46,15 @@ class Job:
         stdin, stdout, stderr = self.ssh.exec_command(f"ps -p {self.p_id} -o args=")
         command_line = stdout.read().decode('utf-8').strip()
         parts = command_line.split()
-
         self.command = command_line
         # Assuming the second and third parts of the command are what you're interested in
-        config_path = parts[1]  # This seems to be new or unused; ensure it's handled as needed
-        self.output_path = parts[2]  # Assuming the last part is the output path
-
+        config_path = parts[-2]  # This seems to be new or unused; ensure it's handled as needed
+        self.output_path = parts[-1]  # Assuming the last part is the output path
         self.get_config_file(config_path)
         self.name=os.path.splitext(os.path.basename(config_path))[0]
         self.get_progress()
         self.dataSize = get_directory_size(self.ssh, self.output_path+self.name)
+
 
     def get_config_file(self, config_path):
         # Download the config file using SFTP
@@ -63,58 +69,52 @@ class Job:
         os.remove(local_config_filename)
 
     def get_progress(self):
-        remote_file_path = (self.output_path + 
-                            self.name + '/' + 
-                            self.name + '.log')
-        # Open the remote file for reading
-        # We read the second last line because the very last line might not be complete
-        with self.ssh.open_sftp().file(remote_file_path, 'rb') as file:
-            # Seek to the second last line
-            file.seek(-2, 2)  # Seek to the second last byte
-            while file.read(1) != b'\n':  # Move to the start of the last line
-                file.seek(-2, 1)  # Move back one byte
-            file.seek(-2, 1)  # Move back one byte
-            while file.read(1) != b'\n':  # Move to the start of the second last line
-                file.seek(-2, 1)  # Move back one byte
+        remote_file_path = (self.output_path +
+                            self.name + '/' +
+                            settings['MACRODATANAME'] + '.csv')
 
-            # Read and return the second last line
-            second_last_line = file.readline().decode('utf-8').strip()
-            # Sample log line
-            #log_line = "[2024-02-12 08:32:44.395] [infoLog] [info] 23% runTime: 2d 11h 48m 44.513s ETR: 8d 0h 41m 8.965s Load: 0.351350"
+        with self.ssh.open_sftp() as sftp:
+            with sftp.file(remote_file_path, 'r') as file:
+                # Read the first line for headers
+                headers = file.readline().strip().split(',')
+                header_indices = {header: idx for idx, header in enumerate(headers)}
 
-            # Extract timestamp from the square brackets
-            timestamp_match = re.search(r"\[(.*?)\]", second_last_line)
-            if timestamp_match:
-                timestamp_str = timestamp_match.group(1)
-                # Parse the timestamp string into a datetime object
-                timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
-                # Manually adjust for timezone
-                timestamp = timestamp.replace(tzinfo=self.gmt_zone)
-                self.progress_timestamp = timestamp
-            if not '[' in second_last_line:
-                # This means that we are not getting propper progress updates yet
-                self.progress = "..."
-            else:
-                # Remove all contents within square brackets from the log line
-                cleaned_log_line = re.sub(r"\[.*?\]", "", second_last_line).strip()
-                self.progress = cleaned_log_line
+                # Now we want to find the last chunk of the file
+                file_size = file.stat().st_size
+                chunk_size = 1024  # Read last 1024 bytes, adjust if necessary
+                start_pos = max(file_size - chunk_size, 0)
+                file.seek(start_pos)
+                chunk = file.read(file_size - start_pos)
+                lines = chunk.decode('utf-8').splitlines()
+                if not lines or len(lines)<=1:
+                    self.timeEstimation = "N/A"
+                    self.progress = 0
+                    return
 
+                # Find the last complete line of data
+                if len(lines[-1].split(',')) == len(headers):
+                    last_line = lines[-1]
+                else:
+                    last_line = lines[-2]
+
+
+                last_line_values = last_line.split(',')
+                load = last_line_values[header_indices['Load']]
+                runTime = last_line_values[header_indices['Run time']]
+                timeRemaining = last_line_values[header_indices['Est time remaining']]
+
+                # Log the results
+                self.timeEstimation = f"RT: {runTime}, ETR: {timeRemaining}"
+                self.progress = float(load)/float(self.configObj.maxLoad)
+        
 
 
     def __str__(self) -> str:
-        if self.progress_timestamp:
-            time_since_update = humanize.naturaltime(
-                datetime.now(self.paris_zone) - self.progress_timestamp
-            )
-            formatted_time = self.progress_timestamp.strftime('%H:%M:%S')
-            timeUpdate = f"{formatted_time}, {time_since_update}"
-        else:
-            timeUpdate = '...'
         return (
                 f"P_ID {self.p_id}: {self.name} on {get_server_short_name(self.server)}\n"
                 #f"\tCommand: {self.command}\n"
-                f"  Progress: {self.progress}\n"
-                f"  Time since update: {timeUpdate}\n"
+                f"  Progress: {self.progress*100:.1f}%\n"
+                f"  Time: {self.timeEstimation}\n"
                 f"  {self.output_path} : {self.dataSize}\n"
             )
     
@@ -133,7 +133,6 @@ class JobManager:
         command = f"ps -eo pid,etime,cmd | grep [M]TS2D | grep -v '/bin/sh'"
         stdin, stdout, stderr = ssh.exec_command(command)
         stdout_lines = stdout.read().decode('utf-8').strip().split('\n')
-
         if 'CMakeFiles' in stdout_lines[0]:
             s = get_server_short_name(server)
             return [f"{s}:\n  Building..."]
@@ -188,7 +187,8 @@ class JobManager:
 
     def getSlurmJobs(self):
         self.slurmJobs = self.execute_command_on_servers(self.find_slurm_jobs_on_server)
-        [print(job) for job in self.slurmJobs]
+        print("Jobs:")
+        [print("  ", job) for job in self.slurmJobs]
 
 
     def cancel_job_on_server(self, server, job_id):
@@ -209,6 +209,21 @@ class JobManager:
                 continue
             else:
                 self.cancel_job_on_server(server, job_id)
+    
+    def kill_all_processes(self, server):
+        """Kill all processes related to the user on the specified server."""
+        # Warning, this will disconnect ssh connections as well
+        ssh = connectToCluster(server, False)
+        command = "pkill -u $(whoami)"  # This kills all processes for the user
+        ssh.exec_command(command)
+        print(f"All processes for user on {server} have been terminated.")
+
+    def kill_process(self, server, pid):
+        """Kill a specific process by PID on the specified server."""
+        ssh = connectToCluster(server, False)
+        command = f"kill {pid}"
+        ssh.exec_command(command)
+        print(f"Process {pid} on {server} has been terminated.")
 
 if __name__ == "__main__":
 
@@ -224,13 +239,15 @@ if __name__ == "__main__":
 
     if len(sys.argv) >= 2:
         onlyCheckJobs = sys.argv[1]
-    
+    else: 
+        onlyCheckJobs = 'False'
 
-    minNrThreads = 4
+    minNrThreads = 65
     script = "benchmarking.py"
     script = "runSimulation.py"
-    server = Servers.condorcet
+    script = "parameterExploring.py"
     server = Servers.dalembert
+    server = Servers.condorcet
     command=f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
     if onlyCheckJobs.upper() == "TRUE":
         j=JobManager()
@@ -240,5 +257,5 @@ if __name__ == "__main__":
         j=JobManager()
         # server = find_server(minNrThreads)
         uploadProject(server)
-        jobId = queue_remote_job(server, command, "60,long", minNrThreads)
+        jobId = queue_remote_job(server, command, "expl", minNrThreads)
         j.getProcesses()

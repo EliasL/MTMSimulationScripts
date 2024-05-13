@@ -1,3 +1,4 @@
+import itertools
 import os
 
 class SimulationConfig:
@@ -14,7 +15,7 @@ class SimulationConfig:
         self.rows = 10 
         self.cols = 10 
         self.usingPBC = 1 # 0=False, 1=True
-        self.scenario = "simpleShearPeriodicBoundary"
+        self.scenario = "simpleShear"
         self.nrThreads = 1 
         self.seed = 0
         self.plasticityEventThreshold = 0.1
@@ -25,12 +26,13 @@ class SimulationConfig:
         self.maxLoad = 1.0 
         self.noise = 0.05
 
-        # Tolerances and Iterations
+        # Minimizer settings
+        self.minimizer = "FIRE" # FIRE / LBFGS
         self.nrCorrections = 10
         self.scale  = 1.0
         self.epsg = 0.0 
         self.epsf = 0.0 
-        self.epsx = 0.0 
+        self.epsx = 1.0E-6 
         self.maxIterations = 0 
 
         # Logging settings
@@ -63,6 +65,8 @@ class SimulationConfig:
             f"t{self.nrThreads}"
         )
         # Conditionally append tolerances and iterations if they are not default
+        if self.minimizer != "FIRE":
+            name += self.minimizer
         if self.noise != 0.05:
             name += f"n{self.noise}"
         if self.nrCorrections != 10:
@@ -137,6 +141,52 @@ class SimulationConfig:
 
 class ConfigGenerator:
     @staticmethod
+    def generate(**kwargs):
+        """
+        Generate a list of SimulationConfig objects over multiple arguments.
+        
+        Each keyword argument should be a pair where the key is the argument name 
+        and the value is an iterable of values for that argument.
+
+        :param kwargs: Dictionary of argument names to iterables of possible values.
+        :return: A list of SimulationConfig objects with all combinations of argument values.
+
+        Example:
+        configurations = ConfigGenerator.generate(nrThreads=[1, 2, 4], seed=[42, 43], scenario='simpleShear')
+        for config in configurations:
+            print(config.generate_name())
+        """
+        # Prepare the kwargs to ensure that each is a list (but keep strings intact)
+        processed_kwargs = {}
+        varying_keys = {}
+        for key, value in kwargs.items():
+            if isinstance(value, str) or not isinstance(value, list):
+                # Handle strings and non-list non-string values as a single-item list
+                processed_kwargs[key] = [value]
+            else:
+                # Use lists as is and mark varying keys
+                processed_kwargs[key] = value
+                if len(value) > 1:
+                    varying_keys[key] = value
+
+        # Extract argument names and corresponding lists of values
+        keys = processed_kwargs.keys()
+        values_product = itertools.product(*processed_kwargs.values())
+
+        # Create a list of SimulationConfig objects and labels for each combination of argument values
+        configs = []
+        labels = []
+        for values in values_product:
+            params = dict(zip(keys, values))
+            config = SimulationConfig(**params)
+            # Create label containing only varying parameters
+            label = ', '.join(f"{k}={params[k]}" for k in varying_keys if k in params)
+            configs.append(config)
+            labels.append(label)
+
+        return configs, labels
+    
+    @staticmethod
     def generate_over_(argument_name, values, **kwargs):
         """
         Generate a list of SimulationConfig objects over a user-selected argument.
@@ -176,8 +226,9 @@ def get_custom_configs(scenario):
         
     if scenario == "longSim": 
         return SimulationConfig(rows=60, cols=60, startLoad=0.15, nrThreads=4,
-                                loadIncrement=0.001, maxLoad=20,
-                                scenario="resettingSimpleShearPeriodicBoundary")    
+                    loadIncrement=0.00001, maxLoad=10,
+                    # scenario="simpleShearPeriodicBoundary")
+                    scenario="cyclicSimpleShear") 
 
 if __name__ == "__main__":
     import os

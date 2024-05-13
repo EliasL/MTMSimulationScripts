@@ -50,6 +50,8 @@ def get_energy_range(vtu_files, cvs_file):
 
     df = pd.read_csv(cvs_file, usecols=['Max energy'])
     max_energy = df['Max energy'].max()
+    if(max_energy>100):
+        max_energy = df['Max energy'][:-1].max()
     # We assume that the minimum energy throughout the whole run is the minimum 
     # of the initial state 
     energy_field = VTUData(vtu_files[0]).get_energy_field()
@@ -147,12 +149,11 @@ def plot_nodes(args):
     grid_size = (axis_limits[3] - axis_limits[2])/float(dims[1])
 
     # Calculate frame size and DPI
-    inches_per_data_unit = fig.dpi * (fig.get_size_inches()[1] / (axis_limits[3] - axis_limits[2]))
-
+    inches_per_data_unit = 0.6 * fig.dpi * (fig.get_size_inches()[1] / (axis_limits[3] - axis_limits[2]))
     # Calculate circle size in points, considering 's' as the area in points squared
     circle_diameter = 0.25 * grid_size  # Adjust the 0.25 factor as necessary to prevent overlap
     circle_radius = circle_diameter / 2
-    circle_point_size = (circle_radius * inches_per_data_unit)**2  # Area in points squared
+    circle_point_size = (circle_radius * inches_per_data_unit)**2
     
     ax.scatter(x, y, s=circle_point_size, c=color, marker='o', alpha=1)  # 's' is the area of the circle
     

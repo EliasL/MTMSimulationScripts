@@ -2,8 +2,8 @@ import os
 import sys
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from makeAveragePlot import make_average_plot
 
+from makePlots import makeEnergyPlot
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / 'Management'))
 # Now we can import from Management
@@ -58,7 +58,7 @@ def get_csv_from_server(server, configs):
 
     newPaths = []
     sftp = ssh.open_sftp()
-    folder_path = "/tmp/MTS2"
+    folder_path = "/tmp/MTS2D"
     os.makedirs(folder_path, exist_ok=True)  # This line ensures the MTS2 folder is created
     for name in names:
         #name = config.generate_name(withExtension=False)
@@ -74,6 +74,14 @@ def get_csv_from_server(server, configs):
 # downloads the csv file associated with the config file to a temp file,
 # and returns the new local path to the csv
 def get_csv_files(configs):
+
+    # First check local path to see if we can avoid checking the servers
+    localPaths = get_csv_from_server(Servers.local_path_mac, configs)
+    if len(localPaths) == len(configs):
+        # We have found all the requested files, so we don't need to search more.
+        print(f"{len(localPaths)} files found. Not searching servers.")
+        return localPaths
+
     newPaths = []
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
     with ThreadPoolExecutor(max_workers=len(Servers.serversAndLocal)) as executor:
@@ -97,6 +105,6 @@ if __name__ == "__main__":
                             loadIncrement=0.00001, maxLoad=1, nrThreads=1) 
     paths = get_csv_files(configs)
     if paths:
-        make_average_plot("seeds", paths)    
+        makeEnergyPlot(paths, "seeds")    
     else:
         print("No files found")

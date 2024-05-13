@@ -69,17 +69,20 @@ class SimulationManager:
 
         return duration
     
-    def resumeSimulation(self, index = 0, name=None, build=True):
+    def resumeSimulation(self, index = 0, name=None, dumpFile=None, build=True, overwriteSettings=False):
         if build:
             self._build()
 
         #if the name is set, we search for that file name,
         # otherwise, we sort the files by date created and choose the newest 
         # (index 0)
-        dumpFile = self.findDumpFile(index, name)
+        if dumpFile is None:
+            dumpFile = self.findDumpFile(index, name)
 
         start_time = time.time()
-        run_command(f"{self.program_path} {dumpFile}")
+        # We can choose to use the previous settings, or overwrite them using new ones
+        conf = self.conf_file if overwriteSettings else ""
+        run_command(f"{self.program_path} {dumpFile} {conf}")
         # Stop the timer right after the command completes
         end_time = time.time()
         # Calculate the duration
