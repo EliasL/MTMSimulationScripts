@@ -81,9 +81,7 @@ class SimulationManager:
 
         start_time = time.time()
         # We can choose to use the previous settings, or overwrite them using new ones
-        conf = self.conf_file if overwriteSettings else ""
-        run_command(f"{self.program_path} {dumpFile} {conf}")
-        # Stop the timer right after the command completes
+        run_command(f"{self.program_path} {dumpFile}{' ' + self.conf_file if overwriteSettings else ''}")        # Stop the timer right after the command completes
         end_time = time.time()
         # Calculate the duration
         duration = end_time - start_time
@@ -96,7 +94,6 @@ class SimulationManager:
 
         :param index: Index of the file to retrieve after sorting by creation date (default newest).
         :param name: Name of the dump file to find. If specified, index is ignored.
-        :param dumpFolderPath: Path to the directory containing the dump files.
         :return: Path to the dump file.
         """
 

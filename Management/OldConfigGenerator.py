@@ -22,32 +22,18 @@ class SimulationConfig:
 
         # Loading parameters
         self.startLoad = 0.0 
-        self.loadIncrement = 1e-5 
+        self.loadIncrement = 0.00001 
         self.maxLoad = 1.0 
         self.noise = 0.05
 
         # Minimizer settings
         self.minimizer = "FIRE" # FIRE / LBFGS
-        # - LBFGS
-        self.LBFGSNrCorrections = 10
-        self.LBFGSScale  = 1.0
-        self.LBFGSEpsg = 0.0 
-        self.LBFGSEpsf = 0.0 
-        self.LBFGSEpsx = 1e-6 
-        self.LBFGSMaxIterations = 0 
-        # - FIRE
-        self.finc = 1.1
-        self.fdec = 0.5
-        self.alphaStart = 0.1
-        self.falpha = 0.99
-        self.dtStart = 0.01
-        self.dtStartMax = 0.01
-        self.dtMax = 0.01*10
-        self.dtMin = 0.01*0.002
-        self.eps = 0.01
-        self.epsRel = 0.0
-        self.delta = 0.0
-        self.maxIt = 1000
+        self.nrCorrections = 10
+        self.scale  = 1.0
+        self.epsg = 0.0 
+        self.epsf = 0.0 
+        self.epsx = 1.0E-6 
+        self.maxIterations = 0 
 
         # Logging settings
         self.showProgress = 1
@@ -57,7 +43,18 @@ class SimulationConfig:
             if hasattr(self, key):
                 setattr(self, key, value)
             else:
-                raise(Warning(f"Unkown keyword: {key}"))
+                raise(AttributeError(f"Unkown keyword: {key}"))
+        self.validate();
+    
+    def validate(self, name=None):
+        # we don't allow any '_' characters in the name
+        if(name is None):
+            name = self.generate_name(True)
+        
+        count = name.count('_')
+        if count !=0:
+            raise(AttributeError("The name is not allowed to contain '_'!"))
+        return True
 
     def generate_name(self, withExtension=True):
         name = (
@@ -68,14 +65,24 @@ class SimulationConfig:
             f"t{self.nrThreads}"
         )
         # Conditionally append tolerances and iterations if they are not default
-        already_written = ['scenario', 'rows', 'cols', 'startLoad', 'loadIncrement', 'maxLoad',
-                           'usingPBC', 'nrThreads', 'seed']
-        
-        defaultValues = vars(SimulationConfig()) 
-        for attr, value in vars(self).items():
-            if attr not in already_written:
-                if defaultValues.get(attr) != value:
-                    name += f"{attr}{value}"
+        if self.minimizer != "FIRE":
+            name += self.minimizer
+        if self.noise != 0.05:
+            name += f"n{self.noise}"
+        if self.nrCorrections != 10:
+            name += f"m{self.nrCorrections}"
+        if self.scale != 1:
+            name += f"s{self.scale}"
+        if self.epsg != 0.0:
+            name += f"EpsG{self.epsg}"
+        if self.epsf != 0.0:
+            name += f"EpsF{self.epsf}"
+        if self.epsx != 0.0:
+            name += f"EpsX{self.epsx}"
+        if self.maxIterations != 0:
+            name += f"MaxIter{self.maxIterations}"
+        if self.plasticityEventThreshold != 0.1:
+            name += f"PET{self.plasticityEventThreshold}"
 
         # We always add the seed at the very end
         name += f"s{self.seed}"
@@ -84,12 +91,7 @@ class SimulationConfig:
             # Add file extension
             name += ".conf"
 
-        count = name.count('_')
-        if count !=0:
-            # information is baked into vtu files using _, so we don't
-            # want to have _ in the name here. See the function
-            # makeFileName in dataExport.cpp.
-            raise(AttributeError("The name is not allowed to contain '_'!"))
+        self.validate(name)
         return name
     
     def get_path_and_name(self, path, withExtension=True):
@@ -234,7 +236,10 @@ if __name__ == "__main__":
 
 
     config = SimulationConfig()
-    config.eps=1e-2
+    config.loadIncrement=0.00001
+    config.maxLoad=1
+    config.rows=3
+    config.cols=3
     if len(sys.argv) >= 2:
         scenario = sys.argv[1]
         config.scenario = scenario

@@ -14,12 +14,13 @@ def task(config):
 
 
 if __name__ == '__main__':
-    seeds = range(0,10)
-    configs = ConfigGenerator.generate_over_seeds(seeds, rows=100, cols=100, startLoad=0.0, 
-                            loadIncrement=0.00001, maxLoad=0.00001, nrThreads=1,
-                            # strange bug with large noise leading to nodes going to 0,0
-                            plasticityEventThreshold=-1, noise=0.2) 
-    
+    seeds = range(0,60)
+    configs = ConfigGenerator.generate_over_seeds(seeds,
+                            rows=60, cols=60, startLoad=0.15, nrThreads=1,
+                            loadIncrement=1E-5, maxLoad=1,
+                            LBFGSEpsx=1e-6,
+                            minimizer="LBFGS",
+                            scenario="simpleShear")
     
     #Build and test (Fail early)
     manager = SimulationManager(SimulationConfig())

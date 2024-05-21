@@ -1,10 +1,12 @@
 import os
 from pathlib import Path
 import sys
-import re
-from datetime import datetime
 from zoneinfo import ZoneInfo
-import humanize
+from tabulate import tabulate
+import time
+import random
+from datetime import timedelta
+import re
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from runOnCluster import queue_remote_job, find_outpath_on_server
@@ -17,7 +19,32 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
 # Now we can import from Management
 from settings import settings
 
-class Job:
+
+def parse_duration(duration_str):
+    pattern = r'(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+(?:\.\d+)?)s)?'
+    matches = re.match(pattern, duration_str.strip())
+    
+    if not matches:
+        return timedelta()
+    
+    days, hours, minutes, seconds = matches.groups(default='0')
+    
+    return timedelta(
+        days=int(days),
+        hours=int(hours),
+        minutes=int(minutes),
+        seconds=float(seconds)
+    )
+
+def calculate_percentage_completed(runtime_str, estimated_remaining_str):
+    runtime = parse_duration(runtime_str)
+    estimated_remaining = parse_duration(estimated_remaining_str)
+    
+    total_time = runtime + estimated_remaining
+    percentage_completed = (runtime / total_time) * 100
+    return percentage_completed
+
+class Process:
     """
     NB This does not find slurm jobs! It checks the processes running on the 
     cluster and finds all instances of MTS2D running.
@@ -105,18 +132,7 @@ class Job:
 
                 # Log the results
                 self.timeEstimation = f"RT: {runTime}, ETR: {timeRemaining}"
-                self.progress = float(load)/float(self.configObj.maxLoad)
-        
-
-
-    def __str__(self) -> str:
-        return (
-                f"P_ID {self.p_id}: {self.name} on {get_server_short_name(self.server)}\n"
-                #f"\tCommand: {self.command}\n"
-                f"  Progress: {self.progress*100:.1f}%\n"
-                f"  Time: {self.timeEstimation}\n"
-                f"  {self.output_path} : {self.dataSize}\n"
-            )
+                self.progress = calculate_percentage_completed(runTime, timeRemaining)
     
 
 class JobManager:
@@ -126,38 +142,70 @@ class JobManager:
         self.user="elundheim"
 
     # Function to be executed in each thread
+
     def find_processes_on_server(self, server):
-        local_jobs = []
-        ssh = connectToCluster(server, False)
-        # The [M] is so that we don't find the grep process searching for MTS2D
+        ssh = connectToCluster(server, False)  # Single SSH connection
         command = f"ps -eo pid,etime,cmd | grep [M]TS2D | grep -v '/bin/sh'"
         stdin, stdout, stderr = ssh.exec_command(command)
         stdout_lines = stdout.read().decode('utf-8').strip().split('\n')
+
         if 'CMakeFiles' in stdout_lines[0]:
             s = get_server_short_name(server)
+            ssh.close()  # Ensure the connection is closed after use
             return [f"{s}:\n  Building..."]
 
         # Filter out empty lines
         stdout_lines = [line for line in stdout_lines if line.strip()]
-        for line in stdout_lines:
-            parts = line.split()
-            p_id = parts[0]  # PID
-            time_running = parts[1]  # Elapsed time
-            local_jobs.append(Job(ssh, p_id, server, time_running))
+
+        def fetch_job(line):
+            attempts = 0
+            max_attempts = 3
+            while attempts < max_attempts:
+                try:
+                    # Each call gets its own channel but uses the same SSH connection
+                    parts = line.split()
+                    p_id = parts[0]  # PID
+                    time_running = parts[1]  # Elapsed time
+                    return Process(ssh, p_id, server, time_running)
+                except Exception as e:
+                    attempts += 1
+                    time.sleep(random.uniform(1, 3))  # Random delay to prevent synchronized reconnection attempts
+                    print(f"Attempt {attempts} failed for {server}: {e}")
+                    if attempts >= max_attempts:
+                        print(f"Error processing {line}: {e}")
+
+
+        # Use ThreadPoolExecutor to process lines in parallel
+        with ThreadPoolExecutor(max_workers=7) as executor:
+            future_jobs = [executor.submit(fetch_job, line) for line in stdout_lines]
+            local_jobs = [future.result() for future in future_jobs]
+
+        ssh.close()  # Ensure the connection is closed after use
         return local_jobs
     
     def find_slurm_jobs_on_server(self, server):
         slurm_jobs = []
         ssh = connectToCluster(server, False)
-        # Use squeue to list jobs for the user, outputting only the job ID
-        command = f"squeue -u {self.user} -h -o %A"
+        # Updated squeue command to include more details
+        command = f"squeue -u {self.user} -h -o \"%A %T %C %l %L %M %D %R\""
         stdin, stdout, stderr = ssh.exec_command(command)
         stdout_lines = stdout.read().decode('utf-8').strip().split('\n')
-        # Filter out empty lines
-        stdout_lines = [line for line in stdout_lines if line.strip()]
+        # Filter out empty lines and split each line into fields
         for line in stdout_lines:
-            job_id = line.strip()  # Slurm job ID
-            slurm_jobs.append((server,job_id))
+            if line.strip():
+                fields = line.strip().split()
+                job_details = {
+                    'server':server,
+                    'job_id':fields[0],
+                    'state':fields[1],
+                    'cpus':fields[2],
+                    'time_limit':fields[3],
+                    'time_left':fields[4],
+                    'elapsed':fields[5],
+                    'nodes':fields[6],
+                    'node_list':fields[7]
+                }
+                slurm_jobs.append(job_details)
         return slurm_jobs
     
     # Generalized method for executing a command on all servers in parallel
@@ -175,20 +223,66 @@ class JobManager:
                     print(f'{server} generated an exception: {exc}')
         return results
 
-    def getProcesses(self):
+
+    def showProcesses(self):
         self.processes = self.execute_command_on_servers(self.find_processes_on_server)
 
         if not self.processes:
-            print("No jobs found")
+            print("No processes found")
         else:
+            print("### PROCESSES ###")
+            headers = ["ID", "Name", "Server", "Progress", "Run time", "Estimated time remaining"]
+            table = []
+
             for process in self.processes:
-                print(process)
+                if isinstance(process, str):
+                    row = ['N/A','Building', process.split(':')[0], '0%', '0', 'N/A']
+                    table.append(row)
+                    continue
+                server_short_name = get_server_short_name(process.server)
+                if(process.timeEstimation=='N/A'):
+                    run_time = 'N/A'
+                    estimated_time_remaining = 'N/A'
+                else:
+                    time_parts = process.timeEstimation.split(',')
+                    run_time = time_parts[0].strip().replace('RT: ', '')
+                    estimated_time_remaining = time_parts[1].strip().replace('ETR: ', '')
+                row = [
+                    process.p_id,
+                    process.name,
+                    server_short_name,
+                    f"{process.progress:.1f}%",
+                    run_time,
+                    estimated_time_remaining
+                ]
+                table.append(row)
+
+            print(tabulate(table, headers=headers, tablefmt="grid"))
             print(f"Found {len(self.processes)} processes.")
 
-    def getSlurmJobs(self):
+
+    def showSlurmJobs(self):
         self.slurmJobs = self.execute_command_on_servers(self.find_slurm_jobs_on_server)
-        print("Jobs:")
-        [print("  ", job) for job in self.slurmJobs]
+        if not self.slurmJobs:
+            print("No jobs found")
+        else:
+            print("### JOBS ###")
+            table = []
+            headers = ["Server", "Job ID", "State", "CPUs", "Time Limit", "Time Left", "Elapsed", "Nodes", "Node List"]
+            for job in self.slurmJobs:
+                row = [
+                    job['server'],
+                    job['job_id'],
+                    job['state'],
+                    job['cpus'],
+                    job['time_limit'],
+                    job['time_left'],
+                    job['elapsed'],
+                    job['nodes'],
+                    job['node_list']
+                ]
+                table.append(row)
+            print(tabulate(table, headers=headers, tablefmt="grid"))
 
 
     def cancel_job_on_server(self, server, job_id):
@@ -242,20 +336,23 @@ if __name__ == "__main__":
     else: 
         onlyCheckJobs = 'False'
 
-    minNrThreads = 65
+    minNrThreads = 61
     script = "benchmarking.py"
-    script = "runSimulation.py"
     script = "parameterExploring.py"
+    script = "runSimulations.py"
     server = Servers.dalembert
     server = Servers.condorcet
+    server = Servers.galois
     command=f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
     if onlyCheckJobs.upper() == "TRUE":
         j=JobManager()
-        j.getSlurmJobs()
-        j.getProcesses()
+        j.showSlurmJobs()
+        j.showProcesses()
     else:
         j=JobManager()
+        j.cancel_job_on_server(server, 558366)
         # server = find_server(minNrThreads)
         uploadProject(server)
-        jobId = queue_remote_job(server, command, "expl", minNrThreads)
-        j.getProcesses()
+
+        jobId = queue_remote_job(server, command, "energy", minNrThreads)
+        #j.showProcesses()
