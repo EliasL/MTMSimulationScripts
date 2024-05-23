@@ -8,8 +8,6 @@ import platform
 import glob
 
 
-
-
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
 # Now we can import from Management
@@ -17,7 +15,7 @@ from settings import settings
 
 class SimulationManager:
     
-    def __init__(self, configObj, outputPath=None, debugBuild=False, useProfiling=False):
+    def __init__(self, configObj, outputPath=None, debugBuild=False, useProfiling=False, overwriteData=False):
         self.configObj = configObj
         self.outputPath = findOutputPath() if outputPath is None else outputPath
 
@@ -49,14 +47,26 @@ class SimulationManager:
         self.conf_file = self.configObj.write_to_file(self.build_path)
         self.subfolderName = Path(self.conf_file).stem
         # Generate command to run simulation
-        self.simulation_command = f"{self.program_path} {self.conf_file} {self.outputPath}"
+        self.simulation_command = f"{self.program_path} -c {self.conf_file} -o {self.outputPath} {' -r' if overwriteData else ''}"
         if self.useProfiling and platform.system() == 'Linux':
             self.simulation_command = f"valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes {self.simulation_command}"
 
 
-    def runSimulation(self, build=True):
+    def runSimulation(self, build=True, resumeIfPossible=True):
         if build:
             self._build()
+        
+        
+        if resumeIfPossible:
+            dump = None
+            try:
+                dump = self.findDumpFile(0)
+            except:
+                pass
+            if dump is not None:
+                # We resume instead of starting normally
+                return self.resumeSimulation()
+
         # Start the timer right before running the command
         start_time = time.time()
         print("Running simulation")
@@ -69,7 +79,7 @@ class SimulationManager:
 
         return duration
     
-    def resumeSimulation(self, index = 0, name=None, dumpFile=None, build=True, overwriteSettings=False):
+    def resumeSimulation(self, index = 0, name=None, dumpFile=None, build=True, overwriteSettings=False, overwriteData=False):
         if build:
             self._build()
 
@@ -81,7 +91,7 @@ class SimulationManager:
 
         start_time = time.time()
         # We can choose to use the previous settings, or overwrite them using new ones
-        run_command(f"{self.program_path} {dumpFile}{' ' + self.conf_file if overwriteSettings else ''}")        # Stop the timer right after the command completes
+        run_command(f"{self.program_path} -d {dumpFile}{' -c ' + self.conf_file if overwriteSettings else '' + ' -r' if overwriteData else ''}")        # Stop the timer right after the command completes
         end_time = time.time()
         # Calculate the duration
         duration = end_time - start_time

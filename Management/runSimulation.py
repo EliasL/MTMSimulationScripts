@@ -5,12 +5,12 @@ if __name__ == "__main__":
 
 
 
-    config = SimulationConfig(rows=60, cols=60, startLoad=0.15, nrThreads=1,
-                            loadIncrement=1E-5, maxLoad=1,
+    config = SimulationConfig(rows=6, cols=6, startLoad=0.15, nrThreads=1,
+                            loadIncrement=1E-3, maxLoad=1,
                             #LBFGSEpsg=9e-5,
-                            LBFGSEpsx=1e-6,
-                            #eps=1e-4, 
-                            minimizer="LBFGS",
+                            #LBFGSEpsx=1e-6,
+                            eps=1e-4, 
+                            #minimizer="LBFGS",
                             scenario="simpleShear")
                             
     # config = SimulationConfig(rows=100, cols=100, startLoad=0.0, nrThreads=4,

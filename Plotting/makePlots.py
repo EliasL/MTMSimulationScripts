@@ -3,8 +3,11 @@ import matplotlib
 import os
 import pandas as pd
 import numpy as np
+import re
 from pathlib import Path
 import mplcursors
+from datetime import timedelta
+
 
 from simplification.cutil import simplify_coords_vwp
 
@@ -36,6 +39,36 @@ def plotYOverX(X, Y, fig=None, ax=None, sub=0, indicateLastPoint=True, tolerance
 
     # Return the axis object for further use
     return fig, ax, line, point
+
+def time_to_seconds(duration_str):
+    pattern = r'(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+(?:\.\d+)?)s)?'
+    matches = re.match(pattern, duration_str.strip())
+    
+    if not matches:
+        return timedelta()
+    
+    days, hours, minutes, seconds = matches.groups(default='0')
+    
+    return timedelta(
+        days=int(days),
+        hours=int(hours),
+        minutes=int(minutes),
+        seconds=float(seconds)
+    ).seconds
+
+def plotColumns(cvs_files, Y, labels, fig=None, ax=None):
+    if fig is None or ax is None:
+        fig, ax = plt.subplots()
+    
+    values = []
+    for file in cvs_files:
+        df = pd.read_csv(file)
+        last_entry = df[Y].values[-1][0]
+        last_entry_seconds = time_to_seconds(last_entry)
+        values.append(last_entry_seconds)
+    
+    ax.bar(labels, values)
+    return fig, ax
 
 def plotIntervalAverage(X, Y, intervalSize=100, fig=None,
                          ax=None, sub=0, **kwargs):
@@ -92,9 +125,9 @@ def plotPowerLaw(Y, fig=None, ax=None, sub=0, **kwargs):
     return fig, ax, line
 
 
-def makePlot(csv_file_paths, name, X, Y, x_name=None, y_name=None, labels=None,
+def makePlot(csv_file_paths, name, X=None, Y=None, x_name=None, y_name=None, labels=None,
              title=None, 
-             plot_average=False, plot_raw=True, plot_power_law=False, ylog=False,
+             plot_average=False, plot_raw=True, plot_power_law=False, plot_columns=False, ylog=False,
              subtract=None, show=False, colors=None, SUM=False, legend=None):
     if x_name is None:
         if X == 'Load':
@@ -120,6 +153,8 @@ def makePlot(csv_file_paths, name, X, Y, x_name=None, y_name=None, labels=None,
     fig, ax = plt.subplots()
     lines =[]
     for i, csv_file_path in enumerate(csv_file_paths):
+        if X is None:
+            break
         if isinstance(Y, str):
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
         else:
@@ -156,8 +191,10 @@ def makePlot(csv_file_paths, name, X, Y, x_name=None, y_name=None, labels=None,
             assert not isinstance(Y, str)
             if not plot_raw:
                 kwargs['label']='total'
-            
             fig, ax, line = plotYOverX(df[X], sum([df[Y_] for Y_ in Y]), **kwargs)
+
+    if plot_columns:
+        fig, ax = plotColumns(csv_file_paths, Y, labels, fig, ax)
 
     cursor = mplcursors.cursor(lines)
     #cursor.connect(
@@ -175,7 +212,8 @@ def makePlot(csv_file_paths, name, X, Y, x_name=None, y_name=None, labels=None,
 
     # Set the legend with the filtered handles and labels
     if (len(line_labels) < 10 and legend is None) or legend:
-        ax.legend(line_handles, line_labels, loc='right')
+
+        ax.legend(line_handles, line_labels, loc=('best' if legend else 'right'))
 
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
@@ -191,7 +229,6 @@ def makePlot(csv_file_paths, name, X, Y, x_name=None, y_name=None, labels=None,
     if show:
         plt.show()
 
-
 def makeEnergyPlot(csv_file_paths, name, **kwargs):
     makePlot(csv_file_paths, name, X='Load', Y='Avg energy', **kwargs)
 
@@ -205,6 +242,11 @@ def makeItterationsPlot(csv_file_paths, name, **kwargs):
                 y_name="Nr itterations", title='Nr of Itterations', plot_raw=True, 
                 plot_average=False, SUM=False, **kwargs)
         
+def makeTimePlot(csv_file_paths, name, **kwargs):
+    makePlot(csv_file_paths, name, x_name='Settings', Y=['Run time'], y_name='Run time (s)', plot_raw=False,
+             plot_columns=True, title='Runtime of simulations', **kwargs)
+
+
 def makePowerLawPlot(csv_file_paths, name, **kwargs):
     makePlot(csv_file_paths, name, X='Load', Y='Avg energy',
              x_name=f'Size of energy drops', y_name='Probability (Frequency/Total)',

@@ -29,6 +29,23 @@ def assignColors(configs, keyValueColors, defaultColor='black'):
                 color_for_config[conf_i] = color
     return color_for_config
 
+def runSims():
+    # Build and test (Fail early)
+    manager = SimulationManager(SimulationConfig(rows=3, cols=3, loadIncrement=0.1))
+    try:
+        manager.runSimulation()
+    except Exception as e:     
+        Warning(e)
+        manager.clean()
+        try:
+            manager.runSimulation()
+        except Exception as e:
+            raise(Exception(e))
+
+
+    with Pool(processes=len(configs)) as pool: 
+        results = pool.map(task, configs)
+
 def plotOldStuff():
     from OldConfigGenerator import ConfigGenerator as OldConf
     configs, labels = OldConf.generate(rows=150, cols=150, startLoad=0.15, nrThreads=1,
@@ -60,62 +77,53 @@ def plotOldStuff():
 
 
 if __name__ == '__main__':
-    plotOldStuff()
-    exit
+    #plotOldStuff()
 
     c=None
+    configs=[]
+    labels=[]
+    # configs, labels = ConfigGenerator.generate(rows=16, cols=16, startLoad=0, nrThreads=1,
+    #                         loadIncrement=1E-5, maxLoad=1, alphaStart=[0.01, 0.1, 0.3],
+    #                         LBFGSEpsg=[9e-4,9e-5,9e-6], eps=[1e-3,1e-4,1e-5],
+    #                         scenario="simpleShear")
 
-    configs, labels = ConfigGenerator.generate(rows=100, cols=100, startLoad=0.15, nrThreads=1,
-                            loadIncrement=1E-5, maxLoad=1, alphaStart=[0.01, 0.1, 0.3],
-                            LBFGSEpsg=[9e-4,9e-5,9e-6], eps=[1e-3,1e-4,1e-5],
+
+    # configs, labels = ConfigGenerator.generate(rows=16, cols=16, startLoad=0, nrThreads=1,
+    #                         loadIncrement=1E-5, maxLoad=1, alphaStart=[0.1],
+    #                         LBFGSEpsg=[9e-9, 9e-10, 9e-11], eps=[1e-8,1e-9,1e-10], LBFGSEpsx=[1e-6, 1e-5, 2e-6],
+    #                         scenario="simpleShear")
+
+    extra_config1 = SimulationConfig(rows=16, cols=16, startLoad=0, nrThreads=1,
+                            loadIncrement=1E-5, maxLoad=1, alphaStart=0.1,
+                            LBFGSEpsg=1e-12,eps=1e-2,
                             scenario="simpleShear")
 
-    extra_config1 = SimulationConfig(rows=100, cols=100, startLoad=0.15, nrThreads=1,
+    extra_config2 = SimulationConfig(rows=16, cols=16, startLoad=0, nrThreads=1,
                             loadIncrement=1E-5, maxLoad=1, alphaStart=0.1,
+                            LBFGSEpsx=1e-6,eps=1e-2,
+                            scenario="simpleShear")
+
+    extra_config3 = SimulationConfig(rows=16, cols=16, startLoad=0, nrThreads=1,
+                            loadIncrement=1E-5, maxLoad=1, alphaStart=0.2,
                             LBFGSEpsx=1e-6,minimizer="LBFGS",
                             scenario="simpleShear")
 
-    extra_config2 = SimulationConfig(rows=100, cols=100, startLoad=0.15, nrThreads=1,
-                            loadIncrement=1E-5, maxLoad=1,
-                            LBFGSEpsg=9e-5,
-                            minimizer="LBFGS",
-                            scenario="simpleShear")
-    
-    extra_config3 = SimulationConfig(rows=100, cols=100, startLoad=0.15, nrThreads=4,
-                            loadIncrement=1E-5, maxLoad=1,
-                            LBFGSEpsg=9e-5,
-                            eps=1e-4, 
-                            minimizer="LBFGS",
-                            scenario="simpleShear")
+    # extra_config2 = SimulationConfig(rows=16, cols=16, startLoad=0, nrThreads=1,
+    #                         loadIncrement=1E-5, maxLoad=1,
+    #                         LBFGSEpsg=9e-5,
+    #                         minimizer="LBFGS",
+    #                         scenario="simpleShear")
 
-    configs += [extra_config1, extra_config2]
-    labels += ["UmutParam", "onlyLBFGS"]
-
-    configs.append(extra_config3)
-    labels.append("onlyLBFGSLocal")
+    configs += [extra_config2, extra_config3]
+    labels += ["UmutParamWithFire", "UmutParam"]
 
     c = assignColors(configs, [
-        ['alphaStart', 0.01, 'black'],
-        ['alphaStart', 0.1, 'red'],
-        ['alphaStart', 0.3, 'blue'],
+        ['minimizer', 'LBFGS', 'red'],
+        ['minimizer', 'FIRE', 'blue'],
                          ])
 
-    # Build and test (Fail early)
-    # manager = SimulationManager(SimulationConfig(rows=3, cols=3, loadIncrement=0.1))
-    # try:
-    #     manager.runSimulation()
-    # except Exception as e:     
-    #     Warning(e)
-    #     manager.clean()
-    #     try:
-    #         manager.runSimulation()
-    #     except Exception as e:
-    #         raise(Exception(e))
 
-
-    # with Pool(processes=len(configs)) as pool: 
-    #     results = pool.map(task, configs)
-
+    runSims()
 
     import sys
     from pathlib import Path
@@ -125,9 +133,10 @@ if __name__ == '__main__':
     # Now we can import from Management
     from remotePlotting import get_csv_files
 
-    from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot
+    from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot, makeTimePlot
     paths = get_csv_files(configs)
     print("Plotting...")
-    makeEnergyPlot(paths, "ParamExploration.pdf", colors=c, labels=labels, show=True, legend=True)    
-    # makeItterationsPlot(paths, "ParamExploration.pdf", colors=c, labels=labels, show=True)
-    # makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", colors=c, labels=labels, show=True)    
+    makeEnergyPlot(paths, "ParamExploration.pdf", colors=c, labels=labels, show=True, legend=True)
+    makeTimePlot(paths, "Run time.pdf", colors=c, labels=labels, show=True, legend=True)    
+    #makeItterationsPlot(paths, "ParamExploration.pdf", colors=c, labels=labels, show=True)
+    #makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", colors=c, labels=labels, show=True)    
