@@ -1,6 +1,7 @@
 from matplotlib import pyplot as plt
 import matplotlib
 import os
+import matplotlib.pylab
 import pandas as pd
 import numpy as np
 import re
@@ -13,7 +14,7 @@ import powerlaw
 from simplification.cutil import simplify_coords_vwp
 
 
-def plotYOverX(X, Y, fig=None, ax=None, sub=0, indicateLastPoint=True, tolerance=1e-12, **kwargs):
+def plotYOverX(X, Y, fig=None, ax=None, indicateLastPoint=True, tolerance=1e-12, **kwargs):
     # If no axis is provided, create a new figure and axis
     if ax is None:
         fig, ax = plt.subplots()
@@ -23,10 +24,10 @@ def plotYOverX(X, Y, fig=None, ax=None, sub=0, indicateLastPoint=True, tolerance
         points = np.column_stack((X, Y))
         simplified_points = simplify_coords_vwp(points, tolerance)
         X_simplified = simplified_points[:, 0]
-        Y_simplified = simplified_points[:, 1] - sub
+        Y_simplified = simplified_points[:, 1]
     else:
         X_simplified = X
-        Y_simplified = Y - sub
+        Y_simplified = Y
     # Plot on the provided axis
     line, = ax.plot(X_simplified, Y_simplified, **kwargs)
     
@@ -71,8 +72,8 @@ def plotColumns(cvs_files, Y, labels, fig=None, ax=None):
     ax.bar(labels, values)
     return fig, ax
 
-def plotIntervalAverage(X, Y, intervalSize=100, fig=None,
-                         ax=None, sub=0, **kwargs):
+def plotRollingAverage(X, Y, intervalSize=100, fig=None,
+                         ax=None, **kwargs):
 
     # Calculate rolling average
     rollingMean = Y.rolling(window=intervalSize, min_periods=1, center=True).mean()
@@ -80,75 +81,88 @@ def plotIntervalAverage(X, Y, intervalSize=100, fig=None,
     # Check if axis provided, if not, create a new one
     if ax is None:
         fig, ax = plt.subplots()
-
+    del kwargs['label']
     # Plotting the interval average
-    line, = ax.plot(X, rollingMean-sub, label=f'Rolling average (window={intervalSize})', **kwargs)
+    line, = ax.plot(X, rollingMean, label=f'Rolling average (window={intervalSize})', **kwargs)
 
     # Return the axis object for further use
     return fig, ax, line
 
-def plotPowerLaw(Y, fig=None, ax=None, sub=0, **kwargs):
+import numpy as np
+import matplotlib.pyplot as plt
+import powerlaw
+
+def plotPowerLaw(Y_input, fig=None, ax=None, include_label=False, **kwargs):
     if ax is None:
         fig, ax = plt.subplots()
 
-    if sub!=0:
-        # It seems strange to do this
-        raise Warning("Are you sure?")
+    alphas=[]
+    # Determine if Y_input is a single array or a list of arrays
+    if isinstance(Y_input[0], (list, np.ndarray)):
+        Y_list = Y_input
+        manyY=True
+    else:
+        Y_list = [Y_input]  # Make it a list to simplify processing
+        manyY=False
 
-    #Convert Y to np array
-    Y=np.array(Y)
+    ccdf_data = []
 
-    # Calculate the difference in Y (and adjust Y if desired)
-    Y_diff = np.diff(Y - sub)
+    # Process each Y array in the list
+    for Y in Y_list:
+        Y = np.array(Y)
+        Y_diff = np.diff(Y)
+        Y_diff = np.abs(Y_diff[Y_diff < 0])
 
-    # We only care about the negative drops
-    # and then we take abs to plot in log plot
-    Y_diff = np.abs(Y_diff[Y_diff < 0])
+        xmin = 1e-4  
+        xmax = max(Y_diff)
+        Y_diff = Y_diff[Y_diff <= xmax]
 
-    if(len(Y_diff)==0):
-        return fig, ax, None
+        if len(Y_diff) == 0:
+            continue
 
-    # Create a histogram of the absolute values of Y differences
-    xmin = min(Y_diff)
-    xmax = max(Y_diff)
-    print("min", xmin)
-    print("max", xmax)
-    # fit the data to a power law distribution
-    xmin_user=1e-5
-    xmax_user=xmax
-    Y_diff = Y_diff[Y_diff <= xmax_user]
-    xmax_user = max(Y_diff)
-    length = len(Y_diff[Y_diff > xmin_user])
-    print(f"The length of the first dimension is {length}")
-#         xmax_user = max(data)
+        fit = powerlaw.Fit(Y_diff, xmin=xmin, xmax=xmax, fit_method='Likelihood')
+        alphas.append(fit.power_law.alpha)
+        # Calculate the CCDF
+        ccdf_x, ccdf_y = fit.ccdf()
 
-#         data = data[data < xmax_user]
+        # Sort the data if not already sorted
+        sorted_indices = np.argsort(ccdf_x)
+        ccdf_x = ccdf_x[sorted_indices]
+        ccdf_y = ccdf_y[sorted_indices]
 
-    fit = powerlaw.Fit(Y_diff, xmin = xmin_user , xmax = xmax_user, fit_method='Likelihood')
+        # Plot using matplotlib to get the line object
+        if not manyY:
+            line, = ax.plot(ccdf_x, ccdf_y, color='gray', alpha=0.5)
 
+        # Store CCDF data for averaging
+        ccdf_data.append((ccdf_x, ccdf_y))
 
-    print('truncated_power_law:')
-    print('alpha:', fit.truncated_power_law.alpha)
-    print('xmin:',  fit.truncated_power_law.xmin)
-    print('pure_power_law:')
-    print('alpha:', fit.power_law.alpha)
-    print('xmin:',  fit.power_law.xmin)
+    # Average the CCDF data if multiple Y arrays
+    if manyY:
+        # To average, we need to interpolate ccdf_y values at common ccdf_x points
+        all_x = sorted(set(np.concatenate([d[0] for d in ccdf_data])))
+        avg_y = np.zeros_like(all_x)
 
-    print('------------------------:')
-    colortable=['brown','blue','red','magenta']
-    fit.plot_ccdf(ax=ax, **kwargs)  
-    fit.power_law.plot_ccdf(color='g', linestyle='--', ax=ax)
-    fit.truncated_power_law.plot_ccdf(color='b', linestyle='--',lw=3,ax=ax)
-#         fit.power_law.plot_ccdf(color='g', linestyle='--',lw=3,ax=ax)
+        for x, y in ccdf_data:
+            interp_y = np.interp(all_x, x, y)
+            avg_y += interp_y
 
+        avg_y /= len(ccdf_data)
+        avg_alpha = sum(alphas) / len(alphas)        
+        if include_label:
+            kwargs['label'] += f': $\\alpha={avg_alpha:.2f}$'
+        line, = ax.plot(all_x, avg_y, linewidth=2, **kwargs)  # Plot averaged CCDF
 
-    return fig, ax, None
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    return fig, ax, line
+
 
 
 def makePlot(csv_file_paths, name, X=None, Y=None, x_name=None, y_name=None, labels=None,
-             title=None, 
-             plot_average=False, plot_raw=True, plot_power_law=False, plot_columns=False, ylog=False,
-             subtract=None, show=False, colors=None, SUM=False, legend=None):
+             title=None, plot_average=False, xLims=(-np.inf, np.inf),
+             plot_roll_average=False, plot_raw=True, plot_power_law=False, plot_columns=False, ylog=False,
+             show=False, colors=None, plot_total=False, legend=None):
     if len(csv_file_paths)==0:
         print('No files provided.')
         return
@@ -165,34 +179,32 @@ def makePlot(csv_file_paths, name, X=None, Y=None, x_name=None, y_name=None, lab
     if type(csv_file_paths)==type(""):
         csv_file_paths = [csv_file_paths]
 
-    if subtract is not None:
-        if isinstance(Y, str):
-            sub = pd.read_csv(subtract, usecols=[X, Y])
-        else:
-            sub = pd.read_csv(subtract, usecols=[X]+Y)
-    else:
-        sub = 0
-
     fig, ax = plt.subplots()
     lines =[]
+    data = []
     for i, csv_file_path in enumerate(csv_file_paths):
         if X is None:
             break
         if isinstance(Y, str):
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
+            df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]  # Truncate data based on xLims
+            if plot_average:
+                data.append(df[Y].values)
         else:
             df = pd.read_csv(csv_file_path, usecols=[X]+Y)
-
-        if not isinstance(sub, (int, float)):
-            sub_ = np.interp(df[X], sub[X], sub[Y])
-        else:
-            sub_ = sub
+            df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]  # Truncate data based on xLims
+            if plot_average:
+                raise Warning("Cannot plot average with multiple Y columns")
 
             
-        kwargs = {'fig': fig, 'ax': ax, 'sub': sub_}
+        kwargs = {'fig': fig, 'ax': ax}
 
         if colors:
             kwargs['color'] = colors[i]
+        else:
+            kwargs['color'] ='gray'
+            kwargs['alpha'] =0.5
+
 
         for Y_ in [Y] if isinstance(Y, str) else Y:
             if len(df[Y_])==0:
@@ -205,22 +217,51 @@ def makePlot(csv_file_paths, name, X=None, Y=None, x_name=None, y_name=None, lab
             point=None
             if plot_raw:
                 fig, ax, line, point = plotYOverX(df[X], df[Y_], **kwargs)
-            if plot_average:
-                fig, ax, line = plotIntervalAverage(df[X], df[Y_], **kwargs)
+            if plot_roll_average:
+                fig, ax, line = plotRollingAverage(df[X], df[Y_], **kwargs)
             if plot_power_law:
                 fig, ax, line = plotPowerLaw(df[Y_], **kwargs)
             if line is not None:
                 lines.append(line)
             if point is not None:
                 lines.append(point)
-        if SUM:
+        if plot_total:
             assert not isinstance(Y, str)
             if not plot_raw:
                 kwargs['label']='total'
             fig, ax, line, point = plotYOverX(df[X], sum([df[Y_] for Y_ in Y]), **kwargs)
+            lines.append(line)
 
     if plot_columns:
         fig, ax = plotColumns(csv_file_paths, Y, labels, fig, ax)
+
+    if plot_average:
+        # Determine the maximum length among all arrays
+        max_length_index = np.argmax([len(d) for d in data])
+        max_length = len(data[max_length_index])
+
+        # Initialize the average array and a count array to track how many entries per index
+        average = np.zeros(max_length)
+        count = np.zeros(max_length)
+
+        # Aggregate data
+        for d in data:
+            length = len(d)
+            average[:length] += d
+            count[:length] += 1
+
+        # Compute average where count is non-zero to avoid division by zero
+        average = np.divide(average, count, out=np.zeros_like(average), where=count!=0)
+
+        kwargs = {'fig': fig, 'ax': ax, 'color':'black'}
+        df = pd.read_csv(csv_file_paths[max_length_index],usecols=[X])
+        df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])] 
+        if plot_raw:
+            fig, ax, line, point = plotYOverX(df[X], average, **kwargs) 
+        if plot_power_law:
+            kwargs['include_label']=legend
+            fig, ax, line = plotPowerLaw(data, **kwargs) 
+        lines.append(line)
 
     cursor = mplcursors.cursor(lines)
     #cursor.connect(
@@ -238,8 +279,8 @@ def makePlot(csv_file_paths, name, X=None, Y=None, x_name=None, y_name=None, lab
 
     # Set the legend with the filtered handles and labels
     if (len(line_labels) < 10 and legend is None) or legend:
-
         ax.legend(line_handles, line_labels, loc=('best' if legend else 'right'))
+
 
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
@@ -262,11 +303,11 @@ def makeItterationsPlot(csv_file_paths, name, **kwargs):
     if isinstance(csv_file_paths, str):
         makePlot(csv_file_paths, name, X='Load', Y=['Nr FIRE iterations', 'Nr LBFGS iterations'],
                 y_name="Nr itterations", title='Nr of Itterations', plot_raw=True, 
-                plot_average=False, SUM=True, **kwargs)
+                plot_roll_average=False, plot_total=True, **kwargs)
     else:
         makePlot(csv_file_paths, name, X='Load', Y=['Nr FIRE iterations', 'Nr LBFGS iterations'],
                 y_name="Nr itterations", title='Nr of Itterations', plot_raw=True, 
-                plot_average=False, SUM=False, **kwargs)
+                plot_roll_average=False, plot_total=False, **kwargs)
         
 def makeTimePlot(csv_file_paths, name, **kwargs):
     makePlot(csv_file_paths, name, x_name='Settings', Y=['Run time'], y_name='Run time (s)', plot_raw=False,
@@ -277,7 +318,7 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
     makePlot(csv_file_paths, name, X='Load', Y='Avg energy',
              x_name=f'Size of energy drops', y_name='Probability (Frequency/Total)',
             title=f'Log-log plot of energy drops',
-             plot_raw=False, plot_average=False, plot_power_law=True, **kwargs)
+             plot_raw=False, plot_power_law=True, **kwargs)
 
 
 if __name__ == "__main__":

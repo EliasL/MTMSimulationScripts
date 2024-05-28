@@ -5,13 +5,13 @@ if __name__ == "__main__":
 
 
 
-    config = SimulationConfig(rows=16, cols=16, startLoad=0.15, nrThreads=4,
+    config = SimulationConfig(rows=160, cols=160, startLoad=0.15, nrThreads=4,
                             loadIncrement=1e-3, maxLoad=2,
                             #LBFGSEpsg=9e-5,
                             LBFGSEpsx=1e-0,
                             #eps=1e-4, 
                             minimizer="LBFGS",
-                            scenario="snappingCyclicSimpleShear")
+                            scenario="simpleShear")
     
                             
     # config = SimulationConfig(rows=100, cols=100, startLoad=0.0, nrThreads=4,

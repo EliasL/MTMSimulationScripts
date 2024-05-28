@@ -37,7 +37,7 @@ def assignColors(configs, keyValueColors, defaultColor='black'):
                 color_for_config[conf_i] = color
     return color_for_config
 
-def runSims():
+def runSims(configs):
     # Build and test (Fail early)
     manager = SimulationManager(SimulationConfig(rows=3, cols=3, loadIncrement=0.1))
     try:
@@ -54,6 +54,18 @@ def runSims():
     with Pool(processes=len(configs)) as pool: 
        results = pool.map(task, configs)
 
+def plotSims(configs, name, **kwargs):
+
+    # Now we can import from Management
+    from remotePlotting import get_csv_files
+
+    from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot
+    paths = get_csv_files(configs)
+    print("Plotting...")
+    #makeEnergyPlot(paths, f"{name}Energy.pdf", **kwargs) 
+    makePowerLawPlot(paths, f"{name}PowerLaw.pdf", **kwargs)    
+    #makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
+
 
 def plotOldStuff():
     from OldConfigGenerator import ConfigGenerator as OldConf
@@ -67,15 +79,8 @@ def plotOldStuff():
         ['loadIncrement', 1e-4, 'blue'],
         ['loadIncrement', 2e-4, 'orange'],
                          ])
+    plotSims(configs, "FireExplore1", labels=labels, c=c, show=True)
 
-    # Now we can import from Management
-    from remotePlotting import get_csv_files
-
-    from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot
-    paths = get_csv_files(configs)
-    print("Plotting...")
-    makeEnergyPlot(paths, "ParamExploration.pdf", colors=c, labels=labels, show=True, legend=False) 
-    makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", colors=c, labels=labels, show=True)    
 
 def plotLessOldStuff():
     configs, labels = ConfigGenerator.generate(rows=100, cols=100, startLoad=0.15, nrThreads=1,
@@ -87,15 +92,7 @@ def plotLessOldStuff():
         ['eps', 1e-5, 'red'],
         ['eps', 1e-6, 'blue'],
                          ])
-
-    # Now we can import from Management
-    from remotePlotting import get_csv_files
-
-    from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot
-    paths = get_csv_files(configs)
-    print("Plotting...")
-    makeEnergyPlot(paths, "ParamExploration.pdf", colors=c, labels=labels, show=True, legend=False) 
-    makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", colors=c, labels=labels, show=True) 
+    plotSims(configs, "FireExplore2", labels=labels, c=c, show=True)
 
 def statStuff():
 
@@ -106,21 +103,12 @@ def statStuff():
                             LBFGSEpsx=1e-6,
                             minimizer="LBFGS",
                             scenario="simpleShear")
-    
-        # Now we can import from Management
-    from remotePlotting import get_csv_files
-
-    from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot, makeTimePlot
-    paths = get_csv_files(configs)
-    print("Plotting...")
-    makeEnergyPlot(paths, "ParamExploration.pdf", colors=c, labels=labels, show=True, legend=True)
-    makeTimePlot(paths, "Run time.pdf", colors=c, labels=labels, show=True, legend=True)    
-    #makeItterationsPlot(paths, "ParamExploration.pdf", colors=c, labels=labels, show=True)
-    makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", colors=c, labels=labels, show=True)    
+    plotSims(configs, "powerlaw", labels=[f"s:{i}" for i in seeds], show=True,
+            plot_average=True, xLims=(0.15, 0.55))
 
 if __name__ == '__main__':
     #plotOldStuff()
     #plotLessOldStuff()
+    statStuff()
 
-
-    runSims()
+    #runSims()
