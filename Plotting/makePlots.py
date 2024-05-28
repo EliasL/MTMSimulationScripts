@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 import mplcursors
 from datetime import timedelta
+import powerlaw
 
 
 from simplification.cutil import simplify_coords_vwp
@@ -108,27 +109,49 @@ def plotPowerLaw(Y, fig=None, ax=None, sub=0, **kwargs):
         return fig, ax, None
 
     # Create a histogram of the absolute values of Y differences
-    bins = np.logspace(-7, 0, num=20, base=10)
-    counts, bin_edges = np.histogram(Y_diff, bins=bins)
-    
-    # Remove bins with zero counts
-    non_zero_indices = counts > 0
-    counts = counts[non_zero_indices]
-    bin_edges = bin_edges[:-1][non_zero_indices]  # Shift to match the counts length correctly
+    xmin = min(Y_diff)
+    xmax = max(Y_diff)
+    print("min", xmin)
+    print("max", xmax)
+    # fit the data to a power law distribution
+    xmin_user=1e-5
+    xmax_user=xmax
+    Y_diff = Y_diff[Y_diff <= xmax_user]
+    xmax_user = max(Y_diff)
+    length = len(Y_diff[Y_diff > xmin_user])
+    print(f"The length of the first dimension is {length}")
+#         xmax_user = max(data)
 
-    probability = counts / sum(counts)
-    
-    # Plot on a log-log scale
-    line, = ax.loglog(bin_edges, probability, **kwargs)
-    #print(counts)
-    # Return the figure, axis, and line for further use
-    return fig, ax, line
+#         data = data[data < xmax_user]
+
+    fit = powerlaw.Fit(Y_diff, xmin = xmin_user , xmax = xmax_user, fit_method='Likelihood')
+
+
+    print('truncated_power_law:')
+    print('alpha:', fit.truncated_power_law.alpha)
+    print('xmin:',  fit.truncated_power_law.xmin)
+    print('pure_power_law:')
+    print('alpha:', fit.power_law.alpha)
+    print('xmin:',  fit.power_law.xmin)
+
+    print('------------------------:')
+    colortable=['brown','blue','red','magenta']
+    fit.plot_ccdf(ax=ax, **kwargs)  
+    fit.power_law.plot_ccdf(color='g', linestyle='--', ax=ax)
+    fit.truncated_power_law.plot_ccdf(color='b', linestyle='--',lw=3,ax=ax)
+#         fit.power_law.plot_ccdf(color='g', linestyle='--',lw=3,ax=ax)
+
+
+    return fig, ax, None
 
 
 def makePlot(csv_file_paths, name, X=None, Y=None, x_name=None, y_name=None, labels=None,
              title=None, 
              plot_average=False, plot_raw=True, plot_power_law=False, plot_columns=False, ylog=False,
              subtract=None, show=False, colors=None, SUM=False, legend=None):
+    if len(csv_file_paths)==0:
+        print('No files provided.')
+        return
     if x_name is None:
         if X == 'Load':
             x_name = r'$\alpha$'
@@ -171,10 +194,13 @@ def makePlot(csv_file_paths, name, X=None, Y=None, x_name=None, y_name=None, lab
         if colors:
             kwargs['color'] = colors[i]
 
-        for Y_ in ([Y] if isinstance(Y, str) else Y):
+        for Y_ in [Y] if isinstance(Y, str) else Y:
             if len(df[Y_])==0:
                 continue
-            kwargs['label'] = labels[i] + ((" - " + Y_) if not isinstance(Y, str) else "")
+            if labels is None:
+                kwargs['label'] = Y
+            else:
+                kwargs['label'] = labels[i] + ((" - " + Y_) if not isinstance(Y, str) else "")
             line=None
             point=None
             if plot_raw:
@@ -191,7 +217,7 @@ def makePlot(csv_file_paths, name, X=None, Y=None, x_name=None, y_name=None, lab
             assert not isinstance(Y, str)
             if not plot_raw:
                 kwargs['label']='total'
-            fig, ax, line = plotYOverX(df[X], sum([df[Y_] for Y_ in Y]), **kwargs)
+            fig, ax, line, point = plotYOverX(df[X], sum([df[Y_] for Y_ in Y]), **kwargs)
 
     if plot_columns:
         fig, ax = plotColumns(csv_file_paths, Y, labels, fig, ax)
@@ -255,15 +281,16 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
 
 
 if __name__ == "__main__":
+    pass
     # The path should be the path from work directory to the folder inside the output folder. 
-    makeEnergyPlot([
-            '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/macroData.csv',
-            '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/FullMacroData.csv',
-        ],
-                   name='energy.pdf')
-    makeItterationsPlot(
-        [
-            '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/macroData.csv',
-            '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/FullMacroData.csv',
-        ],
-                name='nrIterations.pdf')
+    # makeEnergyPlot([
+    #         '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/macroData.csv',
+    #         '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/FullMacroData.csv',
+    #     ],
+    #                name='energy.pdf')
+    # makeItterationsPlot(
+    #     [
+    #         '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/macroData.csv',
+    #         '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/FullMacroData.csv',
+    #     ],
+    #             name='nrIterations.pdf')

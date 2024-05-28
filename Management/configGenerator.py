@@ -18,13 +18,13 @@ class SimulationConfig:
         self.scenario = "simpleShear"
         self.nrThreads = 1 
         self.seed = 0
-        self.plasticityEventThreshold = 0.1
+        self.quenchedDisorderStrength = 0.05
+        self.initialGuessNoise = 0.05
 
         # Loading parameters
         self.startLoad = 0.0 
         self.loadIncrement = 1e-5 
         self.maxLoad = 1.0 
-        self.noise = 0.05
 
         # Minimizer settings
         self.minimizer = "FIRE" # FIRE / LBFGS
@@ -50,6 +50,7 @@ class SimulationConfig:
         self.maxIt = 1000
 
         # Logging settings
+        self.plasticityEventThreshold = 0.1
         self.showProgress = 1
 
         # Update with any provided keyword arguments

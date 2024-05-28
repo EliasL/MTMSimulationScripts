@@ -16,6 +16,9 @@ class VTUData:
     def __init__(self, vtu_file_path):
         self.vtu_file_path = vtu_file_path
         self.mesh = self._read_vtu_file()
+        result = get_data_from_name(vtu_file_path)
+        self.BC = result['BC']
+        self.load = float(result['load'])
 
     def _read_vtu_file(self):
         # Create a reader for the VTU file
@@ -155,8 +158,22 @@ def plot_nodes(args):
     circle_radius = circle_diameter / 2
     circle_point_size = (circle_radius * inches_per_data_unit)**2
     
-    ax.scatter(x, y, s=circle_point_size, c=color, marker='o', alpha=1)  # 's' is the area of the circle
+    #TODO add a rombus to show unit-region
+    # Shifts for periodic boundary conditions
+    # assuming grid spacing=1
+    N=np.sqrt(len(nodes[:,0]))-1
+    if data.BC=='PBC':
+        shifts = [-N, 0, N]
+    else:
+        shifts=[0]
     
+
+    # Plot shifted nodes
+    for dx in shifts:
+        for dy in shifts:
+            sheared_x = x + dx + data.load * dy
+            ax.scatter(sheared_x, y + dy, s=circle_point_size, c=color, marker='o', alpha=1)
+                
     path = f"{framePath}/node_frame_{frame_index:04d}.png"
     plt.savefig(path, bbox_inches='tight', pad_inches=0)
     plt.close(fig)
@@ -168,15 +185,6 @@ def plot_mesh(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
     
     ax, fig = base_plot(args)
-
-    data = VTUData(vtu_file)
-    nodes = data.get_nodes()
-    energy_field = data.get_energy_field()
-    connectivity = data.get_connectivity()
-
-    x, y = nodes[:,0], nodes[:,1]
-    
-    triang = mtri.Triangulation(x, y, connectivity)
     cmap_colors = [
                 (0.0, (0.29, 0.074, 0.38)),
                 (0.07, "#0052cc"),
@@ -191,9 +199,27 @@ def plot_mesh(args):
     gamma = 1  # Adjust this parameter as needed to highlight small energy changes
     norm = mcolors.PowerNorm(gamma=gamma, vmin=global_min, vmax=global_max)
 
-    # Apply the custom colormap and normalization to the tripcolor plot
-    contour = ax.tripcolor(triang, facecolors=energy_field, norm=norm, cmap=custom_cmap)
+    data = VTUData(vtu_file)
+    nodes = data.get_nodes()
+    energy_field = data.get_energy_field()
+    connectivity = data.get_connectivity()
+    x, y = nodes[:,0], nodes[:,1]
 
+    # Add shifts so that the periodicity shows
+    N=np.sqrt(len(nodes[:,0]))-1
+    if data.BC=='PBC':
+        shifts = [-N, 0, N]
+    else:
+        shifts=[0]
+    
+
+    # Plot shifted nodes
+    for dx in shifts:
+        for dy in shifts:
+            sheared_x = x + dx + data.load * dy
+            triang = mtri.Triangulation(sheared_x, y+dy, connectivity)            
+            # Plotting with shifted nodes
+            contour = ax.tripcolor(triang, facecolors=energy_field, norm=norm, cmap=custom_cmap)
     # Create a color bar
     cbar = fig.colorbar(contour, shrink=0.7)
     cbar.set_label('Cell Energy')

@@ -5,13 +5,14 @@ if __name__ == "__main__":
 
 
 
-    config = SimulationConfig(rows=6, cols=6, startLoad=0.15, nrThreads=1,
-                            loadIncrement=1E-3, maxLoad=1,
+    config = SimulationConfig(rows=16, cols=16, startLoad=0.15, nrThreads=4,
+                            loadIncrement=1e-3, maxLoad=2,
                             #LBFGSEpsg=9e-5,
-                            #LBFGSEpsx=1e-6,
-                            eps=1e-4, 
-                            #minimizer="LBFGS",
-                            scenario="simpleShear")
+                            LBFGSEpsx=1e-0,
+                            #eps=1e-4, 
+                            minimizer="LBFGS",
+                            scenario="snappingCyclicSimpleShear")
+    
                             
     # config = SimulationConfig(rows=100, cols=100, startLoad=0.0, nrThreads=4,
     #                         loadIncrement=1E-5, maxLoad=0.1373,
@@ -23,9 +24,9 @@ if __name__ == "__main__":
     #                         scenario = "simpleShearWithNoise")
                             
 
-    manager = SimulationManager(config, useProfiling=False)
+    manager = SimulationManager(config, useProfiling=False, overwriteData=True)
     manager.runSimulation()
     #manager.resumeSimulation(0)
     #manager.resumeSimulation(dumpFile="/Volumes/data/KeepSafe/FireGetsStuckSimpleShear,s100x100l0.15,1e-05,1PBCt4LBFGSEpsg9e-05eps0.0001s0_Dump_l0.315700_08.08~21.05.2024.mtsb",
                              #overwriteSettings=True)
-    #manager.plot()
+    manager.plot()

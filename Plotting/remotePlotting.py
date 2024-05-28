@@ -6,7 +6,7 @@ import time
 import random
 import threading
 
-from makePlots import makeEnergyPlot
+from makePlots import makeEnergyPlot, makeItterationsPlot, makePowerLawPlot, makeTimePlot
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / 'Management'))
 # Now we can import from Management
@@ -187,11 +187,19 @@ def get_csv_files(configs, useOldFiles=False):
 
 if __name__ == "__main__":
 
-    seeds = range(0,10)
-    configs = ConfigGenerator.generate_over_seeds(seeds, rows=100, cols=100, startLoad=0.15, 
-                            loadIncrement=0.00001, maxLoad=1, nrThreads=1) 
+
+    seeds = range(0,60)
+    configs = ConfigGenerator.generate_over_seeds(seeds,
+                        rows=60, cols=60, startLoad=0.15, nrThreads=1,
+                        loadIncrement=1E-5, maxLoad=1,
+                        LBFGSEpsx=1e-6,
+                        minimizer="LBFGS",
+                        scenario="simpleShear")
     paths = get_csv_files(configs)
     if paths:
-        makeEnergyPlot(paths, "seeds")    
+        makeEnergyPlot(paths, "ParamExploration.pdf", show=True, legend=True)
+        #makeTimePlot(paths, "Run time.pdf", show=True, legend=True)    
+        #makeItterationsPlot(paths, "ParamExploration.pdf", show=True)
+        makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", show=True)    
     else:
         print("No files found")
