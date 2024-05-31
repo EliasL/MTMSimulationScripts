@@ -1,12 +1,12 @@
 import xml.etree.ElementTree as ET
 
 def parse_pvd_file(path, pvd_file):
-    tree = ET.parse(path+pvd_file)
+    tree = ET.parse(pvd_file)
     root = tree.getroot()
     vtu_files = []
 
     for dataset in root.iter('DataSet'):
-        vtu_files.append(dataset.attrib['file'])
+        vtu_files.append(path+dataset.attrib['file'])
 
     return vtu_files
 
@@ -32,8 +32,8 @@ def get_data_from_name(nameOrPath):
     # We can now extract some extra stuff from the name
     # It will for example have the form: 
     # resettingSimpleShearPeriodicBoundary,s60x60l0.15,1e-05,10PBCt4s0
-    result['dims'] = result['name'].split(',')[1].split('s')[1].split('l')[0].split('x')
-
+    result['dims'] = tuple(map(int, result['name'].split(',')[1].split('s')[1].split('l')[0].split('x')))
+    
     # Extract start load, load increment, and max load
     load_parts = result['name'].split(',')[1:]
     result['startLoad'] = load_parts[0].split('l')[1]

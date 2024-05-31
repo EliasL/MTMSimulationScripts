@@ -11,7 +11,6 @@ class SimulationConfig:
     def __init__(self, **kwargs):
 
         # Simulation Settings
-        
         self.rows = 10 
         self.cols = 10 
         self.usingPBC = 1 # 0=False, 1=True
@@ -41,13 +40,13 @@ class SimulationConfig:
         self.alphaStart = 0.1
         self.falpha = 0.99
         self.dtStart = 0.01
-        self.dtStartMax = 0.01
         self.dtMax = 0.01*10
         self.dtMin = 0.01*0.002
+        self.maxCompS = 0.01
         self.eps = 0.01
         self.epsRel = 0.0
         self.delta = 0.0
-        self.maxIt = 1000
+        self.maxIt = 10000
 
         # Logging settings
         self.plasticityEventThreshold = 0.1
@@ -57,8 +56,11 @@ class SimulationConfig:
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
-            else:
+            elif key!="NONAME":
                 raise(Warning(f"Unkown keyword: {key}"))
+
+        if "NONAME" not in kwargs.keys():
+            self.name = self.generate_name(withExtension=False)    
 
     def generate_name(self, withExtension=True):
         name = (
@@ -68,29 +70,22 @@ class SimulationConfig:
             f"{'PBC' if self.usingPBC == 1 else 'NPBC'}"+
             f"t{self.nrThreads}"
         )
-        # Conditionally append tolerances and iterations if they are not default
-        already_written = ['scenario', 'rows', 'cols', 'startLoad', 'loadIncrement', 'maxLoad',
-                           'usingPBC', 'nrThreads', 'seed']
-        
-        defaultValues = vars(SimulationConfig()) 
+
+        defaultValues = vars(SimulationConfig(NONAME=True)) 
         for attr, value in vars(self).items():
-            if attr not in already_written:
+            if attr not in ['name', 'scenario', 'rows', 'cols', 'startLoad', 'loadIncrement', 'maxLoad', 'usingPBC', 'nrThreads', 'seed']:
                 if defaultValues.get(attr) != value:
                     name += f"{attr}{value}"
 
-        # We always add the seed at the very end
+        # Seed should be appended once, and only once, at the very end
         name += f"s{self.seed}"
 
         if withExtension:
-            # Add file extension
             name += ".conf"
 
-        count = name.count('_')
-        if count !=0:
-            # information is baked into vtu files using _, so we don't
-            # want to have _ in the name here. See the function
-            # makeFileName in dataExport.cpp.
-            raise(AttributeError("The name is not allowed to contain '_'!"))
+        if '_' in name:
+            raise AttributeError("The name is not allowed to contain '_'!")
+
         return name
     
     def get_path_and_name(self, path, withExtension=True):
@@ -104,7 +99,8 @@ class SimulationConfig:
         with open(full_path, 'w') as file:
             file.write("# Simulation Settings\n")
             for attr, value in self.__dict__.items():
-                file.write(f"{attr} = {value} # Default = {value}\n")
+                if attr != "NONAME":
+                    file.write(f"{attr} = {value}\n")
 
         return full_path
 

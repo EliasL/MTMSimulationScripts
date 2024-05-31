@@ -30,8 +30,9 @@ def create_collection(folder_path, destination="..", collection_name="collection
         out_file.write('<Collection>\n')
 
         for i, (num, file) in enumerate(files_with_numbers):
-            out_file.write(f'<DataSet timestep="{i}" group="" part="0" file="{folder_path}/{file.name}"/>\n')
-
+            relative_path = file.relative_to(destination)  # Calculate relative path
+            out_file.write(f'<DataSet timestep="{i}" group="" part="0" file="{relative_path}"/>\n')
+            
         out_file.write('</Collection>\n')
         out_file.write('</VTKFile>\n')
 

@@ -1,10 +1,12 @@
 import re
 from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import shutil
 from connectToCluster import connectToCluster, Servers, get_server_short_name
 from tabulate import tabulate 
 import subprocess
 import os
+from tqdm import tqdm
 
 
 """
@@ -71,11 +73,14 @@ class DataManager:
 
     def findData(self):
         # Use ThreadPoolExecutor to execute find_data_on_server in
-        # parallel across all servers pluss one to find the data stored locally
+        # parallel across all servers plus one to find the data stored locally
         with ThreadPoolExecutor(max_workers=len(Servers.servers)+1) as executor:
             future_to_server = {executor.submit(self.find_data_on_server, server): server for server in Servers.servers}
             future_to_server[executor.submit(self.find_data_on_disk, "/Volumes/data")] = "Local ssd"
-            for future in as_completed(future_to_server):
+            
+            # Wrap the as_completed method with tqdm for progress indication
+            progress_bar = tqdm(as_completed(future_to_server), total=len(future_to_server), desc="Gathering data")
+            for future in progress_bar:
                 server = future_to_server[future]
                 try:
                     folders_and_sizes = future.result()
@@ -83,7 +88,6 @@ class DataManager:
                         self.data[server] = folders_and_sizes
                 except Exception as exc:
                     print(f'{server} generated an exception: {exc}')
-        
 
     def printData(self):
         table_data = []
@@ -107,30 +111,50 @@ class DataManager:
             self.delete_data_on_server(server, folders, dryRun)
 
     def delete_data_on_server(self, server, folders, dryRun=True):
-        # Connect to the server
-        ssh = connectToCluster(server, False)
-
-        print(f"Are you sure you want to delete these folders on {server}?:") 
-        [print(folder) for folder in folders]
-        if input(f"yes/no : ")!="yes":
-            return
-        
-        # Deleting each folder found by find_data_on_server
-        for folder in folders:
-
-            # Command to delete the folder
-            delete_command = f"rm -r {folder}" 
-
-
-            # Execute the delete command
+        if server == "Local ssd":  # Check if the server is local
             if not dryRun:
-                stdin, stdout, stderr = ssh.exec_command(delete_command)
-                # Check for errors
-                errors = stderr.read().decode().strip()
-                if errors:
-                    print(f"Error deleting {folder} on {server}: {errors}")
-                else:
-                    print(f"Successfully deleted {folder} on {server}")
+                for folder in folders:
+                    try:
+                        shutil.rmtree(folder)  # Use shutil to delete local directories
+                        print(f"Successfully deleted {folder} on local SSD")
+                    except Exception as e:
+                        print(f"Error deleting {folder} on local SSD: {e}")
+        else:
+            try:
+                ssh = connectToCluster(server, False)
+                print(f"Are you sure you want to delete these folders on {server}?")
+                [print(folder) for folder in folders]
+                if input("yes/no: ") != "yes":
+                    return
+                
+                for folder in folders:
+                    delete_command = f"rm -r {folder}"
+                    if not dryRun:
+                        stdin, stdout, stderr = ssh.exec_command(delete_command)
+                        errors = stderr.read().decode().strip()
+                        if errors:
+                            print(f"Error deleting {folder} on {server}: {errors}")
+                        else:
+                            print(f"Successfully deleted {folder} on {server}")
+            except Exception as e:
+                print(f"Error connecting to {server}: {e}")
+
+    def delete_folders_below_size(self, min_size_in_bytes, dryRun=True):
+        for server, (folders, sizes) in self.data.items():
+            if folders:
+                small_folders = []
+                small_sizes = []
+                for folder, size in zip(folders, sizes):
+                    if parse_size(size) < min_size_in_bytes:
+                        small_folders.append(folder)
+                        small_sizes.append(size)  # Track sizes corresponding to small_folders
+                
+                if small_folders:  # Check to ensure there are indeed folders to delete
+                    print(f"Folders to delete on {server} because they are smaller than {min_size_in_bytes} bytes:")
+                    for folder, size in zip(small_folders, small_sizes):
+                        print(f'{folder} - {size} - {parse_size(size)}')
+                        if not dryRun:
+                            self.delete_data_on_server(server, [folder], dryRun=False)
 
     def parse_and_group_seeds(self, folders_and_sizes):
         folder_paths, sizes = folders_and_sizes
@@ -357,4 +381,5 @@ if __name__ == "__main__":
     # dm.clean_projects_on_servers()
     dm.findData()
     dm.printData()
-    #dm.delete_all_found_data(dryRun=False)
+    #dm.delete_folders_below_size(1e8)
+    #dm.delete_all_found_data()

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 # Add Management to sys.path (used to import files)
-sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
+# sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
 
 # Define dumpPath as a global variable
 dumpPath = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.15,1e-05,1PBCt4EpsG0.01EpsF0.001s0/dumps/Dump_l0.650400_19.03~10.05.2024.mtsb"        
@@ -60,12 +60,14 @@ def plotSims(configs, name, **kwargs):
     from remotePlotting import get_csv_files
 
     from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot
-    paths = get_csv_files(configs)
+    paths = get_csv_files(configs, useOldFiles=True)
     print("Plotting...")
-    #makeEnergyPlot(paths, f"{name}Energy.pdf", **kwargs) 
-    makePowerLawPlot(paths, f"{name}PowerLaw.pdf", **kwargs)    
+    makeEnergyPlot(paths, f"{name}Energy.pdf",legend=['test'], **kwargs) 
+    for k in ['plot_average']:
+        if k in kwargs:
+            del kwargs[k]
+    #makePowerLawPlot(paths, f"{name}PowerLaw.pdf", legend=True, **kwargs)    
     #makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
-
 
 def plotOldStuff():
     from OldConfigGenerator import ConfigGenerator as OldConf
@@ -79,7 +81,7 @@ def plotOldStuff():
         ['loadIncrement', 1e-4, 'blue'],
         ['loadIncrement', 2e-4, 'orange'],
                          ])
-    plotSims(configs, "FireExplore1", labels=labels, c=c, show=True)
+    plotSims(configs, "FireExplore1", labels=labels, colors=c, show=True)
 
 
 def plotLessOldStuff():
@@ -92,7 +94,7 @@ def plotLessOldStuff():
         ['eps', 1e-5, 'red'],
         ['eps', 1e-6, 'blue'],
                          ])
-    plotSims(configs, "FireExplore2", labels=labels, c=c, show=True)
+    plotSims(configs, "FireExplore2", labels=labels, colors=c, show=True)
 
 def statStuff():
 
@@ -103,12 +105,26 @@ def statStuff():
                             LBFGSEpsx=1e-6,
                             minimizer="LBFGS",
                             scenario="simpleShear")
+    
     plotSims(configs, "powerlaw", labels=[f"s:{i}" for i in seeds], show=True,
-            plot_average=True, xLims=(0.15, 0.55))
+            plot_average=False, xLims=(0.15, 0.55))
+
+def fastStatStuff():
+    seeds = range(0,60)
+    configs = ConfigGenerator.generate_over_seeds(seeds,
+                            rows=60, cols=60, startLoad=0.15, nrThreads=1,
+                            loadIncrement=3E-5, maxLoad=1,
+                            LBFGSEpsx=1e-5,
+                            minimizer="LBFGS",
+                            scenario="simpleShear")
+    runSims(configs)
+    #plotSims(configs, "powerlaw", labels=[f"s:{i}" for i in seeds], show=True,
+            #plot_average=False, xLims=(0.15, 0.55))
 
 if __name__ == '__main__':
     #plotOldStuff()
     #plotLessOldStuff()
-    statStuff()
+    #fastStatStuff()
+    plotLessOldStuff()
 
     #runSims()

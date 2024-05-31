@@ -120,14 +120,18 @@ def search_for_cvs_files(configs, useOldFiles=False):
     # Folders to search in 
     search_folders = ["/tmp/MTS2D"]
     for folder in search_folders:
+        # Create folder if it does not exist
+        os.makedirs(folder, exist_ok=True)
+
+        # Flag for last folder
         if folder == search_folders[-1]:
             last_search_folder = True
 
         # Get all files in folder (without extension)
         files = [os.path.splitext(f)[0] for f in os.listdir(folder) if os.path.isfile(os.path.join(folder, f))]
         for config in configs:
-            file_path = os.path.join(folder, config.generate_name(False) + '.csv')
-            if config.generate_name(False) in files:
+            file_path = os.path.join(folder, config.name + '.csv')
+            if config.name in files:
                 # Check if file is less than one hour old
                 file_mod_time = os.path.getmtime(file_path)
                 if time.time() - file_mod_time < 3600 or useOldFiles:  # 3600 seconds = 1 hour

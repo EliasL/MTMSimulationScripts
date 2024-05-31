@@ -7,7 +7,8 @@ from vtk import vtkXMLUnstructuredGridReader
 from vtk.util.numpy_support import vtk_to_numpy
 from concurrent.futures import ProcessPoolExecutor
 from tqdm import tqdm
-
+import time
+import random
 from multiprocessing import Pool
 
 from dataFunctions import get_data_from_name
@@ -135,56 +136,76 @@ def base_plot(args):
 
     return ax, fig
 
+def calculate_shifts(nodes, BC, load):
+    N = np.sqrt(len(nodes[:,0])) - 1
+    if BC == 'PBC':
+        return [-N, 0, N]
+    return [0]
+
+def draw_rhombus(ax, N, load, BC):
+    if BC == 'PBC':
+        rhombus_x = [0, N, N + load*N, load*N, 0]
+        rhombus_y = [0, 0, N, N, 0]
+        ax.plot(rhombus_x, rhombus_y, 'k--')
+
+def save_and_close_plot(fig, ax, path):
+    plt.savefig(path, bbox_inches='tight', pad_inches=0)
+    plt.close(fig)
+
+def calculate_valid_indices(n, m):
+    n, m = n+1, m+1  # Adjust grid size
+    # Create a 2D grid of indices
+    indices = np.arange(n * m).reshape(n, m)
+    valid_indices = indices[:n-1, :m-1].flatten()
+    return valid_indices
+
 def plot_nodes(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
-
     ax, fig = base_plot(args)
-    
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
     fixed = data.get_fixed_status()
-    color = np.where(fixed==1, 'red', 'blue')
-    x, y = nodes[:,0], nodes[:,1]
-    
-    # Calculate grid size
     dims = get_data_from_name(vtu_file)['dims']
+    n, m = dims
+    # Calculate valid indices (excluding last row and column) using the NumPy function
+    valid_indices = calculate_valid_indices(n, m)
+
+    # Filter nodes and fixed status using the computed indices
+    nodes = nodes[valid_indices]
+    fixed = fixed[valid_indices]
+
+
+    color = np.where(fixed == 1, 'red', 'blue')
+    x, y = nodes[:,0], nodes[:,1]
+
+    # Calculate grid size
     # We use the y axis because it will be closest to the real size.
     grid_size = (axis_limits[3] - axis_limits[2])/float(dims[1])
 
     # Calculate frame size and DPI
     inches_per_data_unit = 0.6 * fig.dpi * (fig.get_size_inches()[1] / (axis_limits[3] - axis_limits[2]))
     # Calculate circle size in points, considering 's' as the area in points squared
-    circle_diameter = 0.25 * grid_size  # Adjust the 0.25 factor as necessary to prevent overlap
+    circle_diameter = 0.3 * grid_size  # Adjust the 0.25 factor as necessary to prevent overlap
     circle_radius = circle_diameter / 2
     circle_point_size = (circle_radius * inches_per_data_unit)**2
     
-    #TODO add a rombus to show unit-region
-    # Shifts for periodic boundary conditions
-    # assuming grid spacing=1
-    N=np.sqrt(len(nodes[:,0]))-1
-    if data.BC=='PBC':
-        shifts = [-N, 0, N]
-    else:
-        shifts=[0]
     
-
-    # Plot shifted nodes
+    shifts = calculate_shifts(nodes, data.BC, data.load)
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
-            ax.scatter(sheared_x, y + dy, s=circle_point_size, c=color, marker='o', alpha=1)
-                
+            ax.scatter(sheared_x, y + dy, s=circle_point_size, c=color, marker='o', alpha=1,
+                       edgecolors='none')
+            
+    draw_rhombus(ax, np.sqrt(len(nodes[:,0])) - 1, data.load, data.BC)
     path = f"{framePath}/node_frame_{frame_index:04d}.png"
-    plt.savefig(path, bbox_inches='tight', pad_inches=0)
-    plt.close(fig)
-
+    save_and_close_plot(fig, ax, path)
     return path
-
 
 def plot_mesh(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
-    
     ax, fig = base_plot(args)
+    
     cmap_colors = [
                 (0.0, (0.29, 0.074, 0.38)),
                 (0.07, "#0052cc"),
@@ -198,49 +219,48 @@ def plot_mesh(args):
     # Define a normalization that highlights small energy changes
     gamma = 1  # Adjust this parameter as needed to highlight small energy changes
     norm = mcolors.PowerNorm(gamma=gamma, vmin=global_min, vmax=global_max)
-
+    
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
     energy_field = data.get_energy_field()
     connectivity = data.get_connectivity()
     x, y = nodes[:,0], nodes[:,1]
-
-    # Add shifts so that the periodicity shows
-    N=np.sqrt(len(nodes[:,0]))-1
-    if data.BC=='PBC':
-        shifts = [-N, 0, N]
-    else:
-        shifts=[0]
     
-
-    # Plot shifted nodes
+    shifts = calculate_shifts(nodes, data.BC, data.load)
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
-            triang = mtri.Triangulation(sheared_x, y+dy, connectivity)            
-            # Plotting with shifted nodes
+            triang = mtri.Triangulation(sheared_x, y+dy, connectivity)
             contour = ax.tripcolor(triang, facecolors=energy_field, norm=norm, cmap=custom_cmap)
-    # Create a color bar
-    cbar = fig.colorbar(contour, shrink=0.7)
-    cbar.set_label('Cell Energy')
-    cbar.ax.tick_params(labelsize=8)
 
-    # wire mesh
-    #ax.triplot(triang, 'w-', linewidth=0.2, alpha=0.3)
-    
+    draw_rhombus(ax, np.sqrt(len(nodes[:,0])) - 1, data.load, data.BC)
     path = f"{framePath}/mesh_frame_{frame_index:04d}.png"
-    plt.savefig(path, bbox_inches='tight', pad_inches=0)
-    plt.close(fig)
-
+    save_and_close_plot(fig, ax, path)
     return path
+
+def retry_frame_function(frameFunction, args, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return frameFunction(args)
+        except Exception as e:
+            print(f"Error on attempt {attempt+1} for file {args[1]}: {str(e)}")
+            time.sleep(random.uniform(0.1, 1))  # Random delay between 0.1 and 1 second
+    print(f"Failed to process file {args[1]} after {max_retries} attempts.")
+    return None
+
+def process_frame(args):
+    # Unpack the frameFunction from args and apply retry logic
+    frameFunction, other_args = args[0], args[1:]
+    return retry_frame_function(frameFunction, other_args)
 
 def make_images(frameFunction, framePath, vtu_files, macro_data, num_processes=10):
     # Assuming vtu_files is defined, calculate global axis limits
     axis_limits = get_axis_limits(macro_data)
-    # global_min, global_max = precalculate_global_stress_range(vtu_files)
+    # global_min, global_max = precalculate_global_stress range(vtu_files)
     global_min, global_max = get_energy_range(vtu_files, macro_data)
-    args_list = [(framePath, vtu_file, frame_index, global_min, global_max, axis_limits) for frame_index, vtu_file in enumerate(vtu_files)]
+    args_list = [(frameFunction, framePath, vtu_file, frame_index, global_min, global_max, axis_limits) for frame_index, vtu_file in enumerate(vtu_files)]
+
     with Pool(processes=num_processes) as pool:
-        image_paths = list(tqdm(pool.imap(frameFunction, args_list), total=len(vtu_files)))
+        image_paths = list(tqdm(pool.imap(process_frame, args_list), total=len(vtu_files)))
     
     return image_paths

@@ -338,8 +338,8 @@ if __name__ == "__main__":
 
     minNrThreads = 61
     script = "benchmarking.py"
-    script = "parameterExploring.py"
     script = "runSimulations.py"
+    script = "parameterExploring.py"
     server = Servers.dalembert
     server = Servers.condorcet
     server = Servers.galois
@@ -350,7 +350,7 @@ if __name__ == "__main__":
         j.showProcesses()
     else:
         j=JobManager()
-        j.cancel_job_on_server(server, 558366)
+        # j.cancel_job_on_server(server, 558366)
         # server = find_server(minNrThreads)
         uploadProject(server)
 

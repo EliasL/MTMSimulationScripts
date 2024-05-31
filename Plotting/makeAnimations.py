@@ -1,4 +1,5 @@
 import os
+import subprocess
 import cv2
 import imageio.v2 as imageio  # Adjusted import here
 
@@ -59,11 +60,16 @@ def framesToGif(frames, outFile, fps):
 
  
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
-def makeAnimations(path, macro_data, pvd_file):
+def makeAnimations(path, macro_data=None, pvd_file=None):
    
-    framePath = path + settings["FRAMEFOLDERPATH"]  
-    if(not os.path.exists(path+pvd_file)):
-        print(f"No file found at: {path+pvd_file}")
+    framePath = path + settings["FRAMEFOLDERPATH"]
+    if macro_data is None:
+        macro_data = path+settings["MACRODATANAME"]+'.csv'
+    if pvd_file is None:
+        pvd_file = path+settings["COLLECTIONNAME"]+'.pvd'
+
+    if(not os.path.exists(pvd_file)):
+        print(f"No file found at: {pvd_file}")
         print("Creating pvd file...")
         create_collection(path+settings["DATAFOLDERPATH"])
     
@@ -95,9 +101,10 @@ def makeAnimations(path, macro_data, pvd_file):
         images = make_images(function, framePath, vtu_files, macro_data)
         outPath = path+path.split('/')[-2]+f'_{fileName}_video.mp4'
         framesToMp4(images, outPath, fps)
+        subprocess.run(["gifski", outPath, "-o", f"{path + path.split('/')[-2]}_{fileName}_video.gif"]) 
 
 if __name__ == "__main__":
-    output = '/Volumes/data/MTS2D_output/s100x100l0.15,0.001,1t3s0/'
+    output = '/Volumes/data/KeepSafe/simpleShear,s150x150l0.15,2e-05,1PBCt4EpsG0.01s0/'
 
     # Replace 'your_pvd_file.pvd' with the path to your .pvd file
-    makeAnimations(output,'collection.pvd')
+    makeAnimations(output)
