@@ -1,11 +1,14 @@
 # Define a maximum reasonable size for a valarray to prevent runaway summaries
-MAX_REASONABLE_SIZE = 1E6  # 1 million elements
-MAX_DISPLAYED_ELEMENTS = 3  # Only display this many elements followed by an ellipsis if the array is larger
+MAX_REASONABLE_SIZE = 1e6  # 1 million elements
+MAX_DISPLAYED_ELEMENTS = (
+    3  # Only display this many elements followed by an ellipsis if the array is larger
+)
+
 
 def valarray_summary(valobj, internal_dict):
     try:
         # Get the size of the array from the _M_size member
-        size_val = valobj.GetChildMemberWithName('_M_size')
+        size_val = valobj.GetChildMemberWithName("_M_size")
         size = size_val.GetValueAsUnsigned()
 
         # Check if the size is reasonable to prevent runaway array summaries
@@ -13,7 +16,7 @@ def valarray_summary(valobj, internal_dict):
             return "<TooLarge>"
 
         # Get the data pointer from the _M_data member
-        data_ptr_val = valobj.GetChildMemberWithName('_M_data')
+        data_ptr_val = valobj.GetChildMemberWithName("_M_data")
 
         # Ensure we have a valid value for the data pointer
         if data_ptr_val is None:
@@ -28,7 +31,9 @@ def valarray_summary(valobj, internal_dict):
 
         for i in range(display_range):
             # Create an artificial pointer to each element in the array
-            element_ptr = data_ptr_val.CreateChildAtOffset("[" + str(i) + "]", i * element_type.GetByteSize(), element_type)
+            element_ptr = data_ptr_val.CreateChildAtOffset(
+                "[" + str(i) + "]", i * element_type.GetByteSize(), element_type
+            )
             element_val = element_ptr.GetValue()
 
             if element_val is not None:

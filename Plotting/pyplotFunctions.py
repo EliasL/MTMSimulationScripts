@@ -13,13 +13,14 @@ from multiprocessing import Pool
 
 from dataFunctions import get_data_from_name
 
+
 class VTUData:
     def __init__(self, vtu_file_path):
         self.vtu_file_path = vtu_file_path
         self.mesh = self._read_vtu_file()
         result = get_data_from_name(vtu_file_path)
-        self.BC = result['BC']
-        self.load = float(result['load'])
+        self.BC = result["BC"]
+        self.load = float(result["load"])
 
     def _read_vtu_file(self):
         # Create a reader for the VTU file
@@ -50,17 +51,18 @@ class VTUData:
         connectivity = _connectivity.reshape(-1, 4)[:, 1:]
         return connectivity
 
-def get_energy_range(vtu_files, cvs_file):
 
-    df = pd.read_csv(cvs_file, usecols=['Max energy'])
-    max_energy = df['Max energy'].max()
-    if(max_energy>100):
-        max_energy = df['Max energy'][:-1].max()
-    # We assume that the minimum energy throughout the whole run is the minimum 
-    # of the initial state 
+def get_energy_range(vtu_files, cvs_file):
+    df = pd.read_csv(cvs_file, usecols=["Max energy"])
+    max_energy = df["Max energy"].max()
+    if max_energy > 100:
+        max_energy = df["Max energy"][:-1].max()
+    # We assume that the minimum energy throughout the whole run is the minimum
+    # of the initial state
     energy_field = VTUData(vtu_files[0]).get_energy_field()
     min_energy = energy_field.min()
-    return min_energy,max_energy
+    return min_energy, max_energy
+
 
 # This is a conceptual approach and might need adjustments to fit your specific data structure
 def cell_energy_to_node_energy(nodes, energy_field, connectivity):
@@ -74,20 +76,21 @@ def cell_energy_to_node_energy(nodes, energy_field, connectivity):
 
     # Avoid division by zero for isolated nodes if any (shouldn't happen in a well-defined mesh)
     if (node_count == 0).any():
-        raise(Exception("Invalid Mesh"))
+        raise (Exception("Invalid Mesh"))
     node_energy /= node_count
 
     return node_energy
 
+
 # Use this function to set axis limits in your plot_frame function
 def get_axis_limits(cvs_file):
-    df = pd.read_csv(cvs_file, usecols=['maxX', 'minX', 'maxY', 'minY'])
-    
-    x_max = df['maxX'].max()
-    x_min = df['minX'].min()
-    y_max = df['maxY'].max()
-    y_min = df['minY'].min()
-    
+    df = pd.read_csv(cvs_file, usecols=["maxX", "minX", "maxY", "minY"])
+
+    x_max = df["maxX"].max()
+    x_min = df["minX"].min()
+    y_max = df["maxY"].max()
+    y_min = df["minY"].min()
+
     return x_min, x_max, y_min, y_max
 
 
@@ -112,23 +115,22 @@ def add_padding(axis_limits, padding_ratio):
 
 def base_plot(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
-    
+
     dpi = 250
     width = 2000
     height = 1000
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
-    ax.set_aspect('equal')
+    ax.set_aspect("equal")
 
     # Setting the axis limits
     x_min, x_max, y_min, y_max = add_padding(axis_limits, 0.03)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
-    
+
     metadata = get_data_from_name(vtu_file)
     lines = [
         f"State: {metadata['name']}",
-        f"Frame: {frame_index}, " +
-        f"Load: {float(metadata['load']):.3f}",
+        f"Frame: {frame_index}, " + f"Load: {float(metadata['load']):.3f}",
     ]
     ax.set_title("\n".join(lines))
     ax.set_xticks([])
@@ -136,28 +138,33 @@ def base_plot(args):
 
     return ax, fig
 
+
 def calculate_shifts(nodes, BC, load):
-    N = np.sqrt(len(nodes[:,0])) - 1
-    if BC == 'PBC':
+    N = np.sqrt(len(nodes[:, 0])) - 1
+    if BC == "PBC":
         return [-N, 0, N]
     return [0]
 
+
 def draw_rhombus(ax, N, load, BC):
-    if BC == 'PBC':
-        rhombus_x = [0, N, N + load*N, load*N, 0]
+    if BC == "PBC":
+        rhombus_x = [0, N, N + load * N, load * N, 0]
         rhombus_y = [0, 0, N, N, 0]
-        ax.plot(rhombus_x, rhombus_y, 'k--')
+        ax.plot(rhombus_x, rhombus_y, "k--")
+
 
 def save_and_close_plot(fig, ax, path):
-    plt.savefig(path, bbox_inches='tight', pad_inches=0)
+    plt.savefig(path, bbox_inches="tight", pad_inches=0)
     plt.close(fig)
 
+
 def calculate_valid_indices(n, m):
-    n, m = n+1, m+1  # Adjust grid size
+    n, m = n + 1, m + 1  # Adjust grid size
     # Create a 2D grid of indices
     indices = np.arange(n * m).reshape(n, m)
-    valid_indices = indices[:n-1, :m-1].flatten()
+    valid_indices = indices[: n - 1, : m - 1].flatten()
     return valid_indices
+
 
 def plot_nodes(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
@@ -165,7 +172,7 @@ def plot_nodes(args):
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
     fixed = data.get_fixed_status()
-    dims = get_data_from_name(vtu_file)['dims']
+    dims = get_data_from_name(vtu_file)["dims"]
     n, m = dims
     # Calculate valid indices (excluding last row and column) using the NumPy function
     valid_indices = calculate_valid_indices(n, m)
@@ -174,69 +181,85 @@ def plot_nodes(args):
     nodes = nodes[valid_indices]
     fixed = fixed[valid_indices]
 
-
-    color = np.where(fixed == 1, 'red', 'blue')
-    x, y = nodes[:,0], nodes[:,1]
+    color = np.where(fixed == 1, "red", "blue")
+    x, y = nodes[:, 0], nodes[:, 1]
 
     # Calculate grid size
     # We use the y axis because it will be closest to the real size.
-    grid_size = (axis_limits[3] - axis_limits[2])/float(dims[1])
+    grid_size = (axis_limits[3] - axis_limits[2]) / float(dims[1])
 
     # Calculate frame size and DPI
-    inches_per_data_unit = 0.6 * fig.dpi * (fig.get_size_inches()[1] / (axis_limits[3] - axis_limits[2]))
+    inches_per_data_unit = (
+        0.6 * fig.dpi * (fig.get_size_inches()[1] / (axis_limits[3] - axis_limits[2]))
+    )
     # Calculate circle size in points, considering 's' as the area in points squared
-    circle_diameter = 0.3 * grid_size  # Adjust the 0.25 factor as necessary to prevent overlap
+    circle_diameter = (
+        0.3 * grid_size
+    )  # Adjust the 0.25 factor as necessary to prevent overlap
     circle_radius = circle_diameter / 2
-    circle_point_size = (circle_radius * inches_per_data_unit)**2
-    
-    
+    circle_point_size = (circle_radius * inches_per_data_unit) ** 2
+
     shifts = calculate_shifts(nodes, data.BC, data.load)
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
-            ax.scatter(sheared_x, y + dy, s=circle_point_size, c=color, marker='o', alpha=1,
-                       edgecolors='none')
-            
-    draw_rhombus(ax, np.sqrt(len(nodes[:,0])) - 1, data.load, data.BC)
+            ax.scatter(
+                sheared_x,
+                y + dy,
+                s=circle_point_size,
+                c=color,
+                marker="o",
+                alpha=1,
+                edgecolors="none",
+            )
+
+    draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
     path = f"{framePath}/node_frame_{frame_index:04d}.png"
     save_and_close_plot(fig, ax, path)
     return path
 
+
 def plot_mesh(args):
     framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
     ax, fig = base_plot(args)
-    
+
     cmap_colors = [
-                (0.0, (0.29, 0.074, 0.38)),
-                (0.07, "#0052cc"),
-                (0.3, "#ff6f61"),
-                (0.9, "orange"),
-                (1.0, "red")]
+        (0.0, (0.29, 0.074, 0.38)),
+        (0.07, "#0052cc"),
+        (0.3, "#ff6f61"),
+        (0.9, "orange"),
+        (1.0, "red"),
+    ]
 
     # Create a color map from the list of colors and positions
-    custom_cmap = mcolors.LinearSegmentedColormap.from_list("custom_cmap", cmap_colors,N=512)
+    custom_cmap = mcolors.LinearSegmentedColormap.from_list(
+        "custom_cmap", cmap_colors, N=512
+    )
 
     # Define a normalization that highlights small energy changes
     gamma = 1  # Adjust this parameter as needed to highlight small energy changes
     norm = mcolors.PowerNorm(gamma=gamma, vmin=global_min, vmax=global_max)
-    
+
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
     energy_field = data.get_energy_field()
     connectivity = data.get_connectivity()
-    x, y = nodes[:,0], nodes[:,1]
-    
+    x, y = nodes[:, 0], nodes[:, 1]
+
     shifts = calculate_shifts(nodes, data.BC, data.load)
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
-            triang = mtri.Triangulation(sheared_x, y+dy, connectivity)
-            contour = ax.tripcolor(triang, facecolors=energy_field, norm=norm, cmap=custom_cmap)
+            triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
+            contour = ax.tripcolor(
+                triang, facecolors=energy_field, norm=norm, cmap=custom_cmap
+            )
 
-    draw_rhombus(ax, np.sqrt(len(nodes[:,0])) - 1, data.load, data.BC)
+    draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
     path = f"{framePath}/mesh_frame_{frame_index:04d}.png"
     save_and_close_plot(fig, ax, path)
     return path
+
 
 def retry_frame_function(frameFunction, args, max_retries=3):
     for attempt in range(max_retries):
@@ -248,19 +271,34 @@ def retry_frame_function(frameFunction, args, max_retries=3):
     print(f"Failed to process file {args[1]} after {max_retries} attempts.")
     return None
 
+
 def process_frame(args):
     # Unpack the frameFunction from args and apply retry logic
     frameFunction, other_args = args[0], args[1:]
     return retry_frame_function(frameFunction, other_args)
+
 
 def make_images(frameFunction, framePath, vtu_files, macro_data, num_processes=10):
     # Assuming vtu_files is defined, calculate global axis limits
     axis_limits = get_axis_limits(macro_data)
     # global_min, global_max = precalculate_global_stress range(vtu_files)
     global_min, global_max = get_energy_range(vtu_files, macro_data)
-    args_list = [(frameFunction, framePath, vtu_file, frame_index, global_min, global_max, axis_limits) for frame_index, vtu_file in enumerate(vtu_files)]
+    args_list = [
+        (
+            frameFunction,
+            framePath,
+            vtu_file,
+            frame_index,
+            global_min,
+            global_max,
+            axis_limits,
+        )
+        for frame_index, vtu_file in enumerate(vtu_files)
+    ]
 
     with Pool(processes=num_processes) as pool:
-        image_paths = list(tqdm(pool.imap(process_frame, args_list), total=len(vtu_files)))
-    
+        image_paths = list(
+            tqdm(pool.imap(process_frame, args_list), total=len(vtu_files))
+        )
+
     return image_paths

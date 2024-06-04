@@ -10,6 +10,7 @@ fdec = 0.5
 fa = 0.99
 Nnegmax = 2000
 
+
 def optimize_fire2(x0, f, df, params, atol=1e-4, dt=1, logoutput=False):
     error = 10 * atol
     dtmax = 10 * dt
@@ -34,7 +35,8 @@ def optimize_fire2(x0, f, df, params, atol=1e-4, dt=1, logoutput=False):
         else:
             Npos = 0
             Nneg = Nneg + 1
-            if Nneg > Nnegmax: break
+            if Nneg > Nnegmax:
+                break
             if i > Ndelay:
                 dt = max(dt * fdec, dtmin)
                 alpha = alpha0
@@ -48,7 +50,8 @@ def optimize_fire2(x0, f, df, params, atol=1e-4, dt=1, logoutput=False):
         V = V + 0.5 * dt * F
 
         error = max(abs(F))
-        if error < atol: break
+        if error < atol:
+            break
 
         path.append(x.copy())
 

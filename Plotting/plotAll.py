@@ -3,20 +3,28 @@ from makePlots import makeEnergyPlot, makeItterationsPlot
 from makeEnergyField import makeEnergyField
 from settings import settings
 import sys
+import os
 from pathlib import Path
+
+# Add Management to sys.path (used to import files)
+sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
+# Now we can import from Management
+from simulationManager import findOutputPath
+from configGenerator import SimulationConfig
 
 
 def plotAll(configFile, dataPath, noVideo=False):
-    # We expect the argument to be path/name.conf, and we want just the name
-    # subfolderName = Path(configFile).stem
+    conf = SimulationConfig(os.path.join(dataPath, configFile))
+    subfolderName = conf.name
+
     macroData = f"{settings['MACRODATANAME']}.csv"
 
-    # path = dataPath+subfolderName+'/'
-    path = '/Volumes/data/KeepSafe/150x150FireVsLBFGS/simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0/'
-    subfolderName = 'simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0'
+    path = os.path.join(dataPath, subfolderName)
+    # path = '/Volumes/data/KeepSafe/150x150FireVsLBFGS/simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0/'
+    # subfolderName = 'simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0'
     print(f"Plotting at {path}")
-    makeEnergyPlot(path+macroData, subfolderName+"_energy.pdf")
-    #makeItterationsPlot(path+macroData, subfolderName+"_itterations.pdf")
+    makeEnergyPlot(os.path.join(path, macroData), subfolderName + "_energy.pdf")
+    # makeItterationsPlot(path+macroData, subfolderName+"_itterations.pdf")
     if not noVideo:
         makeAnimations(path)
 
@@ -25,24 +33,17 @@ def plotAll(configFile, dataPath, noVideo=False):
 
 
 if __name__ == "__main__":
-    plotAll(None, None)
-    # # Add Management to sys.path (used to import files)
-    # sys.path.append(str(Path(__file__).resolve().parent.parent / 'Management'))
-    # # Now we can import from Management
-    # from simulationManager import findOutputPath
+    if len(sys.argv) < 2:
+        raise Exception("Config file is required!")
 
-    # if len(sys.argv) < 2:
-    #     raise Exception("Config file is required!")
+    if len(sys.argv) < 3:
+        print("Attempting to automatically find output path")
+        dataPath = findOutputPath()
+    else:
+        dataPath = sys.argv[2]
 
-    # if len(sys.argv) < 3:
-    #     print("Attempting to automatically find output path")
-    #     dataPath = findOutputPath()
-    # else:
-    #     dataPath = sys.argv[2]
-    
-    # noVideo=False
-    # if len(sys.argv)>=4:
-    #     noVideo = sys.argv[3]=="noVideo"
+    noVideo = False
+    if len(sys.argv) >= 4:
+        noVideo = sys.argv[3] == "noVideo"
 
- 
-    # plotAll(sys.argv[1], dataPath, noVideo)
+    plotAll(sys.argv[1], dataPath, noVideo)

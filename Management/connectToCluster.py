@@ -1,6 +1,7 @@
 from paramiko import SSHClient, AutoAddPolicy, AuthenticationException
 import subprocess
 
+
 class Servers:
     # Server variables
     galois = "galois.pmmh-cluster.espci.fr"
@@ -25,7 +26,7 @@ class Servers:
         dalembert,
         poincare,
         fourier,
-        descartes
+        descartes,
     ]
 
     # If we want to search all the servers including the local storage, we can do that
@@ -41,46 +42,53 @@ def uploadProject(cluster_address="Servers.default"):
         ssh_command = [
             "ssh",
             f"elundheim@{cluster_address}",
-            "mkdir -p /home/elundheim/simulation /home/elundheim/simulation/MTS2D /home/elundheim/simulation/SimulationScripts"
+            "mkdir -p /home/elundheim/simulation /home/elundheim/simulation/MTS2D /home/elundheim/simulation/SimulationScripts",
         ]
         subprocess.run(ssh_command, check=True)
-        
+
         # Define the rsync command for MTS2D
         rsync_command_MTS2D = [
             "rsync",
             "-avz",
             "--progress",
-            "--exclude", ".git",
-            "--exclude", "build",
-            "--exclude", "build-release",
-            "--exclude", "libs/**-build",
-            "--exclude", "libs/**-subbuild",
-            "--exclude", "Visuals/",
+            "--exclude",
+            ".git",
+            "--exclude",
+            "build",
+            "--exclude",
+            "build-release",
+            "--exclude",
+            "libs/**-build",
+            "--exclude",
+            "libs/**-subbuild",
+            "--exclude",
+            "Visuals/",
             "/Users/eliaslundheim/work/PhD/MTS2D/",
-            f"elundheim@{cluster_address}:/home/elundheim/simulation/MTS2D/"
+            f"elundheim@{cluster_address}:/home/elundheim/simulation/MTS2D/",
         ]
-        
+
         # Define the rsync command for SimulationScripts
         rsync_command_SS = [
             "rsync",
             "-avz",
             "--progress",
-            "--exclude", "Plots/"
-            "--exclude", ".git",
+            "--exclude",
+            "Plots/" "--exclude",
+            ".git",
             "/Users/eliaslundheim/work/PhD/SimulationScripts/",
-            f"elundheim@{cluster_address}:/home/elundheim/simulation/SimulationScripts/"
+            f"elundheim@{cluster_address}:/home/elundheim/simulation/SimulationScripts/",
         ]
-        
+
         # Run the rsync commands
         subprocess.run(rsync_command_MTS2D, check=True)
         subprocess.run(rsync_command_SS, check=True)
         print("Project folders successfully uploaded.")
-        
+
     except subprocess.CalledProcessError as e:
         raise Exception(f"An error occurred while uploading the project: {e}")
 
-def connectToCluster(cluster_address=Servers.default, verbose=True):
 
+def connectToCluster(cluster_address=Servers.default, verbose=True):
     username = "elundheim"
 
     # Step 1: Establish an SSH connection to the cluster using Paramiko.
@@ -94,19 +102,22 @@ def connectToCluster(cluster_address=Servers.default, verbose=True):
         if verbose:
             print(f"SSH connection established to {cluster_address}.")
     except AuthenticationException:
-        raise AuthenticationFailedException(f"Authentication with {cluster_address} failed. Please check your SSH key.")
+        raise AuthenticationFailedException(
+            f"Authentication with {cluster_address} failed. Please check your SSH key."
+        )
     except Exception as e:
         raise SSHConnectionException(f"Error connecting to {cluster_address}: {e}")
 
     return ssh
 
 
-
 def get_server_short_name(full_address):
-    return full_address.split('.')[0]
+    return full_address.split(".")[0]
+
 
 class AuthenticationFailedException(Exception):
     pass
+
 
 class SSHConnectionException(Exception):
     pass
