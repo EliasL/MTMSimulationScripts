@@ -5,7 +5,8 @@ from tabulate import tabulate
 
 class ServerInfo:
     def __init__(self):
-        self.name = ""
+        self.sName = ""  # Server name
+        self.nName = ""  # Node name
         self.nrTotalCores = 0
         self.nrUsedCores = 0
         self.nrFreeCores = 0
@@ -15,6 +16,7 @@ class ServerInfo:
         self.totalRAM = 0  # GB
         self.usedRAM = 0  # GB
         self.freeRAM = 0  # GB
+        self.nodeState = ""  # Node state (e.g., up, down, drained)
 
         self.totalScore = 0
 
@@ -22,7 +24,6 @@ class ServerInfo:
 def get_server_info(ssh_client):
     # Create a ServerInfo object
     si = ServerInfo()
-
     # Get the total number of cores in the system
     stdin, stdout, stderr = ssh_client.exec_command("grep -c ^processor /proc/cpuinfo")
     si.nrTotalCores = int(stdout.read().decode().strip())
@@ -33,7 +34,6 @@ def get_server_info(ssh_client):
     si.nrUsedCores = int(stdout.read().decode().strip())
 
     si.nrFreeCores = si.nrTotalCores - si.nrUsedCores
-
     # Calculate the number of jobs running and waiting in the queue
     command_jobs_running = "squeue -t R | wc -l"
     stdin, stdout, stderr = ssh_client.exec_command(command_jobs_running)
@@ -45,16 +45,14 @@ def get_server_info(ssh_client):
         int(stdout.read().decode().strip()) - 1
     )  # Adjust for header line
 
-    # Check for exclusive job settings
-    command_exclusive_jobs = (
-        "squeue -h -o '%i %t %p %C %D %R' | grep ' R ' | awk '{print $6}'"
-    )
-    stdin, stdout, stderr = ssh_client.exec_command(command_exclusive_jobs)
-    exclusive_job_settings = stdout.read().decode().strip().split("\n")
-
-    # Simplified logic to set theNodeCanAcceptMoreJobs
-    # Adjust this based on how you define exclusivity or constraints in your jobs
-    si.theNodeCanAcceptMoreJobs = "exclusive" not in exclusive_job_settings
+    # Get node status
+    stdin, stdout, stderr = ssh_client.exec_command("sinfo -N -h -o '%N %t'")
+    node_info = stdout.read().decode().strip().split()
+    if node_info:
+        si.nName = node_info[0]
+        si.nodeState = node_info[1]
+    # Check if the node can accept more jobs based on its state
+    si.theNodeCanAcceptMoreJobs = si.nodeState.lower() not in ["drain", "down"]
 
     # Get total RAM in GB
     stdin, stdout, stderr = ssh_client.exec_command(
@@ -135,14 +133,17 @@ def score_and_color_server(info):
 
 def display_server_info(server_info):
     data = []
+    headers = []
     for server, info in server_info.items():
         if isinstance(info, str):  # Error handling case
             data.append([server, "Error", info, "N/A"])
             continue
 
         name = get_server_short_name(server)
-
         results, headers, total_score = score_and_color_server(info)
+        if info.theNodeCanAcceptMoreJobs is False:
+            name += "(d)"
+            total_score -= 100
 
         # Insert the server name in the front
         results.insert(0, colorize(total_score, 1, -1, name)[0])
@@ -160,16 +161,16 @@ def display_server_info(server_info):
 def task(server):
     try:
         ssh = connectToCluster(server, False)
-        info = get_server_info(ssh)
-        return info
     except Exception as e:
-        return f"Error connecting to {server}: {e}"
+        print(f"Error connecting to {server}: {e}")
+
+    info = get_server_info(ssh)
+    return info
 
 
 def get_all_server_info(servers=Servers.servers):
     # A dictionary to hold server information, keyed by server
     server_info = {}
-
     # Use ThreadPoolExecutor for threading instead of multiprocessing Pool
     with ThreadPoolExecutor(max_workers=len(servers)) as executor:
         # Future to server mapping
@@ -179,11 +180,12 @@ def get_all_server_info(servers=Servers.servers):
             server = future_to_server[future]
             try:
                 info = future.result()  # Get the result from future
-                info.name = server
-                server_info[server] = info
             except Exception as exc:
                 print(f"{server} generated an exception: {exc}")
                 server_info[server] = f"Error: {exc}"
+                continue
+            info.sName = server
+            server_info[server] = info
 
     return server_info
 

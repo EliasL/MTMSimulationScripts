@@ -77,7 +77,7 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
 
         # Create the batch script on the server
         batch_script_path = outPath + job_name + ".sh"
-        c.run(f'echo "{batch_script}" > {batch_script_path}')
+        c.run(f'cat << "EOF" > {batch_script_path}\n{batch_script}\nEOF')
 
         # Submit the batch script to Slurm
         result = c.run(f"sbatch {batch_script_path}", hide=True, warn=True)

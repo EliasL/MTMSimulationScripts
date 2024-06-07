@@ -47,11 +47,13 @@ def generateCommands(configs, threads_per_seed=1):
     # If the number of servers with more free cores than nr_seeds is larger than
     # nr_max_batches, we simply put one batch on each of these servers
     # We alphabetically sort just so that the order is not random
-    for si in sorted(serverInfo.values(), key=lambda x: x.name):
-        if si.name not in commands:
-            commands[si.name] = []
+    for si in sorted(serverInfo.values(), key=lambda x: x.sName):
+        if si.theNodeCanAcceptMoreJobs is False:
+            continue
+        if si.sName not in commands:
+            commands[si.sName] = []
         while si.nrFreeCores > nr_seeds * threads_per_seed * (
-            1 + len(commands[si.name])
+            1 + len(commands[si.sName])
         ):
             # This creates a dictionary from keys and tuple values
             combi_dict = dict(zip(kwargs.keys(), kwargs_combi[kwarg_index]))
@@ -62,8 +64,8 @@ def generateCommands(configs, threads_per_seed=1):
                 + " ".join(f"{key}={value}" for key, value in combi_dict.items())
             )
 
-            full_command = f"{cmd} seed={seeds}"
-            commands[si.name].append(full_command)
+            full_command = f'{cmd} seed="{seeds}"'
+            commands[si.sName].append(full_command)
 
             if kwarg_index >= len(kwargs_combi):
                 for key, value in commands.items():
@@ -83,7 +85,7 @@ if __name__ == "__main__":
         startLoad=0.15,
         nrThreads=nrThreads,
         loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
-        maxLoad=1,
+        maxLoad=1.0,
         LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
         scenario="simpleShear",
     )

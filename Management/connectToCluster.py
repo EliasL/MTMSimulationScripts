@@ -33,7 +33,7 @@ class Servers:
     serversAndLocal = servers + [local_path_mac]
 
     # Default server
-    default = galois
+    default = pascal
 
 
 def uploadProject(cluster_address="Servers.default", verbose=False):

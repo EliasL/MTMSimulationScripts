@@ -73,11 +73,15 @@ class Process:
         command_line = stdout.read().decode("utf-8").strip()
         parts = command_line.split()
         self.command = command_line
-        # Assuming the second and third parts of the command are what you're interested in
-        config_path = parts[
-            -2
-        ]  # This seems to be new or unused; ensure it's handled as needed
-        self.output_path = parts[-1]  # Assuming the last part is the output path
+
+        # Extracting the paths based on the -c and -o flags
+        if "-c" in parts:
+            c_index = parts.index("-c") + 1
+            config_path = parts[c_index] if c_index < len(parts) else None
+        if "-o" in parts:
+            o_index = parts.index("-o") + 1
+            self.output_path = parts[o_index] if o_index < len(parts) else None
+
         self.get_config_file(config_path)
         self.name = os.path.splitext(os.path.basename(config_path))[0]
         self.get_progress()
@@ -283,7 +287,7 @@ class JobManager:
                 "Job ID",
                 "State",
                 "CPUs",
-                "Time Limit",
+                # "Time Limit",
                 "Time Left",
                 "Elapsed",
                 "Nodes",
@@ -295,7 +299,7 @@ class JobManager:
                     job["job_id"],
                     job["state"],
                     job["cpus"],
-                    job["time_limit"],
+                    # job["time_limit"],
                     job["time_left"],
                     job["elapsed"],
                     job["nodes"],
@@ -360,7 +364,6 @@ if __name__ == "__main__":
     script = "parameterExploring.py"
     server = Servers.dalembert
     server = Servers.condorcet
-    server = Servers.galois
     command = (
         f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
     )
@@ -374,5 +377,5 @@ if __name__ == "__main__":
         # server = find_server(minNrThreads)
         uploadProject(server)
 
-        jobId = queue_remote_job(server, command, "energy", minNrThreads)
+        # jobId = queue_remote_job(server, command, "energy", minNrThreads)
         # j.showProcesses()

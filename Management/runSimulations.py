@@ -2,6 +2,7 @@ from simulationManager import SimulationManager
 from configGenerator import ConfigGenerator, SimulationConfig
 from multiprocessing import Pool
 import sys
+import ast
 
 
 def task(config):
@@ -18,18 +19,14 @@ def parse_args(args):
     kwargs = {}
     for arg in args[1:]:  # Exclude the script name itself
         key, value = arg.split("=")
-        # Check if the value starts with '[' and ends with ']'
-        if value.startswith("[") and value.endswith("]"):
-            # Strip the brackets and split by comma
-            kwargs[key] = value[1:-1].split(",")
-        else:
-            kwargs[key] = value
+        kwargs[key] = ast.literal_eval(value)
+
     return kwargs
 
 
 if __name__ == "__main__":
     kwargs = parse_args(sys.argv)
-    (configs,) = ConfigGenerator.generate(**kwargs)
+    (configs, labels) = ConfigGenerator.generate(**kwargs)
 
     # Build and test (Fail early)
     manager = SimulationManager(SimulationConfig())
