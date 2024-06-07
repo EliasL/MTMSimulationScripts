@@ -9,8 +9,8 @@ from datetime import timedelta
 import re
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from runOnCluster import queue_remote_job, find_outpath_on_server
-from clusterStatus import find_server, Servers, get_server_short_name
+from runOnCluster import queue_remote_job
+from clusterStatus import Servers, get_server_short_name
 from connectToCluster import uploadProject, connectToCluster
 from configGenerator import SimulationConfig
 from dataManager import get_directory_size
@@ -125,7 +125,7 @@ class Process:
                     last_line = lines[-2]
 
                 last_line_values = last_line.split(",")
-                load = last_line_values[header_indices["Load"]]
+                # load = last_line_values[header_indices["Load"]]
                 runTime = last_line_values[header_indices["Run time"]]
                 timeRemaining = last_line_values[header_indices["Est time remaining"]]
 
@@ -144,7 +144,7 @@ class JobManager:
 
     def find_processes_on_server(self, server):
         ssh = connectToCluster(server, False)  # Single SSH connection
-        command = f"ps -eo pid,etime,cmd | grep [M]TS2D | grep -v '/bin/sh'"
+        command = "ps -eo pid,etime,cmd | grep [M]TS2D | grep -v '/bin/sh'"
         stdin, stdout, stderr = ssh.exec_command(command)
         stdout_lines = stdout.read().decode("utf-8").strip().split("\n")
 
@@ -318,7 +318,7 @@ class JobManager:
         """Cancel all Slurm jobs listed in self.slurmJobs."""
         for server, job_id in self.slurmJobs:
             print(f"Are you sure you want to cancle job {job_id} on {server}?:")
-            if input(f"yes/no : ") != "yes":
+            if input("yes/no: ") != "yes":
                 continue
             else:
                 self.cancel_job_on_server(server, job_id)

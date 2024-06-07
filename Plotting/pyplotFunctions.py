@@ -4,8 +4,7 @@ import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
 from vtk import vtkXMLUnstructuredGridReader
-from vtk.util.numpy_support import vtk_to_numpy
-from concurrent.futures import ProcessPoolExecutor
+from vtk.util.numpy_support import vtk_to_numpy  # type: ignore
 from tqdm import tqdm
 import time
 import random
@@ -251,9 +250,7 @@ def plot_mesh(args):
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
             triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
-            contour = ax.tripcolor(
-                triang, facecolors=energy_field, norm=norm, cmap=custom_cmap
-            )
+            ax.tripcolor(triang, facecolors=energy_field, norm=norm, cmap=custom_cmap)
 
     draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
     path = f"{framePath}/mesh_frame_{frame_index:04d}.png"

@@ -5,6 +5,7 @@ from tabulate import tabulate
 
 class ServerInfo:
     def __init__(self):
+        self.name = ""
         self.nrTotalCores = 0
         self.nrUsedCores = 0
         self.nrFreeCores = 0
@@ -178,6 +179,7 @@ def get_all_server_info(servers=Servers.servers):
             server = future_to_server[future]
             try:
                 info = future.result()  # Get the result from future
+                info.name = server
                 server_info[server] = info
             except Exception as exc:
                 print(f"{server} generated an exception: {exc}")

@@ -1,4 +1,5 @@
 import xml.etree.ElementTree as ET
+import os
 
 
 def parse_pvd_file(path, pvd_file):
@@ -7,7 +8,7 @@ def parse_pvd_file(path, pvd_file):
     vtu_files = []
 
     for dataset in root.iter("DataSet"):
-        vtu_files.append(path + dataset.attrib["file"])
+        vtu_files.append(os.path.join(path, dataset.attrib["file"]))
 
     return vtu_files
 

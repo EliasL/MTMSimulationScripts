@@ -1,4 +1,4 @@
-import itertools
+from itertools import product
 import os
 
 
@@ -9,9 +9,6 @@ class SimulationConfig:
     """
 
     def __init__(self, configPath=None, **kwargs):
-        if configPath is not None:
-            self.parse(configPath)
-
         # Simulation Settings
         self.rows = 10
         self.cols = 10
@@ -54,9 +51,17 @@ class SimulationConfig:
         self.plasticityEventThreshold = 0.1
         self.showProgress = 1
 
+        if configPath is not None:
+            self.parse(configPath)
+
         # Update with any provided keyword arguments
         for key, value in kwargs.items():
             if hasattr(self, key):
+                current_value = getattr(self, key)
+                if not isinstance(value, type(current_value)):
+                    raise TypeError(
+                        f"{key} should be given a {type(current_value)} but was given a {type(value)}."
+                    )
                 setattr(self, key, value)
             elif key != "NONAME":
                 raise (Warning(f"Unkown keyword: {key}"))
@@ -135,7 +140,7 @@ class SimulationConfig:
                 if len(parts) != 2:
                     continue  # Skip lines that do not match the expected format
 
-                attr, value = parts[0].strip(), parts[1].split("#")[0].strip()
+                attr, value = parts[0].strip(), parts[1].strip()
                 # Convert value to the correct type based on the attribute
                 if hasattr(self, attr):
                     current_value = getattr(self, attr)
@@ -152,53 +157,99 @@ class ConfigGenerator:
     @staticmethod
     def generate(**kwargs):
         """
-        Generate a list of SimulationConfig objects over multiple arguments.
+        Generate a list of SimulationConfig objects with combinations prioritizing the 'seed' parameter.
 
-        Each keyword argument should be a pair where the key is the argument name
-        and the value is an iterable of values for that argument.
+        This method first ensures that combinations involving the 'seed' parameter are generated such that
+        the 'seed' values are the first to iterate over. It helps in generating configurations where the 'seed'
+        changes prior to other parameters, useful for setups where seed initialization is critical.
 
-        :param kwargs: Dictionary of argument names to iterables of possible values.
-        :return: A list of SimulationConfig objects with all combinations of argument values.
+        Parameters:
+            kwargs: A dictionary of argument names to iterables of possible values, where 'seed' is treated
+                    as a special parameter to be prioritized in combinations.
 
-        Example:
-        configurations = ConfigGenerator.generate(nrThreads=[1, 2, 4], seed=[42, 43], scenario='simpleShear')
-        for config in configurations:
-            print(config.generate_name())
+        Returns:
+            A tuple containing a list of SimulationConfig objects and a list of labels describing the configurations
+            with only varying parameters.
         """
-        # Prepare the kwargs to ensure that each is a list (but keep strings intact)
+        # Separate 'seed' from other parameters if it's present
+        seed_values = kwargs.pop(
+            "seed", [None]
+        )  # Default to [None] if 'seed' is not provided
+
+        # Prepare the remaining arguments, ensuring they are iterable
         processed_kwargs = {}
-        varying_keys = {}
         for key, value in kwargs.items():
             if isinstance(value, str) or not isinstance(value, list):
-                # Handle strings and non-list non-string values as a single-item list
-                processed_kwargs[key] = [value]
+                processed_kwargs[key] = [value]  # Treat single values as a list
             else:
-                # Use lists as is and mark varying keys
                 processed_kwargs[key] = value
-                if len(value) > 1:
-                    varying_keys[key] = value
 
-        # Extract argument names and corresponding lists of values
-        keys = processed_kwargs.keys()
-        values_product = itertools.product(*processed_kwargs.values())
+        # Generate all combinations of non-seed parameters
+        non_seed_combinations = list(product(*processed_kwargs.values()))
 
-        # Create a list of SimulationConfig objects and labels for each combination of argument values
+        # Generate full combinations, prioritizing seeds
+        combined = [
+            (seed,) + combo for combo in non_seed_combinations for seed in seed_values
+        ]
+
+        # Create SimulationConfig instances and generate labels focusing on varying parameters
         configs = []
         labels = []
-        for values in values_product:
-            params = dict(zip(keys, values))
+        for values in combined:
+            seed = values[0]
+            non_seed_params = dict(zip(processed_kwargs.keys(), values[1:]))
+            params = {"seed": seed, **non_seed_params}
             config = SimulationConfig(**params)
-            # Create label containing only varying parameters
-            label = ", ".join(f"{k}={params[k]}" for k in varying_keys if k in params)
+
+            # Determine which parameters are varying to include in the label
+            varying_params = {
+                k: v for k, v in non_seed_params.items() if len(processed_kwargs[k]) > 1
+            }
+            if len(seed_values) > 1:  # Include 'seed' in label only if it varies
+                varying_params["seed"] = seed
+            label = ", ".join(f"{k}={v}" for k, v in varying_params.items())
+
             configs.append(config)
             labels.append(label)
 
-        # We want to sort the configs such that the seeds change every item:
-        # We don't want s42t1, s42t2, s42t4, s43t1, s43t2, s43t4
-        # We want s42t1, s43t1, s42t2, ...
-        # TODO
-
         return configs, labels
+
+    @staticmethod
+    def get_kwargs(configs):
+        """
+        A reverse of the generate method
+        """
+
+        # Create a default instance to compare against
+        default_config = SimulationConfig()
+
+        # Initialize dictionary to hold parameter values
+        param_values = {}
+
+        # Populate the dictionary with parameter values from each config
+        for config in configs:
+            for key, value in config.__dict__.items():
+                if key == "name":
+                    continue
+                if key not in param_values:
+                    param_values[key] = set()
+                param_values[key].add(value)
+
+        # Convert sets to lists, remove parameters that match the default when there's only one value
+        kwargs = {}
+        for key, values in param_values.items():
+            # Convert set to list for easier manipulation
+            value_list = list(values)
+
+            if len(value_list) == 1:
+                # If only one value and it is different from the default, save it directly
+                if value_list[0] != getattr(default_config, key, None):
+                    kwargs[key] = value_list[0]
+            else:
+                # If more than one value, save it as a list
+                kwargs[key] = value_list
+
+        return kwargs
 
     @staticmethod
     def generate_over_(argument_name, values, **kwargs):

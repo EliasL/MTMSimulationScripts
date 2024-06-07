@@ -6,7 +6,6 @@ import matplotlib.lines as mlines
 import pandas as pd
 import numpy as np
 import re
-from pathlib import Path
 import mplcursors
 from datetime import timedelta
 import powerlaw
@@ -169,7 +168,7 @@ def makePlot(
         y_name = Y
 
     # if we are not given a list, we make it into a list
-    if type(csv_file_paths) == type(""):
+    if isinstance(csv_file_paths, str):
         csv_file_paths = [csv_file_paths]
 
     fig, ax = plt.subplots()
@@ -178,6 +177,10 @@ def makePlot(
     for i, csv_file_path in enumerate(csv_file_paths):
         if X is None:
             break
+        """
+        /Volumes/data/MTS2D_output/simpleShear,s20x20l0.15,1e-05,1.0PBCt4minimizerLBFGSLBFGSEpsg1e-06s0/macroData.csv
+        /Volumes/data/MTS2D_output/simpleShear,s20x20l0.15,1e-05,1PBCt4minimizerLBFGSLBFGSEpsg1e-06s0/macroData.csv
+        """
         if isinstance(Y, str):
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
             df = df[
@@ -269,7 +272,7 @@ def makePlot(
         }
         fig, ax, line = plotPowerLaw(data, **kwargs)
 
-    cursor = mplcursors.cursor(lines)
+    cursor = mplcursors.cursor(lines)  # noqa: F841
     # cursor.connect(
     #   "add", lambda sel: sel.annotation.set_text(labels[sel.index]))
 
@@ -290,7 +293,7 @@ def makePlot(
     ]
 
     # Set the legend with the filtered handles and labels
-    if legend == True:
+    if legend:
         ax.legend(line_handles, line_labels, loc=("best"))
     if isinstance(legend, list):
         custom_legend = [
@@ -376,9 +379,9 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
         name,
         X="Load",
         Y="Avg energy",
-        x_name=f"Magnitude of energy drops",
+        x_name="Magnitude of energy drops",
         y_name="Frequency",
-        title=f"Powerlaw",
+        title="Powerlaw",
         plot_raw=False,
         plot_power_law=True,
         plot_average=False,

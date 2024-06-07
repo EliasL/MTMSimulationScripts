@@ -2,7 +2,6 @@ import os
 import subprocess
 from connectToCluster import Servers
 from getpass import getpass
-import subprocess
 import pexpect
 
 
@@ -77,8 +76,8 @@ def main():
     for server in Servers.servers:
         try:
             change_password(server, username, password, new_password)
-        except:
-            print(f"Failed on {server}")
+        except Exception as e:
+            print(f"Failed on {server}: {e}")
             continue
 
 

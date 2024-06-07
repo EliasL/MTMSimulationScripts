@@ -1,10 +1,7 @@
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
-from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import os
-
-from settings import settings
 
 
 def C2PoincareDisk(C):
@@ -33,7 +30,6 @@ def drawC(ax, C, scale):
 
 def drawFundamentalDomain(ax, scale):
     nr = 1000
-    one = np.array([1] * nr)
     zero = np.array([0] * nr)
     # VERTICAL LINE
     t = np.sinh(np.linspace(np.arcsinh(1), np.arcsinh(2 / np.sqrt(3)), nr))
@@ -206,7 +202,7 @@ def make3DEnergyField(csv_file):
 
     # Set labels
     ax.set_xlabel("$P$(Length ratio)")
-    ax.set_ylabel(f"← Large angle $P$(Length ratio and $θ - π/2$) Small angle →")
+    ax.set_ylabel("← Large angle $P$(Length ratio and $θ - π/2$) Small angle →")
     ax.set_zlabel("Energy")
     ax.set_title("Energy Surface Plot")
 

@@ -64,16 +64,16 @@ def framesToGif(frames, outFile, fps):
 
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
 def makeAnimations(path, macro_data=None, pvd_file=None):
-    framePath = path + settings["FRAMEFOLDERPATH"]
+    framePath = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macro_data is None:
-        macro_data = path + settings["MACRODATANAME"] + ".csv"
+        macro_data = os.path.join(path, settings["MACRODATANAME"] + ".csv")
     if pvd_file is None:
-        pvd_file = path + settings["COLLECTIONNAME"] + ".pvd"
+        pvd_file = os.path.join(path, settings["COLLECTIONNAME"] + ".pvd")
 
     if not os.path.exists(pvd_file):
         print(f"No file found at: {pvd_file}")
         print("Creating pvd file...")
-        create_collection(path + settings["DATAFOLDERPATH"])
+        create_collection(os.path.join(path, settings["DATAFOLDERPATH"]))
 
     vtu_files = parse_pvd_file(path, pvd_file)
 
@@ -103,14 +103,13 @@ def makeAnimations(path, macro_data=None, pvd_file=None):
         images = make_images(function, framePath, vtu_files, macro_data)
         outPath = path + path.split("/")[-2] + f"_{fileName}_video.mp4"
         framesToMp4(images, outPath, fps)
-        subprocess.run(
-            [
-                "gifski",
-                outPath,
-                "-o",
-                f"{path + path.split('/')[-2]}_{fileName}_video.gif",
-            ]
-        )
+
+        command = [
+            "gifski",
+            "-o",
+            f"{path + path.split('/')[-2]}_{fileName}_video.gif",
+        ] + images  # Append the list of image paths to the command
+        subprocess.run(command)
 
 
 if __name__ == "__main__":

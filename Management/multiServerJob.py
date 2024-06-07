@@ -1,40 +1,99 @@
-from configGenerator import SimulationConfig, ConfigGenerator
+from itertools import product
+from configGenerator import ConfigGenerator
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from runOnCluster import queue_remote_job, find_outpath_on_server
-from clusterStatus import find_server, Servers, get_server_short_name
-from connectToCluster import uploadProject, connectToCluster
-from configGenerator import SimulationConfig
-from dataManager import get_directory_size
+from runOnCluster import queue_remote_job
+from clusterStatus import get_all_server_info, get_server_short_name
+from connectToCluster import uploadProject
 from jobManager import JobManager
 
-"""
-The idea here is that we will have a huge number of configuration files, and we 
-want to distribute them among all the available servers.
 
-We are going to send the arguments to the generate function from ConfigGenerator
-to the runSimulations script, and this scipt will generate all the configurations
-that will run on that server
-"""
+def generateCommands(configs, threads_per_seed=1):
+    """
+    The idea here is that we will have a huge number of configuration files, and we
+    want to distribute them among all the available servers.
 
+    We are going to send the arguments to the generate function from ConfigGenerator
+    to the runSimulations script, and this scipt will generate all the configurations
+    that will run on that server
+    """
+    # the base command
+    base_command = "python3 /home/elundheim/simulation/SimulationScripts/Management/runSimulations.py"
 
-def generateCommand(configs):
-    pass
+    # get the kwargs used to generate the configs
+    kwargs = ConfigGenerator.get_kwargs(configs)
+
+    # Find the number of seeds and the number of configs
+    nr_seeds = len(set(config.seed for config in configs))
+
+    seeds = kwargs["seed"]
+    del kwargs["seed"]
+    # Prepare the remaining arguments, ensuring they are iterable
+    processed_kwargs = {}
+    for key, value in kwargs.items():
+        if isinstance(value, str) or not isinstance(value, list):
+            processed_kwargs[key] = [value]  # Treat single values as a list
+        else:
+            processed_kwargs[key] = value
+
+    # Generate all combinations of non-seed parameters
+    kwargs_combi = list(product(*processed_kwargs.values()))
+    kwarg_index = 0  # Used to index kwargs_combi
+
+    # First we want to find the number of available cores on each server
+    # serverInfo[0].nrFreeCores
+    serverInfo = get_all_server_info()
+
+    commands = {}
+    # If the number of servers with more free cores than nr_seeds is larger than
+    # nr_max_batches, we simply put one batch on each of these servers
+    # We alphabetically sort just so that the order is not random
+    for si in sorted(serverInfo.values(), key=lambda x: x.name):
+        if si.name not in commands:
+            commands[si.name] = []
+        while si.nrFreeCores > nr_seeds * threads_per_seed * (
+            1 + len(commands[si.name])
+        ):
+            # This creates a dictionary from keys and tuple values
+            combi_dict = dict(zip(kwargs.keys(), kwargs_combi[kwarg_index]))
+            kwarg_index += 1
+            cmd = (
+                base_command
+                + " "
+                + " ".join(f"{key}={value}" for key, value in combi_dict.items())
+            )
+
+            full_command = f"{cmd} seed={seeds}"
+            commands[si.name].append(full_command)
+
+            if kwarg_index >= len(kwargs_combi):
+                for key, value in commands.items():
+                    pass
+                # print("All commands wiritten")
+                return commands
+    raise RuntimeError("Not enough cores to run simulations!")
 
 
 if __name__ == "__main__":
-    script = "runSimulations.py"
-    server = Servers.dalembert
-    server = Servers.condorcet
-    server = Servers.galois
-    command = (
-        f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
+    nrThreads = 1
+    nrSeeds = 40
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        rows=60,
+        cols=60,
+        startLoad=0.15,
+        nrThreads=nrThreads,
+        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        maxLoad=1,
+        LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
+        scenario="simpleShear",
     )
+    commands = generateCommands(configs)
 
     j = JobManager()
-    # j.cancel_job_on_server(server, 558366)
-    # server = find_server(minNrThreads)
-    uploadProject(server)
-
-    jobId = queue_remote_job(server, command, "energy", 0)
-    # j.showProcesses()
+    for server, commands in commands.items():
+        uploadProject(server)
+        for command in commands:
+            jobId = queue_remote_job(server, command, "bigJ", nrThreads * nrSeeds)
+            pass
+        print(f"Started {len(commands)} jobs on {get_server_short_name(server)}")
+    j.showProcesses()

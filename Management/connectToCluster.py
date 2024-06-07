@@ -36,17 +36,20 @@ class Servers:
     default = galois
 
 
-def uploadProject(cluster_address="Servers.default"):
+def uploadProject(cluster_address="Servers.default", verbose=False):
     try:
-        # Ensure the remote directory structure exists
         ssh_command = [
             "ssh",
             f"elundheim@{cluster_address}",
             "mkdir -p /home/elundheim/simulation /home/elundheim/simulation/MTS2D /home/elundheim/simulation/SimulationScripts",
         ]
-        subprocess.run(ssh_command, check=True)
 
-        # Define the rsync command for MTS2D
+        output_options = None if verbose else subprocess.DEVNULL
+
+        subprocess.run(
+            ssh_command, check=True, stdout=output_options, stderr=output_options
+        )
+
         rsync_command_MTS2D = [
             "rsync",
             "-avz",
@@ -67,7 +70,6 @@ def uploadProject(cluster_address="Servers.default"):
             f"elundheim@{cluster_address}:/home/elundheim/simulation/MTS2D/",
         ]
 
-        # Define the rsync command for SimulationScripts
         rsync_command_SS = [
             "rsync",
             "-avz",
@@ -79,10 +81,18 @@ def uploadProject(cluster_address="Servers.default"):
             f"elundheim@{cluster_address}:/home/elundheim/simulation/SimulationScripts/",
         ]
 
-        # Run the rsync commands
-        subprocess.run(rsync_command_MTS2D, check=True)
-        subprocess.run(rsync_command_SS, check=True)
-        print("Project folders successfully uploaded.")
+        subprocess.run(
+            rsync_command_MTS2D,
+            check=True,
+            stdout=output_options,
+            stderr=output_options,
+        )
+        subprocess.run(
+            rsync_command_SS, check=True, stdout=output_options, stderr=output_options
+        )
+
+        if verbose:
+            print("Project folders successfully uploaded.")
 
     except subprocess.CalledProcessError as e:
         raise Exception(f"An error occurred while uploading the project: {e}")

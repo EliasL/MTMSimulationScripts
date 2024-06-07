@@ -1,11 +1,7 @@
 from simulationManager import SimulationManager
 from configGenerator import ConfigGenerator, SimulationConfig
 from multiprocessing import Pool
-from datetime import time
-import numpy as np
 
-import sys
-from pathlib import Path
 
 # Add Management to sys.path (used to import files)
 # sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
@@ -54,14 +50,14 @@ def runSims(configs):
             raise (Exception(e))
 
     with Pool(processes=len(configs)) as pool:
-        results = pool.map(task, configs)
+        pool.map(task, configs)
 
 
 def plotSims(configs, name, **kwargs):
     # Now we can import from Management
     from remotePlotting import get_csv_files
 
-    from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot
+    from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot  # noqa: F401
 
     paths = get_csv_files(configs, useOldFiles=True)
     print("Plotting...")
@@ -102,6 +98,7 @@ def plotOldStuff():
 
 def plotLessOldStuff():
     configs, labels = ConfigGenerator.generate(
+        seed=[4, 5, 1, 2],
         rows=100,
         cols=100,
         startLoad=0.15,

@@ -67,7 +67,8 @@ class SimulationManager:
             dump = None
             try:
                 dump = self.findDumpFile(0)
-            except:
+            except Exception as e:
+                print(e)
                 pass
             if dump is not None:
                 # We resume instead of starting normally
@@ -147,9 +148,12 @@ class SimulationManager:
         try:
             return files[index]
         except IndexError:
-            raise IndexError(
-                f"No file at index {index}. Only {len(files)} files available in {dumpFolderPath}."
-            )
+            if len(files) == 0:
+                raise Warning("No dumps found.")
+            else:
+                raise IndexError(
+                    f"No file at index {index}. Only {len(files)} files available in {dumpFolderPath}."
+                )
 
     def clean(self):
         # Print a message to indicate the cleaning process has started

@@ -108,7 +108,6 @@ class DataManager:
 
     def printData(self):
         table_data = []
-        last_server = None
         for server, folders_and_sizes in self.data.items():
             if folders_and_sizes:  # If there are folders and sizes
                 grouped_folders = self.parse_and_group_seeds(folders_and_sizes)
@@ -396,7 +395,7 @@ def sum_folder_sizes(str_list):
         total_bytes += convert_to_bytes(numerator_value, numerator_unit)
 
     # Assuming denominator is always the same for all items, use the last one to format the result
-    denominator_value, denominator_unit = (
+    _, denominator_unit = (
         float(denominator.split(" ")[0][:-2]),
         denominator.split(" ")[0][-2:],
     )

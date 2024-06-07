@@ -5,7 +5,6 @@ import sympy as sp
 from fire import optimize_fire2
 from collections import Counter
 import os
-import matplotlib.pyplot as plt
 
 # Set larger sizes for all elements
 scale = 2
@@ -137,7 +136,7 @@ def plot(ax, path, **kwargs):
 # Plotting functions
 def plot_results(X, Y, Z, minima, FIRE_paths, LBFGS_paths):
     fig, ax = plt.subplots(1, 1, figsize=(12, 12))
-    contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")
+    contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
     # ax.scatter(minima[:, 0], minima[:, 1], c='red', marker='x')
 
     # Initialize a set to keep track of unique labels

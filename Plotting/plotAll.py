@@ -1,6 +1,6 @@
 from makeAnimations import makeAnimations
-from makePlots import makeEnergyPlot, makeItterationsPlot
-from makeEnergyField import makeEnergyField
+from makePlots import makeEnergyPlot, makeItterationsPlot  # noqa: F401
+from makeEnergyField import makeEnergyField  # noqa: F401
 from settings import settings
 import sys
 import os
@@ -14,7 +14,11 @@ from configGenerator import SimulationConfig
 
 
 def plotAll(configFile, dataPath, noVideo=False):
-    conf = SimulationConfig(os.path.join(dataPath, configFile))
+    if configFile[0] != "/":
+        # This means that the config file is relative
+        configFile = os.path.join(dataPath, configFile)
+
+    conf = SimulationConfig(configFile)
     subfolderName = conf.name
 
     macroData = f"{settings['MACRODATANAME']}.csv"

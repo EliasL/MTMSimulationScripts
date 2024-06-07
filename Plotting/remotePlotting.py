@@ -8,9 +8,7 @@ import threading
 
 from makePlots import (
     makeEnergyPlot,
-    makeItterationsPlot,
     makePowerLawPlot,
-    makeTimePlot,
 )
 
 # Add Management to sys.path (used to import files)
@@ -221,7 +219,7 @@ def get_csv_files(configs, useOldFiles=False):
             except Exception as exc:
                 print(f"\n{server} generated an exception: {exc}")
                 print("Trying to use old files... ")
-                if useOldFiles == False:
+                if useOldFiles is False:
                     return get_csv_files(configs, useOldFiles=True)
     print("")  # New line from progress indicator
 

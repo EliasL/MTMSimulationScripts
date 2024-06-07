@@ -26,7 +26,7 @@ def find_outpath_on_server(server_hostname):
     with Connection(host=server_hostname, user=SERVER_USER) as c:
         # Execute the remote command (your Python script)
         result = c.run(
-            f"python3 -u /home/elundheim/simulation/SimulationScripts/Management/simulationManager.py",
+            "python3 -u /home/elundheim/simulation/SimulationScripts/Management/simulationManager.py",
             hide=True,
             warn=True,
         )
