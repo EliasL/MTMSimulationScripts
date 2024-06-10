@@ -7,11 +7,11 @@ import time
 import random
 from datetime import timedelta
 import re
+import threading
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from runOnCluster import queue_remote_job
 from clusterStatus import Servers, get_server_short_name
-from connectToCluster import uploadProject, connectToCluster
+from connectToCluster import uploadProject, connectToCluster  # noqa: F401
 from configGenerator import SimulationConfig
 from dataManager import get_directory_size
 
@@ -43,6 +43,20 @@ def calculate_percentage_completed(runtime_str, estimated_remaining_str):
     return percentage_completed
 
 
+# Shared variables
+nr_processes_found = 0
+nr_jobs_found = 0
+lock = threading.Lock()  # Create a lock for thread-safe operations
+
+
+def update_progress(jobs=False, processes=False):
+    global completed_servers, nr_files
+    if jobs:
+        print(f"\r{nr_jobs_found} jobs found", end="")
+    if processes:
+        print(f"\r{nr_processes_found} processes found", end="")
+
+
 class Process:
     """
     NB This does not find slurm jobs! It checks the processes running on the
@@ -68,6 +82,11 @@ class Process:
 
         self.getInfoFromProcess()
 
+        with lock:
+            global nr_processes_found
+            nr_processes_found += 1
+            update_progress(processes=True)
+
     def getInfoFromProcess(self):
         stdin, stdout, stderr = self.ssh.exec_command(f"ps -p {self.p_id} -o args=")
         command_line = stdout.read().decode("utf-8").strip()
@@ -78,14 +97,18 @@ class Process:
         if "-c" in parts:
             c_index = parts.index("-c") + 1
             config_path = parts[c_index] if c_index < len(parts) else None
+            self.get_config_file(config_path)
+            self.name = os.path.splitext(os.path.basename(config_path))[0]
+        else:
+            print(parts)
         if "-o" in parts:
             o_index = parts.index("-o") + 1
             self.output_path = parts[o_index] if o_index < len(parts) else None
 
-        self.get_config_file(config_path)
-        self.name = os.path.splitext(os.path.basename(config_path))[0]
-        self.get_progress()
-        self.dataSize = get_directory_size(self.ssh, self.output_path + self.name)
+            self.get_progress()
+            self.dataSize = get_directory_size(self.ssh, self.output_path + self.name)
+        else:
+            print(parts)
 
     def get_config_file(self, config_path):
         # Download the config file using SFTP
@@ -183,6 +206,7 @@ class JobManager:
         with ThreadPoolExecutor(max_workers=7) as executor:
             future_jobs = [executor.submit(fetch_job, line) for line in stdout_lines]
             local_jobs = [future.result() for future in future_jobs]
+            print("")
 
         ssh.close()  # Ensure the connection is closed after use
         return local_jobs
@@ -210,6 +234,11 @@ class JobManager:
                     "node_list": fields[7],
                 }
                 slurm_jobs.append(job_details)
+
+        with lock:
+            global nr_jobs_found
+            nr_jobs_found += 1
+            update_progress(jobs=True)
         return slurm_jobs
 
     # Generalized method for executing a command on all servers in parallel
@@ -277,6 +306,7 @@ class JobManager:
 
     def showSlurmJobs(self):
         self.slurmJobs = self.execute_command_on_servers(self.find_slurm_jobs_on_server)
+        print("")
         if not self.slurmJobs:
             print("No jobs found")
         else:
@@ -375,7 +405,7 @@ if __name__ == "__main__":
         j = JobManager()
         # j.cancel_job_on_server(server, 558366)
         # server = find_server(minNrThreads)
-        uploadProject(server)
+        # uploadProject(server)
 
         # jobId = queue_remote_job(server, command, "energy", minNrThreads)
-        # j.showProcesses()
+        j.showProcesses()

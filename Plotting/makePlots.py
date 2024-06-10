@@ -93,9 +93,7 @@ def plotPowerLaw(
     y_values_series,
     fig=None,
     ax=None,
-    include_label=False,
-    indicate_last_point=True,
-    **kwargs,
+    label="",
 ):
     if ax is None:
         fig, ax = plt.subplots()
@@ -116,16 +114,22 @@ def plotPowerLaw(
     bins = np.logspace(np.log10(xmin), np.log10(xmax), 12)
     hist, bin_edges = np.histogram(combined_diffs, bins=bins, density=True)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-    ax.plot(bin_centers, hist, linestyle="None", marker=".", markersize=20, color="b")
 
-    # Plot the fitted power law
+    # Plot the histogram and get the line object
+    (line1,) = ax.plot(bin_centers, hist, linestyle="None", marker=".", markersize=20)
+
+    # Extract the color from the first plot
+    color = line1.get_color()
+
+    # Use the same color for the second plot
     ax.plot(
         bin_centers,
         fit.truncated_power_law.pdf(bin_centers),
         "--",
-        color="r",
-        label=rf"Truncated Power law PDF $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
+        label=rf"{label} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
+        color=color,
     )
+    print(f"{label}: {fit.truncated_power_law.alpha}")
 
     # Set axes to logarithmic
     ax.set_xscale("log")
@@ -144,6 +148,7 @@ def makePlot(
     title=None,
     plot_average=False,
     xLims=(-np.inf, np.inf),
+    yLims=(-np.inf, np.inf),
     indicateLastPoint=False,
     plot_roll_average=False,
     plot_raw=True,
@@ -183,18 +188,16 @@ def makePlot(
         """
         if isinstance(Y, str):
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
-            df = df[
-                (df[X] >= xLims[0]) & (df[X] <= xLims[1])
-            ]  # Truncate data based on xLims
-
-            data.append(df[Y].values)
         else:
             df = pd.read_csv(csv_file_path, usecols=[X] + Y)
-            df = df[
-                (df[X] >= xLims[0]) & (df[X] <= xLims[1])
-            ]  # Truncate data based on xLims
             if plot_average:
                 raise Warning("Cannot plot average with multiple Y columns")
+
+        # Truncate data based on Lims
+        df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
+        df = df[(df[Y] >= yLims[0]) & (df[Y] <= yLims[1])]
+
+        data.append(df[Y].values)
 
         kwargs = {"fig": fig, "ax": ax, "indicateLastPoint": indicateLastPoint}
 
@@ -318,6 +321,45 @@ def makePlot(
         ax.set_title(f"{y_name} over {x_name}")
     else:
         ax.set_title(title)
+    ax.autoscale_view()
+    figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
+    fig.savefig(figPath)
+    print(f'Plot saved at: "{figPath}"')
+    if show:
+        plt.show()
+
+
+def makeLogPlotComparison(
+    grouped_csv_file_paths, name, xLims=[-np.inf, np.inf], show=True, **kwargs
+):
+    X = "Load"
+    Y = "Avg energy"
+    x_name = "Magnitude of energy drops"
+    y_name = "Frequency"
+    title = "60x60, 0.15-1, PBC, LBFGS, t1, seeds40"
+
+    fig, ax = plt.subplots()
+
+    for i, csv_file_paths in enumerate(grouped_csv_file_paths):
+        data = []
+        for j, csv_file_path in enumerate(csv_file_paths):
+            df = pd.read_csv(csv_file_path, usecols=[X, Y])
+            df = df[
+                (df[X] >= xLims[0]) & (df[X] <= xLims[1])
+            ]  # Truncate data based on xLims
+            data.append(df[Y].values)
+        log_kwargs = {
+            "fig": fig,
+            "ax": ax,
+            "label": kwargs["labels"][i][j],
+        }
+        fig, ax, line = plotPowerLaw(data, **log_kwargs)
+
+    # Set the legend with the filtered handles and labels
+    ax.legend(loc=("best"))
+    ax.set_xlabel(x_name)
+    ax.set_ylabel(y_name)
+    ax.set_title(title)
     ax.autoscale_view()
     figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
     fig.savefig(figPath)

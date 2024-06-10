@@ -25,7 +25,7 @@ class SimulationConfig:
         self.maxLoad = 1.0
 
         # Minimizer settings
-        self.minimizer = "FIRE"  # FIRE / LBFGS
+        self.minimizer = "LBFGS"  # FIRE / LBFGS
         # - LBFGS
         self.LBFGSNrCorrections = 10
         self.LBFGSScale = 1.0
@@ -57,6 +57,7 @@ class SimulationConfig:
         # Update with any provided keyword arguments
         for key, value in kwargs.items():
             if hasattr(self, key):
+                # Check if the given value is the correct type
                 current_value = getattr(self, key)
                 if not isinstance(value, type(current_value)):
                     raise TypeError(
@@ -155,7 +156,7 @@ class SimulationConfig:
 
 class ConfigGenerator:
     @staticmethod
-    def generate(**kwargs):
+    def generate(group_by_seeds=False, **kwargs):
         """
         Generate a list of SimulationConfig objects with combinations prioritizing the 'seed' parameter.
 
@@ -172,7 +173,7 @@ class ConfigGenerator:
             with only varying parameters.
         """
         # Separate 'seed' from other parameters if it's present
-        seed_values = kwargs.pop(
+        seeds = kwargs.pop(
             "seed", [None]
         )  # Default to [None] if 'seed' is not provided
 
@@ -189,7 +190,7 @@ class ConfigGenerator:
 
         # Generate full combinations, prioritizing seeds
         combined = [
-            (seed,) + combo for combo in non_seed_combinations for seed in seed_values
+            (seed,) + combo for combo in non_seed_combinations for seed in seeds
         ]
 
         # Create SimulationConfig instances and generate labels focusing on varying parameters
@@ -205,14 +206,33 @@ class ConfigGenerator:
             varying_params = {
                 k: v for k, v in non_seed_params.items() if len(processed_kwargs[k]) > 1
             }
-            if len(seed_values) > 1:  # Include 'seed' in label only if it varies
+            if len(seeds) > 1:  # Include 'seed' in label only if it varies
                 varying_params["seed"] = seed
             label = ", ".join(f"{k}={v}" for k, v in varying_params.items())
 
             configs.append(config)
             labels.append(label)
 
-        return configs, labels
+        if group_by_seeds:
+            grouped_configs = []
+            grouped_labels = []
+            num_seeds = len(seeds)
+            nr_groups = (
+                len(configs) // num_seeds
+            )  # Ensure integer division for grouping
+
+            # Iterate over the number of seed groups, not over seeds or configs directly
+            for index in range(nr_groups):
+                # Calculate the slice indices for both configs and labels
+                start = index * num_seeds
+                end = start + num_seeds
+
+                # Slice configs and labels according to calculated indices
+                grouped_configs.append(configs[start:end])
+                grouped_labels.append(labels[start:end])
+            return grouped_configs, grouped_labels
+        else:
+            return configs, labels
 
     @staticmethod
     def get_kwargs(configs):

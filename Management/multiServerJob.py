@@ -1,9 +1,8 @@
 from itertools import product
 from configGenerator import ConfigGenerator
 
-from runOnCluster import queue_remote_job
+from runOnCluster import queue_remote_job, build_on_all_servers  # noqa: F401
 from clusterStatus import get_all_server_info, get_server_short_name
-from connectToCluster import uploadProject
 from jobManager import JobManager
 
 
@@ -89,13 +88,18 @@ if __name__ == "__main__":
         LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
         scenario="simpleShear",
     )
-    commands = generateCommands(configs)
 
+    print("Generating commands...")
+    commands = generateCommands(configs)
+    print("Building on all servers... ")
+    build_on_all_servers()
+    print("Starting jobs...")
     j = JobManager()
     for server, commands in commands.items():
-        uploadProject(server)
         for command in commands:
-            jobId = queue_remote_job(server, command, "bigJ", nrThreads * nrSeeds)
+            # jobId = queue_remote_job(server, command, "bigJ", nrThreads * nrSeeds)
+            # print(command)
             pass
         print(f"Started {len(commands)} jobs on {get_server_short_name(server)}")
+    print("Done!")
     j.showProcesses()

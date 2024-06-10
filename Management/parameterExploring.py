@@ -61,11 +61,28 @@ def plotSims(configs, name, **kwargs):
 
     paths = get_csv_files(configs, useOldFiles=True)
     print("Plotting...")
-    makeEnergyPlot(paths, f"{name}Energy.pdf", legend=["test"], **kwargs)
+    makeEnergyPlot(paths, f"{name} Energy.pdf", legend=["test"], **kwargs)
     for k in ["plot_average"]:
         if k in kwargs:
             del kwargs[k]
     # makePowerLawPlot(paths, f"{name}PowerLaw.pdf", legend=True, **kwargs)
+    # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
+
+
+def plotLog(config_groups, name, **kwargs):
+    # Now we can import from Management
+    from remotePlotting import get_csv_files
+
+    from makePlots import makeLogPlotComparison
+
+    paths, labels = get_csv_files(config_groups, useOldFiles=True, **kwargs)
+    kwargs["labels"] = labels
+    print("Plotting...")
+    # makeEnergyPlot(paths, f"{name}Energy.pdf", legend=["test"], **kwargs)
+    for k in ["plot_average"]:
+        if k in kwargs:
+            del kwargs[k]
+    makeLogPlotComparison(paths, f"{name} PowerLaw.pdf", legend=True, **kwargs)
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
 
 
@@ -164,11 +181,30 @@ def fastStatStuff():
     # plot_average=False, xLims=(0.15, 0.55))
 
 
+def loadingSpeeds():
+    nrThreads = 1
+    nrSeeds = 40
+    configs, labels = ConfigGenerator.generate(
+        group_by_seeds=True,
+        seed=range(nrSeeds),
+        rows=60,
+        cols=60,
+        startLoad=0.15,
+        nrThreads=nrThreads,
+        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        maxLoad=1.0,
+        LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
+        scenario="simpleShear",
+    )
+
+    plotLog(configs, "Loading settings", labels=labels)
+
+
 if __name__ == "__main__":
     # plotOldStuff()
     # plotLessOldStuff()
     # fastStatStuff()
     # plotLessOldStuff()
-
     # runSims()
+    loadingSpeeds()
     pass

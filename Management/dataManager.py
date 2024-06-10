@@ -127,6 +127,15 @@ class DataManager:
             if folders:
                 self.delete_data_on_server(server, folders, dryRun)
 
+    def delete_data_from_configs(self, configs, dryRun=True):
+        names = {x.name for x in configs}  # Use a set for faster lookup
+        for server, foldersAndSizes in self.data.items():
+            if foldersAndSizes:
+                folders, sizes = foldersAndSizes
+                filteredFolders = [f for f in folders if f.split("/")[-1] in names]
+                if filteredFolders:
+                    self.delete_data_on_server(server, filteredFolders, dryRun)
+
     def delete_data_on_server(self, server, folders, dryRun=True):
         if server == "Local ssd":  # Check if the server is local
             if not dryRun:
@@ -139,22 +148,24 @@ class DataManager:
         else:
             try:
                 ssh = connectToCluster(server, False)
-                print(f"Are you sure you want to delete these folders on {server}?")
-                [print(folder) for folder in folders]
-                if input("yes/no: ") != "yes":
-                    return
-
-                for folder in folders:
-                    delete_command = f"rm -r {folder}"
-                    if not dryRun:
-                        stdin, stdout, stderr = ssh.exec_command(delete_command)
-                        errors = stderr.read().decode().strip()
-                        if errors:
-                            print(f"Error deleting {folder} on {server}: {errors}")
-                        else:
-                            print(f"Successfully deleted {folder} on {server}")
             except Exception as e:
                 print(f"Error connecting to {server}: {e}")
+            print(f"Are you sure you want to delete these folders on {server}?")
+            self.print_grouped_folders(folders)
+            if input("yes/no: ") != "yes":
+                return
+
+            for folder in folders:
+                delete_command = f"rm -r {folder}"
+                if not dryRun:
+                    stdin, stdout, stderr = ssh.exec_command(delete_command)
+                    errors = stderr.read().decode().strip()
+                    if errors:
+                        print(f"Error deleting {folder} on {server}: {errors}")
+                    else:
+                        print(f"Successfully deleted {folder} on {server}")
+                else:
+                    print("Not deleting due to DryRun.")
 
     def delete_folders_below_size(self, min_size_in_bytes, dryRun=True):
         for server, (folders, sizes) in self.data.items():
@@ -176,6 +187,13 @@ class DataManager:
                         print(f"{folder} - {size} - {parse_size(size)}")
                         if not dryRun:
                             self.delete_data_on_server(server, [folder], dryRun=False)
+
+    def print_grouped_folders(self, folders, sizes=None):
+        if sizes is None:
+            sizes = ["0BB/1BB (0.0%)"] * len(folders)
+        groups = self.parse_and_group_seeds((folders, sizes))
+        for group in groups:
+            print(group[0])
 
     def parse_and_group_seeds(self, folders_and_sizes):
         folder_paths, sizes = folders_and_sizes
@@ -236,7 +254,7 @@ class DataManager:
 
     def clean_projects_on_servers(self):
         """
-        Deletes the simulation folder in the home directory on all the servers in parallel.
+        Deletes the simulation folder in the home directory on all the servers.
         """
 
         def clean_folder_on_server(server):
@@ -332,7 +350,14 @@ def get_directory_size(ssh, path):
 
 def parse_unit(unit):
     """Convert unit to the corresponding number of bytes."""
-    size_map = {"KB": 1024, "MB": 1024**2, "GB": 1024**3, "TB": 1024**4, "PB": 1024**5}
+    size_map = {
+        "BB": 1,
+        "KB": 1024,
+        "MB": 1024**2,
+        "GB": 1024**3,
+        "TB": 1024**4,
+        "PB": 1024**5,
+    }
     return size_map.get(unit.upper(), 1)
 
 
@@ -403,21 +428,19 @@ def sum_folder_sizes(str_list):
 
     # Convert total bytes back to the largest possible unit while maintaining the original unit of the denominator
     # for consistency in the representation
-    units = ["KB", "MB", "GB", "TB", "PB"]
-    unit_index = units.index(
-        denominator_unit
-    )  # Get the index of the unit to convert back to the same or smaller unit
+    units = ["BB", "KB", "MB", "GB", "TB", "PB"]
+    # Get the index of the unit to convert back to the same or smaller unit
+    unit_index = units.index(denominator_unit)
 
-    for i in range(
-        unit_index, -1, -1
-    ):  # Start from the denominator's unit and go down to find a suitable unit
+    # Start from the denominator's unit and go down to find a suitable unit
+    for i in range(unit_index, -1, -1):
         if total_bytes >= parse_unit(units[i]):
             total_value = total_bytes / parse_unit(units[i])
             total_unit = units[i]
             break
     else:
         total_value = total_bytes  # If no suitable unit found, use bytes
-        total_unit = ""
+        total_unit = "BB"
 
     # Format the sum with the same denominator
 
@@ -426,9 +449,24 @@ def sum_folder_sizes(str_list):
 
 
 if __name__ == "__main__":
+    from configGenerator import ConfigGenerator
+
     dm = DataManager()
     # dm.clean_projects_on_servers()
+    configs, labels = ConfigGenerator.generate(
+        seed=range(40),
+        rows=60,
+        cols=60,
+        startLoad=0.15,
+        nrThreads=1,
+        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        maxLoad=1.0,
+        LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
+        scenario="simpleShear",
+    )
     dm.findData()
-    dm.printData()
+    # dm.clean_projects_on_servers()
+    # dm.delete_data_from_configs(configs)
+    # dm.printData()
     # dm.delete_folders_below_size(1e8)
     # dm.delete_all_found_data()

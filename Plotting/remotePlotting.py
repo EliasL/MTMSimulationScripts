@@ -15,7 +15,7 @@ from makePlots import (
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 # Now we can import from Management
 from connectToCluster import connectToCluster, Servers
-from configGenerator import ConfigGenerator
+from configGenerator import ConfigGenerator, SimulationConfig
 
 
 def handleLocalPath(dataPath, configs):
@@ -178,10 +178,37 @@ def search_for_cvs_files(configs, useOldFiles=False):
     return paths, remaining_configs
 
 
+def configToPath(config):
+    return f"/tmp/MTS2D/{config.name}.csv"
+
+
+def flatToStructure(config_groups, label_groups):
+    # This function searches for where the file WOULD be if it was
+    # successfully downloaded, therefore preserving the structure of the groups
+    paths = []
+    labels = []
+    for group, label_group in zip(config_groups, label_groups):
+        group_paths = []
+        group_labels = []
+        for config, label in zip(group, label_group):
+            if os.path.isfile(configToPath(config)):
+                group_paths.append(configToPath(config))
+                group_labels.append(label)
+        if group_paths:
+            paths.append(group_paths)
+            labels.append(group_labels)
+    return paths, labels
+
+
 # This function searches all the servers for the given config file,
 # downloads the csv file associated with the config file to a temp file,
 # and returns the new local path to the csv
-def get_csv_files(configs, useOldFiles=False):
+def get_csv_files(configs, useOldFiles=False, labels=[], **kwargs):
+    nested = False
+    if not isinstance(configs[0], SimulationConfig):
+        nested = True
+        config_groups = configs
+        configs = [config for sublist in config_groups for config in sublist]
     global completed_servers
 
     # First check if the files have already been downloaded
@@ -222,8 +249,17 @@ def get_csv_files(configs, useOldFiles=False):
                 if useOldFiles is False:
                     return get_csv_files(configs, useOldFiles=True)
     print("")  # New line from progress indicator
+    if nested:
+        paths, labels = flatToStructure(config_groups, labels)
+    return paths, labels
 
-    return paths
+
+def get_csv_from_folder(folderPath):
+    return [
+        os.path.join(folderPath, f)
+        for f in os.listdir(folderPath)
+        if f.endswith(".csv")
+    ]
 
 
 if __name__ == "__main__":
@@ -235,16 +271,21 @@ if __name__ == "__main__":
         startLoad=0.15,
         nrThreads=1,
         loadIncrement=1e-5,
-        maxLoad=1,
+        maxLoad=1.0,
         LBFGSEpsx=1e-6,
         minimizer="LBFGS",
         scenario="simpleShear",
     )
-    paths = get_csv_files(configs)
+    # paths = get_csv_files(configs)
+    paths = get_csv_from_folder(
+        "/Volumes/data/MTS2D_output/FailedStrangeFireSimulatinos"
+    )
     if paths:
-        makeEnergyPlot(paths, "ParamExploration.pdf", show=True, legend=True)
+        makeEnergyPlot(
+            paths, "ParamExploration.pdf", show=True, legend=False, yLims=(-100, 2)
+        )
         # makeTimePlot(paths, "Run time.pdf", show=True, legend=True)
         # makeItterationsPlot(paths, "ParamExploration.pdf", show=True)
-        makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", show=True)
+        # makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", show=True)
     else:
         print("No files found")
