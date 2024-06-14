@@ -1,4 +1,5 @@
 import numpy as np
+from tabulate import tabulate
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 import sympy as sp
@@ -81,48 +82,83 @@ def is_new_minimum(point, minima, tol=1e-2):
 
 
 # Optimization callbacks and paths
-def run_optimizations(x0s, f_func, df_func):
-    FIRE_paths, LBFGS_paths = [], []
-    Fire_nit, LBFGS_nit = [], []  # Initialize lists to store iterations
-    LBFGS_nfev = []  # Initialize lists to store iterations
+def run_optimizations(x0s, f_func, df_func, tol=1e-5):
+    FIRE_paths, LBFGS_paths, CG_paths = [], [], []
+    Fire_nit, LBFGS_nit, CG_nit = [], [], []
+    LBFGS_nfev, CG_nfev = [], []
 
     for x0 in x0s:
+        # Conjugate Gradient algorithm
+        CG_path = []
+        result_cg = minimize(
+            lambda x: f(x, f_func),
+            x0,
+            method="CG",
+            jac=df_func,
+            tol=tol,
+            callback=lambda xk: CG_path.append(xk.copy()),
+        )
+        CG_paths.append(np.array([x0] + CG_path))
+        CG_nit.append(result_cg.nit)
+        CG_nfev.append(result_cg.nfev)
+
+        # LBFGS algorithm
+        LBFGS_path = []
+        result_lbfgs = minimize(
+            lambda x: f(x, f_func),
+            x0,
+            method="L-BFGS-B",
+            jac=df_func,
+            tol=tol,
+            callback=lambda xk: LBFGS_path.append(xk.copy()),
+        )
+        LBFGS_paths.append(np.array([x0] + LBFGS_path))
+        LBFGS_nit.append(result_lbfgs.nit)
+        LBFGS_nfev.append(result_lbfgs.nfev)
+
         # FIRE algorithm
-        result = optimize_fire2(
+        result_fire = optimize_fire2(
             x0,
             lambda x, params=None: f(x, f_func),
             lambda x, params=None: df(x, df_func),
             None,
-            dt=0.01,
+            atol=tol,
+            dt=1,
         )
-        x_opt, f_opt, iterations, path = result
+        x_opt, f_opt, nit, path = result_fire
         FIRE_paths.append(np.array(path))
-        Fire_nit.append(iterations)
+        Fire_nit.append(nit)
 
-        # LBFGS algorithm
-        LBFGS_path = []
-        result = minimize(
-            lambda x: f(x, f_func),
-            x0,
-            method="L-BFGS-B",
-            jac=lambda x: df(x, df_func),
-            callback=lambda xk: LBFGS_path.append(xk.copy()),
-        )
-        LBFGS_paths.append(np.array([x0] + LBFGS_path))
-        LBFGS_nit.append(
-            result.nit
-        )  # Extracting number of iterations directly from the result
-        LBFGS_nfev.append(result.nfev)
+    return {
+        "FIRE": {"paths": FIRE_paths, "nit": Fire_nit, "nfev": Fire_nit},
+        "CG": {"paths": CG_paths, "nit": CG_nit, "nfev": CG_nfev},
+        "LBFGS": {"paths": LBFGS_paths, "nit": LBFGS_nit, "nfev": LBFGS_nfev},
+    }
 
-    return FIRE_paths, LBFGS_paths, Fire_nit, LBFGS_nit, LBFGS_nfev
+
+unique_labels = set()
+
+
+# Function to safely add a label to the legend
+def safe_add_label(label):
+    if label not in unique_labels:
+        unique_labels.add(label)
+        return label
+    return ""
 
 
 def scatter(ax, path, onlyStart=False, **kwargs):
-    if "c" not in kwargs.keys():
-        if tuple(np.round(path[-1]).astype(int)) == (2, -3):
-            kwargs["c"] = "red"
-        else:
-            kwargs["c"] = "black"
+    if tuple(np.round(path[-1]).astype(int)) == (2, -3):
+        kwargs["alpha"] = 0.8
+        kwargs["label"] = safe_add_label(kwargs["label"])
+    else:
+        kwargs["color"] = (0.1, 0.1, 0.1, 0.1)
+        del kwargs["label"]
+
+    if kwargs["marker"] == "o":
+        kwargs["facecolors"] = "none"
+        kwargs["edgecolors"] = kwargs.pop("color", "grey")
+        kwargs["linewidths"] = 3  # Increase the edge line width here
     if onlyStart:
         ax.scatter(path[0, 0], path[0, 1], **kwargs)
     else:
@@ -134,81 +170,92 @@ def plot(ax, path, **kwargs):
 
 
 # Plotting functions
-def plot_results(X, Y, Z, minima, FIRE_paths, LBFGS_paths):
+def plot_results(X, Y, Z, minima, results):
     fig, ax = plt.subplots(1, 1, figsize=(12, 12))
     contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
-    # ax.scatter(minima[:, 0], minima[:, 1], c='red', marker='x')
+    if len(results["FIRE"]["paths"]) < 10:
+        ax.scatter(minima[:, 0], minima[:, 1], c="red", marker="x")
 
-    # Initialize a set to keep track of unique labels
-    unique_labels = set()
+    # Colors and styles for different methods
+    colors = {"FIRE": "blue", "LBFGS": "red", "CG": "orange"}
+    markers = {"FIRE": "x", "LBFGS": "+", "CG": "o"}
+    styles = {"FIRE": "-", "LBFGS": "--", "CG": "-."}
 
-    # Function to safely add a label to the legend
-    def safe_add_label(label):
-        if label not in unique_labels:
-            unique_labels.add(label)
-            return label
-        return ""
+    # Plot the paths for each optimization method
+    for method, data in results.items():
+        paths = data["paths"]
+        for path in paths:
+            if len(paths) < 10:
+                ax.plot(
+                    path[:, 0],
+                    path[:, 1],
+                    styles[method],
+                    label=method,
+                    color=colors[method],
+                    marker="o",
+                )
+            else:
+                scatter(
+                    ax,
+                    path,
+                    onlyStart=True,
+                    color=colors[method],
+                    marker=markers[method],
+                    label=method,
+                )
 
-    # Plot the path of the optimization algorithm
-    for FIRE_path, LBFGS_path in zip(FIRE_paths, LBFGS_paths):
-        y0 = (
-            f"{FIRE_path[0, 1]:.1f}"
-            if FIRE_path[0, 1] % 1
-            else f"{FIRE_path[0, 1]:.0f}"
-        )
-        # scatter(ax, FIRE_path, onlyStart=True, marker='x', label=safe_add_label(f'FIRE'))
-        # scatter(ax, LBFGS_path, onlyStart=True, marker='+', label=safe_add_label(f'LBFGS'))
+    # Add a color bar for the contour plot
+    # fig.colorbar(contour, ax=ax, label="Height")
 
-        plot(ax, FIRE_path, label=f"FIRE y0={y0}", c="r")
-        plot(ax, LBFGS_path, linestyle="--", label=f"LBFGS y0={y0}", c="black")
-
-    # Manually specify the order of the legend entries
+    # Handle legend and plot aesthetics
+    # Assuming you have a plotting object ax
     handles, labels = ax.get_legend_handles_labels()
+    order = ["FIRE", "CG", "LBFGS"]  # Define custom order
+
+    # Create a dictionary mapping labels to handles
     by_label = dict(zip(labels, handles))
-    sorted_labels = sorted(by_label.keys())
-    sorted_handles = [by_label[label] for label in sorted_labels]
 
-    ax.legend(handles=sorted_handles, loc="best")  # Adjust 'loc' as needed
-
-    # fig.colorbar(contour, ax=ax, label='Height')
+    # Reorder handles using the predefined order
+    sorted_handles = [by_label[label] for label in order if label in by_label]
+    # Set the legend with sorted handles
+    leg = ax.legend(handles=sorted_handles, loc="lower right")
+    # Make markers non-transparent
+    for lh in leg.legendHandles:
+        lh.set_alpha(1)
     ax.set_aspect("equal")
+
+    # Layout and save figure
     plt.tight_layout()
-    # Determine the directory where the script is located
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    plt.savefig(os.path.join(script_dir, "fig.png"))
+    script_dir = os.path.dirname(
+        os.path.realpath("__file__")
+    )  # This gets the directory of the script
+    plt.savefig(os.path.join(script_dir, "optimization_paths.png"))
     plt.show()
 
 
-def summarize_end_points(FIRE_paths, LBFGS_paths, Fire_nit, LBFGS_nit, LBFGS_nfev):
-    # Extract and round the last positions for FIRE paths
-    FIRE_end_points = [tuple(np.round(path[-1]).astype(int)) for path in FIRE_paths]
-    # Extract and round the last positions for LBFGS paths
-    LBFGS_end_points = [tuple(np.round(path[-1]).astype(int)) for path in LBFGS_paths]
+def summarize_end_points(results):
+    methods = results.keys()
+    table = [["Method", "Nr it.", "Nr f-eval", "Minimum 1", "Minimum 2"]]
 
-    # Count unique points and their occurrences
-    fire_counter = Counter(FIRE_end_points)
-    lbfgs_counter = Counter(LBFGS_end_points)
+    for method in methods:
+        end_points = [
+            tuple(np.round(path[-1]).astype(int)) for path in results[method]["paths"]
+        ]
+        counter = Counter(end_points)
+        total_nit = sum(results[method]["nit"])
+        total_nfev = sum(results[method]["nfev"])
 
-    # Calculate and print the total number of iterations for FIRE
-    total_Fire_nit = sum(Fire_nit)
-    print(f"\nTotal number of FIRE iterations: {total_Fire_nit}")
+        table.append(
+            [
+                method,
+                total_nit,
+                total_nfev,
+                counter.most_common(2)[0][1],
+                counter.most_common(2)[1][1] if len(counter) > 1 else 0,
+            ]
+        )
 
-    # Calculate and print the total number of function evaluations for LBFGS
-    LBFGS_nit = sum(LBFGS_nit)
-    print(f"Total number of LBFGS iterations: {LBFGS_nit}")
-    # Calculate and print the total number of function evaluations for LBFGS
-    total_LBFGS_nfev = sum(LBFGS_nfev)
-    print(f"Total number of LBFGS function evaluations: {total_LBFGS_nfev}")
-
-    # Print the results for FIRE path end points and their counts
-    print("FIRE path end points and their counts:")
-    for point, count in fire_counter.items():
-        print(f"Point {point}: {count} paths")
-
-    # Print the results for LBFGS path end points and their counts
-    print("\nLBFGS path end points and their counts:")
-    for point, count in lbfgs_counter.items():
-        print(f"Point {point}: {count} paths")
+    print(tabulate(table, headers="firstrow", tablefmt="grid"))
 
 
 # Main function to organize code execution
@@ -223,15 +270,13 @@ def main():
     # Flatten the mesh grid arrays and pair them into starting points
     initial_points = np.column_stack((X.ravel(), Y.ravel()))
     initial_points = np.array([[0, y] for y in [10]])  # , 8, 5, 2]])
-    FIRE_paths, LBFGS_paths, Fire_nit, LBFGS_nit, LBFGS_nfev = run_optimizations(
-        initial_points, f_func, df_func
-    )
-    summarize_end_points(FIRE_paths, LBFGS_paths, Fire_nit, LBFGS_nit, LBFGS_nfev)
+    results = run_optimizations(initial_points, f_func, df_func)
+    summarize_end_points(results)
     x = np.linspace(-16, 16, 100)
     y = np.linspace(-16, 16, 100)
     X, Y = np.meshgrid(x, y)
     Z = f((X, Y), f_func)
-    plot_results(X, Y, Z, minima, FIRE_paths, LBFGS_paths)
+    plot_results(X, Y, Z, minima, results)
 
 
 if __name__ == "__main__":

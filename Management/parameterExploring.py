@@ -61,7 +61,7 @@ def plotSims(configs, name, **kwargs):
 
     paths = get_csv_files(configs, useOldFiles=True)
     print("Plotting...")
-    makeEnergyPlot(paths, f"{name} Energy.pdf", legend=["test"], **kwargs)
+    makeEnergyPlot(paths, f"{name} Energy.pdf", **kwargs)
     for k in ["plot_average"]:
         if k in kwargs:
             del kwargs[k]
@@ -73,12 +73,12 @@ def plotLog(config_groups, name, **kwargs):
     # Now we can import from Management
     from remotePlotting import get_csv_files
 
-    from makePlots import makeLogPlotComparison
+    from makePlots import makeLogPlotComparison, makeEnergyPlot
 
     paths, labels = get_csv_files(config_groups, useOldFiles=True, **kwargs)
     kwargs["labels"] = labels
     print("Plotting...")
-    # makeEnergyPlot(paths, f"{name}Energy.pdf", legend=["test"], **kwargs)
+    makeEnergyPlot(paths, f"{name}Energy.pdf", legend=["test"], **kwargs)
     for k in ["plot_average"]:
         if k in kwargs:
             del kwargs[k]
@@ -200,11 +200,52 @@ def loadingSpeeds():
     plotLog(configs, "Loading settings", labels=labels)
 
 
+def smallLoadingSpeeds():
+    nrThreads = 4
+    nrSeeds = 1
+    size = 30
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
+        startLoad=0.0,
+        nrThreads=nrThreads,
+        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        maxLoad=1.0,
+        LBFGSEpsg=[1e-8, 1e-9],
+        scenario="simpleShear",
+    )
+    extra_configs, extra_labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
+        startLoad=0.0,
+        nrThreads=nrThreads,
+        loadIncrement=[1e-5],
+        maxLoad=1.0,
+        LBFGSEpsx=[1e-6],
+        scenario="simpleShear",
+    )
+    configs.extend(extra_configs)
+    labels.extend(["loadIncrement=1e-5, LBFGSEpsx=1e-6"])
+    runSims(configs)
+    plotSims(
+        configs,
+        "Loading settings",
+        labels=labels,
+        show=True,
+        legend=True,
+        title=f"{size}x{size}",
+        addShift=True,
+    )
+
+
 if __name__ == "__main__":
     # plotOldStuff()
     # plotLessOldStuff()
     # fastStatStuff()
     # plotLessOldStuff()
     # runSims()
-    loadingSpeeds()
+    # loadingSpeeds()
+    smallLoadingSpeeds()
     pass

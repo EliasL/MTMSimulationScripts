@@ -467,6 +467,6 @@ if __name__ == "__main__":
     dm.findData()
     # dm.clean_projects_on_servers()
     # dm.delete_data_from_configs(configs)
-    # dm.printData()
+    dm.printData()
     # dm.delete_folders_below_size(1e8)
     # dm.delete_all_found_data()

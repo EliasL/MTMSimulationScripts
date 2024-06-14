@@ -25,9 +25,9 @@ previous_min_x = 9
 
 # Function to capture specific frames
 def save_frames():
+    global previous_min_x
     # List of specific t values for the frames
     t_values = [0, 1, 1]  # Adjust these as needed to capture the desired moments
-    previous_min_x = 9
     for i, t in enumerate(t_values):
         y = func(x, t)
         ax.clear()  # Clear previous plot
@@ -57,10 +57,6 @@ def save_frames():
         previous_min_x = min_x
 
 
-# Call the function to save specific frames
-save_frames()
-
-
 # Define the update function for the animation
 def update(t):
     global previous_min_x
@@ -79,17 +75,21 @@ def update(t):
     # Update the previous minimum
     previous_min_x = min_x
 
+    # Reset the point
+    if min_x < 1:
+        previous_min_x = 9
+
     return line, point
 
 
 # Increase the frames and reduce the interval for smoother and faster animation
 ani = animation.FuncAnimation(
-    fig, update, frames=np.linspace(0, 6 * np.pi, 40), interval=50, blit=True
+    fig, update, frames=np.linspace(0, 6 * np.pi, 400), interval=30, blit=True
 )
 
 # Save the animation as a high-resolution GIF with a high frame rate and transparency
 fName = "Math/MinimizationProblem/animated_wave_with_minimum_following.gif"
-# ani.save(fName, writer='pillow', fps=60, dpi=150, savefig_kwargs={'transparent': True})
+ani.save(fName, writer="pillow", fps=600, dpi=150)
 
 # Display the animation
-# plt.show()
+plt.show()

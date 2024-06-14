@@ -3,6 +3,9 @@ import subprocess
 from connectToCluster import Servers
 from getpass import getpass
 import pexpect
+from urllib.request import urlretrieve
+from paramiko import SSHClient, AutoAddPolicy
+from scp import SCPClient
 
 
 def generate_ssh_key(key_path):
@@ -80,6 +83,47 @@ def main():
             print(f"Failed on {server}: {e}")
             continue
 
+
+def get_vscode_commit_id():
+    # Run the VS Code version command and parse output
+    result = subprocess.run(["code", "--version"], stdout=subprocess.PIPE)
+    output = result.stdout.decode("utf-8").split()
+    version, commit_id = output[0], output[1]
+    print(f"Detected VS Code version: {version}, Commit ID: {commit_id}")
+    return commit_id
+
+
+def download_vscode_server(commit_id, local_path):
+    url = f"https://update.code.visualstudio.com/commit:{commit_id}/server-linux-x64/stable"
+    if not os.path.exists(local_path):
+        print(f"Downloading VS Code Server from {url}")
+        urlretrieve(url, local_path)
+        print("Download completed.")
+    else:
+        print("File already downloaded.")
+
+
+def scp_transfer(local_path, remote_path, hostname, username, password=None):
+    ssh = SSHClient()
+    ssh.set_missing_host_key_policy(AutoAddPolicy())
+    ssh.connect(hostname, username=username, password=password)
+    scp = SCPClient(ssh.get_transport())
+    print(f"Transferring {local_path} to {hostname}:{remote_path}")
+    scp.put(local_path, remote_path)
+    scp.close()
+    ssh.close()
+    print("Transfer completed.")
+
+
+if __name__ == "__main__":
+    commit_id = get_vscode_commit_id()
+    local_path = "/Users/eliaslundheim/Downloads/vscode-server-linux-x64.tar.gz"
+    hostname = "remote-server"  # Update this with your remote server's address
+    username = "elundheim"  # Update this with your SSH username
+    remote_path = "/work/elundheim/vscode-server-linux-x64.tar.gz"
+
+    download_vscode_server(commit_id, local_path)
+    scp_transfer(local_path, remote_path, hostname, username)
 
 if __name__ == "__main__":
     main()

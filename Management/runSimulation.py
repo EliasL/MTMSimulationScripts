@@ -3,45 +3,21 @@ if __name__ == "__main__":
     from configGenerator import SimulationConfig
 
     config = SimulationConfig(
-        rows=100,
-        cols=100,
-        startLoad=0.15,
+        rows=20,
+        cols=20,
+        startLoad=0.0,
         nrThreads=4,
         loadIncrement=1e-5,
         maxLoad=1.0,
         # LBFGSEpsg=9e-5,
         LBFGSEpsx=1e-6,
         # eps=1e-4,
+        QDSD=0.101,
         minimizer="LBFGS",
-        scenario="cyclicSimpleShear",
-    )
-    config = SimulationConfig(
-        rows=20,
-        cols=20,
-        startLoad=0.15,
-        nrThreads=4,
-        loadIncrement=1e-5,
-        maxLoad=1.0,
-        LBFGSEpsg=1e-6,
-        minimizer="LBFGS",
-        scenario="simpleShear",
-    )
-    FireConfig = SimulationConfig(
-        rows=40,
-        cols=40,
-        startLoad=0.15,
-        nrThreads=4,
-        loadIncrement=1e-5,
-        maxLoad=1.0,
-        # LBFGSEpsg=9e-5,
-        # LBFGSEpsx=1e-4,
-        eps=1e-5,
-        # epsRel=1e-16,
-        # minimizer="LBFGS",
         scenario="simpleShear",
     )
 
-    resume = True
+    resume = False
     manager = SimulationManager(config, useProfiling=False, overwriteData=not resume)
     manager.runSimulation(resumeIfPossible=resume)
     # manager.resumeSimulation()

@@ -159,6 +159,7 @@ def makePlot(
     colors=None,
     plot_total=False,
     legend=None,
+    addShift=False,
 ):
     if len(csv_file_paths) == 0:
         print("No files provided.")
@@ -203,7 +204,7 @@ def makePlot(
 
         if colors:
             kwargs["color"] = colors[i]
-        if len(csv_file_paths) > 7:
+        if len(csv_file_paths) > 10:
             kwargs["color"] = "gray"
             kwargs["alpha"] = 0.5
 
@@ -216,6 +217,8 @@ def makePlot(
                 kwargs["label"] = labels[i] + (
                     (" - " + Y_) if not isinstance(Y, str) else ""
                 )
+            if addShift:
+                df[Y_] -= i * np.max(df[Y_]) / 500
             line = None
             point = None
             if plot_raw:
@@ -361,7 +364,7 @@ def makeLogPlotComparison(
     ax.set_ylabel(y_name)
     ax.set_title(title)
     ax.autoscale_view()
-    figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
+    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name)
     fig.savefig(figPath)
     print(f'Plot saved at: "{figPath}"')
     if show:

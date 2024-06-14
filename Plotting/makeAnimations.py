@@ -63,7 +63,7 @@ def framesToGif(frames, outFile, fps):
 
 
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
-def makeAnimations(path, macro_data=None, pvd_file=None):
+def makeAnimations(path, macro_data=None, pvd_file=None, makeGIF=False):
     framePath = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macro_data is None:
         macro_data = os.path.join(path, settings["MACRODATANAME"] + ".csv")
@@ -101,19 +101,21 @@ def makeAnimations(path, macro_data=None, pvd_file=None):
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in zip([plot_mesh, plot_nodes], ["mesh", "nodes"]):
         images = make_images(function, framePath, vtu_files, macro_data)
-        outPath = path + path.split("/")[-2] + f"_{fileName}_video.mp4"
-        framesToMp4(images, outPath, fps)
 
-        command = [
-            "gifski",
-            "-o",
-            f"{path + path.split('/')[-2]}_{fileName}_video.gif",
-        ] + images  # Append the list of image paths to the command
-        subprocess.run(command)
+        outPath = os.path.join(path, f"{fileName}_video.mp4")
+        framesToMp4(images, outPath, fps)
+        if makeGIF:
+            GIFCommand = [
+                "gifski",
+                "-o",
+                os.path.join(path, f"{fileName}_video.gif"),
+            ] + images  # Append the list of image paths to the command
+            subprocess.run(GIFCommand)
 
 
 if __name__ == "__main__":
-    output = "/Volumes/data/KeepSafe/simpleShear,s150x150l0.15,2e-05,1PBCt4EpsG0.01s0/"
+    pass
+    # output = "/Volumes/data/KeepSafe/simpleShear,s150x150l0.15,2e-05,1PBCt4EpsG0.01s0/"
 
-    # Replace 'your_pvd_file.pvd' with the path to your .pvd file
-    makeAnimations(output)
+    # # Replace 'your_pvd_file.pvd' with the path to your .pvd file
+    # makeAnimations(output)

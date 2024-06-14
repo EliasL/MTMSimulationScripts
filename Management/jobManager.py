@@ -186,6 +186,7 @@ class JobManager:
         def fetch_job(line):
             attempts = 0
             max_attempts = 3
+            e = ""
             while attempts < max_attempts:
                 try:
                     # Each call gets its own channel but uses the same SSH connection
@@ -193,20 +194,20 @@ class JobManager:
                     p_id = parts[0]  # PID
                     time_running = parts[1]  # Elapsed time
                     return Process(ssh, p_id, server, time_running)
-                except Exception as e:
+                except Exception as er:
+                    e = er
                     attempts += 1
                     time.sleep(
                         random.uniform(1, 3)
                     )  # Random delay to prevent synchronized reconnection attempts
-                    print(f"Attempt {attempts} failed for {server}: {e}")
-                    if attempts >= max_attempts:
-                        print(f"Error processing {line}: {e}")
+                    # print(f"Attempt {attempts} failed for {server}: {e}")
+
+            print(f"Error processing {line}: {e}")
 
         # Use ThreadPoolExecutor to process lines in parallel
         with ThreadPoolExecutor(max_workers=7) as executor:
             future_jobs = [executor.submit(fetch_job, line) for line in stdout_lines]
             local_jobs = [future.result() for future in future_jobs]
-            print("")
 
         ssh.close()  # Ensure the connection is closed after use
         return local_jobs
@@ -261,7 +262,7 @@ class JobManager:
 
     def showProcesses(self):
         self.processes = self.execute_command_on_servers(self.find_processes_on_server)
-
+        print("")
         if not self.processes:
             print("No processes found")
         else:
@@ -408,4 +409,5 @@ if __name__ == "__main__":
         # uploadProject(server)
 
         # jobId = queue_remote_job(server, command, "energy", minNrThreads)
+        j.showSlurmJobs()
         j.showProcesses()

@@ -13,7 +13,7 @@ from simulationManager import findOutputPath
 from configGenerator import SimulationConfig
 
 
-def plotAll(configFile, dataPath, noVideo=False):
+def plotAll(configFile, dataPath, noVideo=False, **kwargs):
     if configFile[0] != "/":
         # This means that the config file is relative
         configFile = os.path.join(dataPath, configFile)
@@ -30,24 +30,25 @@ def plotAll(configFile, dataPath, noVideo=False):
     makeEnergyPlot(os.path.join(path, macroData), subfolderName + "_energy.pdf")
     # makeItterationsPlot(path+macroData, subfolderName+"_itterations.pdf")
     if not noVideo:
-        makeAnimations(path)
+        makeAnimations(path, **kwargs)
 
     # energyGridName = "energy_grid.csv"
     # makeEnergyField(path, energyGridName)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        raise Exception("Config file is required!")
+    import argparse
 
-    if len(sys.argv) < 3:
-        print("Attempting to automatically find output path")
-        dataPath = findOutputPath()
-    else:
-        dataPath = sys.argv[2]
+    parser = argparse.ArgumentParser(description="Process some arguments.")
+    parser.add_argument("-c", "--config", required=True, help="Config file")
+    parser.add_argument("-o", "--output", default=None, help="Data path")
+    parser.add_argument("-nV", "--noVideo", action="store_true", help="Disable video")
+    parser.add_argument(
+        "-gif", "--makeGIF", action="store_true", default=False, help="Make gif"
+    )
 
-    noVideo = False
-    if len(sys.argv) >= 4:
-        noVideo = sys.argv[3] == "noVideo"
+    args = parser.parse_args()
 
-    plotAll(sys.argv[1], dataPath, noVideo)
+    outputPath = args.output if args.output else findOutputPath()
+
+    plotAll(args.config, outputPath, args.noVideo, makeGIF=args.makeGIF)

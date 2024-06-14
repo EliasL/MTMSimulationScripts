@@ -263,7 +263,7 @@ def retry_frame_function(frameFunction, args, max_retries=3):
         try:
             return frameFunction(args)
         except Exception as e:
-            print(f"Error on attempt {attempt+1} for file {args[1]}: {str(e)}")
+            # print(f"Error on attempt {attempt+1} for file {args[1]}: {str(e)}")
             time.sleep(random.uniform(0.1, 1))  # Random delay between 0.1 and 1 second
     print(f"Failed to process file {args[1]} after {max_retries} attempts.")
     return None

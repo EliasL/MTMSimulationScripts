@@ -16,7 +16,7 @@ class SimulationConfig:
         self.scenario = "simpleShear"
         self.nrThreads = 1
         self.seed = 0
-        self.quenchedDisorderStrength = 0.05
+        self.QDSD = 0.00  # Quenched dissorder standard deviation
         self.initialGuessNoise = 0.05
 
         # Loading parameters
@@ -340,9 +340,7 @@ if __name__ == "__main__":
     import os
     import sys
 
-    config = SimulationConfig()
-    config.eps = 1e-2
-    config.loadIncrement = 0.01
+    config = SimulationConfig(loadIncrement=0.01)
     if len(sys.argv) >= 2:
         scenario = sys.argv[1]
         config.scenario = scenario
