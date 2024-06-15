@@ -59,7 +59,7 @@ def plotSims(configs, name, **kwargs):
 
     from makePlots import makeEnergyPlot, makePowerLawPlot, makeItterationsPlot  # noqa: F401
 
-    paths = get_csv_files(configs, useOldFiles=True)
+    paths = get_csv_files(configs, useOldFiles=False)
     print("Plotting...")
     makeEnergyPlot(paths, f"{name} Energy.pdf", **kwargs)
     for k in ["plot_average"]:
@@ -73,12 +73,12 @@ def plotLog(config_groups, name, **kwargs):
     # Now we can import from Management
     from remotePlotting import get_csv_files
 
-    from makePlots import makeLogPlotComparison, makeEnergyPlot
+    from makePlots import makeLogPlotComparison, makeEnergyPlotComparison
 
-    paths, labels = get_csv_files(config_groups, useOldFiles=True, **kwargs)
+    paths, labels = get_csv_files(config_groups, useOldFiles=False, **kwargs)
     kwargs["labels"] = labels
     print("Plotting...")
-    makeEnergyPlot(paths, f"{name}Energy.pdf", legend=["test"], **kwargs)
+    makeEnergyPlotComparison(paths, f"{name}Energy.pdf", legend=True, **kwargs)
     for k in ["plot_average"]:
         if k in kwargs:
             del kwargs[k]
@@ -184,19 +184,32 @@ def fastStatStuff():
 def loadingSpeeds():
     nrThreads = 1
     nrSeeds = 40
+    size = 60
     configs, labels = ConfigGenerator.generate(
         group_by_seeds=True,
         seed=range(nrSeeds),
-        rows=60,
-        cols=60,
+        rows=size,
+        cols=size,
         startLoad=0.15,
         nrThreads=nrThreads,
         loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
         maxLoad=1.0,
-        LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
+        LBFGSEpsg=[1e-6, 1e-5, 5e-5, 1e-4],
         scenario="simpleShear",
     )
-
+    extra_configs, extra_labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
+        startLoad=0.0,
+        nrThreads=nrThreads,
+        loadIncrement=[1e-5],
+        maxLoad=1.0,
+        LBFGSEpsx=[1e-6],
+        scenario="simpleShear",
+    )
+    # configs.extend([extra_configs])
+    # labels.extend([["loadIncrement=1e-5, LBFGSEpsx=1e-6"]])
     plotLog(configs, "Loading settings", labels=labels)
 
 
@@ -228,7 +241,7 @@ def smallLoadingSpeeds():
     )
     configs.extend(extra_configs)
     labels.extend(["loadIncrement=1e-5, LBFGSEpsx=1e-6"])
-    runSims(configs)
+    # runSims(configs)
     plotSims(
         configs,
         "Loading settings",
@@ -246,6 +259,6 @@ if __name__ == "__main__":
     # fastStatStuff()
     # plotLessOldStuff()
     # runSims()
-    # loadingSpeeds()
-    smallLoadingSpeeds()
+    loadingSpeeds()
+    # smallLoadingSpeeds()
     pass

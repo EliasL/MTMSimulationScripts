@@ -60,7 +60,7 @@ def change_password(server, username, old_password, new_password):
 
 def main():
     username = "elundheim"  # Change this to your actual username on the servers
-    key_path = "/home/elias/.ssh/id_rsa"  # SSH key path
+    key_path = "/Users/elias/.ssh/id_rsa"  # SSH key path
     password = getpass(
         "Enter your SSH password (will not be echoed): "
     )  # Securely enter password
@@ -77,6 +77,7 @@ def main():
 
     # Change password on each server
     for server in Servers.servers:
+        break
         try:
             change_password(server, username, password, new_password)
         except Exception as e:
@@ -116,14 +117,13 @@ def scp_transfer(local_path, remote_path, hostname, username, password=None):
 
 
 if __name__ == "__main__":
-    commit_id = get_vscode_commit_id()
-    local_path = "/Users/eliaslundheim/Downloads/vscode-server-linux-x64.tar.gz"
-    hostname = "remote-server"  # Update this with your remote server's address
-    username = "elundheim"  # Update this with your SSH username
-    remote_path = "/work/elundheim/vscode-server-linux-x64.tar.gz"
-
-    download_vscode_server(commit_id, local_path)
-    scp_transfer(local_path, remote_path, hostname, username)
-
-if __name__ == "__main__":
     main()
+
+    # commit_id = get_vscode_commit_id()
+    # local_path = "/Users/eliaslundheim/Downloads/vscode-server-linux-x64.tar.gz"
+    # hostname = "remote-server"  # Update this with your remote server's address
+    # username = "elundheim"  # Update this with your SSH username
+    # remote_path = "/work/elundheim/vscode-server-linux-x64.tar.gz"
+
+    # # download_vscode_server(commit_id, local_path)
+    # #scp_transfer(local_path, remote_path, hostname, username)

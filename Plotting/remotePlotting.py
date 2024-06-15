@@ -87,7 +87,7 @@ def get_csv_from_server(server, configs):
     os.makedirs(
         folder_path, exist_ok=True
     )  # This line ensures the MTS2D folder is created
-    nr_files = 0
+
     # Using ThreadPoolExecutor to download files in parallel
     with ThreadPoolExecutor(max_workers=7) as executor:
         future_to_name = {
@@ -163,11 +163,10 @@ def search_for_cvs_files(configs, useOldFiles=False):
         for config in configs:
             file_path = os.path.join(folder, config.name + ".csv")
             if config.name in files:
-                # Check if file is less than one hour old
+                # Check if file is less than 24 hours old
                 file_mod_time = os.path.getmtime(file_path)
-                if (
-                    time.time() - file_mod_time < 3600 or useOldFiles
-                ):  # 3600 seconds = 1 hour
+                # 3600 seconds = 1 hour
+                if time.time() - file_mod_time < 24 * 3600 or useOldFiles:
                     paths.append(file_path)
                 else:
                     # We don't want old files, so we redo everything
@@ -215,9 +214,13 @@ def get_csv_files(configs, useOldFiles=False, labels=[], **kwargs):
     paths, configs = search_for_cvs_files(configs, useOldFiles)
     if len(configs) == 0:
         print("All files already downloaded.")
-        return paths
+        if nested:
+            paths, labels = flatToStructure(config_groups, labels)
+        return paths, labels
     elif len(paths) != 0:
         print(f"{len(paths)} files found, searching for the remaining {len(configs)}.")
+    if len(paths) == 0 and useOldFiles:
+        raise Exception("No files found!")
 
     # Second check local path to see if we can avoid checking the servers
     localPaths = get_csv_from_server(Servers.local_path_mac, configs)

@@ -35,6 +35,7 @@ def plotYOverX(
 
     if indicateLastPoint:
         # Add a scatter point at the last point
+        kwargs["label"] = ""
         point = ax.scatter(X_simplified[-1], Y_simplified[-1], **kwargs)
     else:
         point = None
@@ -89,12 +90,22 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
     return fig, ax, line
 
 
+# Define global variables
+line_styles = ["-", "--", "-.", ":"]
+markers = ["v", "^", "o", "s", "D", "p", "*"]
+colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+color_index = 0
+marker_index = 0
+line_index = 0
+
+
 def plotPowerLaw(
     y_values_series,
     fig=None,
     ax=None,
     label="",
 ):
+    global color_index, marker_index, line_index
     if ax is None:
         fig, ax = plt.subplots()
 
@@ -115,18 +126,45 @@ def plotPowerLaw(
     hist, bin_edges = np.histogram(combined_diffs, bins=bins, density=True)
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
-    # Plot the histogram and get the line object
-    (line1,) = ax.plot(bin_centers, hist, linestyle="None", marker=".", markersize=20)
+    # Get the current color
+    color = colors[color_index]
 
-    # Extract the color from the first plot
-    color = line1.get_color()
+    # Increment the global call count
+    color_index += 1
 
-    # Use the same color for the second plot
-    ax.plot(
+    # Check if we've used all colors
+    if color_index >= len(colors):
+        # Switch to the next line style and marker
+        color_index = 0
+        line_index += 1
+        marker_index += 1
+
+    # Plot the histogram with marker only, but don't show in legend
+    line1 = ax.scatter(
+        bin_centers,
+        hist,
+        marker=markers[marker_index],
+        facecolors="none",
+        edgecolors=color,
+        s=100,
+    )
+
+    # Plot the line only, but don't show in legend
+    (line2,) = ax.plot(
         bin_centers,
         fit.truncated_power_law.pdf(bin_centers),
-        "--",
-        label=rf"{label} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
+        line_styles[line_index],
+        label="_nolegend_",
+        color=color,
+    )
+
+    # Create a dummy plot for the legend with both marker and line style
+    ax.plot(
+        [],
+        [],
+        line_styles[line_index],
+        marker=markers[marker_index],
+        label=rf"{label.split(' seed')[0]} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
         color=color,
     )
     print(f"{label}: {fit.truncated_power_law.alpha}")
@@ -161,7 +199,9 @@ def makePlot(
     legend=None,
     addShift=False,
 ):
-    if len(csv_file_paths) == 0:
+    if len(csv_file_paths) == 0 or (
+        len(csv_file_paths) > 0 and len(csv_file_paths[0]) == 0
+    ):
         print("No files provided.")
         return
     if x_name is None:
@@ -332,6 +372,85 @@ def makePlot(
         plt.show()
 
 
+def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
+    X = "Load"
+    Y = "Avg energy"
+    x_name = "Load"
+    y_name = "Avg energy"
+    title = "60x60, load:0.15-1, loadIncrement:1e-5, PBC, LBFGS, t1, seeds:40"
+
+    fig, ax = plt.subplots()
+
+    color_index = 0
+    line_index = 0
+
+    for i, csv_file_paths in enumerate(grouped_csv_file_paths):
+        data = []
+        # Get the current color
+        color = colors[color_index]
+
+        # Increment the global call count
+        color_index += 1
+
+        # Check if we've used all colors
+        if color_index >= len(colors):
+            # Switch to the next line style and marker
+            color_index = 0
+            line_index += 1
+        for j, csv_file_path in enumerate(csv_file_paths):
+            df = pd.read_csv(csv_file_path, usecols=[X, Y])
+            data.append(df[Y].values)
+
+            e_kwargs = {
+                "fig": fig,
+                "ax": ax,
+                "color": color,
+                "linestyle": line_styles[line_index],
+                "alpha": 0.05,
+            }
+            fig, ax, line, point = plotYOverX(df[X], df[Y], **e_kwargs)
+        # Determine the maximum length among all arrays
+        max_length_index = np.argmax([len(d) for d in data])
+        max_length = len(data[max_length_index])
+
+        # Initialize the average array and a count array to track how many entries per index
+        average = np.zeros(max_length)
+        count = np.zeros(max_length)
+
+        # Aggregate data
+        for d in data:
+            length = len(d)
+            average[:length] += d
+            count[:length] += 1
+
+        # Compute average where count is non-zero to avoid division by zero
+        average = np.divide(
+            average, count, out=np.zeros_like(average), where=count != 0
+        )
+
+        a_kwargs = {
+            "fig": fig,
+            "ax": ax,
+            "label": kwargs["labels"][i][0].split(" seed")[0],
+            "color": colors[color_index],
+            "linestyle": line_styles[line_index],
+        }
+        df = pd.read_csv(csv_file_paths[max_length_index], usecols=[X])
+        fig, ax, line, point = plotYOverX(df[X], average, **a_kwargs)
+
+    # Set the legend with the filtered handles and labels
+    ax.legend(loc=("best"))
+    ax.set_xlabel(x_name)
+    ax.set_ylabel(y_name)
+    ax.set_title(title)
+    ax.autoscale_view()
+    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name)
+    fig.savefig(figPath)
+    print(f'Plot saved at: "{figPath}"')
+    if show:
+        plt.show()
+
+
 def makeLogPlotComparison(
     grouped_csv_file_paths, name, xLims=[-np.inf, np.inf], show=True, **kwargs
 ):
@@ -339,7 +458,7 @@ def makeLogPlotComparison(
     Y = "Avg energy"
     x_name = "Magnitude of energy drops"
     y_name = "Frequency"
-    title = "60x60, 0.15-1, PBC, LBFGS, t1, seeds40"
+    title = "60x60, load:0.15-1, PBC, LBFGS, t1, seeds:40"
 
     fig, ax = plt.subplots()
 

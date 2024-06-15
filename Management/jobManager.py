@@ -288,6 +288,7 @@ class JobManager:
                     estimated_time_remaining = "N/A"
                 else:
                     time_parts = process.timeEstimation.split(",")
+                    print(time_parts)
                     run_time = time_parts[0].strip().replace("RT: ", "")
                     estimated_time_remaining = (
                         time_parts[1].strip().replace("ETR: ", "")
