@@ -263,7 +263,7 @@ class ConfigGenerator:
 
             if len(value_list) == 1:
                 # If only one value and it is different from the default, save it directly
-                if value_list[0] != getattr(default_config, key, None):
+                if value_list[0] != getattr(default_config, key, None) or key == "seed":
                     kwargs[key] = value_list[0]
             else:
                 # If more than one value, save it as a list

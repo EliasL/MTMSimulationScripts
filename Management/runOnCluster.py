@@ -66,6 +66,9 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
         # Ensure the JobOutput directory exists
         c.run(f"mkdir -p {outPath}")
 
+        # Truncate the error file to clear old errors
+        c.run(f"truncate -s 0 {error_file}")
+
         # Create a batch script content
         batch_script = textwrap.dedent(f"""
             #!/bin/bash
@@ -101,10 +104,14 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
 
 
 def build_on_server(server):
+    print(f"Uploading to {server}...")
     uploadProject(server)
     project_path = "/home/elundheim/simulation/MTS2D/build-release/"
     build_command = f"mkdir -p {project_path} && cd {project_path} && cmake -DCMAKE_BUILD_TYPE=Release .. && make"
+
+    print(f"Building on {server}...")
     run_remote_command(server, build_command, hide=True)
+    print(f"{server} is ready!")
 
 
 def build_on_all_servers():

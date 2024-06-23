@@ -249,6 +249,7 @@ def findOutputPath(
         "/media/elias/dataStorage/",
         "/data2/elundheim/",
         "/data/elundheim/",
+        "/tmp/",
     ]
 
     # Initialize a variable to store the chosen path
@@ -259,6 +260,9 @@ def findOutputPath(
         if os.path.exists(path):
             chosen_path = path
             break  # Stop the loop once a valid path is found
+
+    if chosen_path == "/tmp/":
+        print("Warning: Using temp output folder!")
 
     # Check if a valid path was found or raise an error
     if chosen_path is None:

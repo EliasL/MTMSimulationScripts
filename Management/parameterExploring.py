@@ -253,12 +253,47 @@ def smallLoadingSpeeds():
     )
 
 
+def FIRELoading():
+    nrThreads = 1
+    nrSeeds = 1
+    size = 60
+    configs, labels = ConfigGenerator.generate(
+        group_by_seeds=True,
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
+        startLoad=0.15,
+        nrThreads=nrThreads,
+        loadIncrement=[2e-4],
+        maxLoad=1.0,
+        eps=1e-3,
+        LBFGSEpsg=[1e-4],
+        scenario="simpleShear",
+    )
+    extra_configs, extra_labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
+        startLoad=0.0,
+        nrThreads=nrThreads,
+        loadIncrement=[1e-5],
+        maxLoad=1.0,
+        LBFGSEpsx=[1e-6],
+        scenario="simpleShear",
+    )
+    # configs.extend([extra_configs])
+    # labels.extend([["loadIncrement=1e-5, LBFGSEpsx=1e-6"]])
+    # runSims(configs)
+    # plotLog(configs, "Loading settings", labels=labels)
+
+
 if __name__ == "__main__":
     # plotOldStuff()
     # plotLessOldStuff()
     # fastStatStuff()
     # plotLessOldStuff()
     # runSims()
-    loadingSpeeds()
+    # loadingSpeeds()
     # smallLoadingSpeeds()
+    FIRELoading()
     pass

@@ -1,3 +1,4 @@
+import os
 from paramiko import SSHClient, AutoAddPolicy, AuthenticationException
 import subprocess
 
@@ -37,65 +38,74 @@ class Servers:
 
 
 def uploadProject(cluster_address="Servers.default", verbose=False):
-    try:
-        ssh_command = [
-            "ssh",
-            f"elundheim@{cluster_address}",
-            "mkdir -p /home/elundheim/simulation /home/elundheim/simulation/MTS2D /home/elundheim/simulation/SimulationScripts",
-        ]
+    # Get the directory of the current script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
 
-        output_options = None if verbose else subprocess.DEVNULL
+    # Define the local paths based on the script directory
 
-        subprocess.run(
-            ssh_command, check=True, stdout=output_options, stderr=output_options
-        )
+    # Define the local paths based on the script directory and resolve them to absolute paths
+    local_path_MTS2D = os.path.abspath(os.path.join(script_dir, "..", "..", "MTS2D"))
+    local_path_SS = os.path.abspath(os.path.join(script_dir, ".."))
+    clusterPath = f"elundheim@{cluster_address}:/home/elundheim/simulation/"
 
-        rsync_command_MTS2D = [
-            "rsync",
-            "-avz",
-            "--progress",
-            "--exclude",
-            ".git",
-            "--exclude",
-            "build",
-            "--exclude",
-            "build-release",
-            "--exclude",
-            "libs/**-build",
-            "--exclude",
-            "libs/**-subbuild",
-            "--exclude",
-            "Visuals/",
-            "/Users/eliaslundheim/work/PhD/MTS2D/",
-            f"elundheim@{cluster_address}:/home/elundheim/simulation/MTS2D/",
-        ]
+    ssh_command = [
+        "ssh",
+        f"elundheim@{cluster_address}",
+        "mkdir -p /home/elundheim/simulation /home/elundheim/simulation/MTS2D /home/elundheim/simulation/SimulationScripts",
+    ]
 
-        rsync_command_SS = [
-            "rsync",
-            "-avz",
-            "--progress",
-            "--exclude",
-            "Plots/" "--exclude",
-            ".git",
-            "/Users/eliaslundheim/work/PhD/SimulationScripts/",
-            f"elundheim@{cluster_address}:/home/elundheim/simulation/SimulationScripts/",
-        ]
+    output_options = None if verbose else subprocess.DEVNULL
 
-        subprocess.run(
-            rsync_command_MTS2D,
-            check=True,
-            stdout=output_options,
-            stderr=output_options,
-        )
-        subprocess.run(
-            rsync_command_SS, check=True, stdout=output_options, stderr=output_options
-        )
+    if verbose:
+        print("Creating directories")
+    subprocess.run(
+        ssh_command, check=True, stdout=output_options, stderr=output_options
+    )
 
-        if verbose:
-            print("Project folders successfully uploaded.")
+    rsync_command_MTS2D = [
+        "rsync",
+        "-avz",
+        "--progress",
+        "--exclude",
+        ".git",
+        "--exclude",
+        "build",
+        "--exclude",
+        "build-release",
+        "--exclude",
+        "libs/**-build",
+        "--exclude",
+        "libs/**-subbuild",
+        "--exclude",
+        "Visuals/",
+        local_path_MTS2D,
+        clusterPath,
+    ]
 
-    except subprocess.CalledProcessError as e:
-        raise Exception(f"An error occurred while uploading the project: {e}")
+    rsync_command_SS = [
+        "rsync",
+        "-avz",
+        "--progress",
+        "--exclude",
+        "Plots/",
+        "--exclude",
+        ".git",
+        local_path_SS,
+        clusterPath,
+    ]
+
+    subprocess.run(
+        rsync_command_MTS2D,
+        check=True,
+        stdout=output_options,
+        stderr=output_options,
+    )
+    subprocess.run(
+        rsync_command_SS, check=True, stdout=output_options, stderr=output_options
+    )
+
+    if verbose:
+        print("Project folders successfully uploaded.")
 
 
 def connectToCluster(cluster_address=Servers.default, verbose=True):

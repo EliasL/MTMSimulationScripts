@@ -40,8 +40,9 @@ def generateCommands(configs, threads_per_seed=1):
 
     # First we want to find the number of available cores on each server
     # serverInfo[0].nrFreeCores
+    print("Getting server info... ")
     serverInfo = get_all_server_info()
-
+    print("Creating commadns... ")
     commands = {}
     # If the number of servers with more free cores than nr_seeds is larger than
     # nr_max_batches, we simply put one batch on each of these servers
@@ -74,6 +75,25 @@ def generateCommands(configs, threads_per_seed=1):
     raise RuntimeError("Not enough cores to run simulations!")
 
 
+def firetestconfs():
+    nrThreads = 1
+    nrSeeds = 1
+    size = 60
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
+        startLoad=0.15,
+        nrThreads=nrThreads,
+        loadIncrement=[2e-4],
+        maxLoad=1.0,
+        eps=1e-3,
+        LBFGSEpsg=[1e-4],
+        scenario="simpleShear",
+    )
+    return configs, labels
+
+
 if __name__ == "__main__":
     nrThreads = 1
     nrSeeds = 40
@@ -88,8 +108,7 @@ if __name__ == "__main__":
         LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
         scenario="simpleShear",
     )
-
-    print("Generating commands...")
+    configs, labels = firetestconfs()
     commands = generateCommands(configs)
     print("Building on all servers... ")
     build_on_all_servers()
@@ -98,8 +117,8 @@ if __name__ == "__main__":
     for server, commands in commands.items():
         for command in commands:
             # jobId = queue_remote_job(server, command, "bigJ", nrThreads * nrSeeds)
-            # print(command)
+            print(command)
             pass
         print(f"Started {len(commands)} jobs on {get_server_short_name(server)}")
     print("Done!")
-    j.showProcesses()
+    # j.showProcesses()

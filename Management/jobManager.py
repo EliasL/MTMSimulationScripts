@@ -17,6 +17,7 @@ from dataManager import get_directory_size
 
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Plotting"))
 # Now we can import from Management
+from runOnCluster import build_on_all_servers, build_on_server, queue_remote_job
 from settings import settings
 
 
@@ -288,7 +289,6 @@ class JobManager:
                     estimated_time_remaining = "N/A"
                 else:
                     time_parts = process.timeEstimation.split(",")
-                    print(time_parts)
                     run_time = time_parts[0].strip().replace("RT: ", "")
                     estimated_time_remaining = (
                         time_parts[1].strip().replace("ETR: ", "")
@@ -390,12 +390,12 @@ if __name__ == "__main__":
     else:
         onlyCheckJobs = "False"
 
-    minNrThreads = 61
+    minNrThreads = 1
     script = "benchmarking.py"
     script = "runSimulations.py"
     script = "parameterExploring.py"
-    server = Servers.dalembert
     server = Servers.condorcet
+    server = Servers.dalembert
     command = (
         f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
     )
@@ -407,8 +407,9 @@ if __name__ == "__main__":
         j = JobManager()
         # j.cancel_job_on_server(server, 558366)
         # server = find_server(minNrThreads)
-        # uploadProject(server)
+        build_on_server(server)
+        # build_on_all_servers()
 
-        # jobId = queue_remote_job(server, command, "energy", minNrThreads)
-        j.showSlurmJobs()
-        j.showProcesses()
+        jobId = queue_remote_job(server, command, "FIRETest", minNrThreads)
+        # j.showSlurmJobs()
+        # j.showProcesses()
