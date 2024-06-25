@@ -119,6 +119,9 @@ def plotPowerLaw(
 
     # Configure the analysis range
     xmin, xmax = 1e-6, np.max(combined_diffs)
+    if xmin > xmax:
+        print("Invalid min-max. Need larger avalanches.")
+        return
     fit = powerlaw.Fit(combined_diffs, xmin=xmin, xmax=xmax, fit_method="Likelihood")
 
     # Set up bins and plot histogram
@@ -381,24 +384,26 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
 
     fig, ax = plt.subplots()
 
-    color_index = 0
+    color_index = -1
     line_index = 0
 
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
         data = []
-        # Get the current color
-        color = colors[color_index]
-
         # Increment the global call count
         color_index += 1
-
         # Check if we've used all colors
         if color_index >= len(colors):
             # Switch to the next line style and marker
             color_index = 0
             line_index += 1
+
+        # Get the current color
+        color = colors[color_index]
+
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
+            if df.empty:
+                continue
             data.append(df[Y].values)
 
             e_kwargs = {

@@ -59,7 +59,7 @@ class SimulationManager:
         if self.useProfiling and platform.system() == "Linux":
             self.simulation_command = f"valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes {self.simulation_command}"
 
-    def runSimulation(self, build=True, resumeIfPossible=True):
+    def runSimulation(self, build=True, resumeIfPossible=True, silent=False):
         if build:
             self._build()
 
@@ -72,12 +72,12 @@ class SimulationManager:
                 pass
             if dump is not None:
                 # We resume instead of starting normally
-                return self.resumeSimulation()
+                return self.resumeSimulation(silent=silent)
 
         # Start the timer right before running the command
         start_time = time.time()
         print("Running simulation")
-        run_command(self.simulation_command)
+        run_command(self.simulation_command, echo=not silent)
 
         # Stop the timer right after the command completes
         end_time = time.time()
@@ -94,6 +94,7 @@ class SimulationManager:
         build=True,
         overwriteSettings=False,
         overwriteData=False,
+        silent=False,
     ):
         if build:
             self._build()
@@ -107,7 +108,8 @@ class SimulationManager:
         start_time = time.time()
         # We can choose to use the previous settings, or overwrite them using new ones
         run_command(
-            f"{self.program_path} -d {dumpFile}{' -c ' + self.conf_file if overwriteSettings else '' + ' -r' if overwriteData else ''}"
+            f"{self.program_path} -d {dumpFile}{' -c ' + self.conf_file if overwriteSettings else '' + ' -r' if overwriteData else ''}",
+            echo=not silent,
         )  # Stop the timer right after the command completes
         end_time = time.time()
         # Calculate the duration

@@ -1,8 +1,8 @@
 from simulationManager import SimulationManager
 from configGenerator import ConfigGenerator, SimulationConfig
 from multiprocessing import Pool
-import sys
 import ast
+import sys
 
 
 def task(config):
@@ -15,23 +15,33 @@ def task(config):
     return time
 
 
-def parse_args(args):
+def parse_args():
+    # Skip the first argument (script path)
+    args = sys.argv[1:]
     kwargs = {}
-    for arg in args[1:]:  # Exclude the script name itself
-        key, value = arg.split("=")
-        kwargs[key] = ast.literal_eval(value)
+
+    for arg in args:
+        if "=" in arg:
+            key, value = arg.split("=", 1)
+            try:
+                # Try to evaluate the value (e.g., for lists, numbers)
+                value = ast.literal_eval(value)
+            except (ValueError, SyntaxError):
+                # If it fails, keep it as a string
+                pass
+            kwargs[key] = value
 
     return kwargs
 
 
 if __name__ == "__main__":
-    kwargs = parse_args(sys.argv)
+    kwargs = parse_args()
     (configs, labels) = ConfigGenerator.generate(**kwargs)
 
     # Build and test (Fail early)
     manager = SimulationManager(SimulationConfig())
     try:
-        manager.runSimulation()
+        manager.runSimulation(resumeIfPossible=False, silent=True)
     except Exception as e:
         Warning(e)
         manager.clean()
@@ -42,3 +52,4 @@ if __name__ == "__main__":
 
     with Pool(processes=len(configs)) as pool:
         results = pool.map(task, configs)
+        pass

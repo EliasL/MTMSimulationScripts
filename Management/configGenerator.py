@@ -39,10 +39,10 @@ class SimulationConfig:
         self.alphaStart = 0.1
         self.falpha = 0.99
         self.dtStart = 0.01
-        self.dtMax = 0.01 * 10
-        self.dtMin = 0.01 * 0.002
+        self.dtMax = self.dtStart * 5
+        self.dtMin = self.dtStart * 0.000001
         self.maxCompS = 0.01
-        self.eps = 0.01
+        self.eps = 0.001
         self.epsRel = 0.0
         self.delta = 0.0
         self.maxIt = 10000
@@ -347,8 +347,8 @@ if __name__ == "__main__":
         # if there is a complete custom scenario, we replace the config
         if get_custom_configs(scenario) is not None:
             config = get_custom_configs(scenario)
-
-    path = config.write_to_file("build/")
+    build_path = os.path.join(os.getcwd(), "build/")
+    path = config.write_to_file(build_path)
     # Extract the directory part from the original path
     directory = os.path.dirname(path)
 

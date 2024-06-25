@@ -58,10 +58,14 @@ def generateCommands(configs, threads_per_seed=1):
             # This creates a dictionary from keys and tuple values
             combi_dict = dict(zip(kwargs.keys(), kwargs_combi[kwarg_index]))
             kwarg_index += 1
+
             cmd = (
                 base_command
                 + " "
-                + " ".join(f"{key}={value}" for key, value in combi_dict.items())
+                + " ".join(  # We need to add "" to strings
+                    f'{key}="{value}"' if isinstance(value, str) else f"{key}={value}"
+                    for key, value in combi_dict.items()
+                )
             )
 
             full_command = f'{cmd} seed="{seeds}"'
@@ -77,7 +81,7 @@ def generateCommands(configs, threads_per_seed=1):
 
 def firetestconfs():
     nrThreads = 1
-    nrSeeds = 1
+    nrSeeds = 40
     size = 60
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -85,10 +89,10 @@ def firetestconfs():
         cols=size,
         startLoad=0.15,
         nrThreads=nrThreads,
-        loadIncrement=[2e-4],
+        minimizer="FIRE",
+        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        eps=[1e-6, 1e-5, 5e-5, 1e-4],
         maxLoad=1.0,
-        eps=1e-3,
-        LBFGSEpsg=[1e-4],
         scenario="simpleShear",
     )
     return configs, labels
@@ -116,8 +120,8 @@ if __name__ == "__main__":
     j = JobManager()
     for server, commands in commands.items():
         for command in commands:
-            # jobId = queue_remote_job(server, command, "bigJ", nrThreads * nrSeeds)
-            print(command)
+            jobId = queue_remote_job(server, command, "bigJ", nrThreads * nrSeeds)
+            # print(command)
             pass
         print(f"Started {len(commands)} jobs on {get_server_short_name(server)}")
     print("Done!")

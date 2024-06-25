@@ -453,15 +453,19 @@ if __name__ == "__main__":
 
     dm = DataManager()
     # dm.clean_projects_on_servers()
+    nrThreads = 1
+    nrSeeds = 40
+    size = 60
     configs, labels = ConfigGenerator.generate(
-        seed=range(40),
-        rows=60,
-        cols=60,
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
         startLoad=0.15,
-        nrThreads=1,
+        nrThreads=nrThreads,
+        minimizer="FIRE",
         loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        eps=[1e-6, 1e-5, 5e-5, 1e-4],
         maxLoad=1.0,
-        LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
         scenario="simpleShear",
     )
     dm.findData()

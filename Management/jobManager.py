@@ -100,16 +100,13 @@ class Process:
             config_path = parts[c_index] if c_index < len(parts) else None
             self.get_config_file(config_path)
             self.name = os.path.splitext(os.path.basename(config_path))[0]
-        else:
-            print(parts)
+
         if "-o" in parts:
             o_index = parts.index("-o") + 1
             self.output_path = parts[o_index] if o_index < len(parts) else None
 
             self.get_progress()
             self.dataSize = get_directory_size(self.ssh, self.output_path + self.name)
-        else:
-            print(parts)
 
     def get_config_file(self, config_path):
         # Download the config file using SFTP
@@ -236,11 +233,11 @@ class JobManager:
                     "node_list": fields[7],
                 }
                 slurm_jobs.append(job_details)
+                with lock:
+                    global nr_jobs_found
+                    nr_jobs_found += 1
+                    update_progress(jobs=True)
 
-        with lock:
-            global nr_jobs_found
-            nr_jobs_found += 1
-            update_progress(jobs=True)
         return slurm_jobs
 
     # Generalized method for executing a command on all servers in parallel
@@ -352,12 +349,16 @@ class JobManager:
 
     def cancelAllJobs(self):
         """Cancel all Slurm jobs listed in self.slurmJobs."""
-        for server, job_id in self.slurmJobs:
-            print(f"Are you sure you want to cancle job {job_id} on {server}?:")
+        if len(self.slurmJobs) == 0:
+            print("No jobs found. Do you run showSlurmJobs first?")
+        for job in self.slurmJobs:
+            print(
+                f"Are you sure you want to cancle job {job['job_id']} on {job['server']}?:"
+            )
             if input("yes/no: ") != "yes":
                 continue
             else:
-                self.cancel_job_on_server(server, job_id)
+                self.cancel_job_on_server(job["server"], job["job_id"])
 
     def kill_all_processes(self, server):
         """Kill all processes related to the user on the specified server."""
@@ -394,8 +395,8 @@ if __name__ == "__main__":
     script = "benchmarking.py"
     script = "runSimulations.py"
     script = "parameterExploring.py"
-    server = Servers.condorcet
     server = Servers.dalembert
+    server = Servers.condorcet
     command = (
         f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
     )
@@ -405,11 +406,14 @@ if __name__ == "__main__":
         j.showProcesses()
     else:
         j = JobManager()
-        # j.cancel_job_on_server(server, 558366)
+        j.showSlurmJobs()
+        # j.cancel_job_on_server(server, 876296)
+        # j.cancel_job_on_server(server, 876297)
         # server = find_server(minNrThreads)
-        build_on_server(server)
+        j.cancelAllJobs()
+        # build_on_server(server)
         # build_on_all_servers()
 
-        jobId = queue_remote_job(server, command, "FIRETest", minNrThreads)
+        # jobId = queue_remote_job(server, command, "FIRETest", minNrThreads)
         # j.showSlurmJobs()
         # j.showProcesses()

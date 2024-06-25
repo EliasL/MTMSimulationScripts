@@ -7,19 +7,16 @@ from multiprocessing import Pool
 # sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
 
 # Define dumpPath as a global variable
-dumpPath = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.15,1e-05,1PBCt4EpsG0.01EpsF0.001s0/dumps/Dump_l0.650400_19.03~10.05.2024.mtsb"
+dumpPath = "/Volumes/data/MTS2D_output/simpleShear,s60x60l0.15,0.0002,1.0PBCt1minimizerFIRELBFGSEpsg0.0001s0/dumps//Dump_l0.447600_16.27~24.06.2024.mtsb"
 
 
 def task(config):
     manager = SimulationManager(config)
-    try:
-        time = manager.runSimulation(build=False)
-        # time = manager.resumeSimulation(dumpFile=dumpPath,
-        #                                 overwriteSettings=True,
-        #                                 build=False)
-    except Exception as e:
-        print(e)
-        return f"Error: {e}"
+
+    time = manager.runSimulation(build=False, resumeIfPossible=False)
+    # time = manager.resumeSimulation(
+    #     dumpFile=dumpPath, overwriteSettings=True, build=False
+    # )
 
     # manager.plot()
 
@@ -38,9 +35,11 @@ def assignColors(configs, keyValueColors, defaultColor="black"):
 
 def runSims(configs):
     # Build and test (Fail early)
-    manager = SimulationManager(SimulationConfig(rows=3, cols=3, loadIncrement=0.1))
+    manager = SimulationManager(
+        SimulationConfig(rows=3, cols=3, loadIncrement=0.1, showProgress=0)
+    )
     try:
-        manager.runSimulation()
+        manager.runSimulation(resumeIfPossible=False, silent=True)
     except Exception as e:
         Warning(e)
         manager.clean()
@@ -193,8 +192,8 @@ def loadingSpeeds():
         startLoad=0.15,
         nrThreads=nrThreads,
         loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
-        maxLoad=1.0,
         LBFGSEpsg=[1e-6, 1e-5, 5e-5, 1e-4],
+        maxLoad=1.0,
         scenario="simpleShear",
     )
     extra_configs, extra_labels = ConfigGenerator.generate(
@@ -255,7 +254,7 @@ def smallLoadingSpeeds():
 
 def FIRELoading():
     nrThreads = 1
-    nrSeeds = 1
+    nrSeeds = 40
     size = 60
     configs, labels = ConfigGenerator.generate(
         group_by_seeds=True,
@@ -264,10 +263,10 @@ def FIRELoading():
         cols=size,
         startLoad=0.15,
         nrThreads=nrThreads,
-        loadIncrement=[2e-4],
+        minimizer="FIRE",
+        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        eps=[1e-6, 1e-5, 5e-5, 1e-4],
         maxLoad=1.0,
-        eps=1e-3,
-        LBFGSEpsg=[1e-4],
         scenario="simpleShear",
     )
     extra_configs, extra_labels = ConfigGenerator.generate(
@@ -283,8 +282,7 @@ def FIRELoading():
     )
     # configs.extend([extra_configs])
     # labels.extend([["loadIncrement=1e-5, LBFGSEpsx=1e-6"]])
-    # runSims(configs)
-    # plotLog(configs, "Loading settings", labels=labels)
+    plotLog(configs, "Loading settings", labels=labels)
 
 
 if __name__ == "__main__":

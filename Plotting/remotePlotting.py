@@ -79,9 +79,7 @@ def get_csv_from_server(server, configs):
     stdin, stdout, stderr = ssh.exec_command(command)
     folders = stdout.read().strip().decode().split("\n")
     folders = [folder.rstrip("/") for folder in folders]  # Clean up folder names
-
     names = [config.generate_name(False) for config in configs]
-
     newPaths = []
     folder_path = "/tmp/MTS2D"
     os.makedirs(
@@ -132,7 +130,7 @@ def download_file(name, folders, data_path, remote_folder_name, folder_path, ssh
                 time.sleep(
                     random.uniform(1, 3)
                 )  # Random delay to prevent synchronized reconnection attempts
-                print(f"Attempt {attempts} failed for {name}: {e}")
+                # print(f"Attempt {attempts} failed for {name}: {e}")
                 if attempts >= max_attempts:
                     print(f"Error downloading {name}: {e}")
     return None
@@ -209,7 +207,6 @@ def get_csv_files(configs, useOldFiles=False, labels=[], **kwargs):
         config_groups = configs
         configs = [config for sublist in config_groups for config in sublist]
     global completed_servers
-
     # First check if the files have already been downloaded
     paths, configs = search_for_cvs_files(configs, useOldFiles)
     if len(configs) == 0:
