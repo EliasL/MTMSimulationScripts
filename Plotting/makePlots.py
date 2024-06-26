@@ -92,10 +92,10 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
 
 # Define global variables
 line_styles = ["-", "--", "-.", ":"]
-markers = ["v", "^", "o", "s", "D", "p", "*"]
+markers = ["v", "o", "^", "s", "D", "p", "*"]
 colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 color_index = 0
-marker_index = 0
+index = 0
 line_index = 0
 
 
@@ -105,32 +105,82 @@ def plotPowerLaw(
     ax=None,
     label="",
 ):
-    global color_index, marker_index, line_index
+    global color_index, index, line_index
     if ax is None:
         fig, ax = plt.subplots()
 
     # Extract and prepare the data
-    combined_diffs = np.concatenate(
-        [
-            -np.diff(np.array(y_values))[np.diff(np.array(y_values)) < 0]
-            for y_values in y_values_series
-        ]
-    )
+    combined_pre_yield_drops = []
+    combined_post_yield_drops = []
+    for y_values in y_values_series:
+        y_values = np.array(y_values)
+        max_index = np.argmax(y_values)
 
-    # Configure the analysis range
-    xmin, xmax = 1e-6, np.max(combined_diffs)
-    if xmin > xmax:
-        print("Invalid min-max. Need larger avalanches.")
-        return
-    fit = powerlaw.Fit(combined_diffs, xmin=xmin, xmax=xmax, fit_method="Likelihood")
+        # Include max_index in pre_yield_drops
+        pre_yield_drops = np.diff(y_values[: max_index + 1])
+        # Elements after max_index
+        post_yield_drops = np.diff(y_values[max_index + 1 :])
+        combined_pre_yield_drops.append(-pre_yield_drops[pre_yield_drops < 0])
+        combined_post_yield_drops.append(-post_yield_drops[post_yield_drops < 0])
+    combined_pre_yield_drops = np.concatenate(combined_pre_yield_drops)
+    combined_post_yield_drops = np.concatenate(combined_post_yield_drops)
 
-    # Set up bins and plot histogram
-    bins = np.logspace(np.log10(xmin), np.log10(xmax), 12)
-    hist, bin_edges = np.histogram(combined_diffs, bins=bins, density=True)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+    for combined_diffs, part_label, index in [
+        (combined_pre_yield_drops, "pre yield", 0),
+        (combined_post_yield_drops, "post yield", 1),
+    ]:
+        if len(combined_diffs) == 0:
+            continue
 
-    # Get the current color
-    color = colors[color_index]
+        # Configure the analysis range
+        xmin, xmax = np.min(combined_diffs), np.max(combined_diffs)
+
+        fit = powerlaw.Fit(
+            combined_diffs, xmin=xmin, xmax=xmax, fit_method="Likelihood"
+        )
+
+        # Set up bins and plot histogram
+        bins = np.logspace(np.log10(xmin), np.log10(xmax), 12)
+        hist, bin_edges = np.histogram(combined_diffs, bins=bins, density=True)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+        # Get the current color
+        color = colors[color_index]
+
+        # Separated the pre and post lines
+        shift = 1e2
+
+        # Plot the histogram with marker only, but don't show in legend
+        ax.scatter(
+            bin_centers,
+            hist / (shift if index else 1),
+            marker=markers[index],
+            facecolors="none",
+            edgecolors=color,
+            s=100,
+            zorder=-(color_index * 2 + 1),
+        )
+
+        # Plot the line only, but don't show in legend
+        ax.plot(
+            bin_centers,
+            fit.truncated_power_law.pdf(bin_centers) / (shift if index else 1),
+            line_styles[index],
+            label="_nolegend_",
+            color=color,
+            zorder=-color_index * 2,
+        )
+
+        # Create a dummy plot for the legend with both marker and line style
+        ax.plot(
+            [],
+            [],
+            line_styles[index],
+            marker=markers[index],
+            label=rf"{label.split(' seed')[0]} {part_label} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
+            color=color,
+        )
+        print(f"{label} {part_label}: {fit.truncated_power_law.alpha}")
 
     # Increment the global call count
     color_index += 1
@@ -139,38 +189,6 @@ def plotPowerLaw(
     if color_index >= len(colors):
         # Switch to the next line style and marker
         color_index = 0
-        line_index += 1
-        marker_index += 1
-
-    # Plot the histogram with marker only, but don't show in legend
-    line1 = ax.scatter(
-        bin_centers,
-        hist,
-        marker=markers[marker_index],
-        facecolors="none",
-        edgecolors=color,
-        s=100,
-    )
-
-    # Plot the line only, but don't show in legend
-    (line2,) = ax.plot(
-        bin_centers,
-        fit.truncated_power_law.pdf(bin_centers),
-        line_styles[line_index],
-        label="_nolegend_",
-        color=color,
-    )
-
-    # Create a dummy plot for the legend with both marker and line style
-    ax.plot(
-        [],
-        [],
-        line_styles[line_index],
-        marker=markers[marker_index],
-        label=rf"{label.split(' seed')[0]} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
-        color=color,
-    )
-    print(f"{label}: {fit.truncated_power_law.alpha}")
 
     # Set axes to logarithmic
     ax.set_xscale("log")
@@ -380,12 +398,14 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
     Y = "Avg energy"
     x_name = "Load"
     y_name = "Avg energy"
-    title = "60x60, load:0.15-1, loadIncrement:1e-5, PBC, LBFGS, t1, seeds:40"
+    title = f"{name}"
 
     fig, ax = plt.subplots()
 
     color_index = -1
     line_index = 0
+
+    crash_count = 0
 
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
         data = []
@@ -404,6 +424,12 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
             if df.empty:
                 continue
+            # Check for Y values greater than 10 and truncate
+            if (df[Y] > 10).any():
+                crash_count += 1
+                df = df[df[Y] <= 1]
+                print(f"Crash in {csv_file_path}.")
+
             data.append(df[Y].values)
 
             e_kwargs = {
@@ -412,6 +438,7 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
                 "color": color,
                 "linestyle": line_styles[line_index],
                 "alpha": 0.05,
+                "zorder": -color_index,
             }
             fig, ax, line, point = plotYOverX(df[X], df[Y], **e_kwargs)
         # Determine the maximum length among all arrays
@@ -439,17 +466,19 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
             "label": kwargs["labels"][i][0].split(" seed")[0],
             "color": colors[color_index],
             "linestyle": line_styles[line_index],
+            "zorder": -color_index,
         }
         df = pd.read_csv(csv_file_paths[max_length_index], usecols=[X])
         fig, ax, line, point = plotYOverX(df[X], average, **a_kwargs)
-
+    if crash_count > 0:
+        print(f"Found {crash_count} crashes.")
     # Set the legend with the filtered handles and labels
     ax.legend(loc=("best"))
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
     ax.set_title(title)
     ax.autoscale_view()
-    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name)
+    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name + ".pdf")
     fig.savefig(figPath)
     print(f'Plot saved at: "{figPath}"')
     if show:
@@ -463,10 +492,12 @@ def makeLogPlotComparison(
     Y = "Avg energy"
     x_name = "Magnitude of energy drops"
     y_name = "Frequency"
-    title = "60x60, load:0.15-1, PBC, LBFGS, t1, seeds:40"
+    lims = "" if xLims == [-np.inf, np.inf] else f", xLims: {xLims[0]}-{xLims[1]}"
+    title = f"{name}{lims}"
 
     fig, ax = plt.subplots()
 
+    crash_count = 0
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
         data = []
         for j, csv_file_path in enumerate(csv_file_paths):
@@ -474,6 +505,10 @@ def makeLogPlotComparison(
             df = df[
                 (df[X] >= xLims[0]) & (df[X] <= xLims[1])
             ]  # Truncate data based on xLims
+            # Check for Y values greater than 10 and truncate
+            if (df[Y] > 10).any():
+                crash_count += 1
+                df = df[df[Y] <= 1]
             data.append(df[Y].values)
         log_kwargs = {
             "fig": fig,
@@ -481,14 +516,15 @@ def makeLogPlotComparison(
             "label": kwargs["labels"][i][j],
         }
         fig, ax, line = plotPowerLaw(data, **log_kwargs)
-
+    if crash_count > 0:
+        print(f"Found {crash_count} crashes.")
     # Set the legend with the filtered handles and labels
     ax.legend(loc=("best"))
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
     ax.set_title(title)
     ax.autoscale_view()
-    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name)
+    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name + ".pdf")
     fig.savefig(figPath)
     print(f'Plot saved at: "{figPath}"')
     if show:
@@ -561,11 +597,12 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
 if __name__ == "__main__":
     pass
     # The path should be the path from work directory to the folder inside the output folder.
-    # makeEnergyPlot([
-    #         '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/macroData.csv',
-    #         '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/FullMacroData.csv',
-    #     ],
-    #                name='energy.pdf')
+    makeEnergyPlot(
+        [
+            "/Volumes/data/MTS2D_output/simpleShear,s60x60l0.15,0.0002,1.0PBCt1minimizerFIRELBFGSEpsg0.0001eps0.01s0/macroData.csv",
+        ],
+        name="energy.pdf",
+    )
     # makeItterationsPlot(
     #     [
     #         '/Volumes/data/MTS2D_output/simpleShearPeriodicBoundary,s60x60l0.15,1e-05,20PBCt4s0/macroData.csv',

@@ -170,8 +170,8 @@ def plot(ax, path, **kwargs):
 
 
 # Plotting functions
-def plot_results(X, Y, Z, minima, results):
-    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+def plot_results(X, Y, Z, minima, results, name):
+    fig, ax = plt.subplots(1, 1, figsize=(9, 9))
     contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
     if len(results["FIRE"]["paths"]) < 10:
         ax.scatter(minima[:, 0], minima[:, 1], c="red", marker="x")
@@ -218,7 +218,7 @@ def plot_results(X, Y, Z, minima, results):
     # Reorder handles using the predefined order
     sorted_handles = [by_label[label] for label in order if label in by_label]
     # Set the legend with sorted handles
-    leg = ax.legend(handles=sorted_handles, loc="lower right")
+    leg = ax.legend(handles=sorted_handles, loc="lower left")
     # Make markers non-transparent
     for lh in leg.legendHandles:
         lh.set_alpha(1)
@@ -227,10 +227,10 @@ def plot_results(X, Y, Z, minima, results):
     # Layout and save figure
     plt.tight_layout()
     script_dir = os.path.dirname(
-        os.path.realpath("__file__")
+        os.path.realpath(__file__)
     )  # This gets the directory of the script
-    plt.savefig(os.path.join(script_dir, "optimization_paths.png"))
-    plt.show()
+    plt.savefig(os.path.join(script_dir, name))
+    # plt.show()
 
 
 def summarize_end_points(results):
@@ -266,17 +266,22 @@ def main():
     x_range = np.linspace(-10, 10, 30)
     y_range = np.linspace(-15, 15, 30)
     minima = find_minima(x_range, y_range, f_func, df_func)
-    X, Y = np.meshgrid(x_range, y_range)
-    # Flatten the mesh grid arrays and pair them into starting points
-    initial_points = np.column_stack((X.ravel(), Y.ravel()))
-    initial_points = np.array([[0, y] for y in [10]])  # , 8, 5, 2]])
-    results = run_optimizations(initial_points, f_func, df_func)
-    summarize_end_points(results)
+    init_X, init_Y = np.meshgrid(x_range, y_range)
     x = np.linspace(-16, 16, 100)
     y = np.linspace(-16, 16, 100)
     X, Y = np.meshgrid(x, y)
     Z = f((X, Y), f_func)
-    plot_results(X, Y, Z, minima, results)
+
+    # Flatten the mesh grid arrays and pair them into starting points
+    initial_points_grid = np.column_stack((init_X.ravel(), init_Y.ravel()))
+    initial_points_simple = np.array([[0, y] for y in [10]])  # , 8, 5, 2]])
+
+    for initial_points, name in zip(
+        [initial_points_grid, initial_points_simple], ["grid.pdf", "simple.pdf"]
+    ):
+        results = run_optimizations(initial_points, f_func, df_func)
+        summarize_end_points(results)
+        plot_results(X, Y, Z, minima, results, name)
 
 
 if __name__ == "__main__":

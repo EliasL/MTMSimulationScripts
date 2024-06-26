@@ -25,7 +25,7 @@ class SimulationConfig:
         self.maxLoad = 1.0
 
         # Minimizer settings
-        self.minimizer = "LBFGS"  # FIRE / LBFGS
+        self.minimizer = "LBFGS"  # FIRE / LBFGS / CG
         # - LBFGS
         self.LBFGSNrCorrections = 10
         self.LBFGSScale = 1.0
@@ -33,6 +33,12 @@ class SimulationConfig:
         self.LBFGSEpsf = 0.0
         self.LBFGSEpsx = 1e-6
         self.LBFGSMaxIterations = 0
+        # - Conjugate Gradient
+        self.CGScale = 1.0
+        self.CGEpsg = 0.0
+        self.CGEpsf = 0.0
+        self.CGEpsx = 1e-6
+        self.CGMaxIterations = 0
         # - FIRE
         self.finc = 1.1
         self.fdec = 0.5
@@ -188,6 +194,8 @@ class ConfigGenerator:
         # Generate all combinations of non-seed parameters
         non_seed_combinations = list(product(*processed_kwargs.values()))
 
+        # Check if seeds is a single int
+        seeds = [seeds] if isinstance(seeds, int) else seeds
         # Generate full combinations, prioritizing seeds
         combined = [
             (seed,) + combo for combo in non_seed_combinations for seed in seeds
@@ -340,7 +348,7 @@ if __name__ == "__main__":
     import os
     import sys
 
-    config = SimulationConfig(loadIncrement=0.01)
+    config = SimulationConfig(loadIncrement=0.01, minimizer="CG")
     if len(sys.argv) >= 2:
         scenario = sys.argv[1]
         config.scenario = scenario

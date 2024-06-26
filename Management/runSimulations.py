@@ -9,7 +9,7 @@ def task(config):
     try:
         manager = SimulationManager(config)
         time = manager.runSimulation(False)
-        # manager.plot()
+        manager.plot()
     except Exception as e:
         return f"Error: {e}"
     return time
@@ -36,6 +36,18 @@ def parse_args():
 
 if __name__ == "__main__":
     kwargs = parse_args()
+    if len(kwargs) == 0:
+        kwargs = {
+            "seed": 0,
+            "minimizer": ["CG"],
+            "rows": 16,
+            "cols": 16,
+            "eps": 1e-5,
+            "LBFGSEpsg": 1e-5,
+            "CGEpsg": 1e-2,
+            "loadIncrement": 1e-6,
+        }
+
     (configs, labels) = ConfigGenerator.generate(**kwargs)
 
     # Build and test (Fail early)

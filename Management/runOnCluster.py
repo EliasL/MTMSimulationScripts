@@ -137,7 +137,7 @@ if __name__ == "__main__":
     # This can be used to run something on the server, but don't use this
     # to run a job. Use JobManager.
     # Choose which server to run on
-    server = Servers.condorcet
+    server = Servers.galois
     # Upload/sync the project
     uploadProject(server)
     # Choose script to run
@@ -147,5 +147,5 @@ if __name__ == "__main__":
     # Generate sbatch script
 
     # Queue the script on the server
-    # run_remote_script(server, script_path)
-    build_on_all_servers()
+    run_remote_script(server, script_path)
+    # build_on_all_servers()

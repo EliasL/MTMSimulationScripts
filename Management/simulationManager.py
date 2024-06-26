@@ -57,7 +57,7 @@ class SimulationManager:
         # Generate command to run simulation
         self.simulation_command = f"{self.program_path} -c {self.conf_file} -o {self.outputPath} {' -r' if overwriteData else ''}"
         if self.useProfiling and platform.system() == "Linux":
-            self.simulation_command = f"valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes {self.simulation_command}"
+            self.simulation_command = f"LD_PRELOAD=/usr/lib/gcc/x86_64-linux-gnu/7/libasan.so valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes {self.simulation_command}"
 
     def runSimulation(self, build=True, resumeIfPossible=True, silent=False):
         if build:
