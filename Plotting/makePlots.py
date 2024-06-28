@@ -9,8 +9,7 @@ import re
 import mplcursors
 from datetime import timedelta
 import powerlaw
-
-
+import pickle
 from simplification.cutil import simplify_coords_vwp
 
 
@@ -100,7 +99,7 @@ line_index = 0
 
 
 def plotPowerLaw(
-    y_values_series,
+    y_values,
     fig=None,
     ax=None,
     label="",
@@ -109,46 +108,39 @@ def plotPowerLaw(
     if ax is None:
         fig, ax = plt.subplots()
 
-    # Extract and prepare the data
-    combined_pre_yield_drops = []
-    combined_post_yield_drops = []
-    for y_values in y_values_series:
-        y_values = np.array(y_values)
-        max_index = np.argmax(y_values)
+    # Process drops
+    def pros_d(y_values, start, end):
+        diffs = np.diff(y_values[start:end])
+        return -diffs[diffs < 0]
 
-        # Include max_index in pre_yield_drops
-        pre_yield_drops = np.diff(y_values[: max_index + 1])
-        # Elements after max_index
-        post_yield_drops = np.diff(y_values[max_index + 1 :])
-        combined_pre_yield_drops.append(-pre_yield_drops[pre_yield_drops < 0])
-        combined_post_yield_drops.append(-post_yield_drops[post_yield_drops < 0])
-    combined_pre_yield_drops = np.concatenate(combined_pre_yield_drops)
-    combined_post_yield_drops = np.concatenate(combined_post_yield_drops)
+    pre_yield_drops = [pros_d(np.array(y), 0, np.argmax(y) + 1) for y in y_values]
+    post_yield_drops = [pros_d(np.array(y), np.argmax(y) + 1, len(y)) for y in y_values]
 
-    for combined_diffs, part_label, index in [
-        (combined_pre_yield_drops, "pre yield", 0),
-        (combined_post_yield_drops, "post yield", 1),
-    ]:
-        if len(combined_diffs) == 0:
+    combined_drops = [
+        np.concatenate(drops) for drops in (pre_yield_drops, post_yield_drops)
+    ]
+
+    for drops, part_label, index in zip(
+        combined_drops, ["pre yield", "post yield"], [0, 1]
+    ):
+        if len(drops) == 0:
             continue
 
         # Configure the analysis range
-        xmin, xmax = np.min(combined_diffs), np.max(combined_diffs)
+        xmin, xmax = np.min(drops), np.max(drops)
 
-        fit = powerlaw.Fit(
-            combined_diffs, xmin=xmin, xmax=xmax, fit_method="Likelihood"
-        )
+        fit = powerlaw.Fit(drops, xmin=xmin, xmax=xmax, fit_method="Likelihood")
 
         # Set up bins and plot histogram
         bins = np.logspace(np.log10(xmin), np.log10(xmax), 12)
-        hist, bin_edges = np.histogram(combined_diffs, bins=bins, density=True)
+        hist, bin_edges = np.histogram(drops, bins=bins, density=True)
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
         # Get the current color
         color = colors[color_index]
 
         # Separated the pre and post lines
-        shift = 1e2
+        shift = 1e2 * index
 
         # Plot the histogram with marker only, but don't show in legend
         ax.scatter(
@@ -193,7 +185,74 @@ def plotPowerLaw(
     # Set axes to logarithmic
     ax.set_xscale("log")
     ax.set_yscale("log")
-    return fig, ax, None
+    return fig, ax
+
+
+def plotSlidingPowerLaw(
+    y_values,
+    fig=None,
+    ax=None,
+    label="",
+):
+    global color_index, index, line_index
+    if ax is None:
+        fig, ax = plt.subplots()
+
+    # Process drops
+    def pros_d(y_values, start, end):
+        diffs = np.diff(y_values[start:end])
+        return -diffs[diffs < 0]
+
+    widths = [int(0.25 * len(y)) for y in y_values]
+    intervals = 10
+    start_values = [
+        np.linspace(0, len(y - w), intervals).astype(int)
+        for y, w in zip(y_values, widths)
+    ]
+    print(list(map(len, start_values)))
+    drops_series_starts = [
+        [
+            pros_d(np.array(y), s[i], s[i] + w)
+            for y, w, s in zip(y_values, widths, start_values)
+        ]
+        for i in range(intervals)
+    ]
+    combined_drops = [np.concatenate(drops) for drops in drops_series_starts]
+
+    settings = []
+
+    settings_file = "/tmp/settings.pkl"
+
+    # Check if the settings file already exists
+    if os.path.exists(settings_file) and False:
+        with open(settings_file, "rb") as file:
+            settings = pickle.load(file)
+    else:
+        for drops_series in combined_drops:
+            lamb = []
+            alpha = []
+            for drops in drops_series:
+                if len(drops) == 0:
+                    continue
+
+                # Configure the analysis range
+                xmin, xmax = np.min(drops), np.max(drops)
+
+                fit = powerlaw.Fit(drops, xmin=xmin, xmax=xmax, fit_method="Likelihood")
+                alpha.append(fit.truncated_power_law.alpha)
+                lamb.append(fit.truncated_power_law.Lambda)
+            settings.append((np.array(lamb), np.array(alpha)))
+
+        # Save the settings to a file
+        with open(settings_file, "wb") as file:
+            pickle.dump(settings, file)
+    np.array(settings)
+    ax.plot(
+        range(len(settings)),
+        settings[:, 0, 0],
+        marker="o",
+    )
+    return fig, ax
 
 
 def makePlot(
@@ -486,7 +545,12 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
 
 
 def makeLogPlotComparison(
-    grouped_csv_file_paths, name, xLims=[-np.inf, np.inf], show=True, **kwargs
+    grouped_csv_file_paths,
+    name,
+    xLims=[-np.inf, np.inf],
+    show=True,
+    slide=False,
+    **kwargs,
 ):
     X = "Load"
     Y = "Avg energy"
@@ -515,7 +579,10 @@ def makeLogPlotComparison(
             "ax": ax,
             "label": kwargs["labels"][i][j],
         }
-        fig, ax, line = plotPowerLaw(data, **log_kwargs)
+        if slide:
+            fig, ax = plotSlidingPowerLaw(data, **log_kwargs)
+        else:
+            fig, ax = plotPowerLaw(data, **log_kwargs)
     if crash_count > 0:
         print(f"Found {crash_count} crashes.")
     # Set the legend with the filtered handles and labels

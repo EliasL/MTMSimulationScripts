@@ -6,66 +6,59 @@ from tabulate import tabulate
 class ServerInfo:
     def __init__(self):
         self.sName = ""  # Server name
-        self.nName = ""  # Node name
         self.nrTotalCores = 0
         self.nrUsedCores = 0
         self.nrFreeCores = 0
         self.nrJobsRunning = 0
         self.nrJobsWaitingInQueue = 0
-        self.theNodeCanAcceptMoreJobs = False
         self.totalRAM = 0  # GB
         self.usedRAM = 0  # GB
         self.freeRAM = 0  # GB
         self.nodeState = ""  # Node state (e.g., up, down, drained)
-
+        self.nrIdleNodes = 0
+        self.nrNodesTotal = 0
         self.totalScore = 0
 
 
 def get_server_info(ssh_client):
     # Create a ServerInfo object
     si = ServerInfo()
-    # Get the total number of cores in the system
-    stdin, stdout, stderr = ssh_client.exec_command("grep -c ^processor /proc/cpuinfo")
-    si.nrTotalCores = int(stdout.read().decode().strip())
 
-    # Get the total number of cores allocated to running jobs
-    command_busy_cores = "squeue -t R -o '%.6C' | awk '{s+=$1} END {print s}'"
-    stdin, stdout, stderr = ssh_client.exec_command(command_busy_cores)
-    si.nrUsedCores = int(stdout.read().decode().strip())
+    # Execute combined command for cores and node information
+    # This returns "jobsRunning\njobsWaiting\nAlocated/Idle/Other/TotalCores"
+    command = "squeue -h -t R | wc -l;\squeue -h -t PD | wc -l;\sinfo -h -o '%C'"
+    stdin, stdout, stderr = ssh_client.exec_command(command)
+    outputs = stdout.read().decode().split("\n")
+    si.nrJobsRunning = int(outputs[0])
+    si.nrJobsWaitingInQueue = int(outputs[1])
+    alocated, idle, other, total = outputs[2].split("/")
+    si.nrFreeCores = idle
+    si.nrUsedCores = alocated
+    si.nrTotalCores = total
 
-    si.nrFreeCores = si.nrTotalCores - si.nrUsedCores
-    # Calculate the number of jobs running and waiting in the queue
-    command_jobs_running = "squeue -t R | wc -l"
-    stdin, stdout, stderr = ssh_client.exec_command(command_jobs_running)
-    si.nrJobsRunning = int(stdout.read().decode().strip()) - 1  # Adjust for header line
+    command_state = "sinfo -N --noheader -o '%t'"
+    stdin, stdout, stderr = ssh_client.exec_command(command_state)
+    outputs = stdout.read().decode().strip().split("\n")
 
-    command_jobs_waiting = "squeue -t PD | wc -l"
-    stdin, stdout, stderr = ssh_client.exec_command(command_jobs_waiting)
-    si.nrJobsWaitingInQueue = (
-        int(stdout.read().decode().strip()) - 1
-    )  # Adjust for header line
+    # Count the occurrences of each node status
+    status_counts = {}
+    for status in outputs:
+        if status not in status_counts:
+            status_counts[status] = 1
+        else:
+            status_counts[status] += 1
+    # Determine the predominant status for each node
+    si.nodeState = max(status_counts, key=status_counts.get)
 
-    # Get node status
-    stdin, stdout, stderr = ssh_client.exec_command("sinfo -N -h -o '%N %t'")
-    node_info = stdout.read().decode().strip().split()
-    if node_info:
-        si.nName = node_info[0]
-        si.nodeState = node_info[1]
-    # Check if the node can accept more jobs based on its state
-    si.theNodeCanAcceptMoreJobs = si.nodeState.lower() not in ["drain", "down"]
-
-    # Get total RAM in GB
-    stdin, stdout, stderr = ssh_client.exec_command(
-        "free -m | grep Mem: | awk '{print $2}'"
+    # Count total and idle nodes
+    total_nodes = sum(status_counts.values())  # Total nodes based on all lines returned
+    idle_count = sum(
+        count
+        for status, count in status_counts.items()
+        if "idle" in status or "mix" in status
     )
-    si.totalRAM = round(int(stdout.read().decode().strip()) / 1000)
-
-    # Get used RAM in GB (total - free)
-    stdin, stdout, stderr = ssh_client.exec_command(
-        "free -m | grep Mem: | awk '{print $3}'"
-    )
-    si.usedRAM = round(int(stdout.read().decode().strip()) / 1000)
-    si.freeRAM = si.totalRAM - si.usedRAM
+    si.nrIdleNodes = idle_count
+    si.nrNodesTotal = total_nodes
 
     return si
 
@@ -109,10 +102,11 @@ def score_and_color_server(info):
 
     # Define the metrics to evaluate
     metrics = {
-        "Free Cores": (info.nrFreeCores, info.nrTotalCores, 50, 15),
-        "GB RAM": (info.freeRAM, info.totalRAM, 50, 15),
+        "Idle Cores": (info.nrFreeCores, info.nrTotalCores, 50, 15),
+        "Idle Nodes": (info.nrIdleNodes, info.nrNodesTotal, 1, 0),
+        # "GB RAM": (info.freeRAM, info.totalRAM, 50, 15),
         "Jobs R": (info.nrJobsRunning, None, 2, 10),
-        "Jobs W": (info.nrJobsWaitingInQueue, None, 0, 2),
+        "Jobs W": (info.nrJobsWaitingInQueue, None, 0, 4),
     }
 
     results = []
@@ -128,6 +122,7 @@ def score_and_color_server(info):
         total_score += score
         results.append(colorized_value)
         headers.append(label)
+    total_score = total_score * 100 + int(info.nrFreeCores) * 2
     return results, headers, total_score
 
 
@@ -141,12 +136,11 @@ def display_server_info(server_info):
 
         name = get_server_short_name(server)
         results, headers, total_score = score_and_color_server(info)
-        if info.theNodeCanAcceptMoreJobs is False:
+        if "drain" in info.nodeState or "down" in info.nodeState:
             name += "(d)"
-            total_score -= 100
-
+            total_score -= 1000
         # Insert the server name in the front
-        results.insert(0, colorize(total_score, 1, -1, name)[0])
+        results.insert(0, colorize(total_score, 200, -100, name)[0])
         headers.insert(0, "Server")
         info.totalScore = total_score
         # Append results with total_score for sorting

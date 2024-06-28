@@ -24,11 +24,13 @@ def copy_ssh_key_to_server(server, username, key_path, password):
     """Copy the public SSH key to the server's authorized keys using sshpass."""
     command = f"sshpass -p {password} ssh-copy-id -o StrictHostKeyChecking=no -i {key_path} {username}@{server}"
     try:
-        subprocess.run(command, shell=True, check=True, stderr=subprocess.PIPE)
+        result = subprocess.run(
+            command, shell=True, check=True, stderr=subprocess.PIPE, text=True
+        )
         print(f"SSH key copied to {server}")
 
     except subprocess.CalledProcessError as e:
-        print(f"Failed to install SSH key on {server}: {e.stderr.decode()}")
+        print(f"Failed to install SSH key on {server}: {e.stderr}")
 
 
 def change_password(server, username, old_password, new_password):
@@ -60,7 +62,8 @@ def change_password(server, username, old_password, new_password):
 
 def main():
     username = "elundheim"  # Change this to your actual username on the servers
-    key_path = "/Users/elias/.ssh/id_rsa"  # SSH key path
+
+    key_path = os.path.expanduser("~/.ssh/id_rsa")  # Automatically get the SSH key path
     password = getpass(
         "Enter your SSH password (will not be echoed): "
     )  # Securely enter password
@@ -69,20 +72,19 @@ def main():
     generate_ssh_key(key_path)
 
     # Loop through servers and copy the SSH key
-    for server in Servers.servers:
+    for server in [Servers.mesopsl]:
         copy_ssh_key_to_server(server, username, key_path, password)
 
     # Prompt for the new password
-    new_password = getpass("Enter the new password (will not be echoed): ")
+    # new_password = getpass("Enter the new password (will not be echoed): ")
 
     # Change password on each server
-    for server in Servers.servers:
-        break
-        try:
-            change_password(server, username, password, new_password)
-        except Exception as e:
-            print(f"Failed on {server}: {e}")
-            continue
+    # for server in Servers.servers:
+    #     try:
+    #         change_password(server, username, password, new_password)
+    #     except Exception as e:
+    #         print(f"Failed on {server}: {e}")
+    #         continue
 
 
 def get_vscode_commit_id():

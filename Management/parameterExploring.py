@@ -81,7 +81,9 @@ def plotLog(config_groups, name, **kwargs):
     for k in ["plot_average"]:
         if k in kwargs:
             del kwargs[k]
-    makeLogPlotComparison(paths, f"{name} - PowerLaw", legend=True, **kwargs)
+    makeLogPlotComparison(
+        paths, f"{name} - PowerLaw", legend=True, slide=True, **kwargs
+    )
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
 
 
@@ -266,8 +268,10 @@ def FIRELoading():
         startLoad=0.15,
         nrThreads=nrThreads,
         minimizer="FIRE",
-        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
-        eps=[1e-6, 1e-5, 5e-5, 1e-4],
+        # loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        # LBFGSEpsg=[1e-6, 1e-5, 5e-5, 1e-4],
+        loadIncrement=[1e-5],
+        eps=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
         scenario="simpleShear",
     )

@@ -1,5 +1,5 @@
 import os
-from paramiko import SSHClient, AutoAddPolicy, AuthenticationException
+from paramiko import ProxyCommand, SSHClient, AutoAddPolicy, SSHConfig, SSHException
 import subprocess
 
 
@@ -15,6 +15,8 @@ class Servers:
     fourier = "fourier.pmmh-cluster.espci.fr"
     descartes = "descartes.pmmh-cluster.espci.fr"
 
+    mesopsl = "mesopsl.obspm.fr"
+
     local_path_mac = "/Volumes/data/"
 
     # List of server variables for iteration or list-like access
@@ -28,6 +30,7 @@ class Servers:
         poincare,
         fourier,
         descartes,
+        mesopsl,
     ]
 
     # If we want to search all the servers including the local storage, we can do that
@@ -108,26 +111,44 @@ def uploadProject(cluster_address="Servers.default", verbose=False):
         print("Project folders successfully uploaded.")
 
 
-def connectToCluster(cluster_address=Servers.default, verbose=True):
-    username = "elundheim"
+def get_ssh_config():
+    config_file = os.path.expanduser("~/.ssh/config")
+    ssh_config = SSHConfig()
+    with open(config_file) as f:
+        ssh_config.parse(f)
+    return ssh_config
 
-    # Step 1: Establish an SSH connection to the cluster using Paramiko.
+
+def connectToCluster(cluster_address=Servers.default, verbose=True):
+    # Get the SSH configuration
+    ssh_config = get_ssh_config()
+    config = ssh_config.lookup(cluster_address)
+
+    # Create the SSH client
     ssh = SSHClient()
-    ssh.load_system_host_keys()
     ssh.set_missing_host_key_policy(AutoAddPolicy())
 
+    # Define the proxy command using ProxyJump from the SSH config
+    proxy_jump = config.get("proxyjump")
     try:
-        # Connect using the private key instead of a password
-        ssh.connect(cluster_address, username=username)
-        if verbose:
-            print(f"SSH connection established to {cluster_address}.")
-    except AuthenticationException:
-        raise AuthenticationFailedException(
-            f"Authentication with {cluster_address} failed. Please check your SSH key."
-        )
+        if proxy_jump:
+            proxy_command = ProxyCommand(
+                f"ssh -W {config['hostname']}:{22} {proxy_jump}"
+            )
+            # Connect to the server through the proxy with increased timeout
+            ssh.connect(
+                config["hostname"],
+                username=config["user"],
+                sock=proxy_command,
+            )
+        else:
+            # Connect using the private key instead of a password
+            ssh.connect(cluster_address, username=config["user"])
     except Exception as e:
-        raise SSHConnectionException(f"Error connecting to {cluster_address}: {e}")
+        raise SSHException(f"Error connecting to {cluster_address}: {e}")
 
+    if verbose:
+        print(f"SSH connection established to {cluster_address}.")
     return ssh
 
 
@@ -135,9 +156,6 @@ def get_server_short_name(full_address):
     return full_address.split(".")[0]
 
 
-class AuthenticationFailedException(Exception):
-    pass
-
-
-class SSHConnectionException(Exception):
-    pass
+if __name__ == "__main__":
+    ssh = connectToCluster(Servers.mesopsl)
+    ssh = connectToCluster(Servers.galois)
