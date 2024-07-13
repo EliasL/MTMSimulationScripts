@@ -93,7 +93,7 @@ def CGconfs():
         nrThreads=nrThreads,
         minimizer="CG",
         loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
-        LBFGSEpsg=[1e-6, 1e-5, 1e-4],
+        CGEpsg=[1e-6, 1e-5, 5e-5, 1e-4],
         # missing epsg 5e-5
         # loadIncrement=[1e-5],
         # eps=[1e-6, 1e-5, 1e-4],

@@ -1,5 +1,5 @@
-from simulationManager import SimulationManager
-from configGenerator import ConfigGenerator, SimulationConfig
+from .simulationManager import SimulationManager
+from .configGenerator import ConfigGenerator, SimulationConfig
 from multiprocessing import Pool
 
 import logging
@@ -309,11 +309,10 @@ def CGLoading():
         startLoad=0.15,
         nrThreads=nrThreads,
         minimizer="CG",
-        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
-        LBFGSEpsg=[1e-6, 1e-5, 1e-4],
-        # missing 5e-5
-        # loadIncrement=[1e-5],
-        # eps=[1e-6, 1e-5, 1e-4],
+        # loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        # CGEpsg=[1e-6, 1e-5, 5e-5, 1e-4],
+        loadIncrement=[1e-5],
+        CGEps=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
         scenario="simpleShear",
     )

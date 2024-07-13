@@ -467,6 +467,10 @@ def makePlot(
 
 
 def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
+    global color_index, index, line_index
+    color_index = 0
+    index = 0
+    line_index = 0
     X = "Load"
     Y = "Avg energy"
     x_name = "Load"
@@ -566,6 +570,10 @@ def makeLogPlotComparison(
     slide=False,
     **kwargs,
 ):
+    global color_index, index, line_index
+    color_index = 0
+    index = 0
+    line_index = 0
     X = "Load"
     Y = "Avg energy"
     x_name = "Magnitude of energy drops"

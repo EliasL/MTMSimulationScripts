@@ -361,10 +361,10 @@ class JobManager:
             print(
                 f"Are you sure you want to cancle job {job['job_id']} on {job['server']}?:"
             )
-            if input("yes/no: ") != "yes":
-                continue
-            else:
-                self.cancel_job_on_server(job["server"], job["job_id"])
+            # if input("yes/no: ") != "yes":
+            #    continue
+            # else:
+            self.cancel_job_on_server(job["server"], job["job_id"])
 
     def kill_all_processes(self, server):
         """Kill all processes related to the user on the specified server."""

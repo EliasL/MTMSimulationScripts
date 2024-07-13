@@ -15,7 +15,7 @@ class Servers:
     fourier = "fourier.pmmh-cluster.espci.fr"
     descartes = "descartes.pmmh-cluster.espci.fr"
 
-    mesopsl = "mesopsl.obspm.fr"
+    # mesopsl = "mesopsl.obspm.fr"
 
     local_path_mac = "/Volumes/data/"
 
@@ -30,7 +30,7 @@ class Servers:
         poincare,
         fourier,
         descartes,
-        mesopsl,
+        # mesopsl,
     ]
 
     # If we want to search all the servers including the local storage, we can do that

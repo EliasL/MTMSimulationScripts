@@ -1,0 +1,5 @@
+setup.py
+Plotting.egg-info/PKG-INFO
+Plotting.egg-info/SOURCES.txt
+Plotting.egg-info/dependency_links.txt
+Plotting.egg-info/top_level.txt
