@@ -48,7 +48,7 @@ def generateCommands(configs, threads_per_seed=1):
     # nr_max_batches, we simply put one batch on each of these servers
     # We alphabetically sort just so that the order is not random
     for si in sorted(serverInfo.values(), key=lambda x: x.sName):
-        if si.theNodeCanAcceptMoreJobs is False:
+        if "down" in si.nodeState or "drained" in si.nodeState:
             continue
         if si.sName not in commands:
             commands[si.sName] = []
@@ -70,16 +70,18 @@ def generateCommands(configs, threads_per_seed=1):
 
             full_command = f'{cmd} seed="{seeds}"'
             commands[si.sName].append(full_command)
-
             if kwarg_index >= len(kwargs_combi):
                 for key, value in commands.items():
                     pass
                 # print("All commands wiritten")
                 return commands
-    raise RuntimeError("Not enough cores to run simulations!")
+    remaining_settings = len(kwargs_combi) - kwarg_index
+    raise RuntimeError(
+        f"Not enough cores to run simulations! Need {remaining_settings} batches of {nr_seeds} cores."
+    )
 
 
-def firetestconfs():
+def CGconfs():
     nrThreads = 1
     nrSeeds = 40
     size = 60
@@ -89,9 +91,12 @@ def firetestconfs():
         cols=size,
         startLoad=0.15,
         nrThreads=nrThreads,
-        minimizer="FIRE",
+        minimizer="CG",
         loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
-        eps=[1e-6, 1e-5, 5e-5, 1e-4],
+        LBFGSEpsg=[1e-6, 1e-5, 1e-4],
+        # missing epsg 5e-5
+        # loadIncrement=[1e-5],
+        # eps=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
         scenario="simpleShear",
     )
@@ -112,7 +117,7 @@ if __name__ == "__main__":
         LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
         scenario="simpleShear",
     )
-    configs, labels = firetestconfs()
+    configs, labels = CGconfs()
     commands = generateCommands(configs)
     print("Building on all servers... ")
     build_on_all_servers()
@@ -120,7 +125,7 @@ if __name__ == "__main__":
     j = JobManager()
     for server, commands in commands.items():
         for command in commands:
-            jobId = queue_remote_job(server, command, "bigJ", nrThreads * nrSeeds)
+            jobId = queue_remote_job(server, command, "CGJs", nrThreads * nrSeeds)
             # print(command)
             pass
         print(f"Started {len(commands)} jobs on {get_server_short_name(server)}")

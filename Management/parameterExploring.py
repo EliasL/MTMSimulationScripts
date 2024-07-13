@@ -2,6 +2,10 @@ from simulationManager import SimulationManager
 from configGenerator import ConfigGenerator, SimulationConfig
 from multiprocessing import Pool
 
+import logging
+
+# Suppress Paramiko logging
+logging.getLogger("paramiko").setLevel(logging.CRITICAL)
 
 # Add Management to sys.path (used to import files)
 # sys.path.append(str(Path(__file__).resolve().parent.parent / 'Plotting'))
@@ -68,21 +72,21 @@ def plotSims(configs, name, **kwargs):
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
 
 
-def plotLog(config_groups, name, **kwargs):
+def plotLog(config_groups, name, labels, **kwargs):
     # Now we can import from Management
     from remotePlotting import get_csv_files
 
     from makePlots import makeLogPlotComparison, makeEnergyPlotComparison
 
-    paths, labels = get_csv_files(config_groups, useOldFiles=False, **kwargs)
+    paths, labels = get_csv_files(config_groups, labels=labels, useOldFiles=False)
     kwargs["labels"] = labels
     print("Plotting...")
-    # makeEnergyPlotComparison(paths, f"{name} - Energy", legend=True, **kwargs)
+    makeEnergyPlotComparison(paths, f"{name} - Energy", legend=True, **kwargs)
     for k in ["plot_average"]:
         if k in kwargs:
             del kwargs[k]
     makeLogPlotComparison(
-        paths, f"{name} - PowerLaw", legend=True, slide=True, **kwargs
+        paths, f"{name} - PowerLaw", legend=True, slide=False, **kwargs
     )
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
 
@@ -288,7 +292,47 @@ def FIRELoading():
     )
     # configs.extend([extra_configs])
     # labels.extend([["loadIncrement=1e-5, LBFGSEpsx=1e-6"]])
-    plotLog(configs, "60x60, load:0.15-1, PBC, FIRE, t1, seeds:40", labels=labels)
+    plotLog(
+        configs, "60x60, load:0.15-1, PBC, FIRE, t1, seeds:40", labels=labels, show=True
+    )
+
+
+def CGLoading():
+    nrThreads = 1
+    nrSeeds = 40
+    size = 60
+    configs, labels = ConfigGenerator.generate(
+        group_by_seeds=True,
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
+        startLoad=0.15,
+        nrThreads=nrThreads,
+        minimizer="CG",
+        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        LBFGSEpsg=[1e-6, 1e-5, 1e-4],
+        # missing 5e-5
+        # loadIncrement=[1e-5],
+        # eps=[1e-6, 1e-5, 1e-4],
+        maxLoad=1.0,
+        scenario="simpleShear",
+    )
+    extra_configs, extra_labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        rows=size,
+        cols=size,
+        startLoad=0.0,
+        nrThreads=nrThreads,
+        loadIncrement=[1e-5],
+        maxLoad=1.0,
+        LBFGSEpsx=[1e-6],
+        scenario="simpleShear",
+    )
+    # configs.extend([extra_configs])
+    # labels.extend([["loadIncrement=1e-5, LBFGSEpsx=1e-6"]])
+    plotLog(
+        configs, "60x60, load:0.15-1, PBC, CG, t1, seeds:40", labels=labels, show=True
+    )
 
 
 if __name__ == "__main__":
@@ -297,7 +341,8 @@ if __name__ == "__main__":
     # fastStatStuff()
     # plotLessOldStuff()
     # runSims()
-    loadingSpeeds()
+    # loadingSpeeds()
     # smallLoadingSpeeds()
     # FIRELoading()
+    CGLoading()
     pass

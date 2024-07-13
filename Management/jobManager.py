@@ -21,6 +21,12 @@ from runOnCluster import build_on_all_servers, build_on_server, queue_remote_job
 from settings import settings
 
 
+import logging
+
+# Suppress Paramiko logging
+logging.getLogger("paramiko").setLevel(logging.CRITICAL)
+
+
 def parse_duration(duration_str):
     pattern = r"(?:(\d+)d)?\s*(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+(?:\.\d+)?)s)?"
     matches = re.match(pattern, duration_str.strip())

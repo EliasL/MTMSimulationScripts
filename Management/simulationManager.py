@@ -251,6 +251,7 @@ def findOutputPath(
         "/media/elias/dataStorage/",
         "/data2/elundheim/",
         "/data/elundheim/",
+        "/Users/elias/Work/PhD/Code/localData/",
         "/tmp/",
     ]
 

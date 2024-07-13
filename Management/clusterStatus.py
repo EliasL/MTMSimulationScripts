@@ -32,9 +32,9 @@ def get_server_info(ssh_client):
     si.nrJobsRunning = int(outputs[0])
     si.nrJobsWaitingInQueue = int(outputs[1])
     alocated, idle, other, total = outputs[2].split("/")
-    si.nrFreeCores = idle
-    si.nrUsedCores = alocated
-    si.nrTotalCores = total
+    si.nrFreeCores = int(idle)
+    si.nrUsedCores = int(alocated)
+    si.nrTotalCores = int(total)
 
     command_state = "sinfo -N --noheader -o '%t'"
     stdin, stdout, stderr = ssh_client.exec_command(command_state)

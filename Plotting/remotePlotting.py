@@ -11,11 +11,14 @@ from makePlots import (
     makePowerLawPlot,
 )
 
+
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 # Now we can import from Management
 from connectToCluster import connectToCluster, Servers
 from configGenerator import ConfigGenerator, SimulationConfig
+
+FOLDER_PATH = "/Users/elias/Work/PhD/Code/remoteData"
 
 
 def handleLocalPath(dataPath, configs):
@@ -81,9 +84,8 @@ def get_csv_from_server(server, configs):
     folders = [folder.rstrip("/") for folder in folders]  # Clean up folder names
     names = [config.generate_name(False) for config in configs]
     newPaths = []
-    folder_path = "/tmp/MTS2D"
     os.makedirs(
-        folder_path, exist_ok=True
+        FOLDER_PATH, exist_ok=True
     )  # This line ensures the MTS2D folder is created
 
     # Using ThreadPoolExecutor to download files in parallel
@@ -95,7 +97,7 @@ def get_csv_from_server(server, configs):
                 folders,
                 data_path,
                 remote_folder_name,
-                folder_path,
+                FOLDER_PATH,
                 ssh,
             ): name
             for name in names
@@ -143,7 +145,7 @@ def search_for_cvs_files(configs, useOldFiles=False):
     remaining_configs = []
     last_search_folder = False
     # Folders to search in
-    search_folders = ["/tmp/MTS2D"]
+    search_folders = ["/tmp/MTS2D", FOLDER_PATH]
     for folder in search_folders:
         # Create folder if it does not exist
         os.makedirs(folder, exist_ok=True)
@@ -176,7 +178,7 @@ def search_for_cvs_files(configs, useOldFiles=False):
 
 
 def configToPath(config):
-    return f"/tmp/MTS2D/{config.name}.csv"
+    return f"{FOLDER_PATH}/{config.name}.csv"
 
 
 def flatToStructure(config_groups, label_groups):
@@ -200,11 +202,11 @@ def flatToStructure(config_groups, label_groups):
 # This function searches all the servers for the given config file,
 # downloads the csv file associated with the config file to a temp file,
 # and returns the new local path to the csv
-def get_csv_files(configs, useOldFiles=False, labels=[], **kwargs):
+def get_csv_files(configs, labels=[], useOldFiles=False):
     nested = False
+    config_groups = configs
     if not isinstance(configs[0], SimulationConfig):
         nested = True
-        config_groups = configs
         configs = [config for sublist in config_groups for config in sublist]
     global completed_servers
     # First check if the files have already been downloaded
@@ -224,7 +226,10 @@ def get_csv_files(configs, useOldFiles=False, labels=[], **kwargs):
     if len(localPaths) == len(configs):
         # We have found all the requested files, so we don't need to search more.
         print(f"{len(localPaths)} files found. Not searching servers.")
-        return paths + localPaths
+        paths = paths + localPaths
+        if nested:
+            paths, labels = flatToStructure(config_groups, labels)
+        return paths, labels
 
     print("Searching servers for files...")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
@@ -247,7 +252,7 @@ def get_csv_files(configs, useOldFiles=False, labels=[], **kwargs):
                 print(f"\n{server} generated an exception: {exc}")
                 print("Trying to use old files... ")
                 if useOldFiles is False:
-                    return get_csv_files(configs, useOldFiles=True)
+                    return get_csv_files(config_groups, useOldFiles=True, labels=labels)
     print("")  # New line from progress indicator
     if nested:
         paths, labels = flatToStructure(config_groups, labels)

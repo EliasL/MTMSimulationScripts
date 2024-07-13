@@ -348,7 +348,7 @@ if __name__ == "__main__":
     import os
     import sys
 
-    config = SimulationConfig(loadIncrement=0.01, minimizer="CG")
+    config = SimulationConfig(loadIncrement=0.01, minimizer="CG", nrThreads=1)
     if len(sys.argv) >= 2:
         scenario = sys.argv[1]
         config.scenario = scenario

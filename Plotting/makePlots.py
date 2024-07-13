@@ -98,27 +98,41 @@ index = 0
 line_index = 0
 
 
-def plotPowerLaw(
-    y_values,
-    fig=None,
-    ax=None,
-    label="",
-):
+def plotPowerLaw(dfs, fig=None, ax=None, label=""):
     global color_index, index, line_index
     if ax is None:
         fig, ax = plt.subplots()
+    e = "Avg energy"
 
     # Process drops
-    def pros_d(y_values, start, end):
-        diffs = np.diff(y_values[start:end])
+    def pros_d(df, start, end):
+        diffs = np.diff(df["Avg energy"][start:end])
+        mask = (
+            df["Nr plastic deformations"][start + 1 : end] >= 5
+        )  # Correct the field name if needed
+
+        # Find the indices where mask is True
+        indices = np.where(mask)[0]
+
+        # Print surrounding values for each True index in mask
+        # for idx in indices[1:100]:
+        # if diffs[idx] < 0:
+        # print(start + idx)
+        # print(diffs[idx - 1], diffs[idx], diffs[idx + 1], sep=", ")
+
+        # Filter the diffs array
+        diffs = diffs[mask]
+
+        # Return the negative drops
         return -diffs[diffs < 0]
 
-    pre_yield_drops = [pros_d(np.array(y), 0, np.argmax(y) + 1) for y in y_values]
-    post_yield_drops = [pros_d(np.array(y), np.argmax(y) + 1, len(y)) for y in y_values]
+    pre_yield_drops = [pros_d(df, 0, np.argmax(df[e]) + 1) for df in dfs]
+    post_yield_drops = [pros_d(df, np.argmax(df[e]) + 1, len(df[e])) for df in dfs]
 
     combined_drops = [
         np.concatenate(drops) for drops in (pre_yield_drops, post_yield_drops)
     ]
+    print(len(combined_drops[0]))
 
     for drops, part_label, index in zip(
         combined_drops, ["pre yield", "post yield"], [0, 1]
@@ -484,7 +498,7 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
             if df.empty:
                 continue
             # Check for Y values greater than 10 and truncate
-            if (df[Y] > 10).any():
+            if (df[Y] > 1).any():
                 crash_count += 1
                 df = df[df[Y] <= 1]
                 print(f"Crash in {csv_file_path}.")
@@ -563,26 +577,27 @@ def makeLogPlotComparison(
 
     crash_count = 0
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
-        data = []
+        dfs = []
         for j, csv_file_path in enumerate(csv_file_paths):
-            df = pd.read_csv(csv_file_path, usecols=[X, Y])
-            df = df[
-                (df[X] >= xLims[0]) & (df[X] <= xLims[1])
-            ]  # Truncate data based on xLims
+            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
+            # Truncate data based on xLims
+            df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
+            # Truncate data based on dislocations
+            # df = df[(df["Nr plastic deformations"] >= 0)]
             # Check for Y values greater than 10 and truncate
-            if (df[Y] > 10).any():
+            if (df[Y] > 1).any():
                 crash_count += 1
                 df = df[df[Y] <= 1]
-            data.append(df[Y].values)
+            dfs.append(df)
         log_kwargs = {
             "fig": fig,
             "ax": ax,
             "label": kwargs["labels"][i][j],
         }
         if slide:
-            fig, ax = plotSlidingPowerLaw(data, **log_kwargs)
+            fig, ax = plotSlidingPowerLaw(dfs, **log_kwargs)
         else:
-            fig, ax = plotPowerLaw(data, **log_kwargs)
+            fig, ax = plotPowerLaw(dfs, **log_kwargs)
     if crash_count > 0:
         print(f"Found {crash_count} crashes.")
     # Set the legend with the filtered handles and labels
