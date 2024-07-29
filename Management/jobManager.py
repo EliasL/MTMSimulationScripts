@@ -10,15 +10,12 @@ import re
 import threading
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from clusterStatus import Servers, get_server_short_name
-from connectToCluster import uploadProject, connectToCluster  # noqa: F401
-from configGenerator import SimulationConfig
-from dataManager import get_directory_size
-
-sys.path.append(str(Path(__file__).resolve().parent.parent / "Plotting"))
-# Now we can import from Management
-from runOnCluster import build_on_all_servers, build_on_server, queue_remote_job
-from settings import settings
+from .clusterStatus import Servers, get_server_short_name
+from .connectToCluster import uploadProject, connectToCluster  # noqa: F401
+from .configGenerator import SimulationConfig
+from .dataManager import get_directory_size
+from .runOnCluster import build_on_all_servers, build_on_server, queue_remote_job
+from Plotting.settings import settings
 
 
 import logging
@@ -99,20 +96,24 @@ class Process:
         command_line = stdout.read().decode("utf-8").strip()
         parts = command_line.split()
         self.command = command_line
-
         # Extracting the paths based on the -c and -o flags
         if "-c" in parts:
             c_index = parts.index("-c") + 1
-            config_path = parts[c_index] if c_index < len(parts) else None
+            config_path = parts[c_index]
             self.get_config_file(config_path)
             self.name = os.path.splitext(os.path.basename(config_path))[0]
 
         if "-o" in parts:
             o_index = parts.index("-o") + 1
-            self.output_path = parts[o_index] if o_index < len(parts) else None
+            self.output_path = parts[o_index]
+        elif "-d" in parts:
+            d_index = parts.index("-d") + 1
+            # We can extract the output path from the dump path
+            self.output_path = str(Path(parts[d_index]).parents[1])
 
+        if self.output_path != "":
             self.get_progress()
-            self.dataSize = get_directory_size(self.ssh, self.output_path + self.name)
+            # self.dataSize = get_directory_size(self.ssh, self.output_path + self.name)
 
     def get_config_file(self, config_path):
         # Download the config file using SFTP
@@ -127,8 +128,8 @@ class Process:
         os.remove(local_config_filename)
 
     def get_progress(self):
-        remote_file_path = (
-            self.output_path + self.name + "/" + settings["MACRODATANAME"] + ".csv"
+        remote_file_path = os.path.join(
+            self.output_path, self.name, settings["MACRODATANAME"] + ".csv"
         )
 
         with self.ssh.open_sftp() as sftp:
@@ -293,9 +294,15 @@ class JobManager:
                 else:
                     time_parts = process.timeEstimation.split(",")
                     run_time = time_parts[0].strip().replace("RT: ", "")
-                    estimated_time_remaining = (
-                        time_parts[1].strip().replace("ETR: ", "")
-                    )
+                    if len(time_parts) > 1:
+                        estimated_time_remaining = (
+                            time_parts[1].strip().replace("ETR: ", "")
+                        )
+                    else:
+                        estimated_time_remaining = f"Error. Time_parts:{time_parts}"
+                if isinstance(process.progress, str):
+                    process.progress = -1
+
                 row = [
                     process.p_id,
                     process.name,
@@ -361,10 +368,10 @@ class JobManager:
             print(
                 f"Are you sure you want to cancle job {job['job_id']} on {job['server']}?:"
             )
-            # if input("yes/no: ") != "yes":
-            #    continue
-            # else:
-            self.cancel_job_on_server(job["server"], job["job_id"])
+            if input("yes/no: ") != "yes":
+                continue
+            else:
+                self.cancel_job_on_server(job["server"], job["job_id"])
 
     def kill_all_processes(self, server):
         """Kill all processes related to the user on the specified server."""
@@ -383,8 +390,6 @@ class JobManager:
 
 
 if __name__ == "__main__":
-    import sys
-
     config = SimulationConfig()
     config.startLoad = 0.15
     config.loadIncrement = 0.0001
@@ -392,34 +397,25 @@ if __name__ == "__main__":
     config.cols = 10
     config.maxLoad = 0.2
 
-    if len(sys.argv) >= 2:
-        onlyCheckJobs = sys.argv[1]
-    else:
-        onlyCheckJobs = "False"
-
     minNrThreads = 1
     script = "benchmarking.py"
     script = "runSimulations.py"
     script = "parameterExploring.py"
     server = Servers.dalembert
-    server = Servers.condorcet
+    # server = Servers.condorcet
     command = (
         f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
     )
-    if onlyCheckJobs.upper() == "TRUE":
-        j = JobManager()
-        j.showSlurmJobs()
-        j.showProcesses()
-    else:
-        j = JobManager()
-        j.showSlurmJobs()
-        # j.cancel_job_on_server(server, 876296)
-        # j.cancel_job_on_server(server, 876297)
-        # server = find_server(minNrThreads)
-        j.cancelAllJobs()
-        # build_on_server(server)
-        # build_on_all_servers()
 
-        # jobId = queue_remote_job(server, command, "FIRETest", minNrThreads)
-        # j.showSlurmJobs()
-        # j.showProcesses()
+    j = JobManager()
+    j.showSlurmJobs()
+    # j.cancel_job_on_server(server, 876296)
+    # j.cancel_job_on_server(server, 876297)
+    # server = find_server(minNrThreads)
+    # j.cancelAllJobs()
+    # build_on_server(server)
+    # build_on_all_servers()
+
+    # jobId = queue_remote_job(server, command, "FIRETest", minNrThreads)
+    # j.showSlurmJobs()
+    # j.showProcesses()

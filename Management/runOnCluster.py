@@ -1,25 +1,84 @@
-from connectToCluster import uploadProject, Servers
+from Management.connectToCluster import uploadProject, Servers, get_server_short_name
 from fabric import Connection
 import textwrap
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+from invoke import Responder
 
 SERVER_USER = "elundheim"
 
 
-def run_remote_script(server_hostname, script_path):
+def run_remote_script(server_hostname, script_path, silent=False):
     # Establish the SSH connection
     with Connection(host=server_hostname, user=SERVER_USER) as c:
         # Execute the remote command (your Python script)
-        result = c.run(f"python3 -u {script_path}", hide=False, warn=True)
+        # Set `hide=True` to suppress real-time output and capture it instead
+        result = c.run(f"python3 -u {script_path}", hide=True, warn=True)
 
-        # `hide=False` means output and errors are printed in real time
-        # `warn=True` means execution won't stop on errors (similar to try/except)
+        # Output and errors are captured
+        output = result.stdout
+        errors = result.stderr
 
         # Check the result
-        if result.ok:
+        if result.ok and not silent:
             print("Script executed successfully.")
+            print("Output from the script:")
+            print(output)
         else:
-            print(f"Script execution failed: {result.stderr}")
+            print("Script execution failed:")
+            print(errors)
+
+        return output  # Optionally return output for further processing
+
+
+output = {}
+pbars = {}
+
+
+class ProgressBarUpdater(Responder):
+    def __init__(self, server, pbar_index):
+        self.server = get_server_short_name(server)
+        self.pbar_index = pbar_index
+        self.total = -1
+        self.current_line = 0
+
+    def submit(self, all_lines):
+        global output, pbars
+        for line in all_lines.splitlines(keepends=True)[self.current_line :]:
+            if not line.endswith(("\n", "\r")):
+                return []
+            else:
+                line = line.strip()
+            # Initialize or update the progress bar based on the output
+            if self.total == -1:
+                self.total = int(line)
+                pbars[self.pbar_index] = tqdm(
+                    desc=self.server,
+                    total=self.total,
+                    position=self.pbar_index,
+                    unit=" folders",
+                )
+                output[self.pbar_index] = []
+                self.current_line += 1
+            else:
+                if "\t" in line:
+                    output[self.pbar_index].append(line)  # Store the line in the list
+                pbars[self.pbar_index].update(1)
+                self.current_line += 1
+        return []  # Return an empty iterable
+
+
+def run_remote_script_with_progress(server_hostname, script_path, pbar_index):
+    """Run a remote script and process its output in real time, updating a tqdm progress bar."""
+    updater = ProgressBarUpdater(server_hostname, pbar_index)
+    with Connection(host=server_hostname, user=SERVER_USER) as c:
+        # Execute the script with unbuffered Python output and pseudo-terminal
+        command = f"python3 -u {script_path}"
+        c.run(command, watchers=[updater], hide=True)
+        if pbar_index in output:
+            return output[pbar_index]
+        else:
+            return []
 
 
 def find_outpath_on_server(server_hostname):
@@ -104,14 +163,15 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
 
 
 def build_on_server(server):
-    print(f"Uploading to {server}...")
+    shortName = get_server_short_name(server)
+    print(f"Uploading to {shortName}...")
     uploadProject(server)
     project_path = "/home/elundheim/simulation/MTS2D/build-release/"
     build_command = f"mkdir -p {project_path} && cd {project_path} && cmake -DCMAKE_BUILD_TYPE=Release .. && make"
 
-    print(f"Building on {server}...")
+    print(f"Building on {shortName}...")
     run_remote_command(server, build_command, hide=True)
-    print(f"{server} is ready!")
+    print(f"{shortName} is ready!")
 
 
 def build_on_all_servers():

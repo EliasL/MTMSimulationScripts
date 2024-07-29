@@ -2,12 +2,12 @@ import re
 from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import shutil
-from connectToCluster import connectToCluster, Servers, get_server_short_name
+from .connectToCluster import connectToCluster, Servers, get_server_short_name
+from .runOnCluster import run_remote_script_with_progress
 from tabulate import tabulate
 import subprocess
 import os
 from tqdm import tqdm
-
 
 """
 Search through all the servers and identify all the data in all the servers
@@ -19,46 +19,27 @@ class DataManager:
         self.data = {}
         self.user = "elundheim"
 
-    def find_data_on_server(self, server):
-        # Connect to the server
-        ssh = connectToCluster(server, False)
-
-        # Check if /data2 exists, otherwise use /data
-        stdin, stdout, stderr = ssh.exec_command(
-            "if [ -d /data2 ]; then echo '/data2'; else echo '/data'; fi"
+    def find_data_on_server(self, server, pbar_index):
+        remote_script_path = (
+            "/home/elundheim/simulation/SimulationScripts/Management/approximateData.py"
         )
-        base_dir = stdout.read().strip().decode()
+        lines = run_remote_script_with_progress(server, remote_script_path, pbar_index)
 
-        data_path = os.path.join(base_dir, self.user)
+        # Prepare lists to hold paths and sizes
+        folders = []
+        sizes = []
 
-        # Navigate to the base_dir and get the first folder name
-        command = f"cd /{data_path}; ls -d */ | head -n 1"
-        stdin, stdout, stderr = ssh.exec_command(command)
-        folder_name = stdout.read().strip().decode().rstrip("/")
+        # Process each line
+        for line in lines:
+            # Split by tab to separate the path and the size
+            parts = line.split("\t")
+            if len(parts) == 2:  # Make sure the line is properly formatted
+                folders.append(parts[0])  # The first part is the folder path
+                sizes.append(
+                    int(parts[1])
+                )  # The second part is the size, converted to int
 
-        # If there is no data, we can return nothing now
-        if folder_name == "":
-            return []
-
-        # Warning if the folder is not MTS2D_output
-        if folder_name != "MTS2D_output":
-            print(
-                f"Warning: The folder in {data_path} on {server} is not called MTS2D_output. Found: {folder_name}"
-            )
-
-        # List all folders within the output folder
-        fullPath = f"{data_path}/{folder_name}"
-        command = f"cd {fullPath}; ls -d */"
-        stdin, stdout, stderr = ssh.exec_command(command)
-        folders = stdout.read().strip().decode().split("\n")
-        folders = [
-            os.path.join(fullPath, folder.rstrip("/")) for folder in folders
-        ]  # Clean up folder names
-
-        dataSize = [get_directory_size(ssh, folder) for folder in folders]
-
-        # Save the list of folders and sizes in data dictionary
-        return folders, dataSize
+        return folders, sizes
 
     def find_data_on_disk(self, path):
         # Construct the path to the MTS2D_output directory
@@ -70,39 +51,37 @@ class DataManager:
 
         # List all folders within the MTS2D_output folder
         folders = next(os.walk(mts_output_path))[1]
-        folders = [
-            os.path.join(mts_output_path, folder) for folder in folders
-        ]  # Clean up folder names
-
-        dataSize = [get_directory_size(None, folder) for folder in folders]
+        # Clean up folder names
+        folders = [os.path.join(mts_output_path, folder) for folder in folders]
+        free_space = get_free_space(None, folders[0])
+        dataSize = [get_local_directory_size(folder, free_space) for folder in folders]
 
         # Save the list of folders and sizes in data dictionary
         return folders, dataSize
 
     def findData(self):
+        # Initialize progress bar
+
         # Use ThreadPoolExecutor to execute find_data_on_server in
         # parallel across all servers plus one to find the data stored locally
         with ThreadPoolExecutor(max_workers=len(Servers.servers) + 1) as executor:
-            future_to_server = {
-                executor.submit(self.find_data_on_server, server): server
-                for server in Servers.servers
+            futures_to_server = {
+                executor.submit(self.find_data_on_server, server, pbar_index): server
+                for pbar_index, server in enumerate(Servers.servers)
             }
-            future_to_server[
-                executor.submit(self.find_data_on_disk, "/Volumes/data")
-            ] = "Local ssd"
+            if os.path.exists("/Volumes/data"):
+                futures_to_server[
+                    executor.submit(self.find_data_on_disk, "/Volumes/data")
+                ] = "Local ssd"
 
-            # Wrap the as_completed method with tqdm for progress indication
-            progress_bar = tqdm(
-                as_completed(future_to_server),
-                total=len(future_to_server),
-                desc="Gathering data",
-            )
-            for future in progress_bar:
-                server = future_to_server[future]
+            # Wait for all futures to complete
+            for future in as_completed(futures_to_server):
+                server = futures_to_server[future]
+                folders_and_sizes = future.result()
+                if folders_and_sizes:
+                    self.data[server] = folders_and_sizes
                 try:
-                    folders_and_sizes = future.result()
-                    if folders_and_sizes:
-                        self.data[server] = folders_and_sizes
+                    pass
                 except Exception as exc:
                     print(f"{server} generated an exception: {exc}")
 
@@ -113,6 +92,7 @@ class DataManager:
                 grouped_folders = self.parse_and_group_seeds(folders_and_sizes)
                 if grouped_folders:
                     folders, sizes = zip(*grouped_folders)
+                    sizes = [f"{nr}{unit}" for nr, unit in sizes]
                     server = get_server_short_name(server)
                     table_data.append([server, "\n".join(folders), "\n".join(sizes)])
 
@@ -167,13 +147,13 @@ class DataManager:
                 else:
                     print("Not deleting due to DryRun.")
 
-    def delete_folders_below_size(self, min_size_in_bytes, dryRun=True):
+    def delete_folders_below_size(self, min_size_in_mega_bytes, dryRun=True):
         for server, (folders, sizes) in self.data.items():
             if folders:
                 small_folders = []
                 small_sizes = []
                 for folder, size in zip(folders, sizes):
-                    if parse_size(size) < min_size_in_bytes:
+                    if size < min_size_in_mega_bytes * 1e6:
                         small_folders.append(folder)
                         small_sizes.append(
                             size
@@ -181,12 +161,107 @@ class DataManager:
 
                 if small_folders:  # Check to ensure there are indeed folders to delete
                     print(
-                        f"Folders to delete on {server} because they are smaller than {min_size_in_bytes} bytes:"
+                        f"Folders to delete on {server} because they are smaller than {min_size_in_mega_bytes}MB:"
                     )
                     for folder, size in zip(small_folders, small_sizes):
-                        print(f"{folder} - {size} - {parse_size(size)}")
-                        if not dryRun:
-                            self.delete_data_on_server(server, [folder], dryRun=False)
+                        print(f"{folder} - {size} - {bytes_to_readable(size)}")
+                    if not dryRun:
+                        self.delete_data_on_server(server, small_folders, dryRun=False)
+
+    def delete_useless_dumps(self, dryRun=True):
+        """
+        Deletes unnecessary dump files in parallel across all servers, keeping only the latest and
+        one per each 10% load increment, with a progress bar for all folders.
+        """
+        with ThreadPoolExecutor() as executor:
+            futures = []
+            # Summing all folders to set up the total for tqdm
+            total_folders = sum(
+                len(folders)
+                for server, (folders, sizes) in self.data.items()
+                if folders
+            )
+            progress_bar = tqdm(total=total_folders, desc="Deleting dumps")
+
+            for server, (folders, sizes) in self.data.items():
+                if folders:
+                    # Submit a task for each server to the executor
+                    future = executor.submit(
+                        self._delete_useless_dumps_on_server,
+                        server,
+                        folders,
+                        dryRun,
+                        progress_bar,  # Pass the progress bar to each server function
+                    )
+                    futures.append(future)
+
+            # Wait for all futures to complete
+            for future in as_completed(futures):
+                pass  # Futures themselves update the progress bar
+
+            progress_bar.close()  # Ensure the progress bar is closed properly
+
+    def _delete_useless_dumps_on_server(self, server, folders, dryRun, progress_bar):
+        """
+        Process all folders on a given server sequentially, updating the passed tqdm progress bar.
+        """
+        ssh = connectToCluster(server, False)
+        for folder in folders:
+            self._delete_useless_dumps_in_folder(
+                ssh, os.path.join(folder, "dumps"), dryRun
+            )
+            progress_bar.update(1)  # Update progress for each folder processed
+        ssh.close()  # Ensure the SSH connection is closed after processing all folders
+
+    def _delete_useless_dumps_in_folder(self, ssh, dump_dir, dryRun=True):
+        """
+        Retrieves and deletes unnecessary dump files while keeping one per each 10% load increment
+        and the latest dump.
+        """
+        # Command to list all files with their modification time, sorted by modification time
+        list_files_command = f"ls -lt  {dump_dir} | awk '{{print $9}}'"
+        stdin, stdout, stderr = ssh.exec_command(list_files_command)
+        dumps = stdout.read().strip().decode().split("\n")
+
+        load_regex = re.compile(r"Dump_l(\d\.\d+)")
+        load_to_files = {}
+        latest_file = dumps[0]
+
+        for dump in dumps:
+            match = load_regex.search(dump)
+            if match:
+                load = float(match.group(1))
+                load_rounded = round(load, 1)
+                if load_rounded not in load_to_files:
+                    load_to_files[load_rounded] = []
+                load_to_files[load_rounded].append(dump)
+
+        # Determine the files to keep
+        dumps_to_keep = {latest_file}  # Initialize with the latest file
+
+        # Keep one file per load group
+        for load_group, files in load_to_files.items():
+            files.sort()  # Optional, depending on how the filenames are structured
+            dumps_to_keep.add(files[0])  # Keep the first file of each group
+
+        # Files to delete are those not in dumps_to_keep
+        dumps_to_delete = set(dumps) - dumps_to_keep
+
+        # Execute deletion
+        if not dryRun:
+            if dumps_to_delete:
+                delete_command = f"rm -f {' '.join([os.path.join(dump_dir, dump) for dump in dumps_to_delete])}"
+                stdin, stdout, stderr = ssh.exec_command(delete_command)
+                errors = stderr.read().decode().strip()
+                if errors:
+                    print(f"Error deleting files in {dump_dir}: {errors}")
+        else:
+            print("Dry run enabled. Files to delete:")
+            for dump in dumps_to_delete:
+                print(dump)
+            print("Files to keep:")
+            for dump in dumps_to_keep:
+                print(" ", dump)
 
     def print_grouped_folders(self, folders, sizes=None):
         if sizes is None:
@@ -248,7 +323,7 @@ class DataManager:
                 final_grouped_folders.append((folder, size))
 
         # Sort the folders by size, largest first
-        final_grouped_folders.sort(key=lambda x: parse_size(x[1]), reverse=True)
+        final_grouped_folders.sort(key=lambda x: convert_to_bytes(*x[1]), reverse=True)
 
         return final_grouped_folders
 
@@ -283,16 +358,9 @@ class DataManager:
                     print(f"{server} generated an exception: {exc}")
 
 
-def get_directory_size(ssh, path):
+def get_free_space(ssh, path):
     if ssh is None:  # Local directory path
-        du_command = f"du -sh {path}"
         df_command = f"df -h {path} | awk 'NR==2{{print $4}}'"
-
-        # Execute the du command locally for directory size
-        du_process = subprocess.run(
-            ["du", "-sh", path], stdout=subprocess.PIPE, text=True
-        )
-        du_output = du_process.stdout.strip()
 
         # Execute the df command locally for free disk space
         df_process = subprocess.run(
@@ -322,16 +390,7 @@ def get_directory_size(ssh, path):
         free_space = convert_gb_to_tb(free_space)
 
     else:  # SSH connection object
-        du_command = f"du -sh {path}"
         df_command = f"df -h {path} | awk 'NR==2{{print $4}}'"
-
-        # Execute the du command via SSH for directory size
-        stdin, stdout, stderr = ssh.exec_command(du_command)
-        du_output = stdout.read().decode("utf-8").strip()
-        du_error = stderr.read().decode("utf-8").strip()
-        if du_error:
-            print(f"Error calculating directory size: {du_error}")
-            return None
 
         # Execute the df command via SSH for free disk space
         stdin, stdout, stderr = ssh.exec_command(df_command)
@@ -341,9 +400,66 @@ def get_directory_size(ssh, path):
             print(f"Error getting free disk space: {df_error}")
             return None
         free_space = df_output
+    return free_space
+
+
+def get_local_directory_size(path, free_space):
+    # Execute the du command locally for directory size
+    du_process = subprocess.run(["du", "-sh", path], stdout=subprocess.PIPE, text=True)
+    du_output = du_process.stdout.strip()
 
     # Extract the size part from du output
     size = du_output.split("\t")[0]
+    return format_size(size, free_space)
+
+
+def get_directory_size(ssh, path, free_space=False):
+    # Command to list all items in the directory with details
+    list_details_command = f"ls -l {path}"
+    stdin, stdout, stderr = ssh.exec_command(list_details_command)
+    entries = stdout.read().strip().decode().split("\n")
+
+    total_size = 0  # to accumulate the total size in kilobytes
+
+    for entry in entries[1:]:  # Skipping the first line which is the total
+        if not entry:
+            continue
+        parts = entry.split()
+        if len(parts) < 9:
+            print(parts)
+            continue  # Skipping if the entry doesn't have enough parts to be valid
+
+        # First character tells if it's a file (-) or directory (d)
+        file_type = parts[0][0]
+        file_name = parts[-1]  # Last part is the name of the file or directory
+        full_path = os.path.join(path, file_name)
+
+        if file_type == "d":  # Directory
+            # Get a list of entries in the directory
+            list_files_command = f"ls {full_path}"
+            stdin, stdout, stderr = ssh.exec_command(list_files_command)
+            child_entries = stdout.read().strip().decode().split()
+            if child_entries:
+                # Get the size of the first file using 'stat' for precision
+                first_file_path = os.path.join(full_path, child_entries[0])
+                stat_command = f"stat -c %s {first_file_path}"
+                stdin, stdout, stderr = ssh.exec_command(stat_command)
+                first_file_size = stdout.read().strip().decode()
+                if first_file_size.isdigit():
+                    first_file_size = int(first_file_size)  # Size in bytes
+                    # Approximate total size by multiplying the first file size by the number of files
+                    # Convert bytes to kilobytes
+                    total_size += (first_file_size * len(child_entries)) / 1024
+        else:  # File
+            # Just get the size from the ls output which is in parts[4] in bytes
+            total_size += int(parts[4]) / 1024  # Converting bytes to kilobytes
+            continue
+
+    # Format the size for output
+    return format_size(str(total_size) + "K", free_space)
+
+
+def format_size(size, free_space):
     frac = f"{size}B/{free_space}B"
     return f"{frac} ({round(calculate_fraction_percentage(frac),1)}%)"
 
@@ -359,6 +475,33 @@ def parse_unit(unit):
         "PB": 1024**5,
     }
     return size_map.get(unit.upper(), 1)
+
+
+def bytes_to_readable(byte_size):
+    """
+    Convert a byte size into a more readable format with a number between 1 and 999 and the appropriate unit.
+    """
+    # Define the conversion factors and corresponding units
+    units = [
+        ("B", 1),
+        ("KB", 1024),
+        ("MB", 1024**2),
+        ("GB", 1024**3),
+        ("TB", 1024**4),
+        ("PB", 1024**5),
+    ]
+
+    # Iterate over the units to find the most suitable one
+    for unit_name, unit_value in units:
+        readable_number = byte_size / unit_value
+        # Check if the converted number is between 1 and 999
+        if 1 <= readable_number < 1000:
+            return round(
+                readable_number, 2
+            ), unit_name  # Return the number rounded to 2 decimal places and the unit
+
+    # If no suitable unit is found (which is unlikely unless byte_size is extremely large), return in petabytes
+    return f"{round(byte_size / units[-1][1], 2)}{units[-1][0]}"
 
 
 def calculate_fraction_percentage(input_str):
@@ -385,14 +528,16 @@ def convert_to_bytes(value, unit):
     return value * parse_unit(unit)
 
 
-def parse_size(size_str):
+def old_parse_size(size_str):
     """
-    size_str (str): The size string, e.g., "18MB/3.9TB (0.0%)"
+    size_str (str): The size string, e.g., "18MB/3.9TB (0.0%), or 3.4GB"
 
     Returns:
     int: The size in bytes.
     """
-    match = re.match(r"(\d+(?:\.\d+)?)(B|KB|MB|GB|TB|PB)", size_str.split("/")[0])
+    if "/" in size_str:
+        size_str = size_str.split("/")[0]
+    match = re.match(r"(\d+(?:\.\d+)?)(B|KB|MB|GB|TB|PB)", size_str)
     if match:
         used_size, unit = match.groups()
         used_size = float(used_size) * parse_unit(unit)
@@ -401,9 +546,11 @@ def parse_size(size_str):
         raise (Exception("Units not found"))
 
 
-def sum_folder_sizes(str_list):
-    # TODO does not work
-    # Maybe it does work?
+def sum_folder_sizes(sizes):
+    return bytes_to_readable(sum(sizes))
+
+
+def sum_folder_sizes_with_fraction(str_list):
     # Initialize total bytes
     total_bytes = 0
     denominator = ""  # To store the common denominator part for later use
@@ -446,31 +593,3 @@ def sum_folder_sizes(str_list):
 
     frac = f"{total_value:.0f}{total_unit}/{denominator}"
     return f"{frac} ({round(calculate_fraction_percentage(frac),1)}%)"
-
-
-if __name__ == "__main__":
-    from configGenerator import ConfigGenerator
-
-    dm = DataManager()
-    # dm.clean_projects_on_servers()
-    nrThreads = 1
-    nrSeeds = 40
-    size = 60
-    configs, labels = ConfigGenerator.generate(
-        seed=range(nrSeeds),
-        rows=size,
-        cols=size,
-        startLoad=0.15,
-        nrThreads=nrThreads,
-        minimizer="FIRE",
-        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
-        eps=[1e-6, 1e-5, 5e-5, 1e-4],
-        maxLoad=1.0,
-        scenario="simpleShear",
-    )
-    dm.findData()
-    # dm.clean_projects_on_servers()
-    # dm.delete_data_from_configs(configs)
-    dm.printData()
-    # dm.delete_folders_below_size(1e8)
-    # dm.delete_all_found_data()

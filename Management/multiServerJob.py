@@ -1,9 +1,10 @@
 from itertools import product
-from configGenerator import ConfigGenerator
+from collections import OrderedDict
+from .configGenerator import ConfigGenerator
 
-from runOnCluster import queue_remote_job, build_on_all_servers  # noqa: F401
-from clusterStatus import get_all_server_info, get_server_short_name
-from jobManager import JobManager
+from .runOnCluster import queue_remote_job, build_on_all_servers  # noqa: F401
+from .clusterStatus import get_all_server_info, get_server_short_name
+from .jobManager import JobManager
 
 
 def generateCommands(configs, threads_per_seed=1):
@@ -27,12 +28,12 @@ def generateCommands(configs, threads_per_seed=1):
     seeds = kwargs["seed"]
     del kwargs["seed"]
     # Prepare the remaining arguments, ensuring they are iterable
-    processed_kwargs = {}
-    for key, value in kwargs.items():
+    processed_kwargs = OrderedDict()
+    for key, value in sorted(kwargs.items()):
         if isinstance(value, str) or not isinstance(value, list):
             processed_kwargs[key] = [value]  # Treat single values as a list
         else:
-            processed_kwargs[key] = value
+            processed_kwargs[key] = sorted(value)
 
     # Generate all combinations of non-seed parameters
     kwargs_combi = list(product(*processed_kwargs.values()))
@@ -42,21 +43,26 @@ def generateCommands(configs, threads_per_seed=1):
     # serverInfo[0].nrFreeCores
     print("Getting server info... ")
     serverInfo = get_all_server_info()
+
     print("Creating commadns... ")
-    commands = {}
+    commands = OrderedDict()
     # If the number of servers with more free cores than nr_seeds is larger than
     # nr_max_batches, we simply put one batch on each of these servers
     # We alphabetically sort just so that the order is not random
     for si in sorted(serverInfo.values(), key=lambda x: x.sName):
         if "down" in si.nodeState or "drained" in si.nodeState:
             continue
+        if "condorcet" in si.sName:
+            # condorcet is slow
+            continue
+
         if si.sName not in commands:
             commands[si.sName] = []
         while si.nrFreeCores > nr_seeds * threads_per_seed * (
             1 + len(commands[si.sName])
         ):
             # This creates a dictionary from keys and tuple values
-            combi_dict = dict(zip(kwargs.keys(), kwargs_combi[kwarg_index]))
+            combi_dict = zip(kwargs.keys(), kwargs_combi[kwarg_index])
             kwarg_index += 1
 
             cmd = (
@@ -64,7 +70,7 @@ def generateCommands(configs, threads_per_seed=1):
                 + " "
                 + " ".join(  # We need to add "" to strings
                     f'{key}="{value}"' if isinstance(value, str) else f"{key}={value}"
-                    for key, value in combi_dict.items()
+                    for key, value in combi_dict
                 )
             )
 
@@ -81,9 +87,22 @@ def generateCommands(configs, threads_per_seed=1):
     )
 
 
-def CGconfs():
-    nrThreads = 1
-    nrSeeds = 40
+def LBFGSconfs(nrThreads, nrSeeds):
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        rows=60,
+        cols=60,
+        startLoad=0.15,
+        nrThreads=nrThreads,
+        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        maxLoad=1.0,
+        LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
+        scenario="simpleShear",
+    )
+    return configs, labels
+
+
+def CGconfs(nrThreads, nrSeeds):
     size = 60
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -103,31 +122,20 @@ def CGconfs():
     return configs, labels
 
 
-if __name__ == "__main__":
-    nrThreads = 1
-    nrSeeds = 40
+def bigJob(nrThreads, nrSeeds):
+    size = 200
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
-        rows=60,
-        cols=60,
+        rows=size,
+        cols=size,
         startLoad=0.15,
         nrThreads=nrThreads,
-        loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
+        minimizer=["LBFGS", "CG", "FIRE"],
+        loadIncrement=2e-4,
+        LBFGSEpsg=1e-4,
+        CGEpsg=1e-4,
+        eps=1e-4,
         maxLoad=1.0,
-        LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
         scenario="simpleShear",
     )
-    configs, labels = CGconfs()
-    commands = generateCommands(configs)
-    print("Building on all servers... ")
-    build_on_all_servers()
-    print("Starting jobs...")
-    j = JobManager()
-    for server, commands in commands.items():
-        for command in commands:
-            jobId = queue_remote_job(server, command, "CGJs", nrThreads * nrSeeds)
-            # print(command)
-            pass
-        print(f"Started {len(commands)} jobs on {get_server_short_name(server)}")
-    print("Done!")
-    # j.showProcesses()
+    return configs, labels

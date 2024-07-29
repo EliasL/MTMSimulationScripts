@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from connectToCluster import Servers, connectToCluster, get_server_short_name
+from .connectToCluster import Servers, connectToCluster, get_server_short_name
 from tabulate import tabulate
 
 
@@ -209,8 +209,3 @@ def find_server(minNrThreads=16, minRAM=16):
         f"Selected {get_server_short_name(server)} with {info.nrJobsWaitingInQueue} jobs in the queue."
     )
     return server
-
-
-if __name__ == "__main__":
-    server_info = get_all_server_info()
-    display_server_info(server_info)

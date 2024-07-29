@@ -1,5 +1,6 @@
 from itertools import product
 import os
+from collections import OrderedDict
 
 
 class SimulationConfig:
@@ -45,7 +46,7 @@ class SimulationConfig:
         self.alphaStart = 0.1
         self.falpha = 0.99
         self.dtStart = 0.01
-        self.dtMax = self.dtStart * 5
+        self.dtMax = self.dtStart * 3
         self.dtMin = self.dtStart * 0.000001
         self.maxCompS = 0.01
         self.eps = 0.001
@@ -182,10 +183,11 @@ class ConfigGenerator:
         seeds = kwargs.pop(
             "seed", [None]
         )  # Default to [None] if 'seed' is not provided
+        kwargs = sorted(kwargs.items())
 
         # Prepare the remaining arguments, ensuring they are iterable
-        processed_kwargs = {}
-        for key, value in kwargs.items():
+        processed_kwargs = OrderedDict()
+        for key, value in kwargs:
             if isinstance(value, str) or not isinstance(value, list):
                 processed_kwargs[key] = [value]  # Treat single values as a list
             else:
@@ -252,11 +254,12 @@ class ConfigGenerator:
         default_config = SimulationConfig()
 
         # Initialize dictionary to hold parameter values
-        param_values = {}
+        param_values = OrderedDict()
 
         # Populate the dictionary with parameter values from each config
         for config in configs:
-            for key, value in config.__dict__.items():
+            # __dict__ should be ordered
+            for key, value in sorted(config.__dict__.items()):
                 if key == "name":
                     continue
                 if key not in param_values:
@@ -264,7 +267,7 @@ class ConfigGenerator:
                 param_values[key].add(value)
 
         # Convert sets to lists, remove parameters that match the default when there's only one value
-        kwargs = {}
+        kwargs = OrderedDict()
         for key, values in param_values.items():
             # Convert set to list for easier manipulation
             value_list = list(values)

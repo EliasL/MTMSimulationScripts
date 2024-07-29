@@ -11,6 +11,7 @@ from datetime import timedelta
 import powerlaw
 import pickle
 from simplification.cutil import simplify_coords_vwp
+from matplotlib.ticker import MaxNLocator
 
 
 def plotYOverX(
@@ -89,6 +90,29 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
     return fig, ax, line
 
 
+# Process drops
+def pros_d(df, start, end):
+    diffs = np.diff(df["Avg energy"][start:end])
+    mask = (
+        df["Nr plastic deformations"][start + 1 : end] >= 5
+    )  # Correct the field name if needed
+
+    # Find the indices where mask is True
+    # indices = np.where(mask)[0]
+
+    # Print surrounding values for each True index in mask
+    # for idx in indices[1:100]:
+    # if diffs[idx] < 0:
+    # print(start + idx)
+    # print(diffs[idx - 1], diffs[idx], diffs[idx + 1], sep=", ")
+
+    # Filter the diffs array
+    diffs = diffs[mask]
+
+    # Return the negative drops
+    return -diffs[diffs < 0]
+
+
 # Define global variables
 line_styles = ["-", "--", "-.", ":"]
 markers = ["v", "o", "^", "s", "D", "p", "*"]
@@ -104,35 +128,13 @@ def plotPowerLaw(dfs, fig=None, ax=None, label=""):
         fig, ax = plt.subplots()
     e = "Avg energy"
 
-    # Process drops
-    def pros_d(df, start, end):
-        diffs = np.diff(df["Avg energy"][start:end])
-        mask = (
-            df["Nr plastic deformations"][start + 1 : end] >= 5
-        )  # Correct the field name if needed
-
-        # Find the indices where mask is True
-        indices = np.where(mask)[0]
-
-        # Print surrounding values for each True index in mask
-        # for idx in indices[1:100]:
-        # if diffs[idx] < 0:
-        # print(start + idx)
-        # print(diffs[idx - 1], diffs[idx], diffs[idx + 1], sep=", ")
-
-        # Filter the diffs array
-        diffs = diffs[mask]
-
-        # Return the negative drops
-        return -diffs[diffs < 0]
-
     pre_yield_drops = [pros_d(df, 0, np.argmax(df[e]) + 1) for df in dfs]
     post_yield_drops = [pros_d(df, np.argmax(df[e]) + 1, len(df[e])) for df in dfs]
 
     combined_drops = [
         np.concatenate(drops) for drops in (pre_yield_drops, post_yield_drops)
     ]
-    print(len(combined_drops[0]))
+    # print(len(combined_drops[0]))
 
     for drops, part_label, index in zip(
         combined_drops, ["pre yield", "post yield"], [0, 1]
@@ -202,12 +204,83 @@ def plotPowerLaw(dfs, fig=None, ax=None, label=""):
     return fig, ax
 
 
-def plotSlidingPowerLaw(
-    y_values,
-    fig=None,
-    ax=None,
-    label="",
-):
+def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
+    e = "Avg energy"
+    pre_yield_df = [df[0 : np.argmax(df[e]) + 1] for df in dfs]
+    post_yield_df = [df[np.argmax(df[e]) + 1 :] for df in dfs]
+
+    # Prepare the figure and subplots for a 3x3 grid
+    if axs is None:
+        fig, axs = plt.subplots(3, 3, figsize=(8, 8))  # Adjust size as necessary
+        axs = axs.flatten()  # Flatten the array of axes for easier iteration
+
+    max_group_index = 8  # This corresponds to 2^9 as the highest group (2^1 to 2^9)
+    groups_indexes = range(0, max_group_index + 1)
+    # Initialize a dictionary to store drops data for each group
+
+    # Process each DataFrame split
+    for split_dfs, label in zip(
+        (pre_yield_df, post_yield_df),
+        ("Pre yield", "Post yield"),
+        # (post_yield_df, pre_yield_df),
+        # ("Post yield", "Pre yield")
+    ):
+        groups_data = {
+            i: [] for i in groups_indexes
+        }  # Dictionary to store data for each group
+        for df in split_dfs:
+            # Filter out zero and NaN values
+            df = df[df["Nr plastic deformations"] > 0]
+
+            group_index = np.floor(np.log2(df["Nr plastic deformations"])).astype(int)
+            group_index = np.clip(
+                group_index, 0, max_group_index
+            )  # Clamp the group index
+
+            drops = -np.diff(df[e])
+
+            # Filter out negative drops
+            group_index = group_index[1:][drops > 0]
+            drops = drops[drops > 0]
+
+            # Aggregate drops data by group
+            for i in groups_indexes:
+                mask = group_index == i  # Apply mask to align with `diffs` length
+                if any(mask):
+                    groups_data[i].extend(drops[mask])
+
+        # Define logarithmic bins
+
+        # Now plot the aggregated data for each group
+        for i, ax in enumerate(axs):
+            min_v = min(groups_data[i])
+            max_v = max(groups_data[i])
+            bins = np.logspace(
+                np.log10(min_v), np.log10(max_v), 20
+            )  # Generate 20 logarithmic bins
+            ax.hist(groups_data[i], bins=bins, alpha=0.75, label=label)
+            ax.set_title(f"{2**i}-{2**(i+1)-1} p.e.")
+            if i == len(axs) - 1:
+                ax.set_title(f"More than {2**i} p.e.")
+            ax.set_yscale("log")
+            ax.set_xscale("log")
+            if i == 0 or i == len(axs) - 1:
+                ax.legend()
+            # Only allow a maximum of 3 ticks along x-axis
+            # ax.xaxis.set_major_locator(MaxNLocator(3))
+            # Remove axis names for inner axes
+            if i % 3 == 0:  # Not the first column
+                ax.set_ylabel("Frequency")
+            if i >= 6:  # Not the bottom row
+                ax.set_xlabel(r"$-\Delta E$")
+
+    return fig, axs
+
+
+# Example usage can be added as necessary with DataFrames having 'Nr plastic deformations' and 'Avg energy'
+
+
+def plotSlidingPowerLaw(y_values, fig=None, ax=None, label=""):
     global color_index, index, line_index
     if ax is None:
         fig, ax = plt.subplots()
@@ -468,9 +541,7 @@ def makePlot(
 
 def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
     global color_index, index, line_index
-    color_index = 0
-    index = 0
-    line_index = 0
+    color_index, index, line_index = 0, 0, 0
     X = "Load"
     Y = "Avg energy"
     x_name = "Load"
@@ -484,6 +555,7 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
 
     crash_count = 0
 
+    # for each configuration
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
         data = []
         # Increment the global call count
@@ -497,6 +569,7 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
         # Get the current color
         color = colors[color_index]
 
+        # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
             if df.empty:
@@ -571,9 +644,7 @@ def makeLogPlotComparison(
     **kwargs,
 ):
     global color_index, index, line_index
-    color_index = 0
-    index = 0
-    line_index = 0
+    color_index, index, line_index = 0, 0, 0
     X = "Load"
     Y = "Avg energy"
     x_name = "Magnitude of energy drops"
@@ -584,8 +655,10 @@ def makeLogPlotComparison(
     fig, ax = plt.subplots()
 
     crash_count = 0
+    # For each configuration
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
         dfs = []
+        # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
             # Truncate data based on xLims
@@ -614,6 +687,56 @@ def makeLogPlotComparison(
     ax.set_ylabel(y_name)
     ax.set_title(title)
     ax.autoscale_view()
+    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name + ".pdf")
+    fig.savefig(figPath)
+    print(f'Plot saved at: "{figPath}"')
+    if show:
+        plt.show()
+
+
+def makeEnergyAvalancheComparison(
+    grouped_csv_file_paths,
+    name,
+    xLims=[-np.inf, np.inf],
+    show=True,
+    **kwargs,
+):
+    global color_index, index, line_index
+    color_index, index, line_index = 0, 0, 0
+    X = "Load"
+    Y = "Avg energy"
+    x_name = "Magnitude of energy drops"
+    y_name = "Frequency"
+    lims = "" if xLims == [-np.inf, np.inf] else f", xLims: {xLims[0]}-{xLims[1]}"
+    title = f"{name}{lims}"
+
+    crash_count = 0
+
+    # for each config
+    dfs = []  # panda dataframes
+    for i, csv_file_paths in enumerate(grouped_csv_file_paths):
+        # for each seed using this config
+        for j, csv_file_path in enumerate(csv_file_paths):
+            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
+            # Truncate data based on xLims
+            df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
+            # Truncate data based on dislocations
+            # df = df[(df["Nr plastic deformations"] >= 0)]
+            # Check for Y values greater than 10 and truncate
+            if (df[Y] > 1).any():
+                crash_count += 1
+                df = df[df[Y] <= 1]
+            dfs.append(df)
+    fig, ax = plotEnergyAvalancheHistogram(dfs)
+
+    if crash_count > 0:
+        print(f"Found {crash_count} crashes.")
+    # Set the legend with the filtered handles and labels
+    # ax.legend(loc=("best"))
+    # ax.set_xlabel(x_name)
+    # ax.set_ylabel(y_name)
+    fig.suptitle(title, fontsize=16)  # Set the main
+    plt.tight_layout()  # Adjust subplots to fit into figure area.
     figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name + ".pdf")
     fig.savefig(figPath)
     print(f'Plot saved at: "{figPath}"')

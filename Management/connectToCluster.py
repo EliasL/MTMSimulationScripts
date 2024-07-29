@@ -9,7 +9,7 @@ class Servers:
     pascal = "pascal.pmmh-cluster.espci.fr"
     schwartz = "schwartz.pmmh-cluster.espci.fr"
     lagrange = "lagrange.pmmh-cluster.espci.fr"
-    condorcet = "condorcet.pmmh-cluster.espci.fr"
+    # condorcet = "condorcet.pmmh-cluster.espci.fr"
     dalembert = "dalembert.pmmh-cluster.espci.fr"
     poincare = "poincare.pmmh-cluster.espci.fr"
     fourier = "fourier.pmmh-cluster.espci.fr"
@@ -25,7 +25,7 @@ class Servers:
         pascal,
         schwartz,
         lagrange,
-        condorcet,
+        # condorcet,
         dalembert,
         poincare,
         fourier,

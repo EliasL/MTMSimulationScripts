@@ -76,7 +76,11 @@ def plotLog(config_groups, name, labels, **kwargs):
     # Now we can import from Management
     from remotePlotting import get_csv_files
 
-    from makePlots import makeLogPlotComparison, makeEnergyPlotComparison
+    from makePlots import (
+        makeLogPlotComparison,
+        makeEnergyPlotComparison,
+        makeEnergyAvalancheComparison,
+    )
 
     paths, labels = get_csv_files(config_groups, labels=labels, useOldFiles=False)
     kwargs["labels"] = labels
@@ -85,9 +89,8 @@ def plotLog(config_groups, name, labels, **kwargs):
     for k in ["plot_average"]:
         if k in kwargs:
             del kwargs[k]
-    makeLogPlotComparison(
-        paths, f"{name} - PowerLaw", legend=True, slide=False, **kwargs
-    )
+    # makeLogPlotComparison(paths, f"{name} - PowerLaw", legend=True, **kwargs)
+    # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", legend=True, **kwargs)
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
 
 
@@ -199,8 +202,8 @@ def loadingSpeeds():
         nrThreads=nrThreads,
         # loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
         # LBFGSEpsg=[1e-6, 1e-5, 5e-5, 1e-4],
-        loadIncrement=[1e-5],
-        LBFGSEpsg=[1e-6, 1e-5, 1e-4],
+        # loadIncrement=[1e-5],
+        # LBFGSEpsg=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
         scenario="simpleShear",
     )
@@ -274,8 +277,8 @@ def FIRELoading():
         minimizer="FIRE",
         # loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
         # LBFGSEpsg=[1e-6, 1e-5, 5e-5, 1e-4],
-        loadIncrement=[1e-5],
-        eps=[1e-6, 1e-5, 1e-4],
+        # loadIncrement=[1e-5],
+        # eps=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
         scenario="simpleShear",
     )
@@ -312,7 +315,7 @@ def CGLoading():
         # loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
         # CGEpsg=[1e-6, 1e-5, 5e-5, 1e-4],
         loadIncrement=[1e-5],
-        CGEps=[1e-6, 1e-5, 1e-4],
+        CGEpsg=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
         scenario="simpleShear",
     )

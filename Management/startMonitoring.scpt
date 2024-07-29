@@ -11,15 +11,15 @@ tell application "iTerm"
         end tell
         -- Navigate to the first pane and run the command
         tell first session of current tab
-            write text "python /Users/eliaslundheim/work/PhD/SimulationScripts/Management/clusterStatus.py"
+            write text "python PATH/status.py disp_servers"
         end tell
         -- Navigate to the second pane and run the command
         tell second session of current tab
-            write text "python /Users/eliaslundheim/work/PhD/SimulationScripts/Management/dataManager.py"
+            write text "python PATH/status.py disp_data"
         end tell
         -- Navigate to the third pane and run the command
         tell third session of current tab
-            write text "python /Users/eliaslundheim/work/PhD/SimulationScripts/Management/jobManager.py true"
+            write text "python PATH/status.py disp_jobs"
         end tell
     end tell
 end tell

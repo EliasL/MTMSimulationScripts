@@ -8,8 +8,8 @@ import sys
 def task(config):
     try:
         manager = SimulationManager(config)
-        time = manager.runSimulation(False)
-        manager.plot()
+        time = manager.runSimulation(build=False, resumeIfPossible=True)
+        # manager.plot()
     except Exception as e:
         return f"Error: {e}"
     return time
