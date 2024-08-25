@@ -86,11 +86,8 @@ def plotLog(config_groups, name, labels, **kwargs):
     kwargs["labels"] = labels
     print("Plotting...")
     makeEnergyPlotComparison(paths, f"{name} - Energy", legend=True, **kwargs)
-    for k in ["plot_average"]:
-        if k in kwargs:
-            del kwargs[k]
-    # makeLogPlotComparison(paths, f"{name} - PowerLaw", legend=True, **kwargs)
-    # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", legend=True, **kwargs)
+    makeLogPlotComparison(paths, f"{name} - PowerLaw", legend=True, **kwargs)
+    makeEnergyAvalancheComparison(paths, f"{name} - Histogram", legend=True, **kwargs)
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
 
 

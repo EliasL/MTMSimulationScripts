@@ -11,8 +11,8 @@ class SimulationConfig:
 
     def __init__(self, configPath=None, **kwargs):
         # Simulation Settings
-        self.rows = 10
-        self.cols = 10
+        self.rows = 3
+        self.cols = 3
         self.usingPBC = 1  # 0=False, 1=True
         self.scenario = "simpleShear"
         self.nrThreads = 1
@@ -255,6 +255,9 @@ class ConfigGenerator:
 
         # Initialize dictionary to hold parameter values
         param_values = OrderedDict()
+
+        if isinstance(configs, SimulationConfig):
+            configs = [configs]
 
         # Populate the dictionary with parameter values from each config
         for config in configs:

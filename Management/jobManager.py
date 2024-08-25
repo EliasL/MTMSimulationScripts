@@ -108,8 +108,9 @@ class Process:
             self.output_path = parts[o_index]
         elif "-d" in parts:
             d_index = parts.index("-d") + 1
-            # We can extract the output path from the dump path
-            self.output_path = str(Path(parts[d_index]).parents[1])
+            # We can extract the name and output path from the dump path
+            self.name = parts[d_index].split("/")[-3]
+            self.output_path = "/".join(parts[d_index].split("/")[:-3])
 
         if self.output_path != "":
             self.get_progress()
@@ -131,6 +132,7 @@ class Process:
         remote_file_path = os.path.join(
             self.output_path, self.name, settings["MACRODATANAME"] + ".csv"
         )
+        "/data/elundheim/MTS2D_output/simpleShear,s200x200l0.15,0.0002,1.0PBCt3minimizerCGLBFGSEpsg0.0001CGEpsg0.0001eps0.0001s14/simpleShear,s200x200l0.15,0.0002,1.0PBCt3minimizerCGLBFGSEpsg0.0001CGEpsg0.0001eps0.0001s14/macroData.csv"
 
         with self.ssh.open_sftp() as sftp:
             with sftp.file(remote_file_path, "r") as file:
@@ -316,7 +318,7 @@ class JobManager:
             print(tabulate(table, headers=headers, tablefmt="grid"))
             print(f"Found {len(self.processes)} processes.")
 
-    def showSlurmJobs(self):
+    def findAndShowSlurmJobs(self):
         self.slurmJobs = self.execute_command_on_servers(self.find_slurm_jobs_on_server)
         print("")
         if not self.slurmJobs:
@@ -332,7 +334,7 @@ class JobManager:
                 # "Time Limit",
                 "Time Left",
                 "Elapsed",
-                "Nodes",
+                # "Nodes",
                 "Node List",
             ]
             for job in self.slurmJobs:
@@ -344,34 +346,50 @@ class JobManager:
                     # job["time_limit"],
                     job["time_left"],
                     job["elapsed"],
-                    job["nodes"],
+                    # job["nodes"],
                     job["node_list"],
                 ]
                 table.append(row)
             print(tabulate(table, headers=headers, tablefmt="grid"))
 
-    def cancel_job_on_server(self, server, job_id):
+    def cancel_jobs_on_server(self, server, job_ids):
         """Function to cancel a job on a specific server."""
+
+        if not isinstance(job_ids, list):
+            job_ids = [job_ids]
+
         try:
             ssh = connectToCluster(server, False)
-            command = f"scancel {job_id}"
-            ssh.exec_command(command)
-            print(f"Cancelled job {job_id} on {server}")
+            for job_id in job_ids:
+                command = f"scancel {job_id}"
+                ssh.exec_command(command)
+                print(f"Cancelled job {job_id} on {server}")
         except Exception as exc:
             print(f"Error canceling job {job_id} on {server}: {exc}")
 
-    def cancelAllJobs(self):
+    def cancelAllJobs(self, force=False, on=None):
         """Cancel all Slurm jobs listed in self.slurmJobs."""
         if len(self.slurmJobs) == 0:
             print("No jobs found. Do you run showSlurmJobs first?")
-        for job in self.slurmJobs:
-            print(
-                f"Are you sure you want to cancle job {job['job_id']} on {job['server']}?:"
-            )
-            if input("yes/no: ") != "yes":
-                continue
-            else:
-                self.cancel_job_on_server(job["server"], job["job_id"])
+        if force:
+            jobs = {}
+            for job in self.slurmJobs:
+                if job["server"] not in jobs:
+                    jobs[job["server"]] = [job["job_id"]]
+                else:
+                    jobs[job["server"]].append(job["job_id"])
+            for server, jobs in jobs.items():
+                self.cancel_jobs_on_server(server, jobs)
+        else:
+            for job in self.slurmJobs:
+                if on is None or on == job["server"] or job["server"] in on:
+                    print(
+                        f"Are you sure you want to cancle job {job['job_id']} on {job['server']}?:"
+                    )
+                    if input("yes/no: ") != "yes":
+                        continue
+
+                    self.cancel_jobs_on_server(job["server"], job["job_id"])
 
     def kill_all_processes(self, server):
         """Kill all processes related to the user on the specified server."""
@@ -408,7 +426,7 @@ if __name__ == "__main__":
     )
 
     j = JobManager()
-    j.showSlurmJobs()
+    j.findAndShowSlurmJobs()
     # j.cancel_job_on_server(server, 876296)
     # j.cancel_job_on_server(server, 876297)
     # server = find_server(minNrThreads)

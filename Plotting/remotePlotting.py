@@ -208,7 +208,8 @@ def get_csv_files(configs, labels=[], useOldFiles=False):
     if not isinstance(configs[0], SimulationConfig):
         nested = True
         configs = [config for sublist in config_groups for config in sublist]
-    global completed_servers
+    global completed_servers, nr_files
+    completed_servers, nr_files = 0, 0
     # First check if the files have already been downloaded
     paths, configs = search_for_cvs_files(configs, useOldFiles)
     if len(configs) == 0:

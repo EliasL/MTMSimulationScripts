@@ -91,10 +91,10 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
 
 
 # Process drops
-def pros_d(df, start, end):
+def pros_d(df, start, end, min_npd, min_energy=0):
     diffs = np.diff(df["Avg energy"][start:end])
     mask = (
-        df["Nr plastic deformations"][start + 1 : end] >= 5
+        df["Nr plastic deformations"][start + 1 : end] >= min_npd
     )  # Correct the field name if needed
 
     # Find the indices where mask is True
@@ -110,7 +110,7 @@ def pros_d(df, start, end):
     diffs = diffs[mask]
 
     # Return the negative drops
-    return -diffs[diffs < 0]
+    return -diffs[diffs < -min_energy]
 
 
 # Define global variables
@@ -128,8 +128,18 @@ def plotPowerLaw(dfs, fig=None, ax=None, label=""):
         fig, ax = plt.subplots()
     e = "Avg energy"
 
-    pre_yield_drops = [pros_d(df, 0, np.argmax(df[e]) + 1) for df in dfs]
-    post_yield_drops = [pros_d(df, np.argmax(df[e]) + 1, len(df[e])) for df in dfs]
+    # Trim data based on dislocations
+    minNrOfDeformations = 0
+    minEnergy = 1e-5
+
+    pre_yield_drops = [
+        pros_d(df, 0, np.argmax(df[e]) + 1, minNrOfDeformations, minEnergy)
+        for df in dfs
+    ]
+    post_yield_drops = [
+        pros_d(df, np.argmax(df[e]) + 1, len(df[e]), minNrOfDeformations, minEnergy)
+        for df in dfs
+    ]
 
     combined_drops = [
         np.concatenate(drops) for drops in (pre_yield_drops, post_yield_drops)
@@ -222,8 +232,6 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
     for split_dfs, label in zip(
         (pre_yield_df, post_yield_df),
         ("Pre yield", "Post yield"),
-        # (post_yield_df, pre_yield_df),
-        # ("Post yield", "Pre yield")
     ):
         groups_data = {
             i: [] for i in groups_indexes
@@ -253,8 +261,12 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
 
         # Now plot the aggregated data for each group
         for i, ax in enumerate(axs):
+            if not groups_data[i]:
+                continue
             min_v = min(groups_data[i])
             max_v = max(groups_data[i])
+            if min_v == max_v:
+                continue
             bins = np.logspace(
                 np.log10(min_v), np.log10(max_v), 20
             )  # Generate 20 logarithmic bins
@@ -571,11 +583,13 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
 
         # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
+            # print(csv_file_path)
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
+            # df = df[0:50000]
             if df.empty:
                 continue
-            # Check for Y values greater than 10 and truncate
-            if (df[Y] > 1).any():
+            # Check for Y values greater than some value (0.07?) and truncate
+            if (df[Y] > 0.07).any():
                 crash_count += 1
                 df = df[df[Y] <= 1]
                 print(f"Crash in {csv_file_path}.")
@@ -619,6 +633,7 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
             "zorder": -color_index,
         }
         df = pd.read_csv(csv_file_paths[max_length_index], usecols=[X])
+        # df = df[0:50000]
         fig, ax, line, point = plotYOverX(df[X], average, **a_kwargs)
     if crash_count > 0:
         print(f"Found {crash_count} crashes.")
@@ -663,8 +678,6 @@ def makeLogPlotComparison(
             df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
             # Truncate data based on xLims
             df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
-            # Truncate data based on dislocations
-            # df = df[(df["Nr plastic deformations"] >= 0)]
             # Check for Y values greater than 10 and truncate
             if (df[Y] > 1).any():
                 crash_count += 1
@@ -708,13 +721,12 @@ def makeEnergyAvalancheComparison(
     x_name = "Magnitude of energy drops"
     y_name = "Frequency"
     lims = "" if xLims == [-np.inf, np.inf] else f", xLims: {xLims[0]}-{xLims[1]}"
-    title = f"{name}{lims}"
 
     crash_count = 0
 
     # for each config
-    dfs = []  # panda dataframes
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
+        dfs = []  # panda dataframes
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
@@ -722,26 +734,30 @@ def makeEnergyAvalancheComparison(
             df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
             # Truncate data based on dislocations
             # df = df[(df["Nr plastic deformations"] >= 0)]
-            # Check for Y values greater than 10 and truncate
+            # Check for Y values greater than 1 and truncate
             if (df[Y] > 1).any():
                 crash_count += 1
                 df = df[df[Y] <= 1]
             dfs.append(df)
-    fig, ax = plotEnergyAvalancheHistogram(dfs)
+        fig, ax = plotEnergyAvalancheHistogram(dfs)
 
-    if crash_count > 0:
-        print(f"Found {crash_count} crashes.")
-    # Set the legend with the filtered handles and labels
-    # ax.legend(loc=("best"))
-    # ax.set_xlabel(x_name)
-    # ax.set_ylabel(y_name)
-    fig.suptitle(title, fontsize=16)  # Set the main
-    plt.tight_layout()  # Adjust subplots to fit into figure area.
-    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name + ".pdf")
-    fig.savefig(figPath)
-    print(f'Plot saved at: "{figPath}"')
-    if show:
-        plt.show()
+        if crash_count > 0:
+            print(f"Found {crash_count} crashes.")
+        # Set the legend with the filtered handles and labels
+        # ax.legend(loc=("best"))
+        # ax.set_xlabel(x_name)
+        # ax.set_ylabel(y_name)
+        title = f"{name}{lims}" + f'-{["LBFGS", "CG", "FIRE"][i]}'
+        fig.suptitle(title, fontsize=16)  # Set the main
+        plt.tight_layout()  # Adjust subplots to fit into figure area.
+        figPath = os.path.join(
+            os.path.dirname(grouped_csv_file_paths[0][0]),
+            title + ".pdf",
+        )
+        fig.savefig(figPath)
+        print(f'Plot saved at: "{figPath}"')
+        if show:
+            plt.show()
 
 
 def makeEnergyPlot(csv_file_paths, name, **kwargs):

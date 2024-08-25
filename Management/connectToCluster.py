@@ -1,5 +1,4 @@
 import os
-from paramiko import ProxyCommand, SSHClient, AutoAddPolicy, SSHConfig, SSHException
 import subprocess
 
 
@@ -112,6 +111,8 @@ def uploadProject(cluster_address="Servers.default", verbose=False):
 
 
 def get_ssh_config():
+    from paramiko import SSHConfig
+
     config_file = os.path.expanduser("~/.ssh/config")
     ssh_config = SSHConfig()
     with open(config_file) as f:
@@ -120,6 +121,8 @@ def get_ssh_config():
 
 
 def connectToCluster(cluster_address=Servers.default, verbose=True):
+    from paramiko import ProxyCommand, SSHClient, AutoAddPolicy, SSHException
+
     # Get the SSH configuration
     ssh_config = get_ssh_config()
     config = ssh_config.lookup(cluster_address)

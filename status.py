@@ -18,13 +18,17 @@ from Management.multiServerJob import (
 def disp_data():
     dm = DataManager()
     # dm.clean_projects_on_servers()
-    dm.findData()
     # dm.clean_projects_on_servers()
+    # dm.delete_useless_dumps(False)
     nrThreads = 1
     nrSeeds = 40
     configs, labels = bigJob(nrThreads, nrSeeds)
     # dm.delete_data_from_configs(configs, dryRun=True)
     # dm.delete_folders_below_size(100, dryRun=True)
+    dm.printData()
+    dm.findData(silent=True)
+    print("^   Old data above   ^")
+    print("v Updated data below v")
     dm.printData()
     # dm.delete_all_found_data()
 
@@ -36,7 +40,7 @@ def disp_servers():
 
 def disp_jobs():
     j = JobManager()
-    j.showSlurmJobs()
+    j.findAndShowSlurmJobs()
     j.showProcesses()
 
 
@@ -89,4 +93,5 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"No such task {task}.")
     else:
-        run_script()
+        disp_jobs()
+        # run_script()

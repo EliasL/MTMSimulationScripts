@@ -1,9 +1,12 @@
 from Management.connectToCluster import uploadProject, Servers, get_server_short_name
+from Management.queueLocalJobs import get_batch_script
 from fabric import Connection
 import textwrap
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 from invoke import Responder
+import subprocess
+import os
 
 SERVER_USER = "elundheim"
 
@@ -36,11 +39,12 @@ pbars = {}
 
 
 class ProgressBarUpdater(Responder):
-    def __init__(self, server, pbar_index):
+    def __init__(self, server, pbar_index, silent):
         self.server = get_server_short_name(server)
         self.pbar_index = pbar_index
         self.total = -1
         self.current_line = 0
+        self.silent = silent
 
     def submit(self, all_lines):
         global output, pbars
@@ -56,26 +60,27 @@ class ProgressBarUpdater(Responder):
                     desc=self.server,
                     total=self.total,
                     position=self.pbar_index,
+                    disable=self.silent,
                     unit=" folders",
                 )
                 output[self.pbar_index] = []
                 self.current_line += 1
             else:
-                if "\t" in line:
-                    output[self.pbar_index].append(line)  # Store the line in the list
+                output[self.pbar_index].append(line)  # Store the line in the list
                 pbars[self.pbar_index].update(1)
                 self.current_line += 1
         return []  # Return an empty iterable
 
 
-def run_remote_script_with_progress(server_hostname, script_path, pbar_index):
+def run_remote_script_with_progress(server, script_path, pbar_index, silent):
     """Run a remote script and process its output in real time, updating a tqdm progress bar."""
-    updater = ProgressBarUpdater(server_hostname, pbar_index)
-    with Connection(host=server_hostname, user=SERVER_USER) as c:
+    updater = ProgressBarUpdater(server, pbar_index, silent)
+    with Connection(host=server, user=SERVER_USER) as c:
         # Execute the script with unbuffered Python output and pseudo-terminal
         command = f"python3 -u {script_path}"
         c.run(command, watchers=[updater], hide=True)
         if pbar_index in output:
+            pbars[pbar_index].close()
             return output[pbar_index]
         else:
             return []
@@ -112,9 +117,8 @@ def run_remote_command(server_hostname, command, hide=False, silent=True):
 
 def queue_remote_job(server_hostname, command, job_name, nrThreads):
     base_path = "/home/elundheim/simulation/MTS2D/"
-    outPath = base_path + "JobOutput/"
-    output_file = outPath + f"log-{job_name}.out"
-    error_file = outPath + f"err-{job_name}.err"
+    outPath = os.path.join(base_path, "JobOutput")
+    error_file = os.path.join(outPath, f"err-{job_name}.err")
 
     # Establish the SSH connection
     with Connection(host=server_hostname, user=SERVER_USER) as c:
@@ -128,16 +132,7 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
         # Truncate the error file to clear old errors
         c.run(f"truncate -s 0 {error_file}")
 
-        # Create a batch script content
-        batch_script = textwrap.dedent(f"""
-            #!/bin/bash
-            #SBATCH --job-name={job_name}
-            #SBATCH --time=13-23:59:59
-            #SBATCH --ntasks={nrThreads}
-            #SBATCH --output={output_file}
-            #SBATCH --error={error_file}
-            {command}
-        """).strip()
+        batch_script = get_batch_script(command, job_name, nrThreads, outPath)
 
         # Create the batch script on the server
         batch_script_path = outPath + job_name + ".sh"

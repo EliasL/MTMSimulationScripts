@@ -1,13 +1,100 @@
 from itertools import product
 from collections import OrderedDict
-from .configGenerator import ConfigGenerator
+from .configGenerator import ConfigGenerator, SimulationConfig
 
 from .runOnCluster import queue_remote_job, build_on_all_servers  # noqa: F401
 from .clusterStatus import get_all_server_info, get_server_short_name
 from .jobManager import JobManager
+from .dataManager import DataManager
+
+
+def confToCommand(config):
+    base_command = "python3 /home/elundheim/simulation/SimulationScripts/Management/runSimulations.py"
+    return (
+        base_command
+        + " "
+        + " ".join(  # We need to add "" to strings
+            f'{key}="{value}"' if isinstance(value, str) else f"{key}={value}"
+            for key, value in ConfigGenerator.get_kwargs(config).items()
+        )
+    )
 
 
 def generateCommands(configs, threads_per_seed=1):
+    """
+    We give each seed its own slurm job and we just fill the entire cluster with
+    lots of small jobs with a high nice value so that others can get past if they
+    want.
+
+    Importantly, we also need to check the servers for exsisting folders, since
+    we might want to resume a simulation instead of starting a new one.
+    """
+
+    dm = DataManager()
+    dm.findData(autoUpdate=True)
+
+    commands = OrderedDict()
+
+    remaining_configs = []
+
+    # Assign exsisting jobs to servers with that job
+    for config in configs:
+        configSolved = False
+        data = {k: v for k, v in dm.data.items() if k != "date"}
+        for server, (folders, sizes, free_space) in data.items():
+            folders = map(lambda s: s.split("/")[-1], folders)
+            if config.name in folders:
+                if server not in commands:
+                    commands[server] = []
+                commands[server].append(confToCommand(config))
+                configSolved = True
+                break
+        if not configSolved:
+            remaining_configs.append(config)
+
+    print(f"Resuming {sum(len(lst) for lst in commands.values())} exsisting jobs.")
+    if len(remaining_configs) > 0:
+        print(f"Finding cpu space for {len(remaining_configs)} new jobs.")
+    else:
+        return commands
+    print("Getting server info... ")
+    serverInfo = get_all_server_info()
+
+    # Sort the server information by server name
+    for si in sorted(serverInfo.values(), key=lambda x: x.sName):
+        # Skip servers that are down or drained
+        if "down" in si.nodeState or "drained" in si.nodeState:
+            continue
+
+        # Skip the condorcet server as it is slow
+        if "condorcet" in si.sName:
+            continue
+
+        # We try to avoid almost filled servers
+        if si.nrFreeCores < 10:
+            continue
+
+        # Initialize command list for the server if not already present
+        if si.sName not in commands:
+            commands[si.sName] = []
+
+        # Calculate the number of available slots (leave one CPU free)
+        available_slots = (si.nrFreeCores) // threads_per_seed - len(commands[si.sName])
+
+        # Fill servers until they are full or no remaining configurations
+        while available_slots > 0 and remaining_configs:
+            commands[si.sName].append(confToCommand(remaining_configs.pop(0)))
+            available_slots -= 1
+
+        # If no remaining configurations, return the filled commands
+        if not remaining_configs:
+            return commands
+    raise RuntimeError(
+        f"Not enough cores to run simulations! Need {len(remaining_configs)*threads_per_seed} cores."
+    )
+
+
+def oldGenerateCommands(configs, threads_per_seed=1):
     """
     The idea here is that we will have a huge number of configuration files, and we
     want to distribute them among all the available servers.
@@ -122,10 +209,11 @@ def CGconfs(nrThreads, nrSeeds):
     return configs, labels
 
 
-def bigJob(nrThreads, nrSeeds):
+def bigJob(nrThreads, nrSeeds, group_by_seeds=False):
     size = 200
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
+        group_by_seeds=group_by_seeds,
         rows=size,
         cols=size,
         startLoad=0.15,
@@ -135,6 +223,42 @@ def bigJob(nrThreads, nrSeeds):
         LBFGSEpsg=1e-4,
         CGEpsg=1e-4,
         eps=1e-4,
+        maxLoad=1.0,
+        scenario="simpleShear",
+    )
+    return configs, labels
+
+
+def propperJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        group_by_seeds=group_by_seeds,
+        rows=size,
+        cols=size,
+        startLoad=0.15,
+        nrThreads=nrThreads,
+        minimizer=["LBFGS", "CG", "FIRE"],
+        loadIncrement=1e-5,
+        LBFGSEpsg=1e-5,
+        CGEpsg=1e-5,
+        eps=1e-5,
+        maxLoad=1.0,
+        scenario="simpleShear",
+    )
+    return configs, labels
+
+
+def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        group_by_seeds=group_by_seeds,
+        rows=size,
+        cols=size,
+        startLoad=0.15,
+        nrThreads=nrThreads,
+        minimizer="LBFGS",
+        loadIncrement=1e-5,
+        LBFGSEpsg=1e-5,
         maxLoad=1.0,
         scenario="simpleShear",
     )

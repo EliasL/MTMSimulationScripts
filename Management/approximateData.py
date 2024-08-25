@@ -100,6 +100,21 @@ def find_data():
         size = approximate_size(full_path)
         print(f"{full_path}\t{size}")
 
+    # Print nr of gigabytes that are still free
+    # First, use os.statvfs() to get filesystem statistics for the given path
+    stats = os.statvfs(base_dir)
+
+    # Calculate the free space in bytes
+    # 'f_frsize' gives the fundamental file system block size
+    # 'f_bavail' gives the number of free blocks available to a non-superuser
+    free_space_bytes = stats.f_bavail * stats.f_frsize
+
+    # Convert bytes to gigabytes (1 gigabyte = 1,073,741,824 bytes)
+    free_space_gb = free_space_bytes / (1024**3)
+
+    # Return the free space as a float in gigabytes
+    print(free_space_gb)
+
 
 if __name__ == "__main__":
     folder = find_data()

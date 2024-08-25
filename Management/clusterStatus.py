@@ -103,7 +103,7 @@ def score_and_color_server(info):
     # Define the metrics to evaluate
     metrics = {
         "Idle Cores": (info.nrFreeCores, info.nrTotalCores, 50, 15),
-        "Idle Nodes": (info.nrIdleNodes, info.nrNodesTotal, 1, 0),
+        # "Idle Nodes": (info.nrIdleNodes, info.nrNodesTotal, 1, 0),
         # "GB RAM": (info.freeRAM, info.totalRAM, 50, 15),
         "Jobs R": (info.nrJobsRunning, None, 2, 10),
         "Jobs W": (info.nrJobsWaitingInQueue, None, 0, 4),

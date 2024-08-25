@@ -8,6 +8,8 @@ from tabulate import tabulate
 import subprocess
 import os
 from tqdm import tqdm
+import json
+from datetime import datetime, timedelta
 
 """
 Search through all the servers and identify all the data in all the servers
@@ -15,22 +17,38 @@ Search through all the servers and identify all the data in all the servers
 
 
 class DataManager:
+    # Construct the path to 'data.json' in the same directory as this script
+    dataPath = os.path.join(os.path.dirname(__file__), "data.json")
+
     def __init__(self) -> None:
         self.data = {}
         self.user = "elundheim"
 
-    def find_data_on_server(self, server, pbar_index):
+        # Check if the file exists and load the data
+        if os.path.exists(DataManager.dataPath):
+            with open(DataManager.dataPath, "r") as f:
+                self.data = json.load(f)
+
+    def save_data(self):
+        # Save the data to 'data.json'
+        with open(DataManager.dataPath, "w") as f:
+            json.dump(self.data, f)
+
+    def find_data_on_server(self, server, pbar_index, silent):
         remote_script_path = (
             "/home/elundheim/simulation/SimulationScripts/Management/approximateData.py"
         )
-        lines = run_remote_script_with_progress(server, remote_script_path, pbar_index)
-
+        lines = run_remote_script_with_progress(
+            server, remote_script_path, pbar_index, silent
+        )
+        if len(lines) == 0:
+            return None
         # Prepare lists to hold paths and sizes
         folders = []
         sizes = []
 
-        # Process each line
-        for line in lines:
+        # Process each line (Except the last)
+        for line in lines[:-1]:
             # Split by tab to separate the path and the size
             parts = line.split("\t")
             if len(parts) == 2:  # Make sure the line is properly formatted
@@ -38,8 +56,9 @@ class DataManager:
                 sizes.append(
                     int(parts[1])
                 )  # The second part is the size, converted to int
-
-        return folders, sizes
+        # The last line is the free space in GB
+        free_space_in_gb = float(lines[-1])
+        return folders, sizes, free_space_in_gb
 
     def find_data_on_disk(self, path):
         # Construct the path to the MTS2D_output directory
@@ -57,16 +76,26 @@ class DataManager:
         dataSize = [get_local_directory_size(folder, free_space) for folder in folders]
 
         # Save the list of folders and sizes in data dictionary
-        return folders, dataSize
+        return folders, dataSize, free_space
 
-    def findData(self):
-        # Initialize progress bar
+    def findData(self, silent=False, autoUpdate=False):
+        if autoUpdate:
+            # If this is an autoupdate, we don't want to check for new data
+            # if it is less than 24 hours since the last time the data was updated.
+            if "date" in self.data:
+                last_update_time = datetime.fromisoformat(self.data["date"])
+                time_difference = datetime.now() - last_update_time
+                if time_difference < timedelta(hours=24):
+                    # If the data was updated less than 24 hours ago, return None
+                    return None
 
         # Use ThreadPoolExecutor to execute find_data_on_server in
         # parallel across all servers plus one to find the data stored locally
         with ThreadPoolExecutor(max_workers=len(Servers.servers) + 1) as executor:
             futures_to_server = {
-                executor.submit(self.find_data_on_server, server, pbar_index): server
+                executor.submit(
+                    self.find_data_on_server, server, pbar_index, silent
+                ): server
                 for pbar_index, server in enumerate(Servers.servers)
             }
             if os.path.exists("/Volumes/data"):
@@ -84,17 +113,25 @@ class DataManager:
                     pass
                 except Exception as exc:
                     print(f"{server} generated an exception: {exc}")
+        self.data["date"] = datetime.now().isoformat()
+        self.save_data()
 
     def printData(self):
         table_data = []
-        for server, folders_and_sizes in self.data.items():
-            if folders_and_sizes:  # If there are folders and sizes
-                grouped_folders = self.parse_and_group_seeds(folders_and_sizes)
+        for server, (folders, sizes, free_space_in_GB) in self.data.items():
+            if folders:  # If there are folders and sizes
+                grouped_folders = self.parse_and_group_seeds((folders, sizes))
                 if grouped_folders:
                     folders, sizes = zip(*grouped_folders)
                     sizes = [f"{nr}{unit}" for nr, unit in sizes]
                     server = get_server_short_name(server)
-                    table_data.append([server, "\n".join(folders), "\n".join(sizes)])
+                    table_data.append(
+                        [
+                            f"{server}\n{round(free_space_in_GB):d}GB free",
+                            "\n".join(folders),
+                            "\n".join(sizes),
+                        ]
+                    )
 
         # Displaying the table with a separator between servers
         table = tabulate(
@@ -178,12 +215,12 @@ class DataManager:
             # Summing all folders to set up the total for tqdm
             total_folders = sum(
                 len(folders)
-                for server, (folders, sizes) in self.data.items()
+                for server, (folders, sizes, free_space) in self.data.items()
                 if folders
             )
             progress_bar = tqdm(total=total_folders, desc="Deleting dumps")
 
-            for server, (folders, sizes) in self.data.items():
+            for server, (folders, sizes, free_space) in self.data.items():
                 if folders:
                     # Submit a task for each server to the executor
                     future = executor.submit(
@@ -223,7 +260,9 @@ class DataManager:
         stdin, stdout, stderr = ssh.exec_command(list_files_command)
         dumps = stdout.read().strip().decode().split("\n")
 
-        load_regex = re.compile(r"Dump_l(\d\.\d+)")
+        load_regex = re.compile(
+            r"dump_l(\d+(?:\.\d+)?)(?:_[\w\.]+)?\.mstd", re.IGNORECASE
+        )
         load_to_files = {}
         latest_file = dumps[0]
 
