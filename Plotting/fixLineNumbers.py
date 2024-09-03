@@ -10,13 +10,19 @@ def fix_csv_files_in_folder(folder_path):
             file_path = os.path.join(folder_path, filename)
 
             # Read the CSV file into a DataFrame
-            df = pd.read_csv(file_path, header=None)
+            df = pd.read_csv(file_path)
 
-            # Replace the first column with accurate line numbers (starting from 1)
-            df[0] = ["Line nr"] + list(range(1, len(df)))
+            # Create a Series that tracks the maximum value encountered so far
+            cummax_series = df["Load"].cummax()
+
+            # Create a boolean mask where the current value is less than the maximum encountered
+            overlap_mask = df["Load"] < cummax_series
+
+            # Drop the rows where overlap_mask is True
+            df_cleaned = df[~overlap_mask].reset_index(drop=True)
 
             # Save the modified DataFrame back to the same CSV file
-            df.to_csv(file_path, index=False, header=False)
+            df_cleaned.to_csv(file_path, index=False)
 
 
 # Example usage

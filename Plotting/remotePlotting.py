@@ -138,9 +138,11 @@ def download_file(name, folders, data_path, remote_folder_name, folder_path, ssh
     return None
 
 
-def search_for_cvs_files(configs, useOldFiles=False):
-    # We also only include files that are less than an hour old
+def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
+    if forceUpdate:
+        return [], configs
 
+    # We also only include files that are less than 24 hours old
     paths = []
     remaining_configs = []
     last_search_folder = False
@@ -202,7 +204,7 @@ def flatToStructure(config_groups, label_groups):
 # This function searches all the servers for the given config file,
 # downloads the csv file associated with the config file to a temp file,
 # and returns the new local path to the csv
-def get_csv_files(configs, labels=[], useOldFiles=False):
+def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
     nested = False
     config_groups = configs
     if not isinstance(configs[0], SimulationConfig):
@@ -211,7 +213,7 @@ def get_csv_files(configs, labels=[], useOldFiles=False):
     global completed_servers, nr_files
     completed_servers, nr_files = 0, 0
     # First check if the files have already been downloaded
-    paths, configs = search_for_cvs_files(configs, useOldFiles)
+    paths, configs = search_for_cvs_files(configs, useOldFiles, forceUpdate)
     if len(configs) == 0:
         print("All files already downloaded.")
         if nested:

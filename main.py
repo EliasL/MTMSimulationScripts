@@ -138,6 +138,6 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-startJobs()
+# startJobs()
 # plotBigJob()
-# plotPropperJob()
+plotPropperJob()

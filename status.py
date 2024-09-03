@@ -93,5 +93,5 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"No such task {task}.")
     else:
-        disp_jobs()
-        # run_script()
+        # disp_jobs()
+        run_script()

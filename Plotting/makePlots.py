@@ -224,8 +224,9 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
         fig, axs = plt.subplots(3, 3, figsize=(8, 8))  # Adjust size as necessary
         axs = axs.flatten()  # Flatten the array of axes for easier iteration
 
-    max_group_index = 8  # This corresponds to 2^9 as the highest group (2^1 to 2^9)
-    groups_indexes = range(0, max_group_index + 1)
+    min_group_index = 1
+    max_group_index = 9  # This corresponds to 2^9 as the highest group (2^1 to 2^9)
+    groups_indexes = range(min_group_index, max_group_index + 1)
     # Initialize a dictionary to store drops data for each group
 
     # Process each DataFrame split
@@ -242,7 +243,7 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
 
             group_index = np.floor(np.log2(df["Nr plastic deformations"])).astype(int)
             group_index = np.clip(
-                group_index, 0, max_group_index
+                group_index, min_group_index, max_group_index
             )  # Clamp the group index
 
             drops = -np.diff(df[e])
@@ -261,19 +262,20 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
 
         # Now plot the aggregated data for each group
         for i, ax in enumerate(axs):
-            if not groups_data[i]:
+            exp = groups_indexes[i]
+            if not groups_data[exp]:
                 continue
-            min_v = min(groups_data[i])
-            max_v = max(groups_data[i])
+            min_v = min(groups_data[exp])
+            max_v = max(groups_data[exp])
             if min_v == max_v:
                 continue
             bins = np.logspace(
                 np.log10(min_v), np.log10(max_v), 20
             )  # Generate 20 logarithmic bins
-            ax.hist(groups_data[i], bins=bins, alpha=0.75, label=label)
-            ax.set_title(f"{2**i}-{2**(i+1)-1} p.e.")
+            ax.hist(groups_data[exp], bins=bins, alpha=0.75, label=label)
+            ax.set_title(f"{2**exp}-{2**(exp+1)-1} p.e.")
             if i == len(axs) - 1:
-                ax.set_title(f"More than {2**i} p.e.")
+                ax.set_title(f"More than {2**exp} p.e.")
             ax.set_yscale("log")
             ax.set_xscale("log")
             if i == 0 or i == len(axs) - 1:

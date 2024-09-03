@@ -82,7 +82,9 @@ def plotLog(config_groups, name, labels, **kwargs):
         makeEnergyAvalancheComparison,
     )
 
-    paths, labels = get_csv_files(config_groups, labels=labels, useOldFiles=False)
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
+    )
     kwargs["labels"] = labels
     print("Plotting...")
     makeEnergyPlotComparison(paths, f"{name} - Energy", legend=True, **kwargs)
