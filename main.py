@@ -4,14 +4,16 @@ from Management.runOnCluster import (
     run_remote_script,
     queue_remote_job,
     run_remote_command,
+    build_on_all_servers,
+    build_on_server,
 )
 from Management.connectToCluster import Servers
 from Management.multiServerJob import (
     bigJob,
+    confToCommand,
     basicJob,
     propperJob,
     generateCommands,
-    build_on_all_servers,
     JobManager,
     get_server_short_name,
 )
@@ -69,13 +71,36 @@ def lotsOThreads():
     )
 
 
+def threadTest():
+    nrThreads = [8, 16, 32, 64]
+    nrSeeds = 1
+    size = 150
+    build_on_server(Servers.mesopsl)
+    configs, labels = propperJob(nrThreads, nrSeeds, size)
+    print("Starting jobs...")
+    commands = confToCommand(configs)
+    pre_command = "python3 ~/simulation/SimulationScripts/Management/queueLocalJobs.py"
+    # pre_command = "python3 main.py start_jobs"
+    full_pre_command = (
+        pre_command
+        + " "
+        + str(
+            {
+                '"commands"': str(commands).replace('"', "\u203d"),
+                '"job_name"': '"ej"',
+                '"nrThreads"': sum(nrThreads),
+            }
+        )
+    )
+    print(full_pre_command)
+    # run_remote_command(Servers.mesopsl, full_pre_command)
+
+
 def runOnServer():
     server = Servers.galois
     uploadProject(server)
     # Choose script to run
-    remote_script_path = (
-        "/home/elundheim/simulation/SimulationScripts/Management/runSimulation.py"
-    )
+    remote_script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
     run_remote_script(server, remote_script_path)
 
 
@@ -84,16 +109,18 @@ def startJobs():
     # j.findAndShowSlurmJobs()
     # j.cancelAllJobs(force=True)
 
-    nrThreads = 3
-    nrSeeds = 40
-    size = 100
+    nrThreads = 8
+    nrSeeds = 20
+    size = 200
     print("Building on all servers... ")
-    # build_on_all_servers()
+    build_on_all_servers()
     for job in [propperJob]:
         configs, labels = job(nrThreads, nrSeeds, size)
         servers_commands = generateCommands(configs, nrThreads)
         print("Starting jobs...")
-        pre_command = "python3 /home/elundheim/simulation/SimulationScripts/Management/queueLocalJobs.py"
+        pre_command = (
+            "python3 ~/simulation/SimulationScripts/Management/queueLocalJobs.py"
+        )
         # pre_command = "python3 main.py start_jobs"
         for server, commands in servers_commands.items():
             full_pre_command = (
@@ -141,3 +168,4 @@ def stopJobs():
 # startJobs()
 # plotBigJob()
 plotPropperJob()
+# threadTest()

@@ -32,13 +32,13 @@ class SimulationConfig:
         self.LBFGSScale = 1.0
         self.LBFGSEpsg = 0.0
         self.LBFGSEpsf = 0.0
-        self.LBFGSEpsx = 1e-6
+        self.LBFGSEpsx = 0.0
         self.LBFGSMaxIterations = 0
         # - Conjugate Gradient
         self.CGScale = 1.0
         self.CGEpsg = 0.0
         self.CGEpsf = 0.0
-        self.CGEpsx = 1e-6
+        self.CGEpsx = 0.0
         self.CGMaxIterations = 0
         # - FIRE
         self.finc = 1.1
@@ -49,7 +49,7 @@ class SimulationConfig:
         self.dtMax = self.dtStart * 3
         self.dtMin = self.dtStart * 0.000001
         self.maxCompS = 0.01
-        self.eps = 0.001
+        self.eps = 0.000
         self.epsRel = 0.0
         self.delta = 0.0
         self.maxIt = 10000

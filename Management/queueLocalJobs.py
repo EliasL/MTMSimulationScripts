@@ -23,7 +23,9 @@ def get_batch_script(command, job_name, nrThreads, outPath):
 
 
 def queue_local_jobs(commands, job_name, nrThreads):
-    base_path = "/home/elundheim/simulation/MTS2D/"
+    base_path = "~/simulation/MTS2D/"
+    # Expand the user's home directory and check if the path exists
+    base_path = os.path.expanduser(base_path)
     outPath = os.path.join(base_path, "JobOutput")
     error_file = os.path.join(outPath, f"err-{job_name}.err")
 

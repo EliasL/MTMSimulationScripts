@@ -91,7 +91,7 @@ def find_outpath_on_server(server_hostname):
     with Connection(host=server_hostname, user=SERVER_USER) as c:
         # Execute the remote command (your Python script)
         result = c.run(
-            "python3 -u /home/elundheim/simulation/SimulationScripts/Management/simulationManager.py",
+            "python3 -u ~/simulation/SimulationScripts/Management/simulationManager.py",
             hide=True,
             warn=True,
         )
@@ -116,7 +116,7 @@ def run_remote_command(server_hostname, command, hide=False, silent=True):
 
 
 def queue_remote_job(server_hostname, command, job_name, nrThreads):
-    base_path = "/home/elundheim/simulation/MTS2D/"
+    base_path = "~/simulation/MTS2D/"
     outPath = os.path.join(base_path, "JobOutput")
     error_file = os.path.join(outPath, f"err-{job_name}.err")
 
@@ -161,7 +161,7 @@ def build_on_server(server):
     shortName = get_server_short_name(server)
     print(f"Uploading to {shortName}...")
     uploadProject(server)
-    project_path = "/home/elundheim/simulation/MTS2D/build-release/"
+    project_path = "~/simulation/MTS2D/build-release/"
     build_command = f"mkdir -p {project_path} && cd {project_path} && cmake -DCMAKE_BUILD_TYPE=Release .. && make"
 
     print(f"Building on {shortName}...")
@@ -196,9 +196,7 @@ if __name__ == "__main__":
     # Upload/sync the project
     uploadProject(server)
     # Choose script to run
-    script_path = (
-        "/home/elundheim/simulation/SimulationScripts/Management/runSimulation.py"
-    )
+    script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
     # Generate sbatch script
 
     # Queue the script on the server

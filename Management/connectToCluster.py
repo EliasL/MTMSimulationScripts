@@ -8,13 +8,14 @@ class Servers:
     pascal = "pascal.pmmh-cluster.espci.fr"
     schwartz = "schwartz.pmmh-cluster.espci.fr"
     lagrange = "lagrange.pmmh-cluster.espci.fr"
+    # Condorcet is slow
     # condorcet = "condorcet.pmmh-cluster.espci.fr"
     dalembert = "dalembert.pmmh-cluster.espci.fr"
     poincare = "poincare.pmmh-cluster.espci.fr"
     fourier = "fourier.pmmh-cluster.espci.fr"
     descartes = "descartes.pmmh-cluster.espci.fr"
 
-    # mesopsl = "mesopsl.obspm.fr"
+    mesopsl = "mesopsl.obspm.fr"
 
     local_path_mac = "/Volumes/data/"
 
@@ -48,12 +49,12 @@ def uploadProject(cluster_address="Servers.default", verbose=False):
     # Define the local paths based on the script directory and resolve them to absolute paths
     local_path_MTS2D = os.path.abspath(os.path.join(script_dir, "..", "..", "MTS2D"))
     local_path_SS = os.path.abspath(os.path.join(script_dir, ".."))
-    clusterPath = f"elundheim@{cluster_address}:/home/elundheim/simulation/"
+    clusterPath = f"elundheim@{cluster_address}:~/simulation/"
 
     ssh_command = [
         "ssh",
         f"elundheim@{cluster_address}",
-        "mkdir -p /home/elundheim/simulation /home/elundheim/simulation/MTS2D /home/elundheim/simulation/SimulationScripts",
+        "mkdir -p ~/simulation ~/simulation/MTS2D ~/simulation/SimulationScripts",
     ]
 
     output_options = None if verbose else subprocess.DEVNULL

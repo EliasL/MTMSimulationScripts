@@ -50,17 +50,17 @@ if __name__ == "__main__":
 
     (configs, labels) = ConfigGenerator.generate(**kwargs)
 
-    # Build and test (Fail early)
-    manager = SimulationManager(SimulationConfig())
-    try:
-        manager.runSimulation(resumeIfPossible=False, silent=True)
-    except Exception as e:
-        Warning(e)
-        manager.clean()
-        try:
-            manager.runSimulation()
-        except Exception as e:
-            raise (Exception(e))
+    # # Build and test (Fail early)
+    # manager = SimulationManager(SimulationConfig())
+    # try:
+    #     manager.runSimulation(resumeIfPossible=False, silent=True)
+    # except Exception as e:
+    #     Warning(e)
+    #     manager.clean()
+    #     try:
+    #         manager.runSimulation()
+    #     except Exception as e:
+    #         raise (Exception(e))
 
     with Pool(processes=len(configs)) as pool:
         results = pool.map(task, configs)

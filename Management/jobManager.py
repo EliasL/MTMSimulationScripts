@@ -421,9 +421,7 @@ if __name__ == "__main__":
     script = "parameterExploring.py"
     server = Servers.dalembert
     # server = Servers.condorcet
-    command = (
-        f"python3 /home/elundheim/simulation/SimulationScripts/Management/{script}"
-    )
+    command = f"python3 ~/simulation/SimulationScripts/Management/{script}"
 
     j = JobManager()
     j.findAndShowSlurmJobs()

@@ -27,4 +27,5 @@ def fix_csv_files_in_folder(folder_path):
 
 # Example usage
 folder_path = "/Users/elias/Work/PhD/Code/remoteData/"
+folder_path = "/Users/eliaslundheim/work/PhD/remoteData/"
 fix_csv_files_in_folder(folder_path)

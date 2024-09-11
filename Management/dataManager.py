@@ -34,15 +34,7 @@ class DataManager:
         with open(DataManager.dataPath, "w") as f:
             json.dump(self.data, f)
 
-    def find_data_on_server(self, server, pbar_index, silent):
-        remote_script_path = (
-            "/home/elundheim/simulation/SimulationScripts/Management/approximateData.py"
-        )
-        lines = run_remote_script_with_progress(
-            server, remote_script_path, pbar_index, silent
-        )
-        if len(lines) == 0:
-            return None
+    def parse_approximate_data_lines(self, lines):
         # Prepare lists to hold paths and sizes
         folders = []
         sizes = []
@@ -60,23 +52,51 @@ class DataManager:
         free_space_in_gb = float(lines[-1])
         return folders, sizes, free_space_in_gb
 
+    def find_data_on_server(self, server, pbar_index, silent):
+        remote_script_path = (
+            "~/simulation/SimulationScripts/Management/approximateData.py"
+        )
+        lines = run_remote_script_with_progress(
+            server, remote_script_path, pbar_index, silent
+        )
+        if len(lines) == 0:
+            return None
+
+        return self.parse_approximate_data_lines(lines)
+
     def find_data_on_disk(self, path):
-        # Construct the path to the MTS2D_output directory
-        mts_output_path = os.path.join(path, "MTS2D_output")
+        # Define the path to your approximateData.py script
+        base_dir = os.path.dirname(
+            os.path.abspath(__file__)
+        )  # __file__ refers to the current script file
 
-        # Check if MTS2D_output exists
-        if not os.path.isdir(mts_output_path):
-            raise FileNotFoundError(f"The directory {mts_output_path} does not exist.")
+        # Define the relative path to your approximateData.py script
+        relative_script_path = "approximateData.py"
 
-        # List all folders within the MTS2D_output folder
-        folders = next(os.walk(mts_output_path))[1]
-        # Clean up folder names
-        folders = [os.path.join(mts_output_path, folder) for folder in folders]
-        free_space = get_free_space(None, folders[0])
-        dataSize = [get_local_directory_size(folder, free_space) for folder in folders]
+        # Construct the full path by combining the base_dir and the relative path
+        local_script_path = os.path.join(base_dir, relative_script_path)
 
-        # Save the list of folders and sizes in data dictionary
-        return folders, dataSize, free_space
+        # Run the script using subprocess and capture the output
+        try:
+            result = subprocess.run(
+                ["python3", local_script_path, path],  # Pass the path as an argument
+                text=True,  # Get the output as a string
+                capture_output=True,  # Capture stdout and stderr
+                check=True,  # Raise an error if the script fails
+            )
+            # Split the result into lines
+            lines = result.stdout.strip().split("\n")
+
+            if len(lines) == 0:
+                return None
+            return self.parse_approximate_data_lines(lines)
+
+        except subprocess.CalledProcessError as e:
+            # Print detailed error information including stdout and stderr
+            print(f"Error running script: {e}")
+            print(f"Script output (stdout): {e.stdout}")
+            print(f"Script error (stderr): {e.stderr}")
+            return None
 
     def findData(self, silent=False, autoUpdate=False):
         if autoUpdate:
@@ -98,7 +118,7 @@ class DataManager:
                 ): server
                 for pbar_index, server in enumerate(Servers.servers)
             }
-            if os.path.exists("/Volumes/data"):
+            if os.path.isdir("/Volumes/data/MTS2D_output"):
                 futures_to_server[
                     executor.submit(self.find_data_on_disk, "/Volumes/data")
                 ] = "Local ssd"
@@ -118,7 +138,12 @@ class DataManager:
 
     def printData(self):
         table_data = []
-        for server, (folders, sizes, free_space_in_GB) in self.data.items():
+
+        data_copy = self.data.copy()
+        date = data_copy.pop("date", None)  # Use .pop to remove 'date' safely
+        print(date)
+        # Iterate over the remaining data after removing 'date'
+        for server, (folders, sizes, free_space_in_GB) in data_copy.items():
             if folders:  # If there are folders and sizes
                 grouped_folders = self.parse_and_group_seeds((folders, sizes))
                 if grouped_folders:
@@ -335,9 +360,8 @@ class DataManager:
             grouped_seeds = []
             for k, g in groupby(enumerate(seeds), lambda i_x: i_x[0] - i_x[1][1]):
                 seq = list(g)
-                grouped_size = sum_folder_sizes(
-                    [item[1][3] for item in seq]
-                )  # Calculate total size for the group
+                # Calculate total size for the group
+                grouped_size = sum_folder_sizes([item[1][3] for item in seq])
                 if len(seq) > 1:
                     start, end = seq[0][1], seq[-1][1]
                     grouped_seeds.append((f"{start[1]}-{end[1]}", grouped_size))
@@ -415,19 +439,6 @@ def get_free_space(ssh, path):
                     # Found the matching mount point, return the whole line or specific data
                     free_space = columns[3]
 
-        def convert_gb_to_tb(size_str):
-            # Match the numeric part and the unit (G)
-            match = re.match(r"(\d+)(G)", size_str)
-            if match:
-                size_gb = int(match.group(1))
-                # Convert GB to TB, keeping one decimal place
-                size_tb = round(size_gb / 1024, 1)
-                return f"{size_tb}T"
-            return size_str
-
-        # Mac chooses 3990GB over switching to TB which was very annoying
-        free_space = convert_gb_to_tb(free_space)
-
     else:  # SSH connection object
         df_command = f"df -h {path} | awk 'NR==2{{print $4}}'"
 
@@ -440,16 +451,6 @@ def get_free_space(ssh, path):
             return None
         free_space = df_output
     return free_space
-
-
-def get_local_directory_size(path, free_space):
-    # Execute the du command locally for directory size
-    du_process = subprocess.run(["du", "-sh", path], stdout=subprocess.PIPE, text=True)
-    du_output = du_process.stdout.strip()
-
-    # Extract the size part from du output
-    size = du_output.split("\t")[0]
-    return format_size(size, free_space)
 
 
 def get_directory_size(ssh, path, free_space=False):
@@ -534,13 +535,12 @@ def bytes_to_readable(byte_size):
     for unit_name, unit_value in units:
         readable_number = byte_size / unit_value
         # Check if the converted number is between 1 and 999
-        if 1 <= readable_number < 1000:
-            return round(
-                readable_number, 2
-            ), unit_name  # Return the number rounded to 2 decimal places and the unit
+        if 0.9 <= readable_number < 1000:
+            # Return the number rounded to 2 decimal places and the unit
+            return round(readable_number, 2), unit_name
 
     # If no suitable unit is found (which is unlikely unless byte_size is extremely large), return in petabytes
-    return f"{round(byte_size / units[-1][1], 2)}{units[-1][0]}"
+    return round(byte_size / units[-1][1], 2), units[-1][0]
 
 
 def calculate_fraction_percentage(input_str):

@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import random
 import threading
-
+import pandas as pd
 from makePlots import (
     makeEnergyPlot,
     makePowerLawPlot,
@@ -19,6 +19,7 @@ from connectToCluster import connectToCluster, Servers
 from configGenerator import ConfigGenerator, SimulationConfig
 
 FOLDER_PATH = "/Users/elias/Work/PhD/Code/remoteData"
+FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
 
 
 def handleLocalPath(dataPath, configs):
@@ -170,9 +171,11 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
                 # 3600 seconds = 1 hour
                 if time.time() - file_mod_time < 24 * 3600 or useOldFiles:
                     paths.append(file_path)
+                # check if the file is done.
+                elif pd.read_csv(file_path)["Est time remaining"].iloc[-1] == "0.000s":
+                    paths.append(file_path)
                 else:
-                    # We don't want old files, so we redo everything
-                    return [], configs
+                    remaining_configs.append(config)
             elif last_search_folder:
                 remaining_configs.append(config)
 

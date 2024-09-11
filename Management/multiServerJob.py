@@ -9,7 +9,7 @@ from .dataManager import DataManager
 
 
 def confToCommand(config):
-    base_command = "python3 /home/elundheim/simulation/SimulationScripts/Management/runSimulations.py"
+    base_command = "python3 ~/simulation/SimulationScripts/Management/runSimulations.py"
     return (
         base_command
         + " "
@@ -104,7 +104,7 @@ def oldGenerateCommands(configs, threads_per_seed=1):
     that will run on that server
     """
     # the base command
-    base_command = "python3 /home/elundheim/simulation/SimulationScripts/Management/runSimulations.py"
+    base_command = "python3 ~/simulation/SimulationScripts/Management/runSimulations.py"
 
     # get the kwargs used to generate the configs
     kwargs = ConfigGenerator.get_kwargs(configs)

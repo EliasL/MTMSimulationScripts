@@ -72,37 +72,24 @@ def find_data():
         "/Volumes/data/",
         "/Users/elias/Work/PhD/Code/localData",
     ]
-    # We print 0 to tell the data manager script that there are 0 folders
     base_dir = first_existing_directory(preferred_directories)
-    if base_dir is None:
-        print("0")
-        # print("No valid data directory found.")
-        return None
-
-    folder_name = find_first_folder(base_dir)
-
-    if folder_name is None:
-        print("0")
-        # print("No valid data directory found.")
-        return None
-
-    if folder_name != "MTS2D_output":
+    out_dir = os.path.join(base_dir, "MTS2D_output")
+    if not os.path.exists(out_dir):
         print("0")
         print(
-            f"Warning: The folder in {base_dir} is not called 'MTS2D_output'. Found: {folder_name}"
+            f"Warning: The folder {out_dir} does not exsist! Found: {find_first_folder(base_dir)}"
         )
 
-    base_dir = os.path.join(base_dir, folder_name)
-    simulation_folders = find_folders(base_dir)
+    simulation_folders = find_folders(out_dir)
     print(len(simulation_folders))
     for folder in simulation_folders:
-        full_path = os.path.join(base_dir, folder)
+        full_path = os.path.join(out_dir, folder)
         size = approximate_size(full_path)
         print(f"{full_path}\t{size}")
 
     # Print nr of gigabytes that are still free
     # First, use os.statvfs() to get filesystem statistics for the given path
-    stats = os.statvfs(base_dir)
+    stats = os.statvfs(out_dir)
 
     # Calculate the free space in bytes
     # 'f_frsize' gives the fundamental file system block size
