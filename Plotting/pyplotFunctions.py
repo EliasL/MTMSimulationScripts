@@ -11,6 +11,9 @@ import random
 from multiprocessing import Pool
 
 from dataFunctions import get_data_from_name
+import matplotlib
+
+matplotlib.use("Agg")  # Use a non-interactive backend
 
 
 class VTUData:
@@ -155,10 +158,10 @@ def draw_rhombus(ax, N, load, BC):
 def save_and_close_plot(fig, ax, path):
     plt.savefig(path, bbox_inches="tight", pad_inches=0)
     plt.close(fig)
+    plt.close()
 
 
 def calculate_valid_indices(n, m):
-    n, m = n + 1, m + 1  # Adjust grid size
     # Create a 2D grid of indices
     indices = np.arange(n * m).reshape(n, m)
     valid_indices = indices[: n - 1, : m - 1].flatten()
@@ -173,14 +176,16 @@ def plot_nodes(args):
     fixed = data.get_fixed_status()
     dims = get_data_from_name(vtu_file)["dims"]
     n, m = dims
-    # Calculate valid indices (excluding last row and column) using the NumPy function
-    valid_indices = calculate_valid_indices(n, m)
+    if data.BC == "PBC":
+        # When using PBC, we want to hide the last row and column
+        # Calculate valid indices (excluding last row and column) using the NumPy function
+        valid_indices = calculate_valid_indices(n, m)
 
-    # Filter nodes and fixed status using the computed indices
-    nodes = nodes[valid_indices]
-    fixed = fixed[valid_indices]
-
-    color = np.where(fixed == 1, "red", "blue")
+        # Filter nodes and fixed status using the computed indices
+        nodes = nodes[valid_indices]
+        fixed = fixed[valid_indices]
+    #                            Fixed color, Free color
+    color = np.where(fixed == 1, "#2a3857", "#d24646")
     x, y = nodes[:, 0], nodes[:, 1]
 
     # Calculate grid size
@@ -198,10 +203,18 @@ def plot_nodes(args):
     circle_radius = circle_diameter / 2
     circle_point_size = (circle_radius * inches_per_data_unit) ** 2
 
+    # Grid
+    energy_field = data.get_energy_field()
+    connectivity = data.get_connectivity()
+
     shifts = calculate_shifts(nodes, data.BC, data.load)
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
+            # Mesh lines between nodes
+            triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
+            ax.triplot(triang, color="black", linewidth=0.5, alpha=0.3)
+
             ax.scatter(
                 sheared_x,
                 y + dy,
@@ -259,11 +272,14 @@ def plot_mesh(args):
 
 
 def retry_frame_function(frameFunction, args, max_retries=3):
+    # Maybe not needed any more?
+    return frameFunction(args)
     for attempt in range(max_retries):
         try:
             return frameFunction(args)
         except Exception as e:
-            # print(f"Error on attempt {attempt+1} for file {args[1]}: {str(e)}")
+            if attempt == max_retries - 1:
+                print(f"Error for file {args[1]}: {str(e)}")
             time.sleep(random.uniform(0.1, 1))  # Random delay between 0.1 and 1 second
     print(f"Failed to process file {args[1]} after {max_retries} attempts.")
     return None
@@ -292,6 +308,8 @@ def make_images(frameFunction, framePath, vtu_files, macro_data, num_processes=1
         )
         for frame_index, vtu_file in enumerate(vtu_files)
     ]
+    # Use line below to debug
+    image_paths = process_frame(args_list[0])
 
     with Pool(processes=num_processes) as pool:
         image_paths = list(

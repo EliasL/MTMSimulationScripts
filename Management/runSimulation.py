@@ -3,18 +3,17 @@ if __name__ == "__main__":
     from configGenerator import SimulationConfig
 
     config = SimulationConfig(
-        rows=20,
-        cols=20,
-        startLoad=0.15,
-        nrThreads=1,
-        loadIncrement=2e-4,
+        rows=16,
+        cols=16,
+        startLoad=0.0,
+        nrThreads=4,
+        loadIncrement=1e-5,
         maxLoad=1.0,
-        # LBFGSEpsg=1e-6,
-        # CGEpsx=1e-4,
-        eps=1e-4,
+        LBFGSEpsg=1e-10,
         QDSD=0.0,
+        usingPBC=0,
         minimizer="LBFGS",
-        scenario="simpleShear",
+        scenario="simpleShearFixedBoundary",
     )
 
     resume = False

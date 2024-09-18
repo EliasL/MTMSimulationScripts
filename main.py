@@ -35,9 +35,9 @@ def plotBigJob():
     # xLims = [0.25, 0.55]
     pe.plotLog(
         configs,
-        "200x200, load:0.15-1, PBC, t3, seeds:40",
+        "200x200, load:0.15-1, PBC, seeds:40",
         labels=labels,
-        show=True,
+        # show=True,
         # xLims=xLims,
     )
 
@@ -49,9 +49,9 @@ def plotPropperJob():
     # xLims = [0.25, 0.55]
     pe.plotLog(
         configs,
-        "100x100, load:0.15-1, PBC, t3, seeds:40",
+        "100x100, load:0.15-1, PBC, seeds:40",
         labels=labels,
-        show=True,
+        # show=True,
         # xLims=xLims,
     )
 
@@ -66,7 +66,7 @@ def lotsOThreads():
         configs,
         f"{size}x{size}, load:0.15-1, PBC, t{nrThreads}, seeds:{nrSeeds}",
         labels=labels,
-        show=True,
+        # show=True,
         # xLims=xLims,
     )
 

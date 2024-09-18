@@ -42,7 +42,7 @@ def get_data_from_name(nameOrPath):
     load_parts = result["name"].split(",")[1:]
     result["startLoad"] = load_parts[0].split("l")[1]
     result["loadIncrement"] = load_parts[1]
-    if "NPBC" in load_parts:
+    if "NPBC" in load_parts[2]:
         result["maxLoad"] = load_parts[2].split("NPBC")[0]
         result["BC"] = "NPBC"
     else:

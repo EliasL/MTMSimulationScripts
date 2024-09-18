@@ -92,15 +92,16 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
 
 
 # Process drops
-def pros_d(df, start_index, end_index, min_npd, loadLims):
+def pros_d(df, start_index, end_index, min_npd, strainLims):
+    # TODO handle innerstrainLims
     index_range = slice(start_index + 1, end_index)
     diffs = np.diff(df["Avg energy"][index_range])
 
     # Combine all conditions into a single mask using element-wise logical AND
     mask = (
         (df["Nr plastic deformations"][index_range] >= min_npd)
-        & (df["Load"][index_range] >= loadLims[0])
-        & (df["Load"][index_range] <= loadLims[1])
+        & (df["Load"][index_range] >= strainLims[0])
+        & (df["Load"][index_range] <= strainLims[1])
     )
     # Since np.diff reduces the length by 1, adjust the mask accordingly
     # The mask needs to exclude the first entry, so slice the mask by [1:]
@@ -120,19 +121,38 @@ def getPowerLawFit(
     maxEnergy=np.inf,
     bootstrap=False,
     split=True,
-    strainLims=(-np.inf, np.inf),
+    innerStrainLims=(np.inf, -np.inf),
+    outerStrainLims=(-np.inf, np.inf),
 ):
+    # The purpose of the inner and outer strain lims is to isolate a middle
+    # transition region from the analasys. If this is our "line" of data
+    # ---|-----------------|--------|----------------------|---
+    #    (O1)              (I1)     (I2)                   (O2)
+    # I have labeled the locatinos of the outer (O) and inner (I) strain
+    # limits. That way, the two regions we are interested in analysing is
+    # given by (O1, I1) and (I2, O2).
+
     e = "Avg energy"
     # If we split, we find the largest energy value of the system and analyse
     # the pre and post yield seperately
     if split:
         pre_yield_drops = [
-            pros_d(df, 0, np.argmax(df[e]) + 1, minNrOfDeformations, strainLims)
+            pros_d(
+                df,
+                0,
+                np.argmax(df[e]) + 1,
+                minNrOfDeformations,
+                (outerStrainLims[0], innerStrainLims[0]),
+            )
             for df in dfs
         ]
         post_yield_drops = [
             pros_d(
-                df, np.argmax(df[e]) + 1, len(df[e]), minNrOfDeformations, strainLims
+                df,
+                np.argmax(df[e]) + 1,
+                len(df[e]),
+                minNrOfDeformations,
+                (innerStrainLims[1], outerStrainLims[1]),
             )
             for df in dfs
         ]
@@ -144,14 +164,15 @@ def getPowerLawFit(
         combined_drops = [
             np.concatenate(
                 [
-                    pros_d(df, 0, len(df[e]), minNrOfDeformations, strainLims)
+                    pros_d(df, 0, len(df[e]), minNrOfDeformations, outerStrainLims)
                     for df in dfs
                 ]
             )
         ]
+
     if bootstrap:
         # Parameters for bootstrapping
-        n_bootstrap = 1000  # Number of bootstrap samples
+        n_bootstrap = 10  # Number of bootstrap samples
         if split and bootstrap:
             raise (RuntimeError("Bootstrap and split is not supported."))
         drops = combined_drops[0]
@@ -255,22 +276,27 @@ color_index = 0
 index = 0
 
 
-def plotPowerLaw(dfs, fig=None, ax=None, label=""):
+def plotPowerLaw(
+    dfs, fig=None, ax=None, label="", minEnergy=1e-5, innerStrainLims=(np.inf, -np.inf)
+):
     global color_index, index, line_index
     if ax is None:
         fig, ax = plt.subplots()
 
     # Trim data based on dislocations
     minNrOfDeformations = 0
-    minEnergy = 1e-5
 
-    c_fits, c_drops = getPowerLawFit(dfs, minNrOfDeformations, minEnergy)
+    c_fits, c_drops = getPowerLawFit(
+        dfs, minNrOfDeformations, minEnergy, innerStrainLims=innerStrainLims
+    )
 
     for fit, drops, part_label, index in zip(
         c_fits, c_drops, ["pre yield", "post yield"], [0, 1]
     ):
         if len(drops) == 0:
             continue
+
+        # np.savetxt(f"{label}{part_label}.csv", drops, delimiter=",")
 
         xmin, xmax = np.min(drops), np.max(drops)
 
@@ -283,12 +309,12 @@ def plotPowerLaw(dfs, fig=None, ax=None, label=""):
         color = colors[color_index]
 
         # Separated the pre and post lines
-        shift = 1e2 * index
+        shift = [1e2, 1][index]
 
         # Plot the histogram with marker only, but don't show in legend
         ax.scatter(
             bin_centers,
-            hist / (shift if index else 1),
+            hist / shift,
             marker=markers[index],
             facecolors="none",
             edgecolors=color,
@@ -298,8 +324,8 @@ def plotPowerLaw(dfs, fig=None, ax=None, label=""):
 
         # Plot the line only, but don't show in legend
         ax.plot(
-            bin_centers,
-            fit.truncated_power_law.pdf(bin_centers) / (shift if index else 1),
+            fit.truncated_power_law.parent_Fit.data,
+            fit.truncated_power_law.pdf() / shift,
             line_styles[index],
             label="_nolegend_",
             color=color,
@@ -454,7 +480,7 @@ def plotSlidingPowerLaw(dfs, fig=None, ax=None, label=""):
 
 
 def plotSlidingWindowPowerLaw(
-    dfs, windowRadius=0.1, fig=None, ax1=None, ax2=None, label=""
+    dfs, minEnergy=1e-5, windowRadius=0.1, fig=None, ax1=None, ax2=None, label=""
 ):
     global color_index, index, line_index
     if ax1 is None:
@@ -481,10 +507,10 @@ def plotSlidingWindowPowerLaw(
         r, c_drops = getPowerLawFit(
             dfs,
             minNrOfDeformations,
-            minEnergy=1e-5,
+            minEnergy=minEnergy,
             bootstrap=True,
             split=False,
-            strainLims=(center - windowRadius, center + windowRadius),
+            outerStrainLims=(center - windowRadius, center + windowRadius),
         )
 
         exponents.append(r["alpha"])
@@ -736,7 +762,7 @@ def removeBadData(df, Y, crash_count, csv_file_path):
     return df, crash_count
 
 
-def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
+def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=False, **kwargs):
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
     X = "Load"
@@ -808,7 +834,9 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
         a_kwargs = {
             "fig": fig,
             "ax": ax,
-            "label": kwargs["labels"][i][0].split(" seed")[0].replace("minimizer=", ""),
+            "label": kwargs["labels"][i][0]
+            .split(" seed")[0]
+            .replace("minimizer=", "")[:-1],
             "color": colors[color_index],
             "linestyle": line_styles[line_index],
             "zorder": -color_index,
@@ -834,11 +862,13 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=True, **kwargs):
 def makeLogPlotComparison(
     grouped_csv_file_paths,
     name,
-    xLims=[-np.inf, np.inf],
-    show=True,
+    show=False,
     slide=False,
     window=False,
     windowRadius=0.1,
+    minEnergy=5e-7,
+    outerStrainLims=[-np.inf, np.inf],
+    innerStrainLims=(0.45, 0.6),
     **kwargs,
 ):
     global color_index, index, line_index
@@ -847,8 +877,18 @@ def makeLogPlotComparison(
 
     X = "Load"
     Y = "Avg energy"
-    lims = "" if xLims == [-np.inf, np.inf] else f", xLims: {xLims[0]}-{xLims[1]}"
-    title = f"{name}{lims}"
+    oLims = (
+        ""
+        if outerStrainLims == [-np.inf, np.inf]
+        else f", oLims: {outerStrainLims[0]}-{outerStrainLims[1]}, "
+    )
+    iLims = (
+        ""
+        if innerStrainLims == [np.inf, -np.inf]
+        else f", iLims: {innerStrainLims[0]}-{innerStrainLims[1]}, "
+    )
+    title = f"{name}{oLims}{iLims}"
+
     if slide:
         x_name = "Energy cutoff"
         # Use LaTeX format for Greek letter alpha
@@ -858,12 +898,13 @@ def makeLogPlotComparison(
         x_name = "Strain center"
         # Use LaTeX format for Greek letter alpha
         y_name = "Exponent ($\\alpha$)"
-        title += f" - window radius = {windowRadius}"
+        title += f" - window radius={windowRadius}"
         ax2 = ax.twinx()
         # Use LaTeX format for Greek letter lambda
         ax2.set_ylabel("Cutoff ($\\lambda$)")
         name += " window"
     else:
+        title += " $\\Delta E_{\\mathrm{min}}$=" + f"{minEnergy}"
         x_name = "Magnitude of energy drops"
         y_name = "Frequency"
 
@@ -875,7 +916,7 @@ def makeLogPlotComparison(
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
             # Truncate data based on xLims
-            df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
+            df = df[(df[X] >= outerStrainLims[0]) & (df[X] <= outerStrainLims[1])]
             # Check for Y values greater than 10 and truncate
 
             df, crash_count = removeBadData(df, Y, crash_count, csv_file_path)
@@ -890,6 +931,7 @@ def makeLogPlotComparison(
         if window:
             fig, ax, ax2 = plotSlidingWindowPowerLaw(
                 dfs,
+                minEnergy=minEnergy,
                 windowRadius=windowRadius,
                 fig=fig,
                 ax1=ax,
@@ -897,7 +939,9 @@ def makeLogPlotComparison(
                 label=kwargs["labels"][i][j],
             )
         else:
-            fig, ax = plotPowerLaw(dfs, **log_kwargs)
+            fig, ax = plotPowerLaw(
+                dfs, minEnergy=minEnergy, innerStrainLims=innerStrainLims, **log_kwargs
+            )
     if crash_count > 0:
         print(f"Found {crash_count} crashes.")
     # Set the legend with the filtered handles and labels
@@ -921,7 +965,7 @@ def makeEnergyAvalancheComparison(
     grouped_csv_file_paths,
     name,
     xLims=[-np.inf, np.inf],
-    show=True,
+    show=False,
     **kwargs,
 ):
     global color_index, index, line_index

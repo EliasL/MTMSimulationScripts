@@ -37,18 +37,22 @@ def plotAll(configFile, dataPath, noVideo=False, **kwargs):
 
 
 if __name__ == "__main__":
-    import argparse
+    # import argparse
 
-    parser = argparse.ArgumentParser(description="Process some arguments.")
-    parser.add_argument("-c", "--config", required=True, help="Config file")
-    parser.add_argument("-o", "--output", default=None, help="Data path")
-    parser.add_argument("-nV", "--noVideo", action="store_true", help="Disable video")
-    parser.add_argument(
-        "-gif", "--makeGIF", action="store_true", default=False, help="Make gif"
-    )
+    # parser = argparse.ArgumentParser(description="Process some arguments.")
+    # parser.add_argument("-c", "--config", required=True, help="Config file")
+    # parser.add_argument("-o", "--output", default=None, help="Data path")
+    # parser.add_argument("-nV", "--noVideo", action="store_true", help="Disable video")
+    # parser.add_argument(
+    #     "-gif", "--makeGIF", action="store_true", default=False, help="Make gif"
+    # )
 
-    args = parser.parse_args()
+    # args = parser.parse_args()
 
-    outputPath = args.output if args.output else findOutputPath()
+    # outputPath = args.output if args.output else findOutputPath()
 
-    plotAll(args.config, outputPath, args.noVideo, makeGIF=args.makeGIF)
+    # plotAll(args.config, outputPath, args.noVideo, makeGIF=args.makeGIF)
+
+    outputPath = findOutputPath()
+    config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
+    plotAll(config, outputPath)
