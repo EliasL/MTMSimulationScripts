@@ -1,6 +1,6 @@
 from makeAnimations import makeAnimations
 from makePlots import makeEnergyPlot, makeItterationsPlot  # noqa: F401
-from makeEnergyField import makeEnergyField  # noqa: F401
+from makeEnergyField import plotEnergyField  # noqa: F401
 from settings import settings
 import sys
 import os

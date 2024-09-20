@@ -1,0 +1,5 @@
+setup.py
+MTMath.egg-info/PKG-INFO
+MTMath.egg-info/SOURCES.txt
+MTMath.egg-info/dependency_links.txt
+MTMath.egg-info/top_level.txt

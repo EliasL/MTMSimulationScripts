@@ -276,7 +276,7 @@ color_index = 0
 index = 0
 
 
-def plotPowerLaw(
+def plotSplitPowerLaw(
     dfs, fig=None, ax=None, label="", minEnergy=1e-5, innerStrainLims=(np.inf, -np.inf)
 ):
     global color_index, index, line_index
@@ -295,53 +295,7 @@ def plotPowerLaw(
     ):
         if len(drops) == 0:
             continue
-
-        # np.savetxt(f"{label}{part_label}.csv", drops, delimiter=",")
-
-        xmin, xmax = np.min(drops), np.max(drops)
-
-        # Set up bins and plot histogram
-        bins = np.logspace(np.log10(xmin), np.log10(xmax), 12)
-        hist, bin_edges = np.histogram(drops, bins=bins, density=True)
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-        # Get the current color
-        color = colors[color_index]
-
-        # Separated the pre and post lines
-        shift = [1e2, 1][index]
-
-        # Plot the histogram with marker only, but don't show in legend
-        ax.scatter(
-            bin_centers,
-            hist / shift,
-            marker=markers[index],
-            facecolors="none",
-            edgecolors=color,
-            s=100,
-            zorder=-(color_index * 2 + 1),
-        )
-
-        # Plot the line only, but don't show in legend
-        ax.plot(
-            fit.truncated_power_law.parent_Fit.data,
-            fit.truncated_power_law.pdf() / shift,
-            line_styles[index],
-            label="_nolegend_",
-            color=color,
-            zorder=-color_index * 2,
-        )
-
-        # Create a dummy plot for the legend with both marker and line style
-        ax.plot(
-            [],
-            [],
-            line_styles[index],
-            marker=markers[index],
-            label=rf"{label.split(' seed')[0].replace('minimizer=', '')} {part_label} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
-            color=color,
-        )
-        print(f"{label} {part_label}: {fit.truncated_power_law.alpha}")
+        ax = plotPowerLaw(drops, ax, fit, label, part_label)
 
     # Increment the global call count
     color_index += 1
@@ -355,6 +309,57 @@ def plotPowerLaw(
     ax.set_xscale("log")
     ax.set_yscale("log")
     return fig, ax
+
+
+def plotPowerLaw(drops, ax, fit, label, part_label):
+    # np.savetxt(f"{label}{part_label}.csv", drops, delimiter=",")
+
+    xmin, xmax = np.min(drops), np.max(drops)
+
+    # Set up bins and plot histogram
+    bins = np.logspace(np.log10(xmin), np.log10(xmax), 12)
+    hist, bin_edges = np.histogram(drops, bins=bins, density=True)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+
+    # Get the current color
+    color = colors[color_index]
+
+    # Separated the pre and post lines
+    shift = [1e2, 1][index]
+
+    # Plot the histogram with marker only, but don't show in legend
+    ax.scatter(
+        bin_centers,
+        hist / shift,
+        marker=markers[index],
+        facecolors="none",
+        edgecolors=color,
+        s=100,
+        zorder=-(color_index * 2 + 1),
+    )
+
+    # Plot the line only, but don't show in legend
+    ax.plot(
+        fit.truncated_power_law.parent_Fit.data,
+        fit.truncated_power_law.pdf() / shift,
+        line_styles[index],
+        label="_nolegend_",
+        color=color,
+        zorder=-color_index * 2,
+    )
+
+    # Create a dummy plot for the legend with both marker and line style
+    ax.plot(
+        [],
+        [],
+        line_styles[index],
+        marker=markers[index],
+        label=rf"{label.split(' seed')[0].replace('minimizer=', '')} {part_label} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
+        color=color,
+    )
+    print(f"{label} {part_label}: {fit.truncated_power_law.alpha}")
+
+    return ax
 
 
 def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
@@ -512,7 +517,8 @@ def plotSlidingWindowPowerLaw(
             split=False,
             outerStrainLims=(center - windowRadius, center + windowRadius),
         )
-
+        ax1 = plotPowerLaw(c_drops, ax1, r, label, f": {center}")
+        plt.show()
         exponents.append(r["alpha"])
         cutoffs.append(r["Lambda"])
         exponent_errors.append(r["alpha_std"])
@@ -688,7 +694,7 @@ def makePlot(
             "color": "black",
             "include_label": legend,
         }
-        fig, ax, line = plotPowerLaw(data, **kwargs)
+        fig, ax, line = plotSplitPowerLaw(data, **kwargs)
 
     cursor = mplcursors.cursor(lines)  # noqa: F841
     # cursor.connect(
@@ -939,7 +945,7 @@ def makeLogPlotComparison(
                 label=kwargs["labels"][i][j],
             )
         else:
-            fig, ax = plotPowerLaw(
+            fig, ax = plotSplitPowerLaw(
                 dfs, minEnergy=minEnergy, innerStrainLims=innerStrainLims, **log_kwargs
             )
     if crash_count > 0:

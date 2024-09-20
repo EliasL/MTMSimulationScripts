@@ -55,39 +55,20 @@ def drawFundamentalDomain(ax, scale):
     drawC(ax, C, scale)
 
 
-def makeEnergyField(csv_file):
+def plotEnergyField(energy_grid):
     print("Plotting energy field...")
-
-    if not os.path.exists(csv_file):
-        print(f"No file found at: {csv_file}")
-        return
-
-    # Reading data from CSV
-    data = np.genfromtxt(csv_file, delimiter=",")
-
-    # Replace NaN and -NaN with infinity
-    data[np.isnan(data)] = np.inf
-
-    # Extracting x, y, and energy values
-    x_vals = data[:, 0]
-    y_vals = data[:, 1]
-    energies = data[:, 2]
-
-    # Assuming equal spacing and regular grid
-    grid_size = int(np.sqrt(len(energies)))
-    energy_grid = energies.reshape((grid_size, grid_size)).transpose()
+    # Define the range for x and y based on the unit circle
+    radius = 1.0
+    x_min, x_max = -radius, radius
+    y_min, y_max = -radius, radius
+    grid_size = len(energy_grid)
 
     # Create the plot
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot()
+    max_energy = np.nanmax(energy_grid)
 
-    # Set the minimum and maximum values for the color bar
-    min_energy = energy_grid.min()  # Replace with your desired minimum value
-    max_energy = 4.16  # Replace with your desired maximum value
-
-    img = ax.imshow(
-        energy_grid, cmap="viridis", origin="lower", vmin=min_energy, vmax=max_energy
-    )
+    img = ax.imshow(energy_grid, cmap="viridis", origin="lower")
 
     # Add a thin black circle
     circleSize = grid_size / 2
@@ -103,16 +84,16 @@ def makeEnergyField(csv_file):
     fig.gca().add_patch(circle)
 
     # Draw fundamental domain
-    drawFundamentalDomain(ax, grid_size)
+    # drawFundamentalDomain(ax, grid_size)
 
     # Adjusting ticks
     ax.set_xticks(
         np.linspace(0, grid_size - 1, 5),
-        np.linspace(x_vals.min(), x_vals.max(), 5).round(2),
+        np.linspace(x_min, x_max, 5).round(2),
     )
     ax.set_yticks(
         np.linspace(0, grid_size - 1, 5),
-        np.linspace(y_vals.min(), y_vals.max(), 5).round(2),
+        np.linspace(y_min, y_max, 5).round(2),
     )
     ax.set_xlim(0, grid_size)
     ax.set_ylim(0, grid_size)
@@ -128,8 +109,7 @@ def makeEnergyField(csv_file):
     )
     ax.set_title("Energy field in a Poincaré disk")
 
-    path = os.path.dirname(csv_file)
-    output_pdf_path = os.path.join(path, "energy_field.pdf")
+    output_pdf_path = "energy_field.pdf"
     fig.savefig(
         output_pdf_path, format="pdf", dpi=600, bbox_inches="tight", pad_inches=0
     )
@@ -218,5 +198,5 @@ def make3DEnergyField(csv_file):
 
 if __name__ == "__main__":
     # Replace 'your_pvd_file.pvd' with the path to your .pvd file
-    makeEnergyField("/Users/eliaslundheim/work/PhD/MTS2D/build/energy_grid.csv")
+    plotEnergyField()
     # make3DEnergyField('/Users/eliaslundheim/work/PhD/MTS2D/build/energy_grid.csv')
