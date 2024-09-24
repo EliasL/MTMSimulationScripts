@@ -8,12 +8,12 @@ def OneDPotential():
     phi, divPhi, divDivPhi = numericContiPotential()
 
     # Define size and variables
-    distance = (-2, 2)
-    size = 100
-    shear = np.linspace(0, 1, size)
+    distance = (-1.7, 1.7)
+    size = 100 * (distance[1] - distance[0])
+    shear = np.linspace(distance[0], distance[1], int(size))
 
     # Create the deformation gradient tensor F for each value of shear
-    F = np.array([[[1, s], [0, 1]] for s in shear])
+    F = np.array([[[1, s % 1], [0, 1]] for s in shear])
 
     # Compute the right Cauchy-Green tensor C as F^T * F for each deformation gradient
     # Use matrix multiplication (@) for F.T @ F
@@ -28,14 +28,13 @@ def OneDPotential():
     # You may need to adjust these arguments to match the correct inputs for phi
     potential_values = phi(C_00, C_11, C_01, 1.0, 1.0, 1.0)
 
-    # Assuming shear and potential_values are numpy arrays
-    # Repeat shear and potential_values 4 times to extend the plot
-    extended_potential_values = np.tile(
-        potential_values, 4
-    )  # Repeat potential_values 4 times
-
+    fig, ax = plt.subplots(figsize=(3, 1))
     # Plot the extended vectors
-    plt.plot(np.linspace(0, 4, 100 * 4), extended_potential_values)
+    ax.plot(shear, potential_values)
+
+    ax.set_xlabel(r"$\gamma$", fontsize=14)
+    ax.set_ylabel(r"$\Phi$", fontsize=14)
+
     plt.show()
 
 
