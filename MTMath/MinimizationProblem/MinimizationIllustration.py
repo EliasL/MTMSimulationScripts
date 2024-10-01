@@ -6,6 +6,8 @@ import sympy as sp
 from fire import optimize_fire2
 from collections import Counter
 import os
+import matplotlib.patches as patches
+
 
 # Set larger sizes for all elements
 scale = 2
@@ -191,9 +193,49 @@ def plot(ax, path, **kwargs):
     ax.plot(path[:, 0], path[:, 1], **kwargs)
 
 
+def draw_lims_rectangle(ax, lims):
+    # lims is given as ((minx, maxx), (miny, maxy))
+    (minx, maxx), (miny, maxy) = lims
+
+    # Calculate width and height of the rectangle
+    width = maxx - minx
+    height = maxy - miny
+
+    # Create a rectangle patch
+    rect = patches.Rectangle(
+        (minx, miny),
+        width,
+        height,
+        linewidth=1,
+        edgecolor="w",
+        facecolor="none",
+        zorder=11,
+    )
+
+    # Add the rectangle to the Axes object
+    ax.add_patch(rect)
+
+
 # Plotting functions
-def plot_results(X, Y, Z, minima, results, name, loc="lower left"):
-    fig, ax = plt.subplots(1, 1, figsize=(9, 9))
+def plot_results(
+    X, Y, Z, minima, results, name, loc="lower left", lims=None, next_lims=None
+):
+    # Determine the aspect ratio from the lims
+    if lims is not None:
+        x_min, x_max = lims[0]
+        y_min, y_max = lims[1]
+        aspect_ratio = (x_max - x_min) / (y_max - y_min)  # Calculate aspect ratio
+    else:
+        aspect_ratio = 1  # Default to square if no limits are provided
+
+    # Dynamically adjust figsize based on aspect ratio
+    base_height = 11  # You can change this to your desired base height
+    fig_width = base_height * aspect_ratio  # Adjust the width based on the aspect ratio
+    figsize = (fig_width, base_height)  # Create the dynamic figsize
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    # Contour plot with limited data if zooming
     contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
 
     # Colors and styles for different methods
@@ -256,8 +298,15 @@ def plot_results(X, Y, Z, minima, results, name, loc="lower left"):
         ax.scatter(minima[:, 0], minima[:, 1], c="#228B22", marker="x", zorder=10)
 
     # Restore the original axis limits
-    ax.set_xlim(xlim)
-    ax.set_ylim(ylim)
+    if lims is None:
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+    else:
+        ax.set_xlim(lims[0])
+        ax.set_ylim(lims[1])
+    if next_lims is not None:
+        draw_lims_rectangle(ax, next_lims)
+
     # Layout and save figure
     plt.tight_layout()
     script_dir = os.path.dirname(
@@ -292,6 +341,32 @@ def summarize_end_points(results):
         )
 
     print(tabulate(table, headers="firstrow", tablefmt="grid"))
+
+
+def make_mesh(lims, f_func, resolution=100):
+    x = np.linspace(lims[0][0], lims[0][1], resolution)
+    y = np.linspace(lims[1][0], lims[1][1], resolution)
+    X, Y = np.meshgrid(x, y)
+    Z = f((X, Y), f_func)
+    return X, Y, Z
+
+
+def calculate_lims(center, aspect_ratio, zoom_factor):
+    if zoom_factor is None:
+        return None
+    x_center, y_center = center
+
+    # Calculate the width and height of the zoomed region
+    width = zoom_factor
+    height = width / aspect_ratio
+
+    # Calculate the limits based on the center point
+    x_min = x_center - width / 2
+    x_max = x_center + width / 2
+    y_min = y_center - height / 2
+    y_max = y_center + height / 2
+
+    return [[x_min, x_max], [y_min, y_max]]
 
 
 def explore_hill_with_hole():
@@ -372,29 +447,58 @@ def explore_three_hump_camel():
     x_range = np.linspace(-3, 3, 10)
     y_range = np.linspace(-3, 3, 10)
     minima = find_minima(x_range, y_range, f_func, df_func)
-    x = np.linspace(1, 2.2, 100)
-    y = np.linspace(-1.5, 0.5, 100)
-    X, Y = np.meshgrid(x, y)
-    Z = f((X, Y), f_func)
 
-    initial_points_simple = np.array([[1.25, 0.3]])
+    initial_points = np.array([[1.25, 0.3]])
 
-    for initial_points, name in zip(
-        [
-            None,
-            initial_points_simple,
-        ],
-        [
-            "three_hump_eField.pdf",
-            "three_hump_simple.pdf",
-        ],
-    ):
-        if initial_points is not None:
-            results = run_optimizations(initial_points, f_func, df_func)
-            summarize_end_points(results)
-        else:
-            results = None
-        plot_results(X, Y, Z, minima, results, name, loc="upper right")
+    results = run_optimizations(initial_points, f_func, df_func)
+    zooms = [
+        [[1, 2.2], [-1.5, 0.5]],
+        [[1.728, 1.765], [-0.9, -0.82]],
+        [[1.7465, 1.7483], [-0.875, -0.8715]],
+        [[1.74745, 1.74765], [-0.8740, -0.8736]],
+        [[1.747545, 1.747565], [-0.873790, -0.873755]],
+        None,
+    ]
+
+    # Fixed center point and aspect ratio
+    center = (1.747553, -0.873776)
+    aspect_ratio = 9 / 16  # You can change this to your desired ratio
+
+    # Define zoom levels using different zoom factors (smaller factor = closer zoom)
+    zoom_factors = [0.05, 0.002, 0.0001, 0.00001, None]
+
+    # Generate zoom limits for each zoom factor
+    zooms = [
+        calculate_lims(center, aspect_ratio, zoom_factor)
+        for zoom_factor in zoom_factors
+    ]
+    zooms = [[[1, 2.2], [-1.5, 0.5]]] + zooms
+
+    # Now `zooms` contains the zoom limits for each level
+    for i in range(len(zooms) - 1):
+        X, Y, Z = make_mesh(zooms[i], f_func)
+        if i == 0:
+            plot_results(
+                X,
+                Y,
+                Z,
+                minima,
+                None,
+                "three_hump_eField.pdf",
+                loc="upper right",
+                lims=zooms[i],
+            )
+        plot_results(
+            X,
+            Y,
+            Z,
+            minima,
+            results,
+            f"three_hump_simple_zoom{i}.pdf",
+            loc="best",
+            lims=zooms[i],
+            next_lims=zooms[i + 1],
+        )
 
 
 if __name__ == "__main__":
