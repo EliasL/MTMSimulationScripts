@@ -34,6 +34,28 @@ def define_hill_with_hole():
     return X, Y, Z
 
 
+def define_six_hump_camelback():
+    # Define symbolic variables
+    X, Y = sp.symbols("X Y")
+
+    # Define the Six-Hump Camelback function
+    Z = (4 - 2.1 * X**2 + (X**4) / 3) * X**2 + X * Y + (-4 + 4 * Y**2) * Y**2
+
+    # Return the symbolic variables and the function
+    return X, Y, Z
+
+
+def define_three_hump_camelback():
+    # Define symbolic variables
+    X, Y = sp.symbols("X Y")
+
+    # Define the Six-Hump Camelback function
+    Z = 2 * X**2 - 1.05 * X**4 + X**6 / 6 + X * Y + Y**2
+
+    # Return the symbolic variables and the function
+    return X, Y, Z
+
+
 # Gradient calculation
 def calculate_gradient(Z, X, Y):
     grad_Z = [sp.diff(Z, var) for var in (X, Y)]
@@ -123,7 +145,7 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             lambda x, params=None: df(x, df_func),
             None,
             atol=tol,
-            dt=1,
+            dt=0.2,
         )
         x_opt, f_opt, nit, path = result_fire
         FIRE_paths.append(np.array(path))
@@ -170,7 +192,7 @@ def plot(ax, path, **kwargs):
 
 
 # Plotting functions
-def plot_results(X, Y, Z, minima, results, name):
+def plot_results(X, Y, Z, minima, results, name, loc="lower left"):
     fig, ax = plt.subplots(1, 1, figsize=(9, 9))
     contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
 
@@ -218,23 +240,33 @@ def plot_results(X, Y, Z, minima, results, name):
 
     if results is not None:
         # Set the legend with sorted handles
-        leg = ax.legend(handles=sorted_handles, loc="lower left")
+        leg = ax.legend(handles=sorted_handles, loc=loc)
         # Make markers non-transparent
         for lh in leg.legend_handles:
             lh.set_alpha(1)
 
     ax.set_aspect("equal")
 
+    # Save the current axis limits before adding the scatter plot
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+
+    # Plot the scatter points
     if results is None or len(results["FIRE"]["paths"]) < 10:
         ax.scatter(minima[:, 0], minima[:, 1], c="#228B22", marker="x", zorder=10)
 
+    # Restore the original axis limits
+    ax.set_xlim(xlim)
+    ax.set_ylim(ylim)
     # Layout and save figure
     plt.tight_layout()
     script_dir = os.path.dirname(
         os.path.realpath(__file__)
     )  # This gets the directory of the script
-    plt.savefig(os.path.join(script_dir, name))
-    # plt.show()
+    path = os.path.join(script_dir, "Plots", name)
+    print(f"Saving to {path}")
+    plt.savefig(path)
+    plt.show()
 
 
 def summarize_end_points(results):
@@ -262,8 +294,7 @@ def summarize_end_points(results):
     print(tabulate(table, headers="firstrow", tablefmt="grid"))
 
 
-# Main function to organize code execution
-def main():
+def explore_hill_with_hole():
     X, Y, Z = define_hill_with_hole()
     grad_Z = calculate_gradient(Z, X, Y)
     f_func, df_func = lambdify_functions(X, Y, Z, grad_Z)
@@ -282,8 +313,16 @@ def main():
     initial_points_simple = np.array([[0, y] for y in [10]])  # , 8, 5, 2]])
 
     for initial_points, name in zip(
-        [empty, initial_points_grid, initial_points_simple],
-        ["eField.pdf", "grid.pdf", "simple.pdf"],
+        [
+            empty,
+            initial_points_simple,
+            initial_points_grid,
+        ],
+        [
+            "Hill_eField.pdf",
+            "Hill_simple.pdf",
+            "Hill_grid.pdf",
+        ],
     ):
         if initial_points is not None:
             results = run_optimizations(initial_points, f_func, df_func)
@@ -293,5 +332,72 @@ def main():
         plot_results(X, Y, Z, minima, results, name)
 
 
+def explore_six_hump_camel():
+    X, Y, Z = define_six_hump_camelback()
+    grad_Z = calculate_gradient(Z, X, Y)
+    f_func, df_func = lambdify_functions(X, Y, Z, grad_Z)
+    s = 1.2
+    x_range = np.linspace(-3, 3, 10)
+    y_range = np.linspace(-3, 3, 10)
+    minima = find_minima(x_range, y_range, f_func, df_func)
+    x = np.linspace(-0.2, s + 0.2, 100)
+    y = np.linspace(0, s, 100)
+    X, Y = np.meshgrid(x, y)
+    Z = f((X, Y), f_func)
+
+    initial_points_simple = np.array([[1.25, 0.3]])
+
+    for initial_points, name in zip(
+        [
+            None,
+            initial_points_simple,
+        ],
+        [
+            "six_hump_eField.pdf",
+            "six_hump_simple.pdf",
+        ],
+    ):
+        if initial_points is not None:
+            results = run_optimizations(initial_points, f_func, df_func)
+            summarize_end_points(results)
+        else:
+            results = None
+        plot_results(X, Y, Z, minima, results, name, loc="upper right")
+
+
+def explore_three_hump_camel():
+    X, Y, Z = define_three_hump_camelback()
+    grad_Z = calculate_gradient(Z, X, Y)
+    f_func, df_func = lambdify_functions(X, Y, Z, grad_Z)
+    x_range = np.linspace(-3, 3, 10)
+    y_range = np.linspace(-3, 3, 10)
+    minima = find_minima(x_range, y_range, f_func, df_func)
+    x = np.linspace(1, 2.2, 100)
+    y = np.linspace(-1.5, 0.5, 100)
+    X, Y = np.meshgrid(x, y)
+    Z = f((X, Y), f_func)
+
+    initial_points_simple = np.array([[1.25, 0.3]])
+
+    for initial_points, name in zip(
+        [
+            None,
+            initial_points_simple,
+        ],
+        [
+            "three_hump_eField.pdf",
+            "three_hump_simple.pdf",
+        ],
+    ):
+        if initial_points is not None:
+            results = run_optimizations(initial_points, f_func, df_func)
+            summarize_end_points(results)
+        else:
+            results = None
+        plot_results(X, Y, Z, minima, results, name, loc="upper right")
+
+
 if __name__ == "__main__":
-    main()
+    # explore_hill_with_hole()
+    # explore_six_hump_camel()
+    explore_three_hump_camel()

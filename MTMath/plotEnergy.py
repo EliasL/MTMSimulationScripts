@@ -2,6 +2,8 @@ import numpy as np
 from .contiPotential import numericContiPotential
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
+import scipy.interpolate as interpolate
+from mpl_toolkits.mplot3d import Axes3D
 
 
 def OneDPotential():
@@ -217,6 +219,90 @@ def plotEnergyField(energy_grid):
     )
 
 
+def add_arrow_3d(xdata, ydata, zdata, ax, start_ind, end_ind, size=15, color="red"):
+    """
+    NOT WORKING. It removes other lines for some reason. Very annoying.
+    Add an arrow to a 3D line by specifying start and end indices along the data points.
+
+    xdata, ydata, zdata: Coordinates of the 3D line.
+    ax: The 3D axes object.
+    start_ind: Starting index for the arrow.
+    end_ind: Ending index for the arrow.
+    size: Size of the arrow in fontsize points.
+    color: Color of the arrow.
+    """
+    # Annotate with an arrow
+    ax.quiver(
+        xdata[start_ind],
+        ydata[start_ind],
+        zdata[start_ind],  # Starting point
+        xdata[end_ind] - xdata[start_ind],  # Arrow vector in x direction
+        ydata[end_ind] - ydata[start_ind],  # Arrow vector in y direction
+        zdata[end_ind] - zdata[start_ind],  # Arrow vector in z direction
+        arrow_length_ratio=0.3,  # Control the size of the arrow head
+        color=color,
+        linewidth=1.5,
+    )
+
+
+def plot_arch(
+    energy_grid,
+    X,
+    Y,
+    ax,
+    radius=0.5,
+    start_angle=np.pi,
+    end_angle=0,
+    center_x=0,
+    center_y=0,
+    num_points=200,
+    arrow_interval=10,
+    label="path",
+):
+    """
+    Generates x, y coordinates and interpolates z values for a semi-circle.
+
+    Parameters:
+    - center_x, center_y: center of the circle
+    - radius: radius of the circle
+    - start_angle, end_angle: range of angles (in radians) for the arch
+    - num_points: number of points along the arch
+
+    Returns:
+    - x_circle, y_circle: coordinates of the arch
+    - z_circle: interpolated z values along the arch
+    """
+    theta = np.linspace(start_angle, end_angle, num_points)  # Parametrize the angles
+    x_circle = center_x + radius * np.cos(theta)  # X coordinates of the arch
+    y_circle = center_y + radius * np.sin(theta)  # Y coordinates of the arch
+
+    # Interpolate z values along the arch
+    X_mesh, Y_mesh = np.meshgrid(X[0], Y[:, 0])
+    X_flat = X_mesh.flatten()
+    Y_flat = Y_mesh.flatten()
+    energy_flat = energy_grid.flatten()
+
+    z_circle = interpolate.griddata(
+        (X_flat, Y_flat),
+        energy_flat,
+        (x_circle, y_circle),
+        method="linear",  # Linear interpolation
+    )
+    # Plot the line along the arch
+    ax.plot(
+        x_circle,
+        y_circle,
+        z_circle,
+        color="black",
+        linewidth=1,
+        label=label,
+        zorder=10,
+    )
+    # Add arrows along the arch at specified intervals
+    # for i in range(arrow_interval, len(x_circle), arrow_interval):
+    # add_arrow_3d(x_circle, y_circle, z_circle, ax, i - 1, i, size=15, color="red")
+
+
 def make3DEnergyField(energy_grid, X, Y, energy_lim=None, zScale=0.3, zoom=0):
     print("Plotting energy field...")
 
@@ -244,20 +330,22 @@ def make3DEnergyField(energy_grid, X, Y, energy_lim=None, zScale=0.3, zoom=0):
     # Create the second mask to exclude the small portion
     mask2 = radii2 < 1
 
-    # Remove max values
-    mask3 = energy_grid == np.nanmax(energy_grid)
-
+    # Remove large max plates
+    d = 0.6
+    r = 0.35
+    radii3 = np.sqrt((X - d) ** 2 + (Y) ** 2)
+    radii4 = np.sqrt((X + d) ** 2 + (Y) ** 2)
+    mask3 = (radii3 < r) | (radii4 < r)
     # Combine the two masks using element-wise logical AND
     mask = mask1 | mask2 | mask3
 
     # Apply the mask to the energy grid to set values outside the unit circle to NaN
-    energy_grid_masked = np.copy(energy_grid)
-    energy_grid_masked[mask] = np.nan
+    energy_grid[mask] = np.nan
     # Plot the surface with the masked energy grid
     surf = ax.plot_surface(
         X,
         Y,
-        energy_grid_masked,
+        energy_grid,
         cmap="coolwarm",
         linewidth=0,
         antialiased=False,
@@ -266,18 +354,21 @@ def make3DEnergyField(energy_grid, X, Y, energy_lim=None, zScale=0.3, zoom=0):
         vmin=energy_lim[0],
         vmax=energy_lim[1],
     )
-
+    # plot semi-circles
+    plot_arch(energy_grid, X, Y, ax, start_angle=-1.3, end_angle=0.9, center_x=-0.5)
+    # plot_arch(energy_grid, X, Y, ax, start_angle=3.8, end_angle=2, center_x=0.5)
     # Add a color bar
     cbar = fig.colorbar(surf)
-    cbar.set_label("Energy")
+    zLabel = r"Energy density ($\Phi$)"
+    cbar.set_label(zLabel)
 
     default_font_size = plt.rcParams["font.size"]  # Fetch default font size
     cbar.ax.set_title(f"Capped at ${energy_lim[1]}$", fontsize=default_font_size)
     # Set labels for the axes
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Energy")
-    ax.set_title("Energy Surface Plot")
+    ax.set_xlabel(r"$x_p$")
+    ax.set_ylabel(r"$y_p$")
+    ax.set_zlabel(zLabel)
+    # ax.set_title("Energy Surface Plot")
 
     # Set x and y limits based on the valid data (non-NaN values in the energy grid)
     valid_x_min = np.nanmin(X[~mask])
@@ -297,6 +388,5 @@ def make3DEnergyField(energy_grid, X, Y, energy_lim=None, zScale=0.3, zoom=0):
     )
     ax.view_init(elev=30, azim=70)  # Set the view angle (elevation and azimuth)
 
-    plt.savefig("3Denergy.pdf")
-    # Show the plot
-    plt.show()
+    plt.savefig("Plots/3DEnergy.png", dpi=500)
+    # plt.show()
