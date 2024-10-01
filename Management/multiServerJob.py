@@ -49,6 +49,8 @@ def generateCommands(configs, threads_per_seed=1):
                 commands[server].append(confToCommand(config))
                 configSolved = True
                 break
+            else:
+                print(f"{config.name} not found.")
         if not configSolved:
             remaining_configs.append(config)
 
@@ -209,8 +211,7 @@ def CGconfs(nrThreads, nrSeeds):
     return configs, labels
 
 
-def bigJob(nrThreads, nrSeeds, group_by_seeds=False):
-    size = 200
+def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
         group_by_seeds=group_by_seeds,
@@ -246,6 +247,18 @@ def propperJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         scenario="simpleShear",
     )
     return configs, labels
+
+
+def propperJob1():
+    return propperJob(3, 40, 60)
+
+
+def propperJob2():
+    return propperJob(3, 40, 100)
+
+
+def propperJob3():
+    return propperJob(8, 20, 200)
 
 
 def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):

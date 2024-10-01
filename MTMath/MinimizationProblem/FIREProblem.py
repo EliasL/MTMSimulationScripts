@@ -173,8 +173,6 @@ def plot(ax, path, **kwargs):
 def plot_results(X, Y, Z, minima, results, name):
     fig, ax = plt.subplots(1, 1, figsize=(9, 9))
     contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
-    if len(results["FIRE"]["paths"]) < 10:
-        ax.scatter(minima[:, 0], minima[:, 1], c="red", marker="x")
 
     # Colors and styles for different methods
     colors = {"FIRE": "blue", "LBFGS": "red", "CG": "orange"}
@@ -182,7 +180,7 @@ def plot_results(X, Y, Z, minima, results, name):
     styles = {"FIRE": "-", "LBFGS": "--", "CG": "-."}
 
     # Plot the paths for each optimization method
-    for method, data in results.items():
+    for method, data in results.items() if results else []:
         paths = data["paths"]
         for path in paths:
             if len(paths) < 10:
@@ -217,12 +215,18 @@ def plot_results(X, Y, Z, minima, results, name):
 
     # Reorder handles using the predefined order
     sorted_handles = [by_label[label] for label in order if label in by_label]
-    # Set the legend with sorted handles
-    leg = ax.legend(handles=sorted_handles, loc="lower left")
-    # Make markers non-transparent
-    for lh in leg.legendHandles:
-        lh.set_alpha(1)
+
+    if results is not None:
+        # Set the legend with sorted handles
+        leg = ax.legend(handles=sorted_handles, loc="lower left")
+        # Make markers non-transparent
+        for lh in leg.legend_handles:
+            lh.set_alpha(1)
+
     ax.set_aspect("equal")
+
+    if results is None or len(results["FIRE"]["paths"]) < 10:
+        ax.scatter(minima[:, 0], minima[:, 1], c="#228B22", marker="x", zorder=10)
 
     # Layout and save figure
     plt.tight_layout()
@@ -273,14 +277,19 @@ def main():
     Z = f((X, Y), f_func)
 
     # Flatten the mesh grid arrays and pair them into starting points
+    empty = None
     initial_points_grid = np.column_stack((init_X.ravel(), init_Y.ravel()))
     initial_points_simple = np.array([[0, y] for y in [10]])  # , 8, 5, 2]])
 
     for initial_points, name in zip(
-        [initial_points_grid, initial_points_simple], ["grid.pdf", "simple.pdf"]
+        [empty, initial_points_grid, initial_points_simple],
+        ["eField.pdf", "grid.pdf", "simple.pdf"],
     ):
-        results = run_optimizations(initial_points, f_func, df_func)
-        summarize_end_points(results)
+        if initial_points is not None:
+            results = run_optimizations(initial_points, f_func, df_func)
+            summarize_end_points(results)
+        else:
+            results = None
         plot_results(X, Y, Z, minima, results, name)
 
 

@@ -1,0 +1,13 @@
+./Management
+./MTMath
+./Plotting
+
+numpy
+pandas
+scipy
+matplotlib
+sympy
+tqdm
+paramiko
+tabulate
+fabric

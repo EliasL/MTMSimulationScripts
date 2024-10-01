@@ -51,11 +51,18 @@ def run_script():
     # Get the current directory
     current_dir = Path(__file__).resolve().parent
 
+    # Path to the virtual environment Python
+    venv_python_path = current_dir / "venv" / "bin" / "python"
+
     # Read the AppleScript file
     with open(script_path, "r") as file:
         applescript = file.read()
 
+    # Replace placeholders in the AppleScript
     applescript = applescript.replace("PATH", str(current_dir))
+    applescript = applescript.replace(
+        "python", str(venv_python_path)
+    )  # Replace python command with venv Python
 
     # Write the modified AppleScript to a temporary file
     temp_script_path = current_dir / "temp_startMonitoring.scpt"
@@ -72,8 +79,6 @@ def run_script():
     # Check if there was an error
     if process.returncode != 0:
         print(f"Error executing script: {stderr}")
-    else:
-        print("Script executed successfully")
 
     # Clean up the temporary file
     temp_script_path.unlink()

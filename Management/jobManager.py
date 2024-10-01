@@ -159,6 +159,12 @@ class Process:
                     last_line = lines[-2]
 
                 last_line_values = last_line.split(",")
+
+                # I decided to remove the line number, that might give a miss match
+                if len(last_line_values) == len(headers) - 1:
+                    for header in header_indices:
+                        header_indices[header] -= 1
+
                 # load = last_line_values[header_indices["Load"]]
                 runTime = last_line_values[header_indices["Run time"]]
                 timeRemaining = last_line_values[header_indices["Est time remaining"]]

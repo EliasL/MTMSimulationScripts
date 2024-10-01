@@ -448,17 +448,14 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
     return fig, axs
 
 
-def extract_between_equals_and_comma(input_string):
-    # Find the position of the '=' character
-    start = input_string.find("=") + 1  # Add 1 to skip the '=' itself
-    # Find the position of the ',' character after '='
-    end = input_string.find(",", start)
-
-    # Return the substring between '=' and ','
-    if start > 0 and end > start:
-        return input_string[start:end]
+def getPrettyLabel(string):
+    if "minimizer=" in string:
+        return string.split("minimizer=")[1].split(",")[0]
+    if "," not in string:
+        return string
     else:
-        return None  # Return None if no match is found
+        # TODO Could be wrong!
+        return "LBFGS"
 
 
 # Example usage can be added as necessary with DataFrames having 'Nr plastic deformations' and 'Avg energy'
@@ -479,7 +476,7 @@ def plotSlidingPowerLaw(dfs, fig=None, ax=None, label=""):
         exponents.append(c_fits[1].truncated_power_law.alpha)
     exponents = np.array(exponents)
 
-    ax.plot(minEnergies, exponents, label=extract_between_equals_and_comma(label))
+    ax.plot(minEnergies, exponents, label=getPrettyLabel(label))
     ax.set_xscale("log")
     return fig, ax
 
@@ -517,8 +514,9 @@ def plotSlidingWindowPowerLaw(
             split=False,
             outerStrainLims=(center - windowRadius, center + windowRadius),
         )
-        ax1 = plotPowerLaw(c_drops, ax1, r, label, f": {center}")
-        plt.show()
+        # TODO Check individual plots
+        # ax1 = plotPowerLaw(c_drops, ax1, r, label, f": {center}")
+        # plt.show()
         exponents.append(r["alpha"])
         cutoffs.append(r["Lambda"])
         exponent_errors.append(r["alpha_std"])
@@ -535,7 +533,7 @@ def plotSlidingWindowPowerLaw(
         strainWindowCenter,
         exponents,
         yerr=exponent_errors,
-        label="$\\alpha$ " + extract_between_equals_and_comma(label),
+        label="$\\alpha$ " + getPrettyLabel(label),
         fmt="-o",  # Line with circle markers
         capsize=3,  # Error bar cap size
     )
@@ -545,7 +543,7 @@ def plotSlidingWindowPowerLaw(
         strainWindowCenter,
         cutoffs,
         yerr=cutoff_errors,
-        label="$\\lambda$ " + extract_between_equals_and_comma(label),
+        label="$\\lambda$ " + getPrettyLabel(label),
         fmt="--^",  # Line with square markers
         capsize=3,  # Error bar cap size
     )
@@ -584,7 +582,7 @@ def makePlot(
         return
     if x_name is None:
         if X == "Load":
-            x_name = r"$\alpha$"
+            x_name = r"strain ($\gamma$)"
         else:
             x_name = X
 
@@ -773,7 +771,7 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=False, **kwargs)
     color_index, index, line_index = 0, 0, 0
     X = "Load"
     Y = "Avg energy"
-    x_name = "Load"
+    x_name = "Strain ($\gamma$)"
     y_name = "Avg energy"
     title = f"{name}"
 
@@ -840,9 +838,7 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=False, **kwargs)
         a_kwargs = {
             "fig": fig,
             "ax": ax,
-            "label": kwargs["labels"][i][0]
-            .split(" seed")[0]
-            .replace("minimizer=", "")[:-1],
+            "label": getPrettyLabel(kwargs["labels"][i][0]),
             "color": colors[color_index],
             "linestyle": line_styles[line_index],
             "zorder": -color_index,
@@ -872,7 +868,7 @@ def makeLogPlotComparison(
     slide=False,
     window=False,
     windowRadius=0.1,
-    minEnergy=5e-7,
+    minEnergy=1e-6,
     outerStrainLims=[-np.inf, np.inf],
     innerStrainLims=(0.45, 0.6),
     **kwargs,
@@ -886,14 +882,14 @@ def makeLogPlotComparison(
     oLims = (
         ""
         if outerStrainLims == [-np.inf, np.inf]
-        else f", oLims: {outerStrainLims[0]}-{outerStrainLims[1]}, "
+        else f" oLims: {outerStrainLims[0]}-{outerStrainLims[1]}, "
     )
     iLims = (
         ""
         if innerStrainLims == [np.inf, -np.inf]
-        else f", iLims: {innerStrainLims[0]}-{innerStrainLims[1]}, "
+        else f" iLims: {innerStrainLims[0]}-{innerStrainLims[1]}, "
     )
-    title = f"{name}{oLims}{iLims}"
+    title = f"{name}{oLims}, "
 
     if slide:
         x_name = "Energy cutoff"
@@ -904,16 +900,17 @@ def makeLogPlotComparison(
         x_name = "Strain center"
         # Use LaTeX format for Greek letter alpha
         y_name = "Exponent ($\\alpha$)"
-        title += f" - window radius={windowRadius}"
+        title += f" wr={windowRadius},"
         ax2 = ax.twinx()
         # Use LaTeX format for Greek letter lambda
         ax2.set_ylabel("Cutoff ($\\lambda$)")
         name += " window"
     else:
-        title += " $\\Delta E_{\\mathrm{min}}$=" + f"{minEnergy}"
+        title += f" {iLims},"
         x_name = "Magnitude of energy drops"
         y_name = "Frequency"
 
+    title += " $\\Delta E_{\\mathrm{min}}$=" + f"{minEnergy}"
     crash_count = 0
     # For each configuration
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
@@ -930,7 +927,7 @@ def makeLogPlotComparison(
         log_kwargs = {
             "fig": fig,
             "ax": ax,
-            "label": kwargs["labels"][i][j],
+            "label": getPrettyLabel(kwargs["labels"][i][j]),
         }
         if slide:
             fig, ax = plotSlidingPowerLaw(dfs, **log_kwargs)
@@ -942,7 +939,7 @@ def makeLogPlotComparison(
                 fig=fig,
                 ax1=ax,
                 ax2=ax2,
-                label=kwargs["labels"][i][j],
+                label=getPrettyLabel(kwargs["labels"][i][j]),
             )
         else:
             fig, ax = plotSplitPowerLaw(
@@ -952,10 +949,14 @@ def makeLogPlotComparison(
         print(f"Found {crash_count} crashes.")
     # Set the legend with the filtered handles and labels
     if window:
-        ax.legend(loc=("center left"))
+        ax.legend(loc=("lower left"))
         ax2.legend(loc=("center right"))
     else:
         ax.legend(loc=("best"))
+
+    if window and False:  # Hide second axis (with lambda)
+        hide_twinx_axis(ax2)
+
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
     ax.set_title(title)
@@ -965,6 +966,23 @@ def makeLogPlotComparison(
     print(f'Plot saved at: "{figPath}"')
     if show:
         plt.show()
+
+
+# Function to hide twinx axis
+def hide_twinx_axis(ax_twin):
+    # Set visibility of the twin axis to False
+    ax_twin.set_visible(False)
+
+    # Hide the ticks and labels
+    ax_twin.tick_params(axis="both", which="both", length=0)  # Hide tick marks
+    ax_twin.set_yticklabels([])  # Hide tick labels
+
+    # Hide the twin axis' spines (the lines surrounding the axis)
+    ax_twin.spines["right"].set_visible(False)
+
+    # Remove any plot lines or elements associated with the twinx axis
+    for line in ax_twin.get_lines():
+        line.set_visible(False)
 
 
 def makeEnergyAvalancheComparison(

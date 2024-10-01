@@ -116,7 +116,15 @@ def add_padding(axis_limits, padding_ratio):
 
 
 def base_plot(args):
-    framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
+    (
+        framePath,
+        vtu_file,
+        frame_index,
+        global_min,
+        global_max,
+        axis_limits,
+        transparent,
+    ) = args
 
     dpi = 250
     width = 2000
@@ -155,8 +163,28 @@ def draw_rhombus(ax, N, load, BC):
         ax.plot(rhombus_x, rhombus_y, "k--")
 
 
-def save_and_close_plot(fig, ax, path):
-    plt.savefig(path, bbox_inches="tight", pad_inches=0)
+# Function to save the figure with transparent background and close it
+def save_and_close_plot(fig, ax, path, transparent=False):
+    # Set anti-aliasing for lines, text, patches, etc.
+    for line in ax.get_lines():
+        line.set_antialiased(True)  # Anti-alias lines
+
+    for text in ax.texts:
+        text.set_fontproperties(
+            text.get_fontproperties()
+        )  # Ensure text rendering uses proper anti-aliasing
+
+    # You can also anti-alias patches or other graphical elements
+    for patch in ax.patches:
+        patch.set_antialiased(True)  # Anti-alias shapes like rectangles, circles
+
+    # Save the plot with transparent background
+    dpi = 300
+    plt.savefig(
+        path, bbox_inches="tight", pad_inches=0, transparent=transparent, dpi=dpi
+    )
+
+    # Close the figure to free memory
     plt.close(fig)
     plt.close()
 
@@ -169,7 +197,15 @@ def calculate_valid_indices(n, m):
 
 
 def plot_nodes(args):
-    framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
+    (
+        framePath,
+        vtu_file,
+        frame_index,
+        global_min,
+        global_max,
+        axis_limits,
+        transparent,
+    ) = args
     ax, fig = base_plot(args)
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
@@ -227,12 +263,20 @@ def plot_nodes(args):
 
     draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
     path = f"{framePath}/node_frame_{frame_index:04d}.png"
-    save_and_close_plot(fig, ax, path)
+    save_and_close_plot(fig, ax, path, transparent)
     return path
 
 
 def plot_mesh(args):
-    framePath, vtu_file, frame_index, global_min, global_max, axis_limits = args
+    (
+        framePath,
+        vtu_file,
+        frame_index,
+        global_min,
+        global_max,
+        axis_limits,
+        transparent,
+    ) = args
     ax, fig = base_plot(args)
 
     cmap_colors = [
@@ -267,7 +311,7 @@ def plot_mesh(args):
 
     draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
     path = f"{framePath}/mesh_frame_{frame_index:04d}.png"
-    save_and_close_plot(fig, ax, path)
+    save_and_close_plot(fig, ax, path, transparent)
     return path
 
 
@@ -291,7 +335,9 @@ def process_frame(args):
     return retry_frame_function(frameFunction, other_args)
 
 
-def make_images(frameFunction, framePath, vtu_files, macro_data, num_processes=10):
+def make_images(
+    frameFunction, framePath, vtu_files, macro_data, transparent=False, num_processes=10
+):
     # Assuming vtu_files is defined, calculate global axis limits
     axis_limits = get_axis_limits(macro_data)
     # global_min, global_max = precalculate_global_stress range(vtu_files)
@@ -305,6 +351,7 @@ def make_images(frameFunction, framePath, vtu_files, macro_data, num_processes=1
             global_min,
             global_max,
             axis_limits,
+            transparent,
         )
         for frame_index, vtu_file in enumerate(vtu_files)
     ]

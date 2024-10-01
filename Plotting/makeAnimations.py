@@ -63,7 +63,9 @@ def framesToGif(frames, outFile, fps):
 
 
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
-def makeAnimations(path, macro_data=None, pvd_file=None, makeGIF=False):
+def makeAnimations(
+    path, macro_data=None, pvd_file=None, makeGIF=False, transparent=False
+):
     framePath = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macro_data is None:
         macro_data = os.path.join(path, settings["MACRODATANAME"] + ".csv")
@@ -100,13 +102,15 @@ def makeAnimations(path, macro_data=None, pvd_file=None, makeGIF=False):
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in zip([plot_mesh, plot_nodes], ["mesh", "nodes"]):
-        images = make_images(function, framePath, vtu_files, macro_data)
+        images = make_images(function, framePath, vtu_files, macro_data, transparent)
 
         outPath = os.path.join(path, f"{fileName}_video.mp4")
         framesToMp4(images, outPath, fps)
         if makeGIF:
             GIFCommand = [
-                "gifski",
+                "/opt/homebrew/bin/gifski",
+                "--quality",
+                "100",  # Set to maximum quality
                 "-o",
                 os.path.join(path, f"{fileName}_video.gif"),
             ] + images  # Append the list of image paths to the command

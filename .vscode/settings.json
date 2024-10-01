@@ -1,6 +1,3 @@
 {
-  "python.analysis.extraPaths": [
-    "./Plotting",
-    "./Management"
-  ]
+    "python.pythonPath": "/Users/eliaslundheim/work/PhD/SimulationScripts/venv/bin/python3"
 }

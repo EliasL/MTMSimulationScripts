@@ -13,6 +13,9 @@ from Management.multiServerJob import (
     confToCommand,
     basicJob,
     propperJob,
+    propperJob1,
+    propperJob2,
+    propperJob3,
     generateCommands,
     JobManager,
     get_server_short_name,
@@ -109,14 +112,14 @@ def startJobs():
     # j.findAndShowSlurmJobs()
     # j.cancelAllJobs(force=True)
 
-    nrThreads = 8
-    nrSeeds = 20
-    size = 200
+    nrThreads = 3
+    nrSeeds = 40
     print("Building on all servers... ")
+
     build_on_all_servers()
-    for job in [propperJob]:
-        configs, labels = job(nrThreads, nrSeeds, size)
-        servers_commands = generateCommands(configs, nrThreads)
+    for job in [propperJob1, propperJob2, propperJob3]:
+        configs, labels = job()
+        servers_commands = generateCommands(configs, configs[0].nrThreads)
         print("Starting jobs...")
         pre_command = (
             "python3 ~/simulation/SimulationScripts/Management/queueLocalJobs.py"
@@ -130,7 +133,7 @@ def startJobs():
                     {
                         '"commands"': str(commands).replace('"', "\u203d"),
                         '"job_name"': '"ej"',
-                        '"nrThreads"': nrThreads,
+                        '"nrThreads"': configs[0].nrThreads,
                     }
                 )
             )
@@ -165,7 +168,7 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-# startJobs()
+startJobs()
 # plotBigJob()
-plotPropperJob()
+# plotPropperJob()
 # threadTest()

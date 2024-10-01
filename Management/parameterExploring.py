@@ -83,13 +83,13 @@ def plotLog(config_groups, name, labels, **kwargs):
     )
 
     paths, labels = get_csv_files(
-        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=True
     )
     kwargs["labels"] = labels
     print("Plotting...")
-    # makeEnergyPlotComparison(paths, f"{name} - Energy", **kwargs)
-    # makeLogPlotComparison(paths, f"{name} - PowerLaw", window=False, **kwargs)
-    makeLogPlotComparison(paths, f"{name} - PowerLaw", window=True, **kwargs)
+    makeEnergyPlotComparison(paths, f"{name} - Energy", **kwargs)
+    makeLogPlotComparison(paths, f"{name} - PowerLaw", window=False, **kwargs)
+    # makeLogPlotComparison(paths, f"{name} - PowerLaw", window=True, **kwargs)
     # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", **kwargs)
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
 
