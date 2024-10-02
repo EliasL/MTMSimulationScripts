@@ -455,7 +455,7 @@ def getPrettyLabel(string):
         return string
     else:
         # TODO Could be wrong!
-        return "LBFGS"
+        return "L-BFGS"
 
 
 # Example usage can be added as necessary with DataFrames having 'Nr plastic deformations' and 'Avg energy'
@@ -1025,7 +1025,7 @@ def makeEnergyAvalancheComparison(
         # ax.legend(loc=("best"))
         # ax.set_xlabel(x_name)
         # ax.set_ylabel(y_name)
-        title = f"{name}{lims}" + f'-{["LBFGS", "CG", "FIRE"][i]}'
+        title = f"{name}{lims}" + f'-{["L-BFGS", "CG", "FIRE"][i]}'
         fig.suptitle(title, fontsize=16)  # Set the main
         plt.tight_layout()  # Adjust subplots to fit into figure area.
         figPath = os.path.join(

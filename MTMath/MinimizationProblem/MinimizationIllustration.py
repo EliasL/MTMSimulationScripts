@@ -7,7 +7,7 @@ from fire import optimize_fire2
 from collections import Counter
 import os
 import matplotlib.patches as patches
-
+import matplotlib.colors as mcolors
 
 # Set larger sizes for all elements
 scale = 2
@@ -51,7 +51,7 @@ def define_three_hump_camelback():
     # Define symbolic variables
     X, Y = sp.symbols("X Y")
 
-    # Define the Six-Hump Camelback function
+    # Define the three-Hump Camelback function
     Z = 2 * X**2 - 1.05 * X**4 + X**6 / 6 + X * Y + Y**2
 
     # Return the symbolic variables and the function
@@ -91,6 +91,7 @@ def find_minima(x_range, y_range, f_func, df_func):
                 [x, y],
                 jac=lambda x: df(x, df_func),
                 method="BFGS",
+                tol=1e-8,
             )
             if result.success and is_new_minimum(result.x, minima):
                 minima.append(result.x)
@@ -105,59 +106,112 @@ def is_new_minimum(point, minima, tol=1e-2):
     )
 
 
-# Optimization callbacks and paths
+def add_solutions(results, f_func, df_func, tol=1e-17):
+    for method, data in results.items():
+        results[method]["min_energy"] = [0] * len(data["paths"])
+        results[method]["min_pos"] = [[0, 0]] * len(data["paths"])
+        for i, path in enumerate(data["paths"]):
+            result = minimize(
+                lambda x: f(x, f_func),
+                path[-1],
+                jac=lambda x: df(x, df_func),
+                method="BFGS",
+                tol=1e-8,
+            )
+            results[method]["min_pos"][i] = result.x
+            results[method]["min_energy"][i] = f(result.x, f_func)
+
+
 def run_optimizations(x0s, f_func, df_func, tol=1e-5):
-    FIRE_paths, LBFGS_paths, CG_paths = [], [], []
-    Fire_nit, LBFGS_nit, CG_nit = [], [], []
-    LBFGS_nfev, CG_nfev = [], []
+    # Prepare data structures to store results
+    # Define the optimization methods
+    methods = ["FIRE", "CG", "L-BFGS"]
+
+    # Initialize the results dictionary with the same structure for each method
+    results = {
+        method: {
+            "paths": [],
+            "feval_paths": [],
+            "nit": [],
+            "nfev": [],
+            "path_energy": [],
+            "f-eval_energy": [],
+            "min_energy": [],
+            "min_pos": [],
+        }
+        for method in methods
+    }
+
+    # Define the settings for the optimization algorithms
+    optimizers = {
+        "CG": {
+            "method": "CG",
+            "options": {"gtol": tol},
+        },
+        "L-BFGS": {
+            "method": "L-BFGS-B",
+            "options": {"gtol": tol},
+        },
+    }
 
     for x0 in x0s:
-        # Conjugate Gradient algorithm
-        CG_path = []
-        result_cg = minimize(
-            lambda x: f(x, f_func),
-            x0,
-            method="CG",
-            jac=df_func,
-            tol=tol,
-            callback=lambda xk: CG_path.append(xk.copy()),
-        )
-        CG_paths.append(np.array([x0] + CG_path))
-        CG_nit.append(result_cg.nit)
-        CG_nfev.append(result_cg.nfev)
+        # Loop over the optimizers that share similar structure
+        for opt_name, opt_settings in optimizers.items():
+            f_eval_points = []  # Track function evaluations
+            path_energies = []  # Track energy at each point
+            fEval_energies = []  # Track energy at each point
 
-        # LBFGS algorithm
-        LBFGS_path = []
-        result_lbfgs = minimize(
-            lambda x: f(x, f_func),
-            x0,
-            method="L-BFGS-B",
-            jac=df_func,
-            tol=tol,
-            callback=lambda xk: LBFGS_path.append(xk.copy()),
-        )
-        LBFGS_paths.append(np.array([x0] + LBFGS_path))
-        LBFGS_nit.append(result_lbfgs.nit)
-        LBFGS_nfev.append(result_lbfgs.nfev)
+            # Wrapper for the objective function to track function evaluations
+            def f_wrapper(x, func=f_func):
+                f_eval_points.append(x.copy())
+                (fEval_energies.append(func(x[0], x[1])),)  # Calculate and store energy
+                return func(x[0], x[1])
 
-        # FIRE algorithm
+            path = []  # Track optimization path
+
+            # Perform the optimization using minimize
+            result = minimize(
+                lambda x: f_wrapper(x),
+                x0,
+                method=opt_settings["method"],
+                jac=lambda x: df(x, df_func),
+                options=opt_settings["options"],
+                callback=lambda xk: (
+                    path.append(xk.copy()),  # Track the path
+                    path_energies.append(
+                        f_func(xk[0], xk[1])
+                    ),  # Calculate and store energy
+                ),
+            )
+
+            # Store results for this optimizer
+            results[opt_name]["paths"].append(np.array([x0] + path))
+            results[opt_name]["feval_paths"].append(np.array([x0] + f_eval_points))
+            results[opt_name]["nit"].append(result.nit)
+            results[opt_name]["nfev"].append(result.nfev)
+            results[opt_name]["path_energy"].append(np.array(path_energies))
+            results[opt_name]["f-eval_energy"].append(np.array(fEval_energies))
+
+        # FIRE optimization requires separate handling
         result_fire = optimize_fire2(
             x0,
             lambda x, params=None: f(x, f_func),
             lambda x, params=None: df(x, df_func),
             None,
             atol=tol,
-            dt=0.2,
+            dt=0.3,
         )
         x_opt, f_opt, nit, path = result_fire
-        FIRE_paths.append(np.array(path))
-        Fire_nit.append(nit)
+        energies_fire = [f_func(p[0], p[1]) for p in path]
 
-    return {
-        "FIRE": {"paths": FIRE_paths, "nit": Fire_nit, "nfev": Fire_nit},
-        "CG": {"paths": CG_paths, "nit": CG_nit, "nfev": CG_nfev},
-        "LBFGS": {"paths": LBFGS_paths, "nit": LBFGS_nit, "nfev": LBFGS_nfev},
-    }
+        results["FIRE"]["paths"].append(np.array(path))
+        results["FIRE"]["feval_paths"].append(np.array(path))
+        results["FIRE"]["nit"].append(nit)
+        results["FIRE"]["nfev"].append(nit)
+        results["FIRE"]["path_energy"].append(np.array(energies_fire))
+        results["FIRE"]["f-eval_energy"].append(np.array(energies_fire))
+    add_solutions(results, f_func, df_func)
+    return results
 
 
 unique_labels = set()
@@ -216,9 +270,52 @@ def draw_lims_rectangle(ax, lims):
     ax.add_patch(rect)
 
 
+# Function to mute a color (reduce saturation)
+def mute_color(color, factor=0.5):
+    """
+    Takes a color and returns a muted version of it by reducing its saturation.
+
+    Parameters:
+    color: str or tuple
+        The input color in any format recognizable by matplotlib (e.g., 'red', '#ff0000', (1, 0, 0)).
+    factor: float
+        A number between 0 and 1, where lower values reduce the saturation more.
+
+    Returns:
+    muted_color: tuple
+        A muted version of the color.
+    """
+    # Convert color to RGB and then to HSV
+    rgb = mcolors.to_rgb(color)
+    hsv = mcolors.rgb_to_hsv(rgb)
+
+    # Reduce the saturation (second value in HSV)
+    hsv[1] *= factor
+
+    # Convert back to RGB
+    muted_rgb = mcolors.hsv_to_rgb(hsv)
+    return muted_rgb
+
+
+# Colors and styles for different method
+colors = {"FIRE": "#d24646", "L-BFGS": "#008743", "CG": "#ffa701"}
+muted_colors = {key: mute_color(color, factor=0.3) for key, color in colors.items()}
+markers = {"FIRE": "x", "L-BFGS": "+", "CG": "o"}
+styles = {"FIRE": "-", "L-BFGS": "-", "CG": "-"}
+
+
 # Plotting functions
 def plot_results(
-    X, Y, Z, minima, results, name, loc="lower left", lims=None, next_lims=None
+    X,
+    Y,
+    Z,
+    minima,
+    results,
+    name,
+    loc="lower left",
+    lims=None,
+    next_lims=None,
+    alg="all",
 ):
     # Determine the aspect ratio from the lims
     if lims is not None:
@@ -238,13 +335,10 @@ def plot_results(
     # Contour plot with limited data if zooming
     contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
 
-    # Colors and styles for different methods
-    colors = {"FIRE": "blue", "LBFGS": "red", "CG": "orange"}
-    markers = {"FIRE": "x", "LBFGS": "+", "CG": "o"}
-    styles = {"FIRE": "-", "LBFGS": "--", "CG": "-."}
-
     # Plot the paths for each optimization method
     for method, data in results.items() if results else []:
+        if alg != "all" and alg != method:
+            continue
         paths = data["paths"]
         for path in paths:
             if len(paths) < 10:
@@ -255,6 +349,7 @@ def plot_results(
                     label=method,
                     color=colors[method],
                     marker="o",
+                    zorder=2,
                 )
             else:
                 scatter(
@@ -265,6 +360,31 @@ def plot_results(
                     marker=markers[method],
                     label=method,
                 )
+        if "feval_paths" in data and method != "FIRE":
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            for fPath in data["feval_paths"]:
+                if len(paths) < 10:
+                    ax.plot(
+                        fPath[:, 0],
+                        fPath[:, 1],
+                        styles[method],
+                        label=method + (" f-evals"),
+                        color=muted_colors[method],
+                        marker="^",
+                        zorder=1,
+                    )
+                else:
+                    scatter(
+                        ax,
+                        fPath,
+                        onlyStart=True,
+                        color=colors[method],
+                        marker=markers[method],
+                        label=method,
+                    )
+            ax.set_xlim(xlim)
+            ax.set_ylim(ylim)
 
     # Add a color bar for the contour plot
     # fig.colorbar(contour, ax=ax, label="Height")
@@ -272,7 +392,7 @@ def plot_results(
     # Handle legend and plot aesthetics
     # Assuming you have a plotting object ax
     handles, labels = ax.get_legend_handles_labels()
-    order = ["FIRE", "CG", "LBFGS"]  # Define custom order
+    order = ["FIRE", "CG", "L-BFGS"]  # Define custom order
 
     # Create a dictionary mapping labels to handles
     by_label = dict(zip(labels, handles))
@@ -280,12 +400,17 @@ def plot_results(
     # Reorder handles using the predefined order
     sorted_handles = [by_label[label] for label in order if label in by_label]
 
-    if results is not None:
+    if (results is not None or alg != "all") and False:
         # Set the legend with sorted handles
         leg = ax.legend(handles=sorted_handles, loc=loc)
         # Make markers non-transparent
         for lh in leg.legend_handles:
             lh.set_alpha(1)
+    elif results is not None:
+        ax.legend()
+    # Use this to remove y-ticks of all but one image
+    if alg != "all":  # and alg != "L-BFGS":
+        ax.set_yticks([])
 
     ax.set_aspect("equal")
 
@@ -295,7 +420,7 @@ def plot_results(
 
     # Plot the scatter points
     if results is None or len(results["FIRE"]["paths"]) < 10:
-        ax.scatter(minima[:, 0], minima[:, 1], c="#228B22", marker="x", zorder=10)
+        ax.scatter(minima[:, 0], minima[:, 1], c="#fffac5", marker="x", zorder=10)
 
     # Restore the original axis limits
     if lims is None:
@@ -309,13 +434,82 @@ def plot_results(
 
     # Layout and save figure
     plt.tight_layout()
-    script_dir = os.path.dirname(
-        os.path.realpath(__file__)
-    )  # This gets the directory of the script
-    path = os.path.join(script_dir, "Plots", name)
+    # This gets the directory of the script
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    if alg != "all":
+        name = name + f"_{alg}"
+    path = os.path.join(script_dir, "Plots", name + ".pdf")
     print(f"Saving to {path}")
-    plt.savefig(path)
-    plt.show()
+    plt.savefig(path, bbox_inches="tight")
+    # plt.show()
+    if results is not None:
+        plot_energy(results, name, alg=alg)
+
+
+def plot_energy(results, name, itOrFeval="f-eval", alg="all", loc="best"):
+    aspect_ratio = 0.7  # Default to square if no limits are provided
+
+    # Dynamically adjust figsize based on aspect ratio
+    base_height = 9  # You can change this to your desired base height
+    fig_width = base_height * aspect_ratio  # Adjust the width based on the aspect ratio
+    figsize = (fig_width, base_height)  # Create the dynamic figsize
+
+    fig, ax = plt.subplots(1, 1, figsize=figsize)
+
+    # Plot the energy for each optimization method
+    for method, data in results.items():
+        if alg != "all" and alg != method:
+            continue
+
+        # Decide whether to plot against iterations or function evaluations
+        if itOrFeval == "f-eval":
+            # Get the energy data to plot
+            energies = data["f-eval_energy"]
+        elif itOrFeval == "iterations":
+            # Get the energy data to plot
+            energies = data["path_energy"]
+        else:
+            raise ValueError(f"Unknown option for itOrFeval: {itOrFeval}")
+        # Plot energy vs iteration/f-eval for each path
+        for i, energy in enumerate(energies):
+            ax.plot(
+                range(1, len(energy) + 1),  # X-axis is iteration or f-eval count
+                energy - data["min_energy"][i],  # Y-axis is energy
+                styles[method],  # Use predefined style for the method
+                label=method,
+                color=colors[method],
+                marker="o",
+                zorder=2,
+            )
+
+    # Handling the legend and reordering
+    handles, labels = ax.get_legend_handles_labels()
+    order = ["FIRE", "CG", "L-BFGS"]  # Define custom order
+
+    # Create a dictionary mapping labels to handles
+    by_label = dict(zip(labels, handles))
+
+    # Reorder handles using the predefined order
+    sorted_handles = [by_label[label] for label in order if label in by_label]
+
+    if alg != "all":
+        # Set the legend with sorted handles
+        leg = ax.legend(handles=sorted_handles, loc=loc)
+        # Make markers non-transparent
+        for lh in leg.legend_handles:
+            lh.set_alpha(1)
+    elif results is not None:
+        ax.legend()
+
+    ax.set_yscale("log")
+    # Layout and save figure
+    plt.tight_layout()
+    # This gets the directory of the script
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    path = os.path.join(script_dir, "Plots", name + "_energy.pdf")
+    print(f"Saving to {path}")
+    plt.savefig(path, bbox_inches="tight")
+    # plt.show()
 
 
 def summarize_end_points(results):
@@ -394,9 +588,9 @@ def explore_hill_with_hole():
             initial_points_grid,
         ],
         [
-            "Hill_eField.pdf",
-            "Hill_simple.pdf",
-            "Hill_grid.pdf",
+            "Hill_eField",
+            "Hill_simple",
+            "Hill_grid",
         ],
     ):
         if initial_points is not None:
@@ -411,7 +605,7 @@ def explore_six_hump_camel():
     X, Y, Z = define_six_hump_camelback()
     grad_Z = calculate_gradient(Z, X, Y)
     f_func, df_func = lambdify_functions(X, Y, Z, grad_Z)
-    s = 1.2
+    s = 2.3
     x_range = np.linspace(-3, 3, 10)
     y_range = np.linspace(-3, 3, 10)
     minima = find_minima(x_range, y_range, f_func, df_func)
@@ -420,7 +614,7 @@ def explore_six_hump_camel():
     X, Y = np.meshgrid(x, y)
     Z = f((X, Y), f_func)
 
-    initial_points_simple = np.array([[1.25, 0.3]])
+    initial_points_simple = np.array([[1.7, 0.7]])
 
     for initial_points, name in zip(
         [
@@ -428,8 +622,8 @@ def explore_six_hump_camel():
             initial_points_simple,
         ],
         [
-            "six_hump_eField.pdf",
-            "six_hump_simple.pdf",
+            "six_hump_eField",
+            "six_hump_simple",
         ],
     ):
         if initial_points is not None:
@@ -441,6 +635,9 @@ def explore_six_hump_camel():
 
 
 def explore_three_hump_camel():
+    # Combine all algorithms or split them into different plots
+    split = True
+
     X, Y, Z = define_three_hump_camelback()
     grad_Z = calculate_gradient(Z, X, Y)
     f_func, df_func = lambdify_functions(X, Y, Z, grad_Z)
@@ -451,21 +648,15 @@ def explore_three_hump_camel():
     initial_points = np.array([[1.25, 0.3]])
 
     results = run_optimizations(initial_points, f_func, df_func)
-    zooms = [
-        [[1, 2.2], [-1.5, 0.5]],
-        [[1.728, 1.765], [-0.9, -0.82]],
-        [[1.7465, 1.7483], [-0.875, -0.8715]],
-        [[1.74745, 1.74765], [-0.8740, -0.8736]],
-        [[1.747545, 1.747565], [-0.873790, -0.873755]],
-        None,
-    ]
-
+    summarize_end_points(results)
     # Fixed center point and aspect ratio
     center = (1.747553, -0.873776)
     aspect_ratio = 9 / 16  # You can change this to your desired ratio
 
     # Define zoom levels using different zoom factors (smaller factor = closer zoom)
-    zoom_factors = [0.05, 0.002, 0.0001, 0.00001, None]
+    # The loop stops when it encounters None, so you can add None at the beginning
+    # of the array to skipp the ones behind it
+    zoom_factors = [None, 0.05, 0.002, 0.0001, 0.00001, None]
 
     # Generate zoom limits for each zoom factor
     zooms = [
@@ -476,29 +667,46 @@ def explore_three_hump_camel():
 
     # Now `zooms` contains the zoom limits for each level
     for i in range(len(zooms) - 1):
+        if zooms[i] is None:
+            break
         X, Y, Z = make_mesh(zooms[i], f_func)
-        if i == 0:
+        n = f"three_hump_simple_zoom{i}"
+        if i == 0 and True:
             plot_results(
                 X,
                 Y,
                 Z,
                 minima,
                 None,
-                "three_hump_eField.pdf",
-                loc="upper right",
+                "three_hump_eField",
                 lims=zooms[i],
             )
-        plot_results(
-            X,
-            Y,
-            Z,
-            minima,
-            results,
-            f"three_hump_simple_zoom{i}.pdf",
-            loc="best",
-            lims=zooms[i],
-            next_lims=zooms[i + 1],
-        )
+        if split:
+            for alg in ["L-BFGS", "CG", "FIRE"]:
+                plot_results(
+                    X,
+                    Y,
+                    Z,
+                    minima,
+                    results,
+                    n,
+                    loc="best",
+                    lims=zooms[i],
+                    next_lims=zooms[i + 1],
+                    alg=alg,
+                )
+        else:
+            plot_results(
+                X,
+                Y,
+                Z,
+                minima,
+                results,
+                n,
+                loc="best",
+                lims=zooms[i],
+                next_lims=zooms[i + 1],
+            )
 
 
 if __name__ == "__main__":

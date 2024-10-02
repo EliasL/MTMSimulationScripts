@@ -26,7 +26,7 @@ class SimulationConfig:
         self.maxLoad = 1.0
 
         # Minimizer settings
-        self.minimizer = "LBFGS"  # FIRE / LBFGS / CG
+        self.minimizer = "L-BFGS"  # FIRE / LBFGS / CG
         # - LBFGS
         self.LBFGSNrCorrections = 10  # nr correction vector paris, variable m in A Limited Memory Algorithm for Bound Constrained Optimization
         self.LBFGSScale = 1.0

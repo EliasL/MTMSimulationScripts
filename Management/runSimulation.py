@@ -12,7 +12,7 @@ if __name__ == "__main__":
         LBFGSEpsg=1e-10,
         QDSD=0.0,
         usingPBC=0,
-        minimizer="LBFGS",
+        minimizer="L-BFGS",
         scenario="simpleShearFixedBoundary",
     )
 
