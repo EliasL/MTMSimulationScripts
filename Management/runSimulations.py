@@ -1,18 +1,42 @@
-from simulationManager import SimulationManager
-from configGenerator import ConfigGenerator, SimulationConfig
-from multiprocessing import Pool
+from .simulationManager import SimulationManager
+from .configGenerator import ConfigGenerator, SimulationConfig
+from .runSimulation import run_locally
 import ast
 import sys
+import concurrent.futures
+
+
+# Custom class to prepend thread names to output
+class ThreadOutputWrapper:
+    def __init__(self, prefix, original_stdout):
+        self.prefix = prefix
+        self.original_stdout = original_stdout
+
+    def write(self, message):
+        # Check if the message is not an empty string or a newline
+        if message.strip():
+            # Add thread prefix and print to original stdout
+            self.original_stdout.write(f"[{self.prefix}] {message}")
+        else:
+            self.original_stdout.write(message)
+
+    def flush(self):
+        self.original_stdout.flush()
 
 
 def task(config):
-    try:
-        manager = SimulationManager(config)
-        time = manager.runSimulation(build=False, resumeIfPossible=True)
-        # manager.plot()
-    except Exception as e:
-        return f"Error: {e}"
-    return time
+    run_locally(config, build=False, taskName=config.minimizer)
+
+
+# Function to launch the work on different threads
+def run_many_locally(configs):
+    # First build the project once so the task does not have to build it
+    manager = SimulationManager(SimulationConfig())
+    manager.build()
+    # Use ThreadPoolExecutor to run the task on different threads
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Map the configs to threads and run the work
+        executor.map(task, configs)
 
 
 def parse_args():
@@ -49,19 +73,4 @@ if __name__ == "__main__":
         }
 
     (configs, labels) = ConfigGenerator.generate(**kwargs)
-
-    # # Build and test (Fail early)
-    # manager = SimulationManager(SimulationConfig())
-    # try:
-    #     manager.runSimulation(resumeIfPossible=False, silent=True)
-    # except Exception as e:
-    #     Warning(e)
-    #     manager.clean()
-    #     try:
-    #         manager.runSimulation()
-    #     except Exception as e:
-    #         raise (Exception(e))
-
-    with Pool(processes=len(configs)) as pool:
-        results = pool.map(task, configs)
-        pass
+    run_many_locally(configs)

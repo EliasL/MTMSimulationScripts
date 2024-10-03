@@ -157,7 +157,7 @@ def statStuff():
         loadIncrement=1e-5,
         maxLoad=1,
         LBFGSEpsx=1e-6,
-        minimizer="L-BFGS",
+        minimizer="LBFGS",
         scenario="simpleShear",
     )
     plotSims(
@@ -181,7 +181,7 @@ def fastStatStuff():
         loadIncrement=3e-5,
         maxLoad=1,
         LBFGSEpsx=1e-5,
-        minimizer="L-BFGS",
+        minimizer="LBFGS",
         scenario="simpleShear",
     )
     runSims(configs)

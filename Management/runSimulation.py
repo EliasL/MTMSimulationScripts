@@ -1,7 +1,20 @@
-if __name__ == "__main__":
-    from simulationManager import SimulationManager
-    from configGenerator import SimulationConfig
+from .simulationManager import SimulationManager
+from .configGenerator import SimulationConfig
 
+
+def run_locally(
+    config=SimulationConfig(), resume=True, dump=None, plot=False, build=True, **kwargs
+):
+    manager = SimulationManager(config, overwriteData=not resume, **kwargs)
+    if dump:
+        manager.resumeSimulation(dumpFile=dump, overwriteSettings=True, build=build)
+    else:
+        manager.runSimulation(resumeIfPossible=resume, build=build)
+    if plot:
+        manager.plot()
+
+
+if __name__ == "__main__":
     config = SimulationConfig(
         rows=16,
         cols=16,
@@ -12,16 +25,7 @@ if __name__ == "__main__":
         LBFGSEpsg=1e-10,
         QDSD=0.0,
         usingPBC=0,
-        minimizer="L-BFGS",
+        minimizer="LBFGS",
         scenario="simpleShearFixedBoundary",
     )
-
-    resume = False
-    manager = SimulationManager(
-        config, useProfiling=False, debugBuild=False, overwriteData=not resume
-    )
-    dump = "/Users/elias/Work/PhD/Code/localData/MTS2D_output/simpleShear,s100x100l0.15,0.0001,1.0PBCt4LBFGSEpsg0.0001s0/dumps//Dump_l0.957600_17.01~24.07.2024.mtsb"
-    manager.runSimulation(resumeIfPossible=resume)
-    # manager.resumeSimulation()
-    # manager.resumeSimulation(dumpFile=dump, overwriteSettings=True)
-    # manager.plot()
+    run_locally(config)

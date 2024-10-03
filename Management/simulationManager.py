@@ -22,8 +22,10 @@ class SimulationManager:
         debugBuild=False,
         useProfiling=False,
         overwriteData=False,
+        taskName=None,
     ):
         self.configObj = configObj
+        self.taskName = taskName
         self.outputPath = findOutputPath() if outputPath is None else outputPath
 
         self.useProfiling = useProfiling
@@ -61,7 +63,7 @@ class SimulationManager:
 
     def runSimulation(self, build=True, resumeIfPossible=True, silent=False):
         if build:
-            self._build()
+            self.build()
 
         if resumeIfPossible:
             dump = None
@@ -77,7 +79,7 @@ class SimulationManager:
         # Start the timer right before running the command
         start_time = time.time()
         print("Running simulation")
-        run_command(self.simulation_command, echo=not silent)
+        run_command(self.simulation_command, echo=not silent, taskName=self.taskName)
 
         # Stop the timer right after the command completes
         end_time = time.time()
@@ -97,7 +99,7 @@ class SimulationManager:
         silent=False,
     ):
         if build:
-            self._build()
+            self.build()
 
         # if the name is set, we search for that file name,
         # otherwise, we sort the files by date created and choose the newest
@@ -110,6 +112,7 @@ class SimulationManager:
         run_command(
             f"{self.program_path} -d {dumpFile}{' -c ' + self.conf_file if overwriteSettings else '' + ' -r' if overwriteData else ''}",
             echo=not silent,
+            taskName=self.taskName,
         )  # Stop the timer right after the command completes
         end_time = time.time()
         # Calculate the duration
@@ -176,11 +179,18 @@ class SimulationManager:
         os.makedirs(build_dir_path)
         print(f"Recreated build directory: {build_dir_path}")
 
-    def _build(self):
+    def build(self, autoClean=True):
         print("Building...")
-        error = run_command(self.build_command)
+        error = run_command(self.build_command, taskName=self.taskName)
         if error != 0:
-            raise (Exception("Build error."))
+            if autoClean:
+                Warning("Build failed! Attempting to clean and rebuild")
+                self.clean()
+                error = run_command(self.build_command, taskName=self.taskName)
+                if error != 0:
+                    raise (Exception("Build error!"))
+            else:
+                raise (Exception("Build error!"))
         else:
             print("Build completed successfully.")
 
@@ -197,10 +207,15 @@ class SimulationManager:
 
 # The reason why this is so complicated is that if we simply use .readline(), it
 # will not flush properly for lines that should be overwritten using \r.
-def run_command(command, echo=True):
+def run_command(command, echo=True, taskName=None):
+    if taskName is None:
+        taskName = ""
+    elif not (taskName[0] == "[" and taskName[-1] == "]"):
+        taskName = f"[{taskName}]"
+
     if echo:
         # Simply print the command without colors or formatting
-        print("Executing command:", command)
+        print(f"{taskName} Executing command:", command)
 
     process = subprocess.Popen(
         command,
@@ -222,8 +237,11 @@ def run_command(command, echo=True):
 
             # If the byte is a line ending, decode and print the buffer
             if byte in (b"\n", b"\r"):
-                # Decode the buffer and print it
-                print(output_buffer.decode("utf-8", errors="replace"), end="")
+                # Decode the buffer and print it with self.name as a prefix
+                print(
+                    f"{taskName} {output_buffer.decode('utf-8', errors='replace')}",
+                    end="",
+                )
                 # Clear the buffer
                 output_buffer.clear()
         else:
@@ -232,12 +250,12 @@ def run_command(command, echo=True):
 
     # Output any remaining bytes in the buffer after the process has ended
     if output_buffer:
-        print(output_buffer.decode("utf-8", errors="replace"), end="")
+        print(f"{taskName} {output_buffer.decode('utf-8', errors='replace')}", end="")
 
     # Check for any errors
     err = process.stderr.read().decode("utf-8")
     if err:
-        print("Error:", err)
+        print(f"{taskName} Error:", err)
 
     return process.returncode
 

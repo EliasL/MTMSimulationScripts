@@ -449,13 +449,15 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
 
 
 def getPrettyLabel(string):
+    s = ""
     if "minimizer=" in string:
-        return string.split("minimizer=")[1].split(",")[0]
+        s = string.split("minimizer=")[1].split(",")[0]
     if "," not in string:
-        return string
+        s = string
     else:
         # TODO Could be wrong!
-        return "L-BFGS"
+        s = "L-BFGS"
+    return s.replace("LBFGS", "L-BFGS")
 
 
 # Example usage can be added as necessary with DataFrames having 'Nr plastic deformations' and 'Avg energy'

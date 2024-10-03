@@ -284,7 +284,7 @@ if __name__ == "__main__":
         loadIncrement=1e-5,
         maxLoad=1.0,
         LBFGSEpsx=1e-6,
-        minimizer="L-BFGS",
+        minimizer="LBFGS",
         scenario="simpleShear",
     )
     # paths = get_csv_files(configs)

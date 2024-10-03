@@ -149,7 +149,7 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             "options": {"gtol": tol},
         },
         "L-BFGS": {
-            "method": "L-BFGS-B",
+            "method": "L-BFGS",
             "options": {"gtol": tol},
         },
     }

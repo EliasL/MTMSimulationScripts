@@ -7,6 +7,7 @@ from Management.runOnCluster import (
     build_on_all_servers,
     build_on_server,
 )
+from Management.runSimulations import run_many_locally
 from Management.connectToCluster import Servers
 from Management.multiServerJob import (
     bigJob,
@@ -21,8 +22,6 @@ from Management.multiServerJob import (
     get_server_short_name,
 )
 from Management.clusterStatus import get_all_server_info, display_server_info
-
-import subprocess
 
 
 def parameterExploring():
@@ -107,6 +106,11 @@ def runOnServer():
     run_remote_script(server, remote_script_path)
 
 
+def runOnLocalMachine():
+    configs, labels = propperJob(3, 1, size=150, group_by_seeds=False)
+    run_many_locally(configs)
+
+
 def startJobs():
     # j = JobManager()
     # j.findAndShowSlurmJobs()
@@ -168,7 +172,8 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-startJobs()
+runOnLocalMachine()
+# startJobs()
 # plotBigJob()
 # plotPropperJob()
 # threadTest()
