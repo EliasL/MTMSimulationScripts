@@ -312,25 +312,28 @@ def plot_results(
     minima,
     results,
     name,
-    loc="lower left",
+    ax=None,
+    loc="upper right",
     lims=None,
     next_lims=None,
     alg="all",
 ):
-    # Determine the aspect ratio from the lims
-    if lims is not None:
-        x_min, x_max = lims[0]
-        y_min, y_max = lims[1]
-        aspect_ratio = (x_max - x_min) / (y_max - y_min)  # Calculate aspect ratio
-    else:
-        aspect_ratio = 1  # Default to square if no limits are provided
+    if ax is None:
+        # Determine the aspect ratio from the lims
+        if lims is not None:
+            x_min, x_max = lims[0]
+            y_min, y_max = lims[1]
+            aspect_ratio = (x_max - x_min) / (y_max - y_min)  # Calculate aspect ratio
+        else:
+            aspect_ratio = 1  # Default to square if no limits are provided
 
-    # Dynamically adjust figsize based on aspect ratio
-    base_height = 11  # You can change this to your desired base height
-    fig_width = base_height * aspect_ratio  # Adjust the width based on the aspect ratio
-    figsize = (fig_width, base_height)  # Create the dynamic figsize
-
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
+        # Dynamically adjust figsize based on aspect ratio
+        base_height = 11  # You can change this to your desired base height
+        fig_width = (
+            base_height * aspect_ratio
+        )  # Adjust the width based on the aspect ratio
+        figsize = (fig_width, base_height)  # Create the dynamic figsize
+        _, ax = plt.subplots(1, 1, figsize=figsize)
 
     # Contour plot with limited data if zooming
     contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
@@ -369,7 +372,7 @@ def plot_results(
                         fPath[:, 0],
                         fPath[:, 1],
                         styles[method],
-                        label=method + (" f-evals"),
+                        label="f-evals",
                         color=muted_colors[method],
                         marker="^",
                         zorder=1,
@@ -406,10 +409,10 @@ def plot_results(
         # Make markers non-transparent
         for lh in leg.legend_handles:
             lh.set_alpha(1)
-    elif results is not None:
-        ax.legend()
+    elif alg == "all" or alg in results.keys():
+        ax.legend(loc=loc)
     # Use this to remove y-ticks of all but one image
-    if alg != "all":  # and alg != "L-BFGS":
+    if alg in results.keys():  # and alg != "L-BFGS":
         ax.set_yticks([])
 
     ax.set_aspect("equal")
@@ -439,35 +442,42 @@ def plot_results(
     if alg != "all":
         name = name + f"_{alg}"
     path = os.path.join(script_dir, "Plots", name + ".pdf")
-    print(f"Saving to {path}")
-    plt.savefig(path, bbox_inches="tight")
+    # print(f"Saving to {path}")
+    # plt.savefig(path, bbox_inches="tight")
     # plt.show()
-    if results is not None:
-        plot_energy(results, name, alg=alg)
 
 
-def plot_energy(results, name, itOrFeval="f-eval", alg="all", loc="best"):
-    aspect_ratio = 0.7  # Default to square if no limits are provided
-
-    # Dynamically adjust figsize based on aspect ratio
-    base_height = 9  # You can change this to your desired base height
-    fig_width = base_height * aspect_ratio  # Adjust the width based on the aspect ratio
-    figsize = (fig_width, base_height)  # Create the dynamic figsize
-
-    fig, ax = plt.subplots(1, 1, figsize=figsize)
-
+def plot_energy(
+    results, name, ax=None, itOrFeval="f-eval", alg="all", loc="lower left"
+):
+    if ax is None:
+        aspect_ratio = 0.7  # Default to square if no limits are provided
+        # Dynamically adjust figsize based on aspect ratio
+        base_height = 9  # You can change this to your desired base height
+        fig_width = (
+            base_height * aspect_ratio
+        )  # Adjust the width based on the aspect ratio
+        figsize = (fig_width, base_height)  # Create the dynamic figsize
+        _, ax = plt.subplots(1, 1, figsize=figsize)
+    # If the alg does not have results, we are done
+    if alg not in results.keys():
+        return
     # Plot the energy for each optimization method
     for method, data in results.items():
         if alg != "all" and alg != method:
             continue
+        if alg == "all" or alg == "L-BFGS":
+            ax.set_ylabel(r"$f(\mathbf{x}) - f(\mathbf{x^*})$")
 
         # Decide whether to plot against iterations or function evaluations
         if itOrFeval == "f-eval":
             # Get the energy data to plot
             energies = data["f-eval_energy"]
+            ax.set_xlabel("Number of function evaluations")
         elif itOrFeval == "iterations":
             # Get the energy data to plot
             energies = data["path_energy"]
+            ax.set_xlabel("Number of itterations")
         else:
             raise ValueError(f"Unknown option for itOrFeval: {itOrFeval}")
         # Plot energy vs iteration/f-eval for each path
@@ -481,7 +491,6 @@ def plot_energy(results, name, itOrFeval="f-eval", alg="all", loc="best"):
                 marker="o",
                 zorder=2,
             )
-
     # Handling the legend and reordering
     handles, labels = ax.get_legend_handles_labels()
     order = ["FIRE", "CG", "L-BFGS"]  # Define custom order
@@ -503,13 +512,14 @@ def plot_energy(results, name, itOrFeval="f-eval", alg="all", loc="best"):
 
     ax.set_yscale("log")
     # Layout and save figure
-    plt.tight_layout()
+    # plt.tight_layout()
     # This gets the directory of the script
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    path = os.path.join(script_dir, "Plots", name + "_energy.pdf")
-    print(f"Saving to {path}")
-    plt.savefig(path, bbox_inches="tight")
+    # script_dir = os.path.dirname(os.path.realpath(__file__))
+    # path = os.path.join(script_dir, "Plots", name + "_energy.pdf")
+    # print(f"Saving to {path}")
+    # plt.savefig(path, bbox_inches="tight")
     # plt.show()
+    return ax
 
 
 def summarize_end_points(results):
@@ -561,6 +571,20 @@ def calculate_lims(center, aspect_ratio, zoom_factor):
     y_max = y_center + height / 2
 
     return [[x_min, x_max], [y_min, y_max]]
+
+
+def add_mark(ax, mark, x, y, color="black"):
+    # Adding LaTeX-style bold font using \textbf{}
+    ax.text(
+        x,
+        y,
+        r"$\textbf{" + mark + "}$",  # LaTeX syntax for bold
+        transform=ax.transAxes,
+        fontsize=30,
+        va="top",
+        ha="left",
+        color=color,
+    )
 
 
 def explore_hill_with_hole():
@@ -647,15 +671,14 @@ def explore_three_hump_camel():
 
     initial_points = np.array([[1.25, 0.3]])
 
-    results = run_optimizations(initial_points, f_func, df_func)
-    summarize_end_points(results)
+    r = run_optimizations(initial_points, f_func, df_func)
+    summarize_end_points(r)
+
     # Fixed center point and aspect ratio
     center = (1.747553, -0.873776)
     aspect_ratio = 9 / 16  # You can change this to your desired ratio
 
-    # Define zoom levels using different zoom factors (smaller factor = closer zoom)
-    # The loop stops when it encounters None, so you can add None at the beginning
-    # of the array to skipp the ones behind it
+    # Define zoom levels using different zoom factors
     zoom_factors = [None, 0.05, 0.002, 0.0001, 0.00001, None]
 
     # Generate zoom limits for each zoom factor
@@ -664,49 +687,43 @@ def explore_three_hump_camel():
         for zoom_factor in zoom_factors
     ]
     zooms = [[[1, 2.2], [-1.5, 0.5]]] + zooms
+    i = 0
+    X, Y, Z = make_mesh(zooms[i], f_func)
+    n = "three_hump_simple"
 
-    # Now `zooms` contains the zoom limits for each level
-    for i in range(len(zooms) - 1):
-        if zooms[i] is None:
-            break
-        X, Y, Z = make_mesh(zooms[i], f_func)
-        n = f"three_hump_simple_zoom{i}"
-        if i == 0 and True:
-            plot_results(
-                X,
-                Y,
-                Z,
-                minima,
-                None,
-                "three_hump_eField",
-                lims=zooms[i],
-            )
-        if split:
-            for alg in ["L-BFGS", "CG", "FIRE"]:
-                plot_results(
-                    X,
-                    Y,
-                    Z,
-                    minima,
-                    results,
-                    n,
-                    loc="best",
-                    lims=zooms[i],
-                    next_lims=zooms[i + 1],
-                    alg=alg,
-                )
-        else:
-            plot_results(
-                X,
-                Y,
-                Z,
-                minima,
-                results,
-                n,
-                loc="best",
-                lims=zooms[i],
-                next_lims=zooms[i + 1],
-            )
+    w = 6
+    h = 9
+    # Create figure and axes for plot_results (1 row, 4 columns)
+    fig_results, res_ax = plt.subplots(1, 4, figsize=(w * 4, h))
+
+    # Create figure and axes for plot_energy (1 row, 4 columns)
+    fig_energy, energy_ax = plt.subplots(1, 3, figsize=(w * 3, h))
+
+    algorithms = ["eField", "L-BFGS", "CG", "FIRE"]
+    labels = ["(e)", "(a)", "(b)", "(c)"]
+    if split:
+        for idx, alg in enumerate(algorithms):
+            # Pass each ax object to the plotting functions
+            plot_results(X, Y, Z, minima, r, n, res_ax[idx], lims=zooms[i], alg=alg)
+            add_mark(res_ax[idx], labels[idx], 0.03, 0.95, color="white")
+            if idx != 0:
+                plot_energy(r, n, energy_ax[idx - 1], alg=alg)
+                add_mark(energy_ax[idx - 1], labels[idx], 0.80, 0.95)
+
+    else:
+        # Plot without splitting across multiple axes if required
+        plot_results(X, Y, Z, minima, r, n, lims=zooms[i])
+        plot_energy(r, n, alt=alg)
+
+    # Layout and save figure
+    fig_results.tight_layout()
+    fig_energy.tight_layout()
+    # This gets the directory of the script
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    rPath = os.path.join(script_dir, "Plots", n + "_results.pdf")
+    ePath = os.path.join(script_dir, "Plots", n + "_energy.pdf")
+    fig_results.savefig(rPath, bbox_inches="tight")
+    fig_energy.savefig(ePath, bbox_inches="tight")
 
 
 if __name__ == "__main__":
