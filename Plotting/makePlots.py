@@ -1,4 +1,5 @@
 from matplotlib import pyplot as plt
+import matplotlib.image as mpimg
 import matplotlib
 import os
 import matplotlib.pylab
@@ -10,9 +11,13 @@ import mplcursors
 from datetime import timedelta
 import powerlaw
 import json
+import scipy.integrate
+import scipy.interpolate
 from simplification.cutil import simplify_coords_vwp
 from matplotlib.ticker import MaxNLocator
 from tqdm import tqdm
+import scipy
+from pathlib import Path
 
 
 def plotYOverX(
@@ -95,7 +100,10 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
 def pros_d(df, start_index, end_index, min_npd, strainLims):
     # TODO handle innerstrainLims
     index_range = slice(start_index + 1, end_index)
-    diffs = np.diff(df["Avg energy"][index_range])
+
+    e = [key for key in df.columns if key not in ["Load", "Nr plastic deformations"]][0]
+
+    diffs = np.diff(df[e][index_range])
 
     # Combine all conditions into a single mask using element-wise logical AND
     mask = (
@@ -132,7 +140,11 @@ def getPowerLawFit(
     # limits. That way, the two regions we are interested in analysing is
     # given by (O1, I1) and (I2, O2).
 
-    e = "Avg energy"
+    # Strange way of finding the remaining key
+    e = [
+        key for key in dfs[0].columns if key not in ["Load", "Nr plastic deformations"]
+    ][0]
+
     # If we split, we find the largest energy value of the system and analyse
     # the pre and post yield seperately
     if split:
@@ -454,9 +466,6 @@ def getPrettyLabel(string):
         s = string.split("minimizer=")[1].split(",")[0]
     if "," not in string:
         s = string
-    else:
-        # TODO Could be wrong!
-        s = "L-BFGS"
     return s.replace("LBFGS", "L-BFGS")
 
 
@@ -561,6 +570,7 @@ def makePlot(
     x_name=None,
     y_name=None,
     labels=None,
+    use_title=False,
     title=None,
     plot_average=False,
     xLims=(-np.inf, np.inf),
@@ -568,6 +578,7 @@ def makePlot(
     indicateLastPoint=False,
     plot_roll_average=False,
     plot_raw=True,
+    plot_gradient=False,
     plot_power_law=False,
     plot_columns=False,
     ylog=False,
@@ -575,7 +586,8 @@ def makePlot(
     colors=None,
     plot_total=False,
     legend=None,
-    addShift=False,
+    add_shift=False,
+    add_images=False,
 ):
     if len(csv_file_paths) == 0 or (
         len(csv_file_paths) > 0 and len(csv_file_paths[0]) == 0
@@ -584,12 +596,15 @@ def makePlot(
         return
     if x_name is None:
         if X == "Load":
-            x_name = r"strain ($\gamma$)"
+            x_name = r"Strain ($\gamma$)"
         else:
             x_name = X
 
     if y_name is None:
-        y_name = Y
+        if Y == "Avg RSS":
+            y_name = r"Stress ($\sigma$)"
+        else:
+            y_name = Y
 
     # if we are not given a list, we make it into a list
     if isinstance(csv_file_paths, str):
@@ -598,6 +613,7 @@ def makePlot(
     fig, ax = plt.subplots()
     lines = []
     data = []
+    xData = []
     for i, csv_file_path in enumerate(csv_file_paths):
         if X is None:
             break
@@ -617,6 +633,7 @@ def makePlot(
         df = df[(df[Y] >= yLims[0]) & (df[Y] <= yLims[1])]
 
         data.append(df[Y].values)
+        xData.append(df[X].values)
 
         kwargs = {"fig": fig, "ax": ax, "indicateLastPoint": indicateLastPoint}
 
@@ -632,10 +649,9 @@ def makePlot(
             if labels is None:
                 kwargs["label"] = Y
             else:
-                kwargs["label"] = labels[i] + (
-                    (" - " + Y_) if not isinstance(Y, str) else ""
-                )
-            if addShift:
+                kwargs["label"] = labels[i]
+                # +((" - " + Y_) if not isinstance(Y, str) else "")
+            if add_shift:
                 df[Y_] -= i * np.max(df[Y_]) / 500
             line = None
             point = None
@@ -680,10 +696,10 @@ def makePlot(
         )
 
         kwargs = {"fig": fig, "ax": ax, "label": "Average", "color": "black"}
-        df = pd.read_csv(csv_file_paths[max_length_index], usecols=[X])
-        df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
         if plot_raw:
-            fig, ax, line, point = plotYOverX(df[X], average, **kwargs)
+            fig, ax, line, point = plotYOverX(
+                xData[max_length_index], average, **kwargs
+            )
         lines.append(line)
 
     if plot_power_law:
@@ -735,19 +751,133 @@ def makePlot(
         ]
         # Create the legend with custom labels
         ax.legend(handles=custom_legend)
-
+    if add_images:
+        i = 0
+        addImagesToPlot(ax, csv_file_paths[i], xData[i], data[i])
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
-    if title is None:
-        ax.set_title(f"{y_name} over {x_name}")
-    else:
-        ax.set_title(title)
+    if use_title:
+        if title is None:
+            ax.set_title(f"{y_name} over {x_name}")
+        else:
+            ax.set_title(title)
     ax.autoscale_view()
     figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
     fig.savefig(figPath)
     print(f'Plot saved at: "{figPath}"')
     if show:
         plt.show()
+    return fig, ax
+
+
+def cropImage(image_path):
+    image = mpimg.imread(image_path)
+
+    # Convert to grayscale
+    gray_image = np.mean(image, axis=2)  # Averaging the RGB values to get a grayscale
+
+    dim = gray_image.shape[:2]
+    middlex = int(dim[0] / 2)
+    middley = int(dim[1] / 2)
+
+    # Define thresholds for white and black
+    white_threshold = 0.95 * gray_image.max()  # Close to white
+
+    # Find the columns where the image is not white (less than threshold)
+    non_white_columns = np.where(gray_image[middlex, :] < white_threshold)[0]
+
+    # Determine the left and right boundaries
+    left_bound = non_white_columns[0]
+    right_bound = non_white_columns[-1]
+
+    # Crop horizontally (left and right boundaries)
+    cropped_image = image[:, left_bound:right_bound, :]
+
+    # Find the difference between the color channels is above some threshold
+    # in other words, searching for non grey scale colors (tecnically does not )
+    # Calculate the difference between the color channels along the RGB axis (axis 2)
+    channel_diff = np.max(image[:, middley, :3], axis=1) - np.min(
+        image[:, middley, :3], axis=1
+    )
+
+    # Find where the difference exceeds the threshold (indicating non-grey colors)
+    non_black_white_rows = np.where(channel_diff > 0.1)[0]
+
+    # Determine the top boundary
+    top_bound = non_black_white_rows[0]
+
+    # Crop vertically (top boundary)
+    final_cropped_image = cropped_image[top_bound:, :, :]
+
+    return final_cropped_image
+
+
+def addImagesToPlot(ax, csv_file_path, x, y):
+    # First we get the folder with frames
+    framesPath = Path(csv_file_path).parent / "frames"
+
+    # Define the regex pattern to match the file names (mesh_frame_xxxx.png)
+    pattern = re.compile(r"mesh_frame_(\d{4})\.png")
+
+    # Get all files in the folder matching the pattern
+    matching_files = [
+        f for f in framesPath.iterdir() if f.is_file() and pattern.match(f.name)
+    ]
+
+    # Extract the numbers from the filenames
+    file_numbers = [int(pattern.match(f.name).group(1)) for f in matching_files]
+
+    # Sort the numbers
+    file_numbers.sort()
+
+    # Get the first, middle, and last numbers
+    first_number = file_numbers[0]
+    middle_number = file_numbers[int(len(file_numbers) * 0.7)]
+    last_number = file_numbers[-1]
+    s = 0.3
+    for num, pos in zip(
+        [first_number, middle_number, last_number],
+        [
+            [0.05, 0.45, s, s],  # first image, middle left
+            [0.1, 0.8, s, s],  # second image, top slight middle
+            [0.55, 0.05, s, s],  # bottom middle
+        ],
+    ):
+        # Construct the paths for the first, middle, and last images
+        image_path = framesPath / f"mesh_frame_{num:04d}.png"
+
+        # Top left for the first image
+        ax_inset = ax.inset_axes(pos)  # (left, bottom, width, height)
+        img = cropImage(image_path)
+        ax_inset.imshow(img)
+        ax_inset.axis("off")
+
+        # Now we want to make arrows that point to the graph where the image is
+        # taken from
+        index = int(num / len(file_numbers) * len(y))
+        y_value = y[index]
+        x_value = x[index]
+
+        # Get axis limits
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+
+        # Convert normalized coordinates to actual axis coordinates
+        arrow_start = (
+            xlim[0] + (pos[0] + s / 2) * (xlim[1] - xlim[0]),
+            ylim[0] + (pos[1] + s / 2) * (ylim[1] - ylim[0]),
+        )
+
+        # Arrow's ending point (the point on the main plot where the image corresponds to)
+        arrow_end = (x_value, y_value)
+
+        # Add the arrow using annotate
+        ax.annotate(
+            "",  # No text
+            xy=arrow_end,  # End of the arrow (on the main plot)
+            xytext=arrow_start,  # Start of the arrow (from the inset)
+            arrowprops=dict(facecolor="black", shrink=0.05, width=2, headwidth=10),
+        )
 
 
 def removeBadData(df, Y, crash_count, csv_file_path):
@@ -769,12 +899,22 @@ def removeBadData(df, Y, crash_count, csv_file_path):
 
 
 def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=False, **kwargs):
+    makeComparisonPlot(grouped_csv_file_paths, name, "Avg energy", show, **kwargs)
+
+
+def makeStressPlotComparison(grouped_csv_file_paths, name, show=False, **kwargs):
+    makeComparisonPlot(grouped_csv_file_paths, name, "Avg RSS", show, **kwargs)
+
+
+def makeComparisonPlot(grouped_csv_file_paths, name, Y, show=False, **kwargs):
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
     X = "Load"
-    Y = "Avg energy"
-    x_name = "Strain ($\gamma$)"
-    y_name = "Avg energy"
+    if Y == "Avg energy":
+        y_name = r"Avg energy ($E$)"
+    elif Y == "Avg RSS":
+        y_name = r"Avg stress ($\sigma$)"
+    x_name = r"Strain ($\gamma$)"
     title = f"{name}"
 
     fig, ax = plt.subplots()
@@ -801,11 +941,13 @@ def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=False, **kwargs)
         # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             # print(csv_file_path)
-            df = pd.read_csv(csv_file_path, usecols=[X, Y])
+            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Avg energy"])
             # df = df[0:50000]
             if df.empty:
                 continue
-            df, crash_count = removeBadData(df, Y, crash_count, csv_file_path)
+            df, crash_count = removeBadData(
+                df, "Avg energy", crash_count, csv_file_path
+            )
 
             data.append(df[Y].values)
 
@@ -873,6 +1015,7 @@ def makeLogPlotComparison(
     minEnergy=1e-6,
     outerStrainLims=[-np.inf, np.inf],
     innerStrainLims=(0.45, 0.6),
+    Y="Avg energy",
     **kwargs,
 ):
     global color_index, index, line_index
@@ -880,7 +1023,6 @@ def makeLogPlotComparison(
     fig, ax = plt.subplots()
 
     X = "Load"
-    Y = "Avg energy"
     oLims = (
         ""
         if outerStrainLims == [-np.inf, np.inf]
@@ -909,7 +1051,10 @@ def makeLogPlotComparison(
         name += " window"
     else:
         title += f" {iLims},"
-        x_name = "Magnitude of energy drops"
+        if Y == "Avg energy":
+            x_name = "Magnitude of energy drops"
+        elif Y == "Avg RSS":
+            x_name = "Magnitude of stress drops"
         y_name = "Frequency"
 
     title += " $\\Delta E_{\\mathrm{min}}$=" + f"{minEnergy}"
@@ -1042,6 +1187,10 @@ def makeEnergyAvalancheComparison(
 
 def makeEnergyPlot(csv_file_paths, name, **kwargs):
     makePlot(csv_file_paths, name, X="Load", Y="Avg energy", **kwargs)
+
+
+def makeStressPlot(csv_file_paths, name, **kwargs):
+    makePlot(csv_file_paths, name, X="Load", Y="Avg RSS", **kwargs)
 
 
 def makeItterationsPlot(csv_file_paths, name, **kwargs):

@@ -74,21 +74,26 @@ def plotSims(configs, name, **kwargs):
 
 def plotLog(config_groups, name, labels, **kwargs):
     # Now we can import from Management
-    from remotePlotting import get_csv_files
+    from Plotting.remotePlotting import get_csv_files
 
-    from makePlots import (
+    from Plotting.makePlots import (
         makeLogPlotComparison,
         makeEnergyPlotComparison,
         makeEnergyAvalancheComparison,
+        makeStressPlotComparison,
     )
 
     paths, labels = get_csv_files(
-        config_groups, labels=labels, useOldFiles=False, forceUpdate=True
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
     kwargs["labels"] = labels
     print("Plotting...")
     makeEnergyPlotComparison(paths, f"{name} - Energy", **kwargs)
+    makeStressPlotComparison(paths, f"{name} - Stress", **kwargs)
     makeLogPlotComparison(paths, f"{name} - PowerLaw", window=False, **kwargs)
+    makeLogPlotComparison(
+        paths, f"{name} - StressPowerLaw", window=False, Y="Avg RSS", **kwargs
+    )
     # makeLogPlotComparison(paths, f"{name} - PowerLaw", window=True, **kwargs)
     # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", **kwargs)
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)

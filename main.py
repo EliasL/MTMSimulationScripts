@@ -44,20 +44,6 @@ def plotBigJob():
     )
 
 
-def plotPropperJob():
-    nrThreads = 3
-    nrSeeds = 40
-    configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
-    # xLims = [0.25, 0.55]
-    pe.plotLog(
-        configs,
-        "100x100, load:0.15-1, PBC, seeds:40",
-        labels=labels,
-        # show=True,
-        # xLims=xLims,
-    )
-
-
 def lotsOThreads():
     nrThreads = 64
     nrSeeds = 3
@@ -107,7 +93,7 @@ def runOnServer():
 
 
 def runOnLocalMachine():
-    configs, labels = propperJob(3, 1, size=150, group_by_seeds=False)
+    configs, labels = propperJob(3, seeds=[1], size=150, group_by_seeds=False)
     run_many_locally(configs)
 
 

@@ -102,6 +102,8 @@ def makeAnimations(
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in zip([plot_mesh, plot_nodes], ["mesh", "nodes"]):
+        if fileName == "nodes" and True:  # Skip making nodes video
+            continue
         images = make_images(function, framePath, vtu_files, macro_data, transparent)
 
         outPath = os.path.join(path, f"{fileName}_video.mp4")

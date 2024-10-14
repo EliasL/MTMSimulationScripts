@@ -91,7 +91,7 @@ def symbolicContiPotential():
 
 def numericContiPotential(compute_derivative=False, compute_second_derivative=False):
     # Define the potential (phi) symbolically
-    phi = symbolicContiPotential()  # Assumed to be defined elsewhere
+    phi = symbolicContiPotential()
 
     # Initialize default return values
     fast_first_derivatives = None
@@ -123,3 +123,63 @@ def numericContiPotential(compute_derivative=False, compute_second_derivative=Fa
         fast_first_derivatives,  # First derivatives (if any)
         fast_second_derivatives,  # Second derivatives (if any)
     )
+
+
+if __name__ == "__main__":
+    from sympy import expand, collect, latex
+
+    def symbolicContiPotential():
+        # Get the symbolic expression for the potential energy
+        phi = polynomialEnergy(*phiArgs)
+
+        # Expand the expression to expose all terms involving powers of c11, c22, and c12
+        expanded_phi = expand(phi)
+
+        # Collect terms by powers of c11, c22, and c12
+        collected_phi = collect(expanded_phi, [c11, c22, c12])
+
+        # Break down the expression into individual terms
+        terms = collected_phi.as_ordered_terms()
+
+        return terms
+
+    def evaluate_terms_with_input(
+        c11_val, c22_val, c12_val, beta_val, K_val, noise_val
+    ):
+        # Get the individual terms from the symbolic potential
+        terms = symbolicContiPotential()
+
+        # Substitute the provided values into each term
+        substituted_terms = [
+            term.subs(
+                {
+                    c11: c11_val,
+                    c22: c22_val,
+                    c12: c12_val,
+                    beta: beta_val,
+                    K: K_val,
+                    noise: noise_val,
+                }
+            )
+            for term in terms
+        ]
+
+        return substituted_terms
+
+    # Example: Provide input values for c11, c22, c12, beta, K, and noise
+    s = 10000
+    c11_val = s**2
+    c22_val = 1 / s**2
+    c12_val = 0.0
+    beta_val = -0.25
+    K_val = 4
+    noise_val = 1
+    # Get the evaluated terms with the input values
+    evaluated_terms = evaluate_terms_with_input(
+        c11_val, c22_val, c12_val, beta_val, K_val, noise_val
+    )
+    terms = symbolicContiPotential()
+    # Print each term and its evaluated value
+    for i, term in enumerate(evaluated_terms, 1):
+        # print(f"Term {i}: {latex(terms[i-1])}")
+        print(f"Term {i}: {term}")

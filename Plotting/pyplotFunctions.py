@@ -36,8 +36,12 @@ class VTUData:
     def get_nodes(self):
         return vtk_to_numpy(self.mesh.GetPoints().GetData())
 
-    def get_stress_field(self):
+    def get_force_field(self):
+        # NB this is "force". Check the C++ code, might not be what you think
         return vtk_to_numpy(self.mesh.GetPointData().GetArray("stress_field"))
+
+    def get_stress_field(self):
+        return vtk_to_numpy(self.mesh.GetCellData().GetArray("P12"))
 
     def get_energy_field(self):
         return vtk_to_numpy(self.mesh.GetCellData().GetArray("energy_field"))
@@ -139,10 +143,10 @@ def base_plot(args):
 
     metadata = get_data_from_name(vtu_file)
     lines = [
-        f"State: {metadata['name']}",
+        f"{metadata['name']}",
         f"Frame: {frame_index}, " + f"Load: {float(metadata['load']):.3f}",
     ]
-    ax.set_title("\n".join(lines))
+    ax.set_title("\n".join(lines), fontsize=8)
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -196,6 +200,20 @@ def calculate_valid_indices(n, m):
     return valid_indices
 
 
+def trim_connections(nr_nodes, connections):
+    # Connections is an Nx3 array where the three numbers indicate
+    # the indexes of the nodes that should form elements
+    # This function removes all the elements that connect nodes that
+    # have an index larger than nr_nodes
+
+    mask = np.all(connections < nr_nodes, axis=1)
+
+    # Use the mask to filter the connections
+    trimmed_connections = connections[mask]
+
+    return trimmed_connections
+
+
 def plot_nodes(args):
     (
         framePath,
@@ -242,7 +260,7 @@ def plot_nodes(args):
     # Grid
     energy_field = data.get_energy_field()
     connectivity = data.get_connectivity()
-
+    connectivity = trim_connections(len(x), connectivity)
     shifts = calculate_shifts(nodes, data.BC, data.load)
     for dx in shifts:
         for dy in shifts:
@@ -267,7 +285,7 @@ def plot_nodes(args):
     return path
 
 
-def plot_mesh(args):
+def plot_mesh(args, useStress=True):
     (
         framePath,
         vtu_file,
@@ -279,35 +297,40 @@ def plot_mesh(args):
     ) = args
     ax, fig = base_plot(args)
 
-    cmap_colors = [
-        (0.0, (0.29, 0.074, 0.38)),
-        (0.07, "#0052cc"),
-        (0.3, "#ff6f61"),
-        (0.9, "orange"),
-        (1.0, "red"),
-    ]
-
-    # Create a color map from the list of colors and positions
-    custom_cmap = mcolors.LinearSegmentedColormap.from_list(
-        "custom_cmap", cmap_colors, N=512
-    )
-
-    # Define a normalization that highlights small energy changes
-    gamma = 1  # Adjust this parameter as needed to highlight small energy changes
-    norm = mcolors.PowerNorm(gamma=gamma, vmin=global_min, vmax=global_max)
-
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
-    energy_field = data.get_energy_field()
     connectivity = data.get_connectivity()
     x, y = nodes[:, 0], nodes[:, 1]
+
+    if useStress:
+        field = data.get_stress_field()
+        cmap = "coolwarm"
+        norm = mcolors.Normalize(vmin=-1.5, vmax=1.5)
+    else:
+        field = data.get_energy_field()
+        cmap_colors = [
+            (0.0, (0.29, 0.074, 0.38)),
+            (0.07, "#0052cc"),
+            (0.3, "#ff6f61"),
+            (0.9, "orange"),
+            (1.0, "red"),
+        ]
+
+        # Create a color map from the list of colors and positions
+        cmap = mcolors.LinearSegmentedColormap.from_list(
+            "custom_cmap", cmap_colors, N=512
+        )
+
+        # Define a normalization that highlights small energy changes
+        gamma = 1  # Adjust this parameter as needed to highlight small energy changes
+        norm = mcolors.PowerNorm(gamma=gamma, vmin=global_min, vmax=global_max)
 
     shifts = calculate_shifts(nodes, data.BC, data.load)
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
             triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
-            ax.tripcolor(triang, facecolors=energy_field, norm=norm, cmap=custom_cmap)
+            ax.tripcolor(triang, facecolors=field, norm=norm, cmap=cmap)
 
     draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
     path = f"{framePath}/mesh_frame_{frame_index:04d}.png"

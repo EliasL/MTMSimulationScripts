@@ -230,9 +230,11 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
     return configs, labels
 
 
-def propperJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+def propperJob(nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None):
+    if seeds is None:
+        seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(
-        seed=range(nrSeeds),
+        seed=seeds,
         group_by_seeds=group_by_seeds,
         rows=size,
         cols=size,

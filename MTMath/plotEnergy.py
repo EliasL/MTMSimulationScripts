@@ -4,6 +4,8 @@ from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
 from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import colors
+from matplotlib import cm
 
 
 def OneDPotential():
@@ -57,7 +59,7 @@ def lagrange_reduction(C11, C22, C12, loops=600):
 
 
 def generate_energy_grid(
-    resolution=500, beta=-0.25, K=4, min_energy=3.9, max_energy=4.16, return_XY=False
+    resolution=500, beta=-0.25, K=4, energy_lim=(None, 4.15), return_XY=False
 ):
     # Load the potential and its derivatives (assuming this function is defined elsewhere)
     phi, divPhi, divDivPhi = numericContiPotential()
@@ -95,13 +97,14 @@ def generate_energy_grid(
     # Apply the phi function only to the points inside the unit circle
     energy_grid[mask] = phi(C11[mask], C22[mask], C12[mask], beta, K, 1)
 
-    # Cap energies to avoid extreme values
-    if min_energy is None:
-        min_energy = energy_grid.min()
-    if max_energy is None:
-        max_energy = energy_grid.max()
+    if energy_lim is None:
+        energy_lim = (np.nanmin(energy_grid), np.nanmax(energy_grid))
+    elif energy_lim[0] is None:
+        energy_lim[0] = np.nanmin(energy_grid)
+    elif energy_lim[1] is None:
+        energy_lim[1] = np.nanmax(energy_grid)
 
-    energy_grid = np.clip(energy_grid, min_energy, max_energy)
+    energy_grid = np.clip(energy_grid, *energy_lim)
     if return_XY:
         return energy_grid, X, Y
     else:
@@ -303,7 +306,18 @@ def plot_arch(
     # add_arrow_3d(x_circle, y_circle, z_circle, ax, i - 1, i, size=15, color="red")
 
 
-def make3DEnergyField(energy_grid, X, Y, energy_lim=None, zScale=0.3, zoom=0):
+def make3DEnergyField(
+    energy_grid,
+    X,
+    Y,
+    energy_lim=None,
+    zScale=0.3,
+    zoom=0,
+    add_front_hole=True,
+    remove_max_color=True,
+    left_arch=False,
+    right_arch=True,
+):
     print("Plotting energy field...")
 
     # Create a 3D plot
@@ -319,34 +333,39 @@ def make3DEnergyField(energy_grid, X, Y, energy_lim=None, zScale=0.3, zoom=0):
 
     # Calculate the radii from the meshgrid (X, Y)
     radii = np.sqrt(X**2 + Y**2)
-    # For a better view of the landscape, we also want to hide a small portion
-    # (0, 0.4)
-    # Calculate the radii from the meshgrid (X, Y)
-    radii2 = np.sqrt((X) ** 2 + (Y - 1.4) ** 2)
-
     # Create the first mask for points outside the main circle
-    mask1 = radii > 0.8
+    center_mask = radii > 0.8
 
-    # Create the second mask to exclude the small portion
-    mask2 = radii2 < 1
-
-    # Remove large max plates
-    d = 0.6
-    r = 0.35
-    radii3 = np.sqrt((X - d) ** 2 + (Y) ** 2)
-    radii4 = np.sqrt((X + d) ** 2 + (Y) ** 2)
-    mask3 = (radii3 < r) | (radii4 < r)
-    # Combine the two masks using element-wise logical AND
-    mask = mask1 | mask2 | mask3
+    if add_front_hole:
+        # For a better view of the landscape, we also want to hide a small portion
+        # (0, 0.4)
+        # Calculate the radii from the meshgrid (X, Y)
+        radii2 = np.sqrt((X) ** 2 + (Y - 1.4) ** 2)
+        # Create the second mask to exclude the small portion
+        front_hole = radii2 < 1
+        mask = center_mask | front_hole
+    else:
+        mask = center_mask
 
     # Apply the mask to the energy grid to set values outside the unit circle to NaN
     energy_grid[mask] = np.nan
+
+    base_cmap_name = "coolwarm"
+    if remove_max_color:
+        coolwarm = cm.get_cmap(base_cmap_name, 256)  # 256 colors
+        newcolors = coolwarm(np.linspace(0, 1, 256))
+        n = 2
+        newcolors[-n:, -1] = np.linspace(1, 0, n) ** (1 / 2)
+        cmap = colors.ListedColormap(newcolors)
+    else:
+        cmap = base_cmap_name
+
     # Plot the surface with the masked energy grid
     surf = ax.plot_surface(
         X,
         Y,
         energy_grid,
-        cmap="coolwarm",
+        cmap=cmap,
         linewidth=0,
         antialiased=False,
         rstride=1,  # Increase the number of rows used for plotting
@@ -355,10 +374,13 @@ def make3DEnergyField(energy_grid, X, Y, energy_lim=None, zScale=0.3, zoom=0):
         vmax=energy_lim[1],
     )
     # plot semi-circles
-    plot_arch(energy_grid, X, Y, ax, start_angle=-1.3, end_angle=0.9, center_x=-0.5)
-    # plot_arch(energy_grid, X, Y, ax, start_angle=3.8, end_angle=2, center_x=0.5)
+    if right_arch:
+        plot_arch(energy_grid, X, Y, ax, start_angle=-1.2, end_angle=0.9, center_x=-0.5)
+    if left_arch:
+        plot_arch(energy_grid, X, Y, ax, start_angle=3.9, end_angle=2.2, center_x=0.5)
     # Add a color bar
-    cbar = fig.colorbar(surf)
+    cbar = fig.colorbar(surf, location="right")
+
     zLabel = r"Energy density ($\Phi$)"
     cbar.set_label(zLabel)
 
@@ -386,7 +408,7 @@ def make3DEnergyField(energy_grid, X, Y, energy_lim=None, zScale=0.3, zoom=0):
         energy_lim[0] - 0.5 / zScale * np.diff(energy_lim),
         energy_lim[1] + 0.5 / zScale * np.diff(energy_lim),
     )
-    ax.view_init(elev=30, azim=70)  # Set the view angle (elevation and azimuth)
-
+    ax.view_init(elev=35, azim=80)  # Set the view angle (elevation and azimuth)
+    fig.tight_layout()
     plt.savefig("Plots/3DEnergy.png", dpi=500)
     # plt.show()

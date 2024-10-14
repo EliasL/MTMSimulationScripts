@@ -1,6 +1,5 @@
 from makeAnimations import makeAnimations
-from makePlots import makeEnergyPlot, makeItterationsPlot  # noqa: F401
-from makeEnergyField import plotEnergyField  # noqa: F401
+from makePlots import makeEnergyPlot, makeItterationsPlot, makeStressPlot  # noqa: F401
 from settings import settings
 import sys
 import os
@@ -27,16 +26,26 @@ def plotAll(configFile, dataPath, noVideo=False, **kwargs):
     # path = '/Volumes/data/KeepSafe/150x150FireVsLBFGS/simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0/'
     # subfolderName = 'simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0'
     print(f"Plotting at {path}")
-    makeEnergyPlot(os.path.join(path, macroData), subfolderName + "_energy.pdf")
+    csvPath = os.path.join(path, macroData)
+    makeEnergyPlot(csvPath, subfolderName + "_energy.pdf")
+    makeStressPlot(csvPath, subfolderName + "_stress.pdf")
+
     # makeItterationsPlot(path+macroData, subfolderName+"_itterations.pdf")
     if not noVideo:
         makeAnimations(path, **kwargs)
+
+    makeStressPlot(
+        csvPath,
+        subfolderName + "_stress+.pdf",
+        add_images=True,
+        labels=conf.minimizer,
+    )
 
     # energyGridName = "energy_grid.csv"
     # makeEnergyField(path, energyGridName)
 
 
-if __name__ == "__main__":
+def handle_args_and_plot():
     import argparse
 
     parser = argparse.ArgumentParser(description="Process some arguments.")
@@ -56,7 +65,11 @@ if __name__ == "__main__":
 
     plotAll(args.config, outputPath, args.noVideo, makeGIF=args.makeGIF)
 
+
+if __name__ == "__main__":
+    handle_args_and_plot()
+
     # outputPath = findOutputPath()
-    # config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
-    # config = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,0.001,1.0PBCt4LBFGSEpsx0.0001eps0.001s0/config.conf"
-    # plotAll(config, outputPath, makeGIF=True, transparent=False)
+    # # config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
+    # config = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0/config.conf"
+    # plotAll(config, outputPath, makeGIF=False, transparent=False)

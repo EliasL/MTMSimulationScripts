@@ -30,7 +30,7 @@ class SimulationConfig:
         # - LBFGS
         self.LBFGSNrCorrections = 10  # nr correction vector paris, variable m in A Limited Memory Algorithm for Bound Constrained Optimization
         self.LBFGSScale = 1.0
-        self.LBFGSEpsg = 0.0
+        self.LBFGSEpsg = 0.1
         self.LBFGSEpsf = 0.0
         self.LBFGSEpsx = 0.0
         self.LBFGSMaxIterations = 0
@@ -111,8 +111,20 @@ class SimulationConfig:
 
         if "_" in name:
             raise AttributeError("The name is not allowed to contain '_'!")
+        self.validate_threshold()
 
         return name
+
+    def validate_threshold(self):
+        if self.minimizer == "LBFGS":
+            if self.LBFGSEpsf == 0 and self.LBFGSEpsg == 0 and self.LBFGSEpsx == 0:
+                raise AttributeError("No threshold set!")
+        elif self.minimizer == "CG":
+            if self.CGEpsf == 0 and self.CGEpsg == 0 and self.CGEpsx == 0:
+                raise AttributeError("No threshold set!")
+        elif self.minimizer == "FIRE":
+            if self.eps == 0 and self.epsRel == 0:
+                raise AttributeError("No threshold set!")
 
     def get_path_and_name(self, path, withExtension=True):
         filename = self.generate_name(withExtension)
@@ -354,7 +366,9 @@ if __name__ == "__main__":
     import os
     import sys
 
-    config = SimulationConfig(loadIncrement=0.01, minimizer="CG", nrThreads=1)
+    config = SimulationConfig(
+        loadIncrement=0.01, minimizer="LBFGS", nrThreads=3, LBFGSEpsg=1e-5
+    )
     if len(sys.argv) >= 2:
         scenario = sys.argv[1]
         config.scenario = scenario
