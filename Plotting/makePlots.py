@@ -18,6 +18,8 @@ from matplotlib.ticker import MaxNLocator
 from tqdm import tqdm
 import scipy
 from pathlib import Path
+from pyplotFunctions import plot_mesh
+from dataFunctions import get_data_from_name
 
 
 def plotYOverX(
@@ -97,19 +99,16 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
 
 
 # Process drops
-def pros_d(df, start_index, end_index, min_npd, strainLims):
-    # TODO handle innerstrainLims
-    index_range = slice(start_index + 1, end_index)
-
+def pros_d(df, min_npd, strainLims):
     e = [key for key in df.columns if key not in ["Load", "Nr plastic deformations"]][0]
 
-    diffs = np.diff(df[e][index_range])
+    diffs = np.diff(df[e])
 
     # Combine all conditions into a single mask using element-wise logical AND
     mask = (
-        (df["Nr plastic deformations"][index_range] >= min_npd)
-        & (df["Load"][index_range] >= strainLims[0])
-        & (df["Load"][index_range] <= strainLims[1])
+        (df["Nr plastic deformations"] >= min_npd)
+        & (df["Load"] >= strainLims[0])
+        & (df["Load"] <= strainLims[1])
     )
     # Since np.diff reduces the length by 1, adjust the mask accordingly
     # The mask needs to exclude the first entry, so slice the mask by [1:]
@@ -140,31 +139,22 @@ def getPowerLawFit(
     # limits. That way, the two regions we are interested in analysing is
     # given by (O1, I1) and (I2, O2).
 
-    # Strange way of finding the remaining key
-    e = [
-        key for key in dfs[0].columns if key not in ["Load", "Nr plastic deformations"]
-    ][0]
-
     # If we split, we find the largest energy value of the system and analyse
     # the pre and post yield seperately
     if split:
         pre_yield_drops = [
             pros_d(
-                df,
-                0,
-                np.argmax(df[e]) + 1,
-                minNrOfDeformations,
-                (outerStrainLims[0], innerStrainLims[0]),
+                df=df,
+                min_npd=minNrOfDeformations,
+                strainLims=(outerStrainLims[0], innerStrainLims[0]),
             )
             for df in dfs
         ]
         post_yield_drops = [
             pros_d(
-                df,
-                np.argmax(df[e]) + 1,
-                len(df[e]),
-                minNrOfDeformations,
-                (innerStrainLims[1], outerStrainLims[1]),
+                df=df,
+                min_npd=minNrOfDeformations,
+                strainLims=(innerStrainLims[1], outerStrainLims[1]),
             )
             for df in dfs
         ]
@@ -175,10 +165,7 @@ def getPowerLawFit(
     else:
         combined_drops = [
             np.concatenate(
-                [
-                    pros_d(df, 0, len(df[e]), minNrOfDeformations, outerStrainLims)
-                    for df in dfs
-                ]
+                [pros_d(df, minNrOfDeformations, outerStrainLims) for df in dfs]
             )
         ]
 
@@ -284,12 +271,20 @@ def doBootstrap(drops, n, fit_func):
 line_styles = ["-", "--", "-.", ":"]
 markers = ["v", "o", "^", "s", "D", "p", "*"]
 colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+colors = {"FIRE": "#d24646", "L-BFGS": "#008743", "CG": "#ffa701"}
 color_index = 0
 index = 0
 
 
 def plotSplitPowerLaw(
-    dfs, fig=None, ax=None, label="", minEnergy=1e-5, innerStrainLims=(np.inf, -np.inf)
+    dfs,
+    fig=None,
+    ax=None,
+    label="",
+    minEnergy=1e-5,
+    innerStrainLims=(np.inf, -np.inf),
+    plot_pre_yield=True,
+    plot_post_yield=True,
 ):
     global color_index, index, line_index
     if ax is None:
@@ -303,10 +298,16 @@ def plotSplitPowerLaw(
     )
 
     for fit, drops, part_label, index in zip(
-        c_fits, c_drops, ["pre yield", "post yield"], [0, 1]
+        c_fits, c_drops, [" pre yield", " post yield"], [0, 1]
     ):
         if len(drops) == 0:
             continue
+        if part_label == "pre yield" and not plot_pre_yield:
+            continue
+        if part_label == "post yield" and not plot_post_yield:
+            continue
+        if not (plot_post_yield and plot_pre_yield):
+            part_label = ""
         ax = plotPowerLaw(drops, ax, fit, label, part_label)
 
     # Increment the global call count
@@ -326,6 +327,7 @@ def plotSplitPowerLaw(
 def plotPowerLaw(drops, ax, fit, label, part_label):
     # np.savetxt(f"{label}{part_label}.csv", drops, delimiter=",")
 
+    global color_index, index
     xmin, xmax = np.min(drops), np.max(drops)
 
     # Set up bins and plot histogram
@@ -334,15 +336,12 @@ def plotPowerLaw(drops, ax, fit, label, part_label):
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
     # Get the current color
-    color = colors[color_index]
-
-    # Separated the pre and post lines
-    shift = [1e2, 1][index]
+    color = colors[label]
 
     # Plot the histogram with marker only, but don't show in legend
     ax.scatter(
         bin_centers,
-        hist / shift,
+        hist,
         marker=markers[index],
         facecolors="none",
         edgecolors=color,
@@ -353,7 +352,7 @@ def plotPowerLaw(drops, ax, fit, label, part_label):
     # Plot the line only, but don't show in legend
     ax.plot(
         fit.truncated_power_law.parent_Fit.data,
-        fit.truncated_power_law.pdf() / shift,
+        fit.truncated_power_law.pdf(),
         line_styles[index],
         label="_nolegend_",
         color=color,
@@ -366,7 +365,7 @@ def plotPowerLaw(drops, ax, fit, label, part_label):
         [],
         line_styles[index],
         marker=markers[index],
-        label=rf"{label.split(' seed')[0].replace('minimizer=', '')} {part_label} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
+        label=rf"{label.split(' seed')[0].replace('minimizer=', '')}{part_label} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
         color=color,
     )
     print(f"{label} {part_label}: {fit.truncated_power_law.alpha}")
@@ -569,6 +568,7 @@ def makePlot(
     Y=None,
     x_name=None,
     y_name=None,
+    use_y_axis_name=True,
     labels=None,
     use_title=False,
     title=None,
@@ -588,6 +588,16 @@ def makePlot(
     legend=None,
     add_shift=False,
     add_images=False,
+    image_pos=None,
+    image_size=0.4,
+    ax=None,
+    fig=None,
+    save=True,
+    mark=None,
+    mark_pos=(0.8, 0.95),
+    legend_loc="best",
+    plot_pre_yield=True,
+    plot_post_yield=True,
 ):
     if len(csv_file_paths) == 0 or (
         len(csv_file_paths) > 0 and len(csv_file_paths[0]) == 0
@@ -600,9 +610,11 @@ def makePlot(
         else:
             x_name = X
 
-    if y_name is None:
+    if y_name is None and use_y_axis_name:
         if Y == "Avg RSS":
             y_name = r"Stress ($\sigma$)"
+        elif Y == "Avg energy":
+            y_name = r"Energy ($E$)"
         else:
             y_name = Y
 
@@ -610,17 +622,21 @@ def makePlot(
     if isinstance(csv_file_paths, str):
         csv_file_paths = [csv_file_paths]
 
-    fig, ax = plt.subplots()
+    if fig is None or ax is None:
+        assert fig is None
+        assert ax is None
+        fig, ax = plt.subplots()
+
     lines = []
     data = []
     xData = []
+
+    ax.set_xlim(*xLims)
+    ax.set_ylim(*yLims)
+
     for i, csv_file_path in enumerate(csv_file_paths):
         if X is None:
             break
-        """
-        /Volumes/data/MTS2D_output/simpleShear,s20x20l0.15,1e-05,1.0PBCt4minimizerLBFGSLBFGSEpsg1e-06s0/macroData.csv
-        /Volumes/data/MTS2D_output/simpleShear,s20x20l0.15,1e-05,1PBCt4minimizerLBFGSLBFGSEpsg1e-06s0/macroData.csv
-        """
         if isinstance(Y, str):
             df = pd.read_csv(csv_file_path, usecols=[X, Y])
         else:
@@ -709,6 +725,8 @@ def makePlot(
             "label": "Fit",
             "color": "black",
             "include_label": legend,
+            "plot_pre_yeild": plot_pre_yield,
+            "plot_post_yield": plot_post_yield,
         }
         fig, ax, line = plotSplitPowerLaw(data, **kwargs)
 
@@ -733,9 +751,9 @@ def makePlot(
     ]
 
     # Set the legend with the filtered handles and labels
-    if legend:
-        ax.legend(line_handles, line_labels, loc=("best"))
-    if isinstance(legend, list):
+    if legend and isinstance(legend, bool):
+        ax.legend(line_handles, line_labels, loc=legend_loc)
+    elif isinstance(legend, list):
         custom_legend = [
             mlines.Line2D(
                 [], [], color="blue", marker="o", linestyle="-", label="Custom Label 1"
@@ -750,10 +768,20 @@ def makePlot(
             ),
         ]
         # Create the legend with custom labels
-        ax.legend(handles=custom_legend)
+        ax.legend(handles=custom_legend, loc=legend_loc)
+    elif isinstance(legend, str):
+        ax.legend(line_handles, [legend], loc=legend_loc)
     if add_images:
         i = 0
-        addImagesToPlot(ax, csv_file_paths[i], xData[i], data[i])
+        addImagesToPlot(
+            ax,
+            csv_file_paths[i],
+            xData[i],
+            data[i],
+            image_pos,
+            image_size,
+            use_stress=Y == "Avg RSS",
+        )
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
     if use_title:
@@ -762,110 +790,104 @@ def makePlot(
         else:
             ax.set_title(title)
     ax.autoscale_view()
-    figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
-    fig.savefig(figPath)
-    print(f'Plot saved at: "{figPath}"')
+    if mark:
+        assert mark_pos is not None
+        add_mark(ax, f"({mark})", *mark_pos)
+
+    if save:
+        figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
+        fig.savefig(figPath)
+        print(f'Plot saved at: "{figPath}"')
     if show:
         plt.show()
     return fig, ax
 
 
-def cropImage(image_path):
-    image = mpimg.imread(image_path)
-
-    # Convert to grayscale
-    gray_image = np.mean(image, axis=2)  # Averaging the RGB values to get a grayscale
-
-    dim = gray_image.shape[:2]
-    middlex = int(dim[0] / 2)
-    middley = int(dim[1] / 2)
-
-    # Define thresholds for white and black
-    white_threshold = 0.95 * gray_image.max()  # Close to white
-
-    # Find the columns where the image is not white (less than threshold)
-    non_white_columns = np.where(gray_image[middlex, :] < white_threshold)[0]
-
-    # Determine the left and right boundaries
-    left_bound = non_white_columns[0]
-    right_bound = non_white_columns[-1]
-
-    # Crop horizontally (left and right boundaries)
-    cropped_image = image[:, left_bound:right_bound, :]
-
-    # Find the difference between the color channels is above some threshold
-    # in other words, searching for non grey scale colors (tecnically does not )
-    # Calculate the difference between the color channels along the RGB axis (axis 2)
-    channel_diff = np.max(image[:, middley, :3], axis=1) - np.min(
-        image[:, middley, :3], axis=1
+def add_mark(ax, mark, x, y, color="black"):
+    # Adding LaTeX-style bold font using \textbf{}
+    ax.text(
+        x,
+        y,
+        r"$\textbf{" + mark + "}$",  # LaTeX syntax for bold
+        transform=ax.transAxes,
+        fontsize=30,
+        va="top",
+        ha="left",
+        color=color,
     )
 
-    # Find where the difference exceeds the threshold (indicating non-grey colors)
-    non_black_white_rows = np.where(channel_diff > 0.1)[0]
 
-    # Determine the top boundary
-    top_bound = non_black_white_rows[0]
+def addImagesToPlot(ax, csv_file_path, x, y, image_pos, size=0.4, use_stress=True):
+    # First we get the folder with vtu_files
+    framesPath = Path(csv_file_path).parent / "data"
 
-    # Crop vertically (top boundary)
-    final_cropped_image = cropped_image[top_bound:, :, :]
+    # Define the regex pattern to match the file names and find the number between the dots
+    pattern = re.compile(r".*\.(\d*)\.vtu")
 
-    return final_cropped_image
-
-
-def addImagesToPlot(ax, csv_file_path, x, y):
-    # First we get the folder with frames
-    framesPath = Path(csv_file_path).parent / "frames"
-
-    # Define the regex pattern to match the file names (mesh_frame_xxxx.png)
-    pattern = re.compile(r"mesh_frame_(\d{4})\.png")
-
-    # Get all files in the folder matching the pattern
+    # Get all files in the folder matching the pattern and extract both the number and full path
     matching_files = [
-        f for f in framesPath.iterdir() if f.is_file() and pattern.match(f.name)
+        (
+            int(pattern.match(f.name).group(1)),
+            f,
+        )  # Create a tuple with the number and the full path
+        for f in framesPath.iterdir()
+        if f.is_file() and pattern.match(f.name)
     ]
 
-    # Extract the numbers from the filenames
-    file_numbers = [int(pattern.match(f.name).group(1)) for f in matching_files]
+    # Sort the list of tuples by the number (the first element of the tuple)
+    matching_files.sort(key=lambda x: x[0])
 
-    # Sort the numbers
-    file_numbers.sort()
+    # Extract the paths for the first, middle, and last files
+    first_file = matching_files[0][1]
+    middle_file = matching_files[int(len(matching_files) * 0.45)][1]
+    last_file = matching_files[-1][1]
 
-    # Get the first, middle, and last numbers
-    first_number = file_numbers[0]
-    middle_number = file_numbers[int(len(file_numbers) * 0.7)]
-    last_number = file_numbers[-1]
-    s = 0.3
-    for num, pos in zip(
-        [first_number, middle_number, last_number],
-        [
-            [0.05, 0.45, s, s],  # first image, middle left
-            [0.1, 0.8, s, s],  # second image, top slight middle
-            [0.55, 0.05, s, s],  # bottom middle
-        ],
+    if not isinstance(size, list):
+        size = size * 3
+
+    for i, vtu_file, index_fraction in zip(
+        range(3),
+        [first_file, middle_file, last_file],
+        [0, 0.45, 0.999],
     ):
-        # Construct the paths for the first, middle, and last images
-        image_path = framesPath / f"mesh_frame_{num:04d}.png"
-
         # Top left for the first image
-        ax_inset = ax.inset_axes(pos)  # (left, bottom, width, height)
-        img = cropImage(image_path)
-        ax_inset.imshow(img)
+        #                           (left, bottom, width, height)
+        ax_inset = ax.inset_axes((image_pos[i][0], image_pos[i][1], size[i], size[i]))
+        plot_mesh(
+            vtu_file=vtu_file,
+            ax=ax_inset,
+            add_rombus=False,
+            shift=False,
+            useStress=use_stress,
+        )
         ax_inset.axis("off")
 
         # Now we want to make arrows that point to the graph where the image is
         # taken from
-        index = int(num / len(file_numbers) * len(y))
-        y_value = y[index]
-        x_value = x[index]
 
+        # This should work, but there is a desync in my data somehow that means the
+        # load in the vtu files are not accurate
+        if False:
+            # First we find the load
+            load = get_data_from_name(vtu_file)["load"]
+
+            x_value = float(load)
+            # we find the index that is closest to this load,
+            # and use that to find a y value
+            index = np.abs(x - x_value).argmin()
+            y_value = y[index]
+        else:
+            value_index = int(index_fraction * len(x))
+            x_value = x[value_index]
+            y_value = y[value_index]
         # Get axis limits
         xlim = ax.get_xlim()
         ylim = ax.get_ylim()
 
         # Convert normalized coordinates to actual axis coordinates
         arrow_start = (
-            xlim[0] + (pos[0] + s / 2) * (xlim[1] - xlim[0]),
-            ylim[0] + (pos[1] + s / 2) * (ylim[1] - ylim[0]),
+            xlim[0] + (image_pos[i][0] + size[i] / 2) * (xlim[1] - xlim[0]),
+            ylim[0] + (image_pos[i][1] + size[i] / 2) * (ylim[1] - ylim[0]),
         )
 
         # Arrow's ending point (the point on the main plot where the image corresponds to)
@@ -876,14 +898,21 @@ def addImagesToPlot(ax, csv_file_path, x, y):
             "",  # No text
             xy=arrow_end,  # End of the arrow (on the main plot)
             xytext=arrow_start,  # Start of the arrow (from the inset)
-            arrowprops=dict(facecolor="black", shrink=0.05, width=2, headwidth=10),
+            arrowprops=dict(
+                facecolor="black", shrink=0.05, width=0.5, headwidth=5, headlength=5
+            ),
         )
 
 
 def removeBadData(df, Y, crash_count, csv_file_path):
     # Check for Y values greater than some value (0.07?) and truncate
-    max_change = 0.00005
-    max_value = 0.01
+    if Y == "Avg energy":
+        max_change = 0.0005
+        max_value = 0.01
+    elif Y == "Avg RSS":
+        max_change = 0.01
+        max_value = 0.4
+
     diffs = np.diff(df[Y])
     if (diffs > max_change).any():
         crash_count += 1
@@ -894,19 +923,29 @@ def removeBadData(df, Y, crash_count, csv_file_path):
         # Combine both masks using logical AND
         combined_mask = mask_change & mask_value
         df = df[combined_mask]
-        print(f"Crash in {csv_file_path}.")
+        # print(f"Crash in {csv_file_path}.")
     return df, crash_count
 
 
-def makeEnergyPlotComparison(grouped_csv_file_paths, name, show=False, **kwargs):
-    makeComparisonPlot(grouped_csv_file_paths, name, "Avg energy", show, **kwargs)
+def makeEnergyPlotComparison(grouped_csv_file_paths, name, **kwargs):
+    return makeComparisonPlot(grouped_csv_file_paths, name, Y="Avg energy", **kwargs)
 
 
-def makeStressPlotComparison(grouped_csv_file_paths, name, show=False, **kwargs):
-    makeComparisonPlot(grouped_csv_file_paths, name, "Avg RSS", show, **kwargs)
+def makeStressPlotComparison(grouped_csv_file_paths, name, **kwargs):
+    return makeComparisonPlot(grouped_csv_file_paths, name, Y="Avg RSS", **kwargs)
 
 
-def makeComparisonPlot(grouped_csv_file_paths, name, Y, show=False, **kwargs):
+def makeComparisonPlot(
+    grouped_csv_file_paths,
+    name,
+    Y,
+    show=False,
+    use_title=False,
+    ax=None,
+    fig=None,
+    save=True,
+    **kwargs,
+):
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
     X = "Load"
@@ -917,7 +956,10 @@ def makeComparisonPlot(grouped_csv_file_paths, name, Y, show=False, **kwargs):
     x_name = r"Strain ($\gamma$)"
     title = f"{name}"
 
-    fig, ax = plt.subplots()
+    if fig is None or ax is None:
+        assert fig is None
+        assert ax is None
+        fig, ax = plt.subplots()
 
     color_index = -1
     line_index = 0
@@ -957,7 +999,7 @@ def makeComparisonPlot(grouped_csv_file_paths, name, Y, show=False, **kwargs):
                 "color": color,
                 "linestyle": line_styles[line_index],
                 "alpha": 0.05,
-                "zorder": -color_index,
+                "zorder": color_index - 10,
             }
             fig, ax, line, point = plotYOverX(df[X], df[Y], **e_kwargs)
         # Determine the maximum length among all arrays
@@ -978,31 +1020,40 @@ def makeComparisonPlot(grouped_csv_file_paths, name, Y, show=False, **kwargs):
         average = np.divide(
             average, count, out=np.zeros_like(average), where=count != 0
         )
-
+        label = getPrettyLabel(kwargs["labels"][i][0])
         a_kwargs = {
             "fig": fig,
             "ax": ax,
-            "label": getPrettyLabel(kwargs["labels"][i][0]),
-            "color": colors[color_index],
+            "label": label,
+            "color": colors[label],
             "linestyle": line_styles[line_index],
             "zorder": -color_index,
         }
         df = pd.read_csv(csv_file_paths[max_length_index], usecols=[X])
-        # df = df[0:50000]
         fig, ax, line, point = plotYOverX(df[X], average, **a_kwargs)
     if crash_count > 0:
-        print(f"Found {crash_count} crashes.")
+        print(f"Found {crash_count} crashes using {label}.")
     # Set the legend with the filtered handles and labels
-    ax.legend(loc=("best"))
+    ax.legend(loc="upper left")
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
-    ax.set_title(title)
+    if use_title:
+        ax.set_title(title)
     ax.autoscale_view()
-    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name + ".pdf")
-    fig.savefig(figPath)
-    print(f'Plot saved at: "{figPath}"')
+
+    if save:
+        # Get the parent directory of the CSV file
+        csv_directory = Path(grouped_csv_file_paths[0][0]).parent.parent
+        # Move to the "plots" directory relative to the CSV file directory
+        plotPath = csv_directory / "plots"
+
+        figPath = os.path.join(plotPath, name + ".pdf")
+        fig.savefig(figPath)
+        fig.savefig("Plots/" + name + ".pdf")
+        # print(f'Plot saved at: "{figPath}"')
     if show:
         plt.show()
+    return fig, ax
 
 
 def makeLogPlotComparison(
@@ -1015,12 +1066,25 @@ def makeLogPlotComparison(
     minEnergy=1e-6,
     outerStrainLims=[-np.inf, np.inf],
     innerStrainLims=(0.45, 0.6),
+    use_title=False,
+    use_y_axis_name=True,
     Y="Avg energy",
+    ax=None,
+    fig=None,
+    save=True,
+    show_lambda=False,
+    plot_pre_yield=True,
+    plot_post_yield=True,
+    legend_loc="best",
     **kwargs,
 ):
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
-    fig, ax = plt.subplots()
+
+    if fig is None or ax is None:
+        assert fig is None
+        assert ax is None
+        fig, ax = plt.subplots()
 
     X = "Load"
     oLims = (
@@ -1033,7 +1097,7 @@ def makeLogPlotComparison(
         if innerStrainLims == [np.inf, -np.inf]
         else f" iLims: {innerStrainLims[0]}-{innerStrainLims[1]}, "
     )
-    title = f"{name}{oLims}, "
+    title = f"{name}{oLims},"
 
     if slide:
         x_name = "Energy cutoff"
@@ -1071,11 +1135,15 @@ def makeLogPlotComparison(
 
             df, crash_count = removeBadData(df, Y, crash_count, csv_file_path)
             dfs.append(df)
+        label = getPrettyLabel(kwargs["labels"][i][0])
         log_kwargs = {
             "fig": fig,
             "ax": ax,
-            "label": getPrettyLabel(kwargs["labels"][i][j]),
+            "label": label,
+            "plot_pre_yield": plot_pre_yield,
+            "plot_post_yield": plot_post_yield,
         }
+
         if slide:
             fig, ax = plotSlidingPowerLaw(dfs, **log_kwargs)
         if window:
@@ -1086,33 +1154,46 @@ def makeLogPlotComparison(
                 fig=fig,
                 ax1=ax,
                 ax2=ax2,
-                label=getPrettyLabel(kwargs["labels"][i][j]),
+                label=label,
             )
         else:
             fig, ax = plotSplitPowerLaw(
                 dfs, minEnergy=minEnergy, innerStrainLims=innerStrainLims, **log_kwargs
             )
-    if crash_count > 0:
-        print(f"Found {crash_count} crashes.")
+        if crash_count > 0:
+            print(f"Found {crash_count} crashes using {label}.")
     # Set the legend with the filtered handles and labels
-    if window:
-        ax.legend(loc=("lower left"))
-        ax2.legend(loc=("center right"))
+    if legend_loc:
+        ax.legend(loc=legend_loc)
     else:
-        ax.legend(loc=("best"))
+        if window:
+            ax.legend(loc=("lower left"))
+            ax2.legend(loc=("center right"))
+        else:
+            ax.legend(loc=("best"))
 
-    if window and False:  # Hide second axis (with lambda)
+    if window and show_lambda:  # Hide second axis (with lambda)
         hide_twinx_axis(ax2)
 
     ax.set_xlabel(x_name)
-    ax.set_ylabel(y_name)
-    ax.set_title(title)
+    if use_y_axis_name:
+        ax.set_ylabel(y_name)
+    if use_title:
+        ax.set_title(title)
     ax.autoscale_view()
-    figPath = os.path.join(os.path.dirname(grouped_csv_file_paths[0][0]), name + ".pdf")
-    fig.savefig(figPath)
-    print(f'Plot saved at: "{figPath}"')
+    if save:
+        # Get the parent directory of the CSV file
+        csv_directory = Path(grouped_csv_file_paths[0][0]).parent.parent
+        # Move to the "plots" directory relative to the CSV file directory
+        plotPath = csv_directory / "plots"
+
+        figPath = os.path.join(plotPath, name + ".pdf")
+        fig.savefig(figPath)
+        fig.savefig("Plots/" + name + ".pdf")
+        # print(f'Plot saved at: "{figPath}"')
     if show:
         plt.show()
+    return fig, ax
 
 
 # Function to hide twinx axis
@@ -1167,7 +1248,7 @@ def makeEnergyAvalancheComparison(
         fig, ax = plotEnergyAvalancheHistogram(dfs)
 
         if crash_count > 0:
-            print(f"Found {crash_count} crashes.")
+            print(f"Found {crash_count} crashes using {["L-BFGS", "CG", "FIRE"][i]}.")
         # Set the legend with the filtered handles and labels
         # ax.legend(loc=("best"))
         # ax.set_xlabel(x_name)
@@ -1175,22 +1256,26 @@ def makeEnergyAvalancheComparison(
         title = f"{name}{lims}" + f'-{["L-BFGS", "CG", "FIRE"][i]}'
         fig.suptitle(title, fontsize=16)  # Set the main
         plt.tight_layout()  # Adjust subplots to fit into figure area.
-        figPath = os.path.join(
-            os.path.dirname(grouped_csv_file_paths[0][0]),
-            title + ".pdf",
-        )
+        # Get the parent directory of the CSV file
+        csv_directory = Path(grouped_csv_file_paths[0][0]).parent.parent
+        # Move to the "plots" directory relative to the CSV file directory
+        plotPath = csv_directory / "plots"
+
+        figPath = os.path.join(plotPath, title + ".pdf")
         fig.savefig(figPath)
+        fig.savefig("Plots/" + title + ".pdf")
+        # print(f'Plot saved at: "{figPath}"')
         print(f'Plot saved at: "{figPath}"')
         if show:
             plt.show()
 
 
 def makeEnergyPlot(csv_file_paths, name, **kwargs):
-    makePlot(csv_file_paths, name, X="Load", Y="Avg energy", **kwargs)
+    return makePlot(csv_file_paths, name, X="Load", Y="Avg energy", **kwargs)
 
 
 def makeStressPlot(csv_file_paths, name, **kwargs):
-    makePlot(csv_file_paths, name, X="Load", Y="Avg RSS", **kwargs)
+    return makePlot(csv_file_paths, name, X="Load", Y="Avg RSS", **kwargs)
 
 
 def makeItterationsPlot(csv_file_paths, name, **kwargs):

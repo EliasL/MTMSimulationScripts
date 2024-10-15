@@ -93,7 +93,7 @@ def runOnServer():
 
 
 def runOnLocalMachine():
-    configs, labels = propperJob(3, seeds=[1], size=150, group_by_seeds=False)
+    configs, labels = propperJob(3, seeds=[0], size=150, group_by_seeds=False)
     run_many_locally(configs)
 
 

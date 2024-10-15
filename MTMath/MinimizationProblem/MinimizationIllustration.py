@@ -519,7 +519,11 @@ def plot_energy(
                 zorder=2,
             )
         if threshold:
-            ax.hlines(threshold, c="b", linestyles="--")
+            # Get the current x-axis limits
+            xmin, xmax = ax.get_xlim()
+
+            # Draw a horizontal line across the entire plot
+            ax.hlines(threshold, xmin=xmin, xmax=xmax, color="b", linestyles="--")
 
     # Handling the legend and reordering
     handles, labels = ax.get_legend_handles_labels()
@@ -688,7 +692,7 @@ def explore_six_hump_camel():
         plot_results(X, Y, Z, minima, results, name, loc="upper right")
 
 
-# Article plot
+# MDPI Article plot
 def explore_three_hump_camel():
     # Combine all algorithms or split them into different plots
     split = True
@@ -738,7 +742,8 @@ def explore_three_hump_camel():
             plot_results(X, Y, Z, minima, r, n, res_ax[idx], lims=zooms[i], alg=alg)
             add_mark(res_ax[idx], labels[idx], 0.03, 0.95, color="white")
 
-            plot_energy(r, n, energy_ax[idx], alg=alg)
+            plot_energy(r, n, ax=energy_ax[idx], alg=alg)
+            add_mark(energy_ax[idx], labels[idx], 0.8, 0.95)
 
     else:
         # Plot without splitting across multiple axes if required

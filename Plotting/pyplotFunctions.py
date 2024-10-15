@@ -119,17 +119,7 @@ def add_padding(axis_limits, padding_ratio):
     return adjusted_x_min, adjusted_x_max, adjusted_y_min, adjusted_y_max
 
 
-def base_plot(args):
-    (
-        framePath,
-        vtu_file,
-        frame_index,
-        global_min,
-        global_max,
-        axis_limits,
-        transparent,
-    ) = args
-
+def base_plot(vtu_file=None, axis_limits=None, add_title=True, frame_index=None):
     dpi = 250
     width = 2000
     height = 1000
@@ -137,16 +127,18 @@ def base_plot(args):
     ax.set_aspect("equal")
 
     # Setting the axis limits
-    x_min, x_max, y_min, y_max = add_padding(axis_limits, 0.03)
-    ax.set_xlim(x_min, x_max)
-    ax.set_ylim(y_min, y_max)
+    if axis_limits:
+        x_min, x_max, y_min, y_max = add_padding(axis_limits, 0.03)
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
 
-    metadata = get_data_from_name(vtu_file)
-    lines = [
-        f"{metadata['name']}",
-        f"Frame: {frame_index}, " + f"Load: {float(metadata['load']):.3f}",
-    ]
-    ax.set_title("\n".join(lines), fontsize=8)
+    if add_title:
+        metadata = get_data_from_name(vtu_file)
+        lines = [
+            f"{metadata['name']}",
+            f"Frame: {frame_index}, " + f"Load: {float(metadata['load']):.3f}",
+        ]
+        ax.set_title("\n".join(lines), fontsize=8)
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -168,7 +160,7 @@ def draw_rhombus(ax, N, load, BC):
 
 
 # Function to save the figure with transparent background and close it
-def save_and_close_plot(fig, ax, path, transparent=False):
+def save_and_close_plot(ax, path, transparent=False):
     # Set anti-aliasing for lines, text, patches, etc.
     for line in ax.get_lines():
         line.set_antialiased(True)  # Anti-alias lines
@@ -188,8 +180,6 @@ def save_and_close_plot(fig, ax, path, transparent=False):
         path, bbox_inches="tight", pad_inches=0, transparent=transparent, dpi=dpi
     )
 
-    # Close the figure to free memory
-    plt.close(fig)
     plt.close()
 
 
@@ -224,7 +214,9 @@ def plot_nodes(args):
         axis_limits,
         transparent,
     ) = args
-    ax, fig = base_plot(args)
+    ax, fig = base_plot(
+        vtu_file=vtu_file, axis_limits=axis_limits, frame_index=frame_index
+    )
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
     fixed = data.get_fixed_status()
@@ -285,18 +277,25 @@ def plot_nodes(args):
     return path
 
 
-def plot_mesh(args, useStress=True):
-    (
-        framePath,
-        vtu_file,
-        frame_index,
-        global_min,
-        global_max,
-        axis_limits,
-        transparent,
-    ) = args
-    ax, fig = base_plot(args)
-
+def plot_mesh(
+    vtu_file,
+    global_min=None,
+    global_max=None,
+    useStress=True,
+    axis_limits=None,
+    frame_index=None,
+    add_title=False,
+    ax=None,
+    shift=True,
+    add_rombus=True,
+):
+    if ax is None:
+        ax, fig = base_plot(
+            vtu_file=vtu_file,
+            axis_limits=axis_limits,
+            frame_index=frame_index,
+            add_title=add_title,
+        )
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
     connectivity = data.get_connectivity()
@@ -306,10 +305,12 @@ def plot_mesh(args, useStress=True):
         field = data.get_stress_field()
         cmap = "coolwarm"
         norm = mcolors.Normalize(vmin=-1.5, vmax=1.5)
+        backgroundColor = "white"
     else:
         field = data.get_energy_field()
+        backgroundColor = (0.29, 0.074, 0.38)
         cmap_colors = [
-            (0.0, (0.29, 0.074, 0.38)),
+            (0.0, backgroundColor),
             (0.07, "#0052cc"),
             (0.3, "#ff6f61"),
             (0.9, "orange"),
@@ -324,17 +325,47 @@ def plot_mesh(args, useStress=True):
         # Define a normalization that highlights small energy changes
         gamma = 1  # Adjust this parameter as needed to highlight small energy changes
         norm = mcolors.PowerNorm(gamma=gamma, vmin=global_min, vmax=global_max)
-
-    shifts = calculate_shifts(nodes, data.BC, data.load)
+    if shift:
+        shifts = calculate_shifts(nodes, data.BC, data.load)
+    else:
+        shifts = [0]
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
             triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
-            ax.tripcolor(triang, facecolors=field, norm=norm, cmap=cmap)
+            ax.triplot(triang, color=backgroundColor, lw=0.1)
+            ax.tripcolor(
+                triang, facecolors=field, norm=norm, cmap=cmap, edgecolors="none"
+            )
 
-    draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
+    if add_rombus:
+        draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
+    return ax
+
+
+def plot_and_save_mesh(args, useStress=True):
+    (
+        framePath,
+        vtu_file,
+        frame_index,
+        global_min,
+        global_max,
+        axis_limits,
+        transparent,
+    ) = args
+
+    ax = plot_mesh(
+        vtu_file=vtu_file,
+        global_min=global_min,
+        global_max=global_max,
+        useStress=useStress,
+        axis_limits=axis_limits,
+        frame_index=frame_index,
+        add_title=True,
+    )
+
     path = f"{framePath}/mesh_frame_{frame_index:04d}.png"
-    save_and_close_plot(fig, ax, path, transparent)
+    save_and_close_plot(ax, path, transparent)
     return path
 
 

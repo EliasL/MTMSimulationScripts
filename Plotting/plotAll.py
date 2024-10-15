@@ -12,17 +12,13 @@ from simulationManager import findOutputPath
 from configGenerator import SimulationConfig
 
 
-def plotAll(configFile, dataPath, noVideo=False, **kwargs):
-    if configFile[0] != "/":
-        # This means that the config file is relative
-        configFile = os.path.join(dataPath, configFile)
-
+def plotAll(configFile, noVideo=False, **kwargs):
     conf = SimulationConfig(configFile)
     subfolderName = conf.name
 
     macroData = f"{settings['MACRODATANAME']}.csv"
 
-    path = os.path.join(dataPath, subfolderName)
+    path = Path(configFile).parent
     # path = '/Volumes/data/KeepSafe/150x150FireVsLBFGS/simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0/'
     # subfolderName = 'simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0'
     print(f"Plotting at {path}")
@@ -50,7 +46,6 @@ def handle_args_and_plot():
 
     parser = argparse.ArgumentParser(description="Process some arguments.")
     parser.add_argument("-c", "--config", required=True, help="Config file")
-    parser.add_argument("-o", "--output", default=None, help="Data path")
     parser.add_argument("-nV", "--noVideo", action="store_true", help="Disable video")
     parser.add_argument(
         "-t", "--transparent", action="store_true", help="Make transparent videoes"
@@ -61,9 +56,7 @@ def handle_args_and_plot():
 
     args = parser.parse_args()
 
-    outputPath = args.output if args.output else findOutputPath()
-
-    plotAll(args.config, outputPath, args.noVideo, makeGIF=args.makeGIF)
+    plotAll(args.config, args.noVideo, makeGIF=args.makeGIF)
 
 
 if __name__ == "__main__":

@@ -69,7 +69,7 @@ def speed_tests():
     nrTimesRun = 5
     # Prepare tasks with each config to be run 3 times
     tasks = [
-        (config, f"{config.generate_name(False)}-run{run_id}")
+        (config, f"{config.generate_name(withExtension=False)}-run{run_id}")
         for config in configs
         for run_id in range(1, nrTimesRun + 1)
     ]

@@ -1,6 +1,7 @@
 from itertools import product
 import os
 from collections import OrderedDict
+from collections.abc import Iterable
 
 
 class SimulationConfig:
@@ -176,40 +177,30 @@ class SimulationConfig:
 class ConfigGenerator:
     @staticmethod
     def generate(group_by_seeds=False, **kwargs):
-        """
-        Generate a list of SimulationConfig objects with combinations prioritizing the 'seed' parameter.
-
-        This method first ensures that combinations involving the 'seed' parameter are generated such that
-        the 'seed' values are the first to iterate over. It helps in generating configurations where the 'seed'
-        changes prior to other parameters, useful for setups where seed initialization is critical.
-
-        Parameters:
-            kwargs: A dictionary of argument names to iterables of possible values, where 'seed' is treated
-                    as a special parameter to be prioritized in combinations.
-
-        Returns:
-            A tuple containing a list of SimulationConfig objects and a list of labels describing the configurations
-            with only varying parameters.
-        """
         # Separate 'seed' from other parameters if it's present
         seeds = kwargs.pop(
             "seed", [None]
         )  # Default to [None] if 'seed' is not provided
-        kwargs = sorted(kwargs.items())
+
+        # Ensure 'seeds' is a list
+        if isinstance(seeds, int):
+            seeds = [seeds]
+        elif isinstance(seeds, str) or not isinstance(seeds, Iterable):
+            seeds = [seeds]
+        else:
+            seeds = list(seeds)
 
         # Prepare the remaining arguments, ensuring they are iterable
         processed_kwargs = OrderedDict()
-        for key, value in kwargs:
-            if isinstance(value, str) or not isinstance(value, list):
+        for key, value in kwargs.items():
+            if isinstance(value, str) or not isinstance(value, Iterable):
                 processed_kwargs[key] = [value]  # Treat single values as a list
             else:
-                processed_kwargs[key] = value
+                processed_kwargs[key] = list(value)
 
         # Generate all combinations of non-seed parameters
         non_seed_combinations = list(product(*processed_kwargs.values()))
 
-        # Check if seeds is a single int
-        seeds = [seeds] if isinstance(seeds, int) else seeds
         # Generate full combinations, prioritizing seeds
         combined = [
             (seed,) + combo for combo in non_seed_combinations for seed in seeds
@@ -238,18 +229,10 @@ class ConfigGenerator:
         if group_by_seeds:
             grouped_configs = []
             grouped_labels = []
-            num_seeds = len(seeds)
-            nr_groups = (
-                len(configs) // num_seeds
-            )  # Ensure integer division for grouping
-
-            # Iterate over the number of seed groups, not over seeds or configs directly
-            for index in range(nr_groups):
-                # Calculate the slice indices for both configs and labels
-                start = index * num_seeds
-                end = start + num_seeds
-
-                # Slice configs and labels according to calculated indices
+            num_combos = len(non_seed_combinations)
+            for i in range(num_combos):
+                start = i * len(seeds)
+                end = start + len(seeds)
                 grouped_configs.append(configs[start:end])
                 grouped_labels.append(labels[start:end])
             return grouped_configs, grouped_labels

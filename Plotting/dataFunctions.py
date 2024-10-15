@@ -15,6 +15,8 @@ def parse_pvd_file(path, pvd_file):
 
 def get_data_from_name(nameOrPath):
     # Split the filename by underscores
+    if not isinstance(nameOrPath, str):
+        nameOrPath = str(nameOrPath)
     fileName = nameOrPath.split("/")[-1]
     parts = fileName.split("_")
 

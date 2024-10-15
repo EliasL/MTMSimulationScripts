@@ -72,33 +72,6 @@ def plotSims(configs, name, **kwargs):
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
 
 
-def plotLog(config_groups, name, labels, **kwargs):
-    # Now we can import from Management
-    from Plotting.remotePlotting import get_csv_files
-
-    from Plotting.makePlots import (
-        makeLogPlotComparison,
-        makeEnergyPlotComparison,
-        makeEnergyAvalancheComparison,
-        makeStressPlotComparison,
-    )
-
-    paths, labels = get_csv_files(
-        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
-    )
-    kwargs["labels"] = labels
-    print("Plotting...")
-    makeEnergyPlotComparison(paths, f"{name} - Energy", **kwargs)
-    makeStressPlotComparison(paths, f"{name} - Stress", **kwargs)
-    makeLogPlotComparison(paths, f"{name} - PowerLaw", window=False, **kwargs)
-    makeLogPlotComparison(
-        paths, f"{name} - StressPowerLaw", window=False, Y="Avg RSS", **kwargs
-    )
-    # makeLogPlotComparison(paths, f"{name} - PowerLaw", window=True, **kwargs)
-    # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", **kwargs)
-    # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
-
-
 def plotOldStuff():
     from OldConfigGenerator import ConfigGenerator as OldConf
 
@@ -195,6 +168,8 @@ def fastStatStuff():
 
 
 def loadingSpeeds():
+    from Plotting.remotePlotting import plotLog
+
     nrThreads = 1
     nrSeeds = 40
     size = 60
@@ -269,6 +244,8 @@ def smallLoadingSpeeds():
 
 
 def FIRELoading():
+    from Plotting.remotePlotting import plotLog
+
     nrThreads = 1
     nrSeeds = 40
     size = 60
@@ -306,6 +283,8 @@ def FIRELoading():
 
 
 def CGLoading():
+    from Plotting.remotePlotting import plotLog
+
     nrThreads = 1
     nrSeeds = 40
     size = 60
