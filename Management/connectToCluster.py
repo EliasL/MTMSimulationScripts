@@ -40,7 +40,7 @@ class Servers:
     default = pascal
 
 
-def uploadProject(cluster_address="Servers.default", verbose=False):
+def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
     # Get the directory of the current script
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -93,6 +93,8 @@ def uploadProject(cluster_address="Servers.default", verbose=False):
         "Plots/",
         "--exclude",
         ".git",
+        "--exclude",
+        "venv/",
         local_path_SS,
         clusterPath,
     ]
@@ -109,6 +111,42 @@ def uploadProject(cluster_address="Servers.default", verbose=False):
 
     if verbose:
         print("Project folders successfully uploaded.")
+
+    if setup:
+        run_setup(cluster_address, verbose)
+
+
+def run_setup(cluster_address, verbose):
+    ssh_command = [
+        "ssh",
+        f"elundheim@{cluster_address}",
+        "cd ~/simulation/SimulationScripts && pip3 install ./Management ./Plotting",
+    ]
+
+    output_options = None if verbose else subprocess.DEVNULL
+
+    if verbose:
+        print("Running setup")
+    subprocess.run(
+        ssh_command, check=True, stdout=output_options, stderr=output_options
+    )
+
+
+def run_full_setup(cluster_address, verbose=False):
+    return  # This doesn't quite work
+    ssh_command = [
+        "ssh",
+        f"elundheim@{cluster_address}",
+        "cd ~/simulation/SimulationScripts && ./setup_env.sh",
+    ]
+
+    output_options = None if verbose else subprocess.DEVNULL
+
+    if verbose:
+        print("Running setup")
+    subprocess.run(
+        ssh_command, check=True, stdout=output_options, stderr=output_options
+    )
 
 
 def download_folders(cluster_address, configs, destination):

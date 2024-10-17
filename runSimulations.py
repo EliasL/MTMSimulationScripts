@@ -1,6 +1,6 @@
-from .simulationManager import SimulationManager
-from .configGenerator import ConfigGenerator, SimulationConfig
-from .runSimulation import run_locally
+from Management.simulationManager import SimulationManager
+from Management.configGenerator import ConfigGenerator, SimulationConfig
+from Management.runSimulation import run_locally
 import ast
 import sys
 import concurrent.futures

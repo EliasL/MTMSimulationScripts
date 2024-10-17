@@ -5,13 +5,14 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 
 
-def fix_csv_files_in_folder(folder_path, use_tqdm=True):
+def fix_csv_files(paths, use_tqdm=True):
+    if isinstance(paths[0], list):
+        paths = [item for sublist in paths for item in sublist]
     # Iterate over all files in the given folder
-    for filename in tqdm(os.listdir(folder_path), disable=not use_tqdm):
-        if filename.endswith(".csv"):
-            file_path = os.path.join(folder_path, filename)
+    for path in tqdm(paths, disable=not use_tqdm):
+        if path.endswith(".csv"):
             # Read the CSV file into a DataFrame
-            df = pd.read_csv(file_path, low_memory=False)
+            df = pd.read_csv(path, low_memory=False)
 
             # Create a Series that tracks the maximum value encountered so far
             cummax_series = df["Load"].cummax()
@@ -23,10 +24,17 @@ def fix_csv_files_in_folder(folder_path, use_tqdm=True):
             df_cleaned = df[~overlap_mask].reset_index(drop=True)
 
             # Save the modified DataFrame back to the same CSV file
-            df_cleaned.to_csv(file_path, index=False)
+            df_cleaned.to_csv(path, index=False)
 
 
-def fix_lines_in_data_folder(folder_path, max_workers=10):
+def fix_csv_files_in_folder(folder_path, use_tqdm=True):
+    paths = [
+        os.path.join(folder_path, filename) for filename in os.listdir(folder_path)
+    ]
+    fix_csv_files(paths, use_tqdm=use_tqdm)
+
+
+def fix_csv_files_in_data_folder(folder_path, max_workers=10):
     # Get the list of all folders in the given directory
     folders = [
         f

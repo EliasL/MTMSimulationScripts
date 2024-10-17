@@ -16,7 +16,11 @@ def run_remote_script(server_hostname, script_path, silent=False):
     with Connection(host=server_hostname, user=SERVER_USER) as c:
         # Execute the remote command (your Python script)
         # Set `hide=True` to suppress real-time output and capture it instead
-        result = c.run(f"python3 -u {script_path}", hide=True, warn=True)
+        result = c.run(
+            f"python3 -u {script_path}",
+            hide=True,
+            warn=True,
+        )
 
         # Output and errors are captured
         output = result.stdout

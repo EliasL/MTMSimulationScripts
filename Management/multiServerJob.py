@@ -9,7 +9,7 @@ from .dataManager import DataManager
 
 
 def confToCommand(config):
-    base_command = "python3 ~/simulation/SimulationScripts/Management/runSimulations.py"
+    base_command = "python3 ~/simulation/SimulationScripts/runSimulations.py"
     return (
         base_command
         + " "

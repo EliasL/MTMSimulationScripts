@@ -144,7 +144,7 @@ def statStuff():
         labels=[f"s:{i}" for i in seeds],
         show=True,
         plot_average=False,
-        xLims=(0.15, 0.55),
+        xlim=(0.15, 0.55),
     )
 
 
@@ -164,7 +164,7 @@ def fastStatStuff():
     )
     runSims(configs)
     # plotSims(configs, "powerlaw", labels=[f"s:{i}" for i in seeds], show=True,
-    # plot_average=False, xLims=(0.15, 0.55))
+    # plot_average=False, xlim=(0.15, 0.55))
 
 
 def loadingSpeeds():

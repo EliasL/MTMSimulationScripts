@@ -7,7 +7,7 @@ from Management.runOnCluster import (
     build_on_all_servers,
     build_on_server,
 )
-from Management.runSimulations import run_many_locally
+from runSimulations import run_many_locally
 from Management.connectToCluster import Servers
 from Management.multiServerJob import (
     bigJob,
@@ -34,13 +34,13 @@ def plotBigJob():
     nrThreads = 3
     nrSeeds = 40
     configs, labels = bigJob(nrThreads, nrSeeds, group_by_seeds=True)
-    # xLims = [0.25, 0.55]
+    # xlim = [0.25, 0.55]
     pe.plotLog(
         configs,
         "200x200, load:0.15-1, PBC, seeds:40",
         labels=labels,
         # show=True,
-        # xLims=xLims,
+        # xlim=xlim,
     )
 
 
@@ -49,13 +49,13 @@ def lotsOThreads():
     nrSeeds = 3
     size = 150
     configs, labels = propperJob(nrThreads, nrSeeds, size=size, group_by_seeds=True)
-    # xLims = [0.25, 0.55]
+    # xlim = [0.25, 0.55]
     pe.plotLog(
         configs,
         f"{size}x{size}, load:0.15-1, PBC, t{nrThreads}, seeds:{nrSeeds}",
         labels=labels,
         # show=True,
-        # xLims=xLims,
+        # xlim=xlim,
     )
 
 
@@ -107,7 +107,7 @@ def startJobs():
     print("Building on all servers... ")
 
     build_on_all_servers()
-    for job in [propperJob1, propperJob2, propperJob3]:
+    for job in [propperJob3]:
         configs, labels = job()
         servers_commands = generateCommands(configs, configs[0].nrThreads)
         print("Starting jobs...")
@@ -158,8 +158,8 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-runOnLocalMachine()
-# startJobs()
+# runOnLocalMachine()
+startJobs()
 # plotBigJob()
 # plotPropperJob()
 # threadTest()

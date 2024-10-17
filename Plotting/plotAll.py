@@ -1,5 +1,5 @@
 from makeAnimations import makeAnimations
-from makePlots import makeEnergyPlot, makeItterationsPlot, makeStressPlot  # noqa: F401
+from makePlots import makePlot, makeItterationsPlot  # noqa: F401
 from settings import settings
 import sys
 import os
@@ -23,16 +23,17 @@ def plotAll(configFile, noVideo=False, **kwargs):
     # subfolderName = 'simpleShear,s150x150l0.15,1e-05,1PBCt4LBFGSEpsX1e-06s0'
     print(f"Plotting at {path}")
     csvPath = os.path.join(path, macroData)
-    makeEnergyPlot(csvPath, subfolderName + "_energy.pdf")
-    makeStressPlot(csvPath, subfolderName + "_stress.pdf")
+    makePlot(csvPath, subfolderName + "_energy.pdf", Y="Avg energy")
+    makePlot(csvPath, subfolderName + "_stress.pdf", Y="Avg RSS")
 
     # makeItterationsPlot(path+macroData, subfolderName+"_itterations.pdf")
     if not noVideo:
         makeAnimations(path, **kwargs)
 
-    makeStressPlot(
+    makePlot(
         csvPath,
         subfolderName + "_stress+.pdf",
+        Y="Avg RSS",
         add_images=True,
         labels=conf.minimizer,
     )

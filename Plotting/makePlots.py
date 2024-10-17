@@ -23,11 +23,24 @@ from dataFunctions import get_data_from_name
 
 
 def plotYOverX(
-    X, Y, fig=None, ax=None, indicateLastPoint=True, tolerance=1e-12, **kwargs
+    X,
+    Y,
+    fig=None,
+    ax=None,
+    indicateLastPoint=True,
+    tolerance=1e-12,
+    xlim=None,
+    ylim=None,
+    **kwargs,
 ):
     # If no axis is provided, create a new figure and axis
     if ax is None:
         fig, ax = plt.subplots()
+
+    if xlim:
+        ax.set_xlim(xlim)
+    if ylim:
+        ax.set_ylim(ylim)
 
     # Simplify the points if tolerance is provided
     if tolerance is not None:
@@ -269,11 +282,15 @@ def doBootstrap(drops, n, fit_func):
 
 # Define global variables
 line_styles = ["-", "--", "-.", ":"]
-markers = ["v", "o", "^", "s", "D", "p", "*"]
+markers = ["o", "v", "^", "s", "D", "p", "*"]
 colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 colors = {"FIRE": "#d24646", "L-BFGS": "#008743", "CG": "#ffa701"}
 color_index = 0
 index = 0
+
+
+def get_method(i, kwargs):
+    return getPrettyLabel(kwargs["labels"][i][0])
 
 
 def plotSplitPowerLaw(
@@ -563,9 +580,9 @@ def plotSlidingWindowPowerLaw(
 
 def makePlot(
     csv_file_paths,
-    name,
-    X=None,
-    Y=None,
+    name="",
+    Y="Avg energy",
+    X="Load",
     x_name=None,
     y_name=None,
     use_y_axis_name=True,
@@ -573,8 +590,8 @@ def makePlot(
     use_title=False,
     title=None,
     plot_average=False,
-    xLims=(-np.inf, np.inf),
-    yLims=(-np.inf, np.inf),
+    xlim=(-np.inf, np.inf),
+    ylim=(-np.inf, np.inf),
     indicateLastPoint=False,
     plot_roll_average=False,
     plot_raw=True,
@@ -631,8 +648,8 @@ def makePlot(
     data = []
     xData = []
 
-    ax.set_xlim(*xLims)
-    ax.set_ylim(*yLims)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
 
     for i, csv_file_path in enumerate(csv_file_paths):
         if X is None:
@@ -645,8 +662,8 @@ def makePlot(
                 raise Warning("Cannot plot average with multiple Y columns")
 
         # Truncate data based on Lims
-        df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
-        df = df[(df[Y] >= yLims[0]) & (df[Y] <= yLims[1])]
+        df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
+        df = df[(df[Y] >= ylim[0]) & (df[Y] <= ylim[1])]
 
         data.append(df[Y].values)
         xData.append(df[X].values)
@@ -927,23 +944,18 @@ def removeBadData(df, Y, crash_count, csv_file_path):
     return df, crash_count
 
 
-def makeEnergyPlotComparison(grouped_csv_file_paths, name, **kwargs):
-    return makeComparisonPlot(grouped_csv_file_paths, name, Y="Avg energy", **kwargs)
-
-
-def makeStressPlotComparison(grouped_csv_file_paths, name, **kwargs):
-    return makeComparisonPlot(grouped_csv_file_paths, name, Y="Avg RSS", **kwargs)
-
-
 def makeComparisonPlot(
     grouped_csv_file_paths,
-    name,
-    Y,
+    Y="Avg energy",
+    name="",
     show=False,
     use_title=False,
+    use_y_axis_name=True,
     ax=None,
     fig=None,
     save=True,
+    xlim=None,
+    ylim=None,
     **kwargs,
 ):
     global color_index, index, line_index
@@ -951,8 +963,12 @@ def makeComparisonPlot(
     X = "Load"
     if Y == "Avg energy":
         y_name = r"Avg energy ($E$)"
+        if name == "":
+            name == "Avg energy"
     elif Y == "Avg RSS":
         y_name = r"Avg stress ($\sigma$)"
+        if name == "":
+            name == "Avg stress"
     x_name = r"Strain ($\gamma$)"
     title = f"{name}"
 
@@ -978,7 +994,7 @@ def makeComparisonPlot(
             line_index += 1
 
         # Get the current color
-        color = colors[color_index]
+        color = colors[get_method(i, kwargs)]
 
         # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
@@ -1000,6 +1016,8 @@ def makeComparisonPlot(
                 "linestyle": line_styles[line_index],
                 "alpha": 0.05,
                 "zorder": color_index - 10,
+                "xlim": xlim,
+                "ylim": ylim,
             }
             fig, ax, line, point = plotYOverX(df[X], df[Y], **e_kwargs)
         # Determine the maximum length among all arrays
@@ -1028,6 +1046,8 @@ def makeComparisonPlot(
             "color": colors[label],
             "linestyle": line_styles[line_index],
             "zorder": -color_index,
+            "xlim": xlim,
+            "ylim": ylim,
         }
         df = pd.read_csv(csv_file_paths[max_length_index], usecols=[X])
         fig, ax, line, point = plotYOverX(df[X], average, **a_kwargs)
@@ -1036,7 +1056,9 @@ def makeComparisonPlot(
     # Set the legend with the filtered handles and labels
     ax.legend(loc="upper left")
     ax.set_xlabel(x_name)
-    ax.set_ylabel(y_name)
+
+    if use_y_axis_name:
+        ax.set_ylabel(y_name)
     if use_title:
         ax.set_title(title)
     ax.autoscale_view()
@@ -1058,7 +1080,8 @@ def makeComparisonPlot(
 
 def makeLogPlotComparison(
     grouped_csv_file_paths,
-    name,
+    Y="Avg energy",
+    name="",
     show=False,
     slide=False,
     window=False,
@@ -1068,7 +1091,7 @@ def makeLogPlotComparison(
     innerStrainLims=(0.45, 0.6),
     use_title=False,
     use_y_axis_name=True,
-    Y="Avg energy",
+    ylim=None,
     ax=None,
     fig=None,
     save=True,
@@ -1098,6 +1121,12 @@ def makeLogPlotComparison(
         else f" iLims: {innerStrainLims[0]}-{innerStrainLims[1]}, "
     )
     title = f"{name}{oLims},"
+
+    if name == "":
+        if Y == "Avg energy":
+            name == "Avg energy power law"
+        elif Y == "Avg RSS":
+            name == "Avg stress power law"
 
     if slide:
         x_name = "Energy cutoff"
@@ -1129,7 +1158,7 @@ def makeLogPlotComparison(
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
-            # Truncate data based on xLims
+            # Truncate data based on xlim
             df = df[(df[X] >= outerStrainLims[0]) & (df[X] <= outerStrainLims[1])]
             # Check for Y values greater than 10 and truncate
 
@@ -1175,6 +1204,9 @@ def makeLogPlotComparison(
     if window and show_lambda:  # Hide second axis (with lambda)
         hide_twinx_axis(ax2)
 
+    if ylim:
+        ax.set_ylim(ylim)
+
     ax.set_xlabel(x_name)
     if use_y_axis_name:
         ax.set_ylabel(y_name)
@@ -1182,13 +1214,13 @@ def makeLogPlotComparison(
         ax.set_title(title)
     ax.autoscale_view()
     if save:
-        # Get the parent directory of the CSV file
-        csv_directory = Path(grouped_csv_file_paths[0][0]).parent.parent
-        # Move to the "plots" directory relative to the CSV file directory
-        plotPath = csv_directory / "plots"
+        # # Get the parent directory of the CSV file
+        # csv_directory = Path(grouped_csv_file_paths[0][0]).parent.parent
+        # # Move to the "plots" directory relative to the CSV file directory
+        # plotPath = csv_directory / "plots"
 
-        figPath = os.path.join(plotPath, name + ".pdf")
-        fig.savefig(figPath)
+        # figPath = os.path.join(plotPath, name + ".pdf")
+        # fig.savefig(figPath)
         fig.savefig("Plots/" + name + ".pdf")
         # print(f'Plot saved at: "{figPath}"')
     if show:
@@ -1216,7 +1248,7 @@ def hide_twinx_axis(ax_twin):
 def makeEnergyAvalancheComparison(
     grouped_csv_file_paths,
     name,
-    xLims=[-np.inf, np.inf],
+    xlim=[-np.inf, np.inf],
     show=False,
     **kwargs,
 ):
@@ -1226,7 +1258,7 @@ def makeEnergyAvalancheComparison(
     Y = "Avg energy"
     x_name = "Magnitude of energy drops"
     y_name = "Frequency"
-    lims = "" if xLims == [-np.inf, np.inf] else f", xLims: {xLims[0]}-{xLims[1]}"
+    lims = "" if xlim == [-np.inf, np.inf] else f", xlim: {xlim[0]}-{xlim[1]}"
 
     crash_count = 0
 
@@ -1236,8 +1268,8 @@ def makeEnergyAvalancheComparison(
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
-            # Truncate data based on xLims
-            df = df[(df[X] >= xLims[0]) & (df[X] <= xLims[1])]
+            # Truncate data based on xlim
+            df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
             # Truncate data based on dislocations
             # df = df[(df["Nr plastic deformations"] >= 0)]
             # Check for Y values greater than 1 and truncate
@@ -1268,14 +1300,6 @@ def makeEnergyAvalancheComparison(
         print(f'Plot saved at: "{figPath}"')
         if show:
             plt.show()
-
-
-def makeEnergyPlot(csv_file_paths, name, **kwargs):
-    return makePlot(csv_file_paths, name, X="Load", Y="Avg energy", **kwargs)
-
-
-def makeStressPlot(csv_file_paths, name, **kwargs):
-    return makePlot(csv_file_paths, name, X="Load", Y="Avg RSS", **kwargs)
 
 
 def makeItterationsPlot(csv_file_paths, name, **kwargs):
@@ -1340,11 +1364,12 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
 if __name__ == "__main__":
     pass
     # The path should be the path from work directory to the folder inside the output folder.
-    makeEnergyPlot(
+    makePlot(
         [
             "/Volumes/data/MTS2D_output/simpleShear,s60x60l0.15,0.0002,1.0PBCt1minimizerFIRELBFGSEpsg0.0001eps0.01s0/macroData.csv",
         ],
         name="energy.pdf",
+        Y="Avg energy",
     )
     # makeItterationsPlot(
     #     [

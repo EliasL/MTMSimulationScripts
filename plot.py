@@ -12,7 +12,6 @@ from Management.multiServerJob import (
 )
 from Management.simulationManager import findOutputPath
 from Plotting.plotAll import plotAll
-from Plotting.makePlots import makeStressPlot
 from Plotting.remotePlotting import stressPlotWithImages, energyPlotWithImages, plotLog
 
 
@@ -20,13 +19,12 @@ def plotPropperJob():
     nrThreads = 3
     nrSeeds = 40
     configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
-    # xLims = [0.25, 0.55]
+    # xlim = [0.25, 0.55]
     plotLog(
         configs,
-        "100x100, load:0.15-1, PBC, seeds:40",
         labels=labels,
         # show=True,
-        # xLims=xLims,
+        # xlim=xlim,
     )
 
 
