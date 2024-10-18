@@ -1,6 +1,5 @@
 from matplotlib import pyplot as plt
-import matplotlib.image as mpimg
-import matplotlib
+import matplotlib as mpl
 import os
 import matplotlib.pylab
 import matplotlib.lines as mlines
@@ -11,12 +10,8 @@ import mplcursors
 from datetime import timedelta
 import powerlaw
 import json
-import scipy.integrate
-import scipy.interpolate
 from simplification.cutil import simplify_coords_vwp
-from matplotlib.ticker import MaxNLocator
 from tqdm import tqdm
-import scipy
 from pathlib import Path
 from pyplotFunctions import plot_mesh
 from dataFunctions import get_data_from_name
@@ -206,7 +201,7 @@ def getPowerLawFit(
             # Load the JSON result object if the file exists
             with open(filePath, "r") as f:
                 result = json.load(f)
-            print(f"Loaded bootstrap results from {filePath}")
+            # print(f"Loaded bootstrap results from {filePath}")
         else:
             # Perform bootstrapping and fit the power law model
             result = doBootstrap(
@@ -298,7 +293,7 @@ def plotSplitPowerLaw(
     fig=None,
     ax=None,
     label="",
-    minEnergy=1e-5,
+    minEnergy=0,
     innerStrainLims=(np.inf, -np.inf),
     plot_pre_yield=True,
     plot_post_yield=True,
@@ -509,9 +504,8 @@ def plotSlidingPowerLaw(dfs, fig=None, ax=None, label=""):
 
 
 def plotSlidingWindowPowerLaw(
-    dfs, minEnergy=1e-5, windowRadius=0.1, fig=None, ax1=None, ax2=None, label=""
+    dfs, minEnergy=0, windowRadius=0.1, fig=None, ax1=None, ax2=None, label=""
 ):
-    global color_index, index, line_index
     if ax1 is None:
         fig, ax1 = plt.subplots()
         ax2 = ax1.twinx()
@@ -559,8 +553,10 @@ def plotSlidingWindowPowerLaw(
     ax1.errorbar(
         strainWindowCenter,
         exponents,
+        # Get the current color
+        color=colors[label],
         yerr=exponent_errors,
-        label="$\\alpha$ " + getPrettyLabel(label),
+        label="$\\alpha$ " + label,
         fmt="-o",  # Line with circle markers
         capsize=3,  # Error bar cap size
     )
@@ -569,9 +565,10 @@ def plotSlidingWindowPowerLaw(
     ax2.errorbar(
         strainWindowCenter,
         cutoffs,
+        color=colors[label],
         yerr=cutoff_errors,
-        label="$\\lambda$ " + getPrettyLabel(label),
-        fmt="--^",  # Line with square markers
+        label="$\\lambda$ " + label,
+        fmt="--^",  # Line with triangular markers
         capsize=3,  # Error bar cap size
     )
 
@@ -580,6 +577,8 @@ def plotSlidingWindowPowerLaw(
 
 def makePlot(
     csv_file_paths,
+    ax=None,
+    fig=None,
     name="",
     Y="Avg energy",
     X="Load",
@@ -595,7 +594,6 @@ def makePlot(
     indicateLastPoint=False,
     plot_roll_average=False,
     plot_raw=True,
-    plot_gradient=False,
     plot_power_law=False,
     plot_columns=False,
     ylog=False,
@@ -607,11 +605,11 @@ def makePlot(
     add_images=False,
     image_pos=None,
     image_size=0.4,
-    ax=None,
-    fig=None,
+    add_cbar=True,
     save=True,
     mark=None,
     mark_pos=(0.8, 0.95),
+    mark_fontsize=20,
     legend_loc="best",
     plot_pre_yield=True,
     plot_post_yield=True,
@@ -792,12 +790,14 @@ def makePlot(
         i = 0
         addImagesToPlot(
             ax,
+            fig,
             csv_file_paths[i],
             xData[i],
             data[i],
             image_pos,
             image_size,
             use_stress=Y == "Avg RSS",
+            add_cbar=add_cbar,
         )
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
@@ -809,7 +809,9 @@ def makePlot(
     ax.autoscale_view()
     if mark:
         assert mark_pos is not None
-        add_mark(ax, f"({mark})", *mark_pos)
+        add_mark(ax, f"({mark})", *mark_pos, fontsize=mark_fontsize)
+
+    fig.tight_layout()
 
     if save:
         figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
@@ -820,21 +822,23 @@ def makePlot(
     return fig, ax
 
 
-def add_mark(ax, mark, x, y, color="black"):
+def add_mark(ax, mark, x, y, color="black", fontsize=30):
     # Adding LaTeX-style bold font using \textbf{}
     ax.text(
         x,
         y,
         r"$\textbf{" + mark + "}$",  # LaTeX syntax for bold
         transform=ax.transAxes,
-        fontsize=30,
+        fontsize=fontsize,
         va="top",
         ha="left",
         color=color,
     )
 
 
-def addImagesToPlot(ax, csv_file_path, x, y, image_pos, size=0.4, use_stress=True):
+def addImagesToPlot(
+    ax, fig, csv_file_path, x, y, image_pos, size=0.4, use_stress=True, add_cbar=True
+):
     # First we get the folder with vtu_files
     framesPath = Path(csv_file_path).parent / "data"
 
@@ -862,15 +866,16 @@ def addImagesToPlot(ax, csv_file_path, x, y, image_pos, size=0.4, use_stress=Tru
     if not isinstance(size, list):
         size = size * 3
 
-    for i, vtu_file, index_fraction in zip(
-        range(3),
+    for pos, size, vtu_file, index_fraction in zip(
+        image_pos,
+        size,
         [first_file, middle_file, last_file],
         [0, 0.45, 0.999],
     ):
         # Top left for the first image
         #                           (left, bottom, width, height)
-        ax_inset = ax.inset_axes((image_pos[i][0], image_pos[i][1], size[i], size[i]))
-        plot_mesh(
+        ax_inset = ax.inset_axes((pos[0], pos[1], size, size))
+        _, cmap, norm = plot_mesh(
             vtu_file=vtu_file,
             ax=ax_inset,
             add_rombus=False,
@@ -903,8 +908,8 @@ def addImagesToPlot(ax, csv_file_path, x, y, image_pos, size=0.4, use_stress=Tru
 
         # Convert normalized coordinates to actual axis coordinates
         arrow_start = (
-            xlim[0] + (image_pos[i][0] + size[i] / 2) * (xlim[1] - xlim[0]),
-            ylim[0] + (image_pos[i][1] + size[i] / 2) * (ylim[1] - ylim[0]),
+            xlim[0] + (pos[0] + size / 2) * (xlim[1] - xlim[0]),
+            ylim[0] + (pos[1] + size / 2) * (ylim[1] - ylim[0]),
         )
 
         # Arrow's ending point (the point on the main plot where the image corresponds to)
@@ -919,6 +924,13 @@ def addImagesToPlot(ax, csv_file_path, x, y, image_pos, size=0.4, use_stress=Tru
                 facecolor="black", shrink=0.05, width=0.5, headwidth=5, headlength=5
             ),
         )
+    # Create the color bar using the colormap and normalization
+    if add_cbar:
+        # Create a ScalarMappable object with the colormap and norm
+        sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
+
+        # Add the color bar to the figure
+        fig.colorbar(sm, ax=ax, shrink=0.5)
 
 
 def removeBadData(df, Y, crash_count, csv_file_path):
@@ -1098,6 +1110,9 @@ def makeLogPlotComparison(
     show_lambda=False,
     plot_pre_yield=True,
     plot_post_yield=True,
+    mark=None,
+    mark_pos=(0.8, 0.95),
+    mark_fontsize=20,
     legend_loc="best",
     **kwargs,
 ):
@@ -1201,11 +1216,15 @@ def makeLogPlotComparison(
         else:
             ax.legend(loc=("best"))
 
-    if window and show_lambda:  # Hide second axis (with lambda)
+    if window and not show_lambda:  # Hide second axis (with lambda)
         hide_twinx_axis(ax2)
 
     if ylim:
         ax.set_ylim(ylim)
+
+    if mark:
+        assert mark_pos is not None
+        add_mark(ax, f"({mark})", *mark_pos, fontsize=mark_fontsize)
 
     ax.set_xlabel(x_name)
     if use_y_axis_name:

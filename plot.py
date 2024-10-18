@@ -13,6 +13,7 @@ from Management.multiServerJob import (
 from Management.simulationManager import findOutputPath
 from Plotting.plotAll import plotAll
 from Plotting.remotePlotting import stressPlotWithImages, energyPlotWithImages, plotLog
+from tqdm import tqdm
 
 
 def plotPropperJob():
@@ -55,17 +56,23 @@ def plotSampleRuns():
         "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s3",
         "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s3",
     ]
-    stressPlotWithImages(configs, paths)
-    energyPlotWithImages(configs, paths)
+    with tqdm(total=len(configs) * 2 + 2) as pbar:
+        # Loop through each config and path, updating the progress bar
+        for config, path in zip(configs, paths):
+            stressPlotWithImages([config], [path])
+            pbar.update(1)
+            energyPlotWithImages([config], [path])
+            pbar.update(1)
+
+        stressPlotWithImages(configs, paths)
+        pbar.update(1)
+        energyPlotWithImages(configs, paths)
+        pbar.update(1)
 
 
 # MDPI Article plot
 def plotEnergyPowerLaw():
     pass
-
-
-def jobs():
-    plotPropperJob()
 
 
 def debugPlotAll():
@@ -76,6 +83,6 @@ def debugPlotAll():
 
 
 if __name__ == "__main__":
-    jobs()
-    # plotSampleRuns()
+    # plotPropperJob()
+    plotSampleRuns()
     # debugPlotAll()

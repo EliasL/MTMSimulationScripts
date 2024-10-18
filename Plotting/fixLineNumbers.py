@@ -27,6 +27,41 @@ def fix_csv_files(paths, use_tqdm=True):
             df_cleaned.to_csv(path, index=False)
 
 
+def fix_missing_column(paths, use_tqdm=True):
+    # This function processes each file in the given paths
+    # It removes the first column if the first header is "Line nr"
+    # and continues removing rows if the values in the first column
+    # are floats equal to 1, until a non-1, non-float is found.
+
+    for path in tqdm(paths, disable=not use_tqdm):
+        # Read the file into a dataframe (assuming CSV format)
+        df = pd.read_csv(path)
+
+        # Check if the first column header is "Line nr"
+        if df.columns[0] == "Line nr":
+            # Iterate over the rows in the first column
+            for i, val in enumerate(df.iloc[:, 0]):
+                try:
+                    # Try to convert the value to a float
+                    float_val = float(val)
+
+                    # If it's a float and equals 1, continue checking
+                    if float_val == 1.0:
+                        break
+                    else:
+                        # Stop once we find a value that isn't 1
+                        break
+                except ValueError:
+                    # If we hit a value that can't be converted to float, stop
+                    break
+
+            # Remove the first column up to the valid row
+            df = df.iloc[i:, 1:]  # Skip rows and drop the first column
+
+            # Optionally, save the cleaned dataframe back to a file
+            df.to_csv(path + "test.txt", index=False)
+
+
 def fix_csv_files_in_folder(folder_path, use_tqdm=True):
     paths = [
         os.path.join(folder_path, filename) for filename in os.listdir(folder_path)
@@ -57,4 +92,10 @@ if __name__ == "__main__":
     # Example usage
     folder_path = "/Users/elias/Work/PhD/Code/remoteData/"
     folder_path = "/Users/eliaslundheim/work/PhD/remoteData/"
-    fix_csv_files_in_folder(folder_path)
+
+    fix_missing_column(
+        [
+            "/Users/eliaslundheim/work/PhD/remoteData/macro/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s18.csv"
+        ]
+    )
+    # fix_csv_files_in_folder(folder_path)

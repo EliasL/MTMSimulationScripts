@@ -49,6 +49,16 @@ class VTUData:
     def get_fixed_status(self):
         return vtk_to_numpy(self.mesh.GetPointData().GetArray("fixed"))
 
+    def get_C(self):
+        """
+        Returns [C11, C22, C12]
+        """
+        return [
+            vtk_to_numpy(
+                self.mesh.getCellData().GetArray(C) for C in ["C11", "C22", "C12"]
+            )
+        ]
+
     def get_connectivity(self):
         # Extract Connectivity
         _connectivity = vtk_to_numpy(self.mesh.GetCells().GetData())
@@ -250,7 +260,6 @@ def plot_nodes(args):
     circle_point_size = (circle_radius * inches_per_data_unit) ** 2
 
     # Grid
-    energy_field = data.get_energy_field()
     connectivity = data.get_connectivity()
     connectivity = trim_connections(len(x), connectivity)
     shifts = calculate_shifts(nodes, data.BC, data.load)
@@ -279,8 +288,8 @@ def plot_nodes(args):
 
 def plot_mesh(
     vtu_file,
-    global_min=None,
-    global_max=None,
+    global_min=3.93,
+    global_max=4.20,
     useStress=True,
     axis_limits=None,
     frame_index=None,
@@ -301,30 +310,17 @@ def plot_mesh(
     connectivity = data.get_connectivity()
     x, y = nodes[:, 0], nodes[:, 1]
 
+    cmap = "coolwarm"
+
     if useStress:
         field = data.get_stress_field()
-        cmap = "coolwarm"
         norm = mcolors.Normalize(vmin=-1.5, vmax=1.5)
-        backgroundColor = "white"
+        backgroundColor = plt.get_cmap(cmap)(0.5)
     else:
         field = data.get_energy_field()
-        backgroundColor = (0.29, 0.074, 0.38)
-        cmap_colors = [
-            (0.0, backgroundColor),
-            (0.07, "#0052cc"),
-            (0.3, "#ff6f61"),
-            (0.9, "orange"),
-            (1.0, "red"),
-        ]
+        norm = mcolors.Normalize(vmin=global_min, vmax=global_max)
+        backgroundColor = plt.get_cmap(cmap)(0)
 
-        # Create a color map from the list of colors and positions
-        cmap = mcolors.LinearSegmentedColormap.from_list(
-            "custom_cmap", cmap_colors, N=512
-        )
-
-        # Define a normalization that highlights small energy changes
-        gamma = 1  # Adjust this parameter as needed to highlight small energy changes
-        norm = mcolors.PowerNorm(gamma=gamma, vmin=global_min, vmax=global_max)
     if shift:
         shifts = calculate_shifts(nodes, data.BC, data.load)
     else:
@@ -340,7 +336,28 @@ def plot_mesh(
 
     if add_rombus:
         draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
-    return ax
+    return ax, cmap, norm
+
+
+def plot_in_poincare_disk(
+    vtu_file,
+    frame_index=None,
+    add_title=False,
+    ax=None,
+):
+    from MTMath.plotEnergy import plotEnergyField, generate_energy_grid
+
+    if ax is None:
+        ax, fig = base_plot(
+            vtu_file=vtu_file,
+            frame_index=frame_index,
+            add_title=add_title,
+        )
+    data = VTUData(vtu_file)
+    C11, C22, C12 = data.get_C()
+
+    generate_energy_grid()
+    plotEnergyField()
 
 
 def plot_and_save_mesh(args, useStress=True):

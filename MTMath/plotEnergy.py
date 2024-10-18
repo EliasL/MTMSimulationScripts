@@ -61,7 +61,7 @@ def lagrange_reduction(C11, C22, C12, loops=600):
 def generate_energy_grid(
     resolution=500, beta=-0.25, K=4, energy_lim=(None, 4.15), return_XY=False
 ):
-    # Load the potential and its derivatives (assuming this function is defined elsewhere)
+    # Load the potential and its derivatives
     phi, divPhi, divDivPhi = numericContiPotential()
 
     # Define the range for x and y based on the unit circle
@@ -162,7 +162,7 @@ def drawFundamentalDomain(ax, scale):
     drawC(ax, C, scale)
 
 
-def plotEnergyField(energy_grid):
+def plotEnergyField(energy_grid, fig=None, ax=None, save=True, add_title=True):
     print("Plotting energy field...")
     # Define the range for x and y based on the unit circle
     radius = 1.0
@@ -171,8 +171,10 @@ def plotEnergyField(energy_grid):
     grid_size = len(energy_grid)
 
     # Create the plot
-    fig = plt.figure(figsize=(8, 6))
-    ax = fig.add_subplot()
+    if fig is None:
+        fig = plt.figure(figsize=(8, 6))
+        ax = fig.add_subplot()
+
     max_energy = np.nanmax(energy_grid)
 
     img = ax.imshow(energy_grid, cmap="viridis", origin="lower")
@@ -214,12 +216,14 @@ def plotEnergyField(energy_grid):
     ax.set_ylabel(
         f"← Large angle {nbs*7} $P_y$(Length ratio and $\\theta - \\pi/2$) {nbs*7} Small angle →"
     )
-    ax.set_title("Energy field in a Poincaré disk")
+    if add_title:
+        ax.set_title("Energy field in a Poincaré disk")
 
-    output_pdf_path = "energy_field.pdf"
-    fig.savefig(
-        output_pdf_path, format="pdf", dpi=600, bbox_inches="tight", pad_inches=0
-    )
+    if save:
+        output_pdf_path = "energy_field.pdf"
+        fig.savefig(
+            output_pdf_path, format="pdf", dpi=600, bbox_inches="tight", pad_inches=0
+        )
 
 
 def add_arrow_3d(xdata, ydata, zdata, ax, start_ind, end_ind, size=15, color="red"):

@@ -307,7 +307,9 @@ def get_folders_from_servers(configs):
     return new_paths
 
 
-def set_font_size(ax, axis_size=20, legend_size=16):
+def set_font_size(ax, axis_size=10, legend_size=10, extra_size=0):
+    axis_size += extra_size
+    legend_size += extra_size
     # Set axis labels font size
     ax.set_xlabel(ax.get_xlabel(), fontsize=axis_size)
     ax.set_ylabel(ax.get_ylabel(), fontsize=axis_size)
@@ -319,45 +321,50 @@ def set_font_size(ax, axis_size=20, legend_size=16):
             text.set_fontsize(legend_size)
 
 
-def createPlotsWithImages(configs, paths, filename, **kwargs):
+def createPlotsWithImages(configs, paths, metric, **kwargs):
     if not paths:
         # Download the folders associated with the configs from the server
         paths = get_folders_from_servers(configs)
 
+    base = 5 if len(configs) == 3 else 10
     # Create a figure with subplots, one for each configuration
-    fig, axes = plt.subplots(1, len(configs), figsize=(len(configs) * 5, 5))
+    fig, axes = plt.subplots(1, len(configs), figsize=(base * len(configs), base))
 
     # If there's only one configuration, axes won't be a list, so convert it into one
     if len(configs) == 1:
         axes = [axes]
 
     colors = {"FIRE": "#d24646", "LBFGS": "#008743", "CG": "#ffa701"}
-
+    sp = len(configs) == 1  # Single plot
     # Loop over the configurations, paths, and axes
-    for ax, path, config, mark in tqdm(zip(axes, paths, configs, "abc")):
+    for ax, path, config, mark in zip(axes, paths, configs, "abc"):
         # Call the provided plot function (either makeStressPlot or makeEnergyPlot)
         makePlot(
             path + "/macroData.csv",
-            config.name + f"_{filename}+.pdf",
+            name=config.name + f"_{metric}+.pdf",
             add_images=True,
             ax=ax,
             fig=fig,
             save=False,
             xlim=(0.15, 1),
             colors=[colors[config.minimizer]],
-            use_y_axis_name=config.minimizer == "LBFGS",
-            mark=mark,
+            use_y_axis_name=config.minimizer == "LBFGS" if not sp else True,
+            add_cbar=config.minimizer == "FIRE" if not sp else True,
+            mark=mark if not sp else None,
             legend=config.minimizer,
             legend_loc="upper left",
-            **kwargs,  # You can parameterize this too if needed
+            mark_fontsize=20 + 3 * len(configs),
+            **kwargs,
         )
-        set_font_size(ax)
+        set_font_size(ax, extra_size=3 * len(configs))
 
-    # Adjust layout for a neat appearance
-    plt.tight_layout()
+    if sp:
+        method = configs[0].minimizer
+    else:
+        method = "combined"
 
     # Save the combined figure
-    plt.savefig(f"Plots/combined_{filename}_plots.pdf")
+    plt.savefig(f"Plots/{method}_{metric}_plots.pdf")
 
 
 def stressPlotWithImages(configs, paths=None):
@@ -373,7 +380,7 @@ def stressPlotWithImages(configs, paths=None):
         ],
         image_size=[0.3, 0.4, 0.4],
         Y="Avg RSS",
-        filename="stress",
+        metric="stress",
     )
 
 
@@ -390,7 +397,7 @@ def energyPlotWithImages(configs, paths=None):
         ],
         image_size=[0.4, 0.3, 0.4],
         Y="Avg energy",
-        filename="energy",
+        metric="energy",
     )
 
 
@@ -418,7 +425,6 @@ def plotWholeRangePowerLaw(paths, Y, **kwargs):
         )
         set_font_size(ax)
 
-    fig.tight_layout()  # Adjust layout to prevent overlap
     name = "energy" if Y == "Avg energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_full_range.pdf")
@@ -468,7 +474,6 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
         set_font_size(axes[0, i])
         set_font_size(axes[1, i])
 
-    fig.tight_layout()  # Adjust layout to prevent overlap
     name = "energy" if Y == "Avg energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_preYield.pdf")
@@ -486,7 +491,7 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
         log_ylim = [0.5, 4e4]
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    for i, (group, method) in zip(range(3), zip(paths, ["L-BFGS", "CG", "FIRE"])):
+    for i, group, method in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"]):
         kwargs["labels"] = [[method]]
 
         makeComparisonPlot(
@@ -518,10 +523,44 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
         set_font_size(axes[0, i])
         set_font_size(axes[1, i])
 
-    fig.tight_layout()  # Adjust layout to prevent overlap
     name = "energy" if Y == "Avg energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_postYield.pdf")
+
+
+def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
+    # Define limits
+    if Y == "Avg energy":
+        ylim = [0.63, 0.95]
+    elif Y == "Avg RSS":
+        ylim = [0.51, 0.73]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
+        kwargs["labels"] = [[method]]
+
+        makeLogPlotComparison(
+            [group],
+            plot_post_yield=False,
+            save=False,
+            use_y_axis_name=method == "L-BFGS",
+            Y=Y,
+            ax=ax,
+            fig=fig,
+            legend_loc="lower right",
+            window=True,
+            ylim=ylim,
+            show_lambda=show_lambda,
+            mark=mark,
+            mark_pos=(0.8, 0.3),
+            mark_fontsize=29,
+            **kwargs,
+        )
+        set_font_size(ax, extra_size=3 * len(paths))
+
+    name = "energy" if Y == "Avg energy" else "stress"
+    name = name + "_withLambda" if show_lambda else name
+    # Display all plots in a row
+    plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
 
 
 def plotLog(config_groups, labels, **kwargs):
@@ -533,10 +572,11 @@ def plotLog(config_groups, labels, **kwargs):
     # Iterate over the groups and methods, and plot each one in a separate subplot
     for Y in ["Avg energy", "Avg RSS"]:
         # makeComparisonPlot(paths, Y=Y, **kwargs)
-        # makeLogPlotComparison(paths, Y=Y, **kwargs)
+        ## makeLogPlotComparison(paths, Y=Y, **kwargs)
         # plotWholeRangePowerLaw(paths, Y, **kwargs)
         # plotPreYieldPowerLaw(paths, Y, **kwargs)
-        plotPostYieldPowerLaw(paths, Y, **kwargs)
+        # plotPostYieldPowerLaw(paths, Y, **kwargs)
+        plotWindowPowerLaw(paths, Y, **kwargs)
 
     # makeLogPlotComparison(paths, f"{name} - EnergyPowerLawWindow", window=True, **kwargs)
     # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", **kwargs)
