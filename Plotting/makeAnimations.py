@@ -4,10 +4,16 @@ import cv2
 import imageio.v2 as imageio  # Adjusted import here
 
 
-from settings import settings
-from pyplotFunctions import make_images, plot_mesh, plot_nodes
-from dataFunctions import parse_pvd_file, get_data_from_name
-from makePvd import create_collection
+from .settings import settings
+from .pyplotFunctions import (
+    make_images,
+    plot_nodes,
+    plot_and_save_mesh,
+    plot_and_save_in_poincare_disk,
+    plot_and_save_in_elastically_reduced_poincare_disk,
+)
+from .dataFunctions import parse_pvd_file, get_data_from_name
+from .makePvd import create_collection
 
 
 # This function selects a subset of the vtu files to speed up the animation
@@ -101,8 +107,18 @@ def makeAnimations(
 
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
-    for function, fileName in zip([plot_mesh, plot_nodes], ["mesh", "nodes"]):
-        if fileName == "nodes" and True:  # Skip making nodes video
+    for function, fileName in zip(
+        [
+            plot_and_save_mesh,
+            plot_and_save_in_poincare_disk,
+            plot_and_save_in_elastically_reduced_poincare_disk,
+            plot_nodes,
+        ],
+        ["mesh", "disk", "erDisk", "nodes"],
+    ):
+        if (
+            fileName == "nodes" or fileName == "mesh" and True
+        ):  # Skip making some videos
             continue
         images = make_images(function, framePath, vtu_files, macro_data, transparent)
 

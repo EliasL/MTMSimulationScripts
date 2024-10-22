@@ -125,6 +125,13 @@ def numericContiPotential(compute_derivative=False, compute_second_derivative=Fa
     )
 
 
+def ground_state_energy(beta=-1 / 4, K=4):
+    # Load the potential and its derivatives
+    phi, divPhi, divDivPhi = numericContiPotential()
+    ground_state_energy = phi(1, 1, 0, beta, K, 1)
+    return ground_state_energy
+
+
 if __name__ == "__main__":
     from sympy import expand, collect, latex
 

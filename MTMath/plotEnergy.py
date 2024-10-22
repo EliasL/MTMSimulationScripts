@@ -1,11 +1,12 @@
 import numpy as np
-from .contiPotential import numericContiPotential
+from .contiPotential import numericContiPotential, ground_state_energy
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
-from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import colors
 from matplotlib import cm
+from scipy.stats import gaussian_kde
+from matplotlib.colors import LogNorm
 
 
 def OneDPotential():
@@ -53,21 +54,75 @@ def lagrange_reduction(C11, C22, C12, loops=600):
         C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
 
         mask3 = 2 * C12 > C11
+        # Stop the loop if no changes are made
+        if not np.any(mask1 | mask2 | mask3):
+            break
         C22[mask3] += C11[mask3] - 2 * C12[mask3]
         C12[mask3] -= C11[mask3]
     return C11, C22, C12
 
 
+def elastic_reduction(C11, C22, C12, loops=600):
+    """
+    The idea here is that we want to undo the last m1 or m2 transformation we
+    did after the last m3 transformation. To do that, we keep track of the last
+    m1 and m2 transformations we do, and if we perform an m3 transformation, we
+    forget that we did an m1 or m2 transformation. Then, at the end, we undo the
+    relevant m1 and m2 transformations
+    """
+    # We create a mask of false everywhere
+    last_swap_C11 = C11 != C11
+    last_flip_C12 = C12 != C12
+    for i in range(loops):
+        mask1 = C12 < 0
+        C12[mask1] *= -1
+
+        # Stores the last change made to C12
+        last_flip_C12 = last_flip_C12 | mask1
+
+        mask2 = C22 < C11
+        # Swap operation
+        C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
+
+        # Stores the last change made to C11 and C22
+        last_swap_C11 = last_swap_C11 | mask2
+
+        mask3 = 2 * C12 > C11
+        # Stop the loop if no changes are made
+        if not np.any(mask1 | mask2 | mask3):
+            break
+        else:
+            C22[mask3] += C11[mask3] - 2 * C12[mask3]
+            C12[mask3] -= C11[mask3]
+
+            # Now we update the last swap and flip. Anywhere we made a m3
+            # transformation, we should forget that we did a m1 or m2
+            last_swap_C11 = ~mask3 & last_swap_C11
+            last_flip_C12 = ~mask3 & last_flip_C12
+
+    # Now we want to undo the m1 and m2 transformations (Which is the same as
+    # doing them again)
+
+    C12[last_flip_C12] *= -1
+    C11[last_swap_C11], C22[last_swap_C11] = (
+        C22[last_swap_C11].copy(),
+        C11[last_swap_C11].copy(),
+    )
+
+    return C11, C22, C12
+
+
 def generate_energy_grid(
-    resolution=500, beta=-0.25, K=4, energy_lim=(None, 4.15), return_XY=False
+    resolution=500, beta=-0.25, K=4, energy_lim=[None, 0.37], return_XY=False, zoom=1
 ):
     # Load the potential and its derivatives
     phi, divPhi, divDivPhi = numericContiPotential()
 
     # Define the range for x and y based on the unit circle
     radius = 1.0
-    x_min, x_max = -radius, radius
-    y_min, y_max = -radius, radius
+
+    x_min, x_max = -radius / zoom, radius / zoom
+    y_min, y_max = -radius / zoom, radius / zoom
 
     # Create the meshgrid for the x and y coordinates
     X, Y = np.meshgrid(
@@ -75,6 +130,7 @@ def generate_energy_grid(
     )
 
     # Calculate the mask for points inside the unit circle
+    # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
     mask = X**2 + Y**2 <= 1 - 1e-9
 
     # Precompute some common terms used in a, b, c12, c22, and c11 calculations
@@ -96,6 +152,8 @@ def generate_energy_grid(
 
     # Apply the phi function only to the points inside the unit circle
     energy_grid[mask] = phi(C11[mask], C22[mask], C12[mask], beta, K, 1)
+
+    energy_grid -= ground_state_energy()
 
     if energy_lim is None:
         energy_lim = (np.nanmin(energy_grid), np.nanmax(energy_grid))
@@ -125,14 +183,56 @@ def C2PoincareDisk(C):
 
 
 def drawC(ax, C, scale):
-    pos = C2PoincareDisk(C)
+    x, y = C2PoincareDisk(C)
     ax.plot(
-        pos[0] * scale / 2 + scale / 2,
-        pos[1] * scale / 2 + scale / 2,
+        x * scale / 2 + scale / 2,
+        y * scale / 2 + scale / 2,
         c="black",
         linewidth=0.6,
         linestyle="--",
     )
+
+
+def drawCScatter(
+    ax, C, scale, remove_max_color=True, vmax=None, log_scale=True, zoom=1
+):
+    x, y = C2PoincareDisk(C)
+    # Create a density estimate
+    xy = np.vstack([x, y])
+
+    # Scott rule
+    bandwidth = len(x) ** (-1 / 6)
+    kde = gaussian_kde(xy, bw_method=bandwidth)
+    density1 = kde(xy)
+
+    cmap = "inferno"
+    if remove_max_color:
+        coolwarm = cm.get_cmap(cmap, 256)  # 256 colors
+        newcolors = coolwarm(np.linspace(0, 1, 256))
+        n = 2
+        newcolors[-n:, -1] = np.linspace(1, 0, n) ** (1 / 2)
+        cmap = colors.ListedColormap(newcolors)
+
+    # Check if log scale is to be applied
+    norm = None
+    if log_scale:
+        # Use LogNorm for logarithmic scale normalization
+        norm = LogNorm(vmin=1, vmax=vmax)
+        # We set it to None so that it is not given to the scatter function
+        vmax = None
+
+    # Plot with scatter, adjusting color based on density
+    scatter = ax.scatter(
+        x * zoom * scale / 2 + scale / 2,
+        y * zoom * scale / 2 + scale / 2,
+        c=density1,
+        s=0.2,
+        linewidth=0,
+        cmap=cmap,
+        norm=norm,
+        vmax=vmax,
+    )
+    plt.colorbar(scatter, ax=ax, label="Kernel density estimate", pad=-0.0005)
 
 
 def drawFundamentalDomain(ax, scale):
@@ -162,12 +262,19 @@ def drawFundamentalDomain(ax, scale):
     drawC(ax, C, scale)
 
 
-def plotEnergyField(energy_grid, fig=None, ax=None, save=True, add_title=True):
-    print("Plotting energy field...")
+def plotEnergyField(
+    energy_grid,
+    fig=None,
+    ax=None,
+    save=True,
+    add_title=True,
+    zoom=1,
+    remove_max_color=True,
+):
     # Define the range for x and y based on the unit circle
     radius = 1.0
-    x_min, x_max = -radius, radius
-    y_min, y_max = -radius, radius
+    x_min, x_max = -radius / zoom, radius / zoom
+    y_min, y_max = -radius / zoom, radius / zoom
     grid_size = len(energy_grid)
 
     # Create the plot
@@ -177,12 +284,19 @@ def plotEnergyField(energy_grid, fig=None, ax=None, save=True, add_title=True):
 
     max_energy = np.nanmax(energy_grid)
 
-    img = ax.imshow(energy_grid, cmap="viridis", origin="lower")
+    cmap = "coolwarm"
+    if remove_max_color:
+        coolwarm = cm.get_cmap(cmap, 256)  # 256 colors
+        newcolors = coolwarm(np.linspace(0, 1, 256))
+        n = 2
+        newcolors[-n:, -1] = np.linspace(1, 0, n) ** (1 / 2)
+        cmap = colors.ListedColormap(newcolors)
+    img = ax.imshow(energy_grid, cmap=cmap, origin="lower")
 
     # Add a thin black circle
-    circleSize = grid_size / 2
-    circle_center_x = circleSize
-    circle_center_y = circleSize
+    circleSize = (grid_size / 2) * zoom
+    circle_center_x = grid_size / 2
+    circle_center_y = grid_size / 2
     circle = Circle(
         (circle_center_x, circle_center_y),
         circleSize,
@@ -195,6 +309,9 @@ def plotEnergyField(energy_grid, fig=None, ax=None, save=True, add_title=True):
     # Draw fundamental domain
     # drawFundamentalDomain(ax, grid_size)
 
+    # Draw elastic domain
+    # TODO
+
     # Adjusting ticks
     ax.set_xticks(
         np.linspace(0, grid_size - 1, 5),
@@ -204,25 +321,29 @@ def plotEnergyField(energy_grid, fig=None, ax=None, save=True, add_title=True):
         np.linspace(0, grid_size - 1, 5),
         np.linspace(y_min, y_max, 5).round(2),
     )
+
     ax.set_xlim(0, grid_size)
     ax.set_ylim(0, grid_size)
 
     # Add colorbar
-    cbar = fig.colorbar(img, label="Energy")
+    cbar = fig.colorbar(img, label="Energy", pad=-0.01)
     default_font_size = plt.rcParams["font.size"]  # Fetch default font size
     cbar.ax.set_title(f"Capped at ${max_energy}$", fontsize=default_font_size)
     nbs = "\u00a0"  # non-breaking-space
-    ax.set_xlabel(f"← Tall {nbs*7} $P_x$(Length ratio) {nbs*7} Wide →")
-    ax.set_ylabel(
-        f"← Large angle {nbs*7} $P_y$(Length ratio and $\\theta - \\pi/2$) {nbs*7} Small angle →"
-    )
+    # $P_x$(Length ratio)
+    ax.set_xlabel(f"← Tall {nbs*6} Wide →")
+    # $P_y$(Length ratio and $\\theta - \\pi/2$)
+    ax.set_ylabel(f"← Large angle {nbs*6} Small angle →")
     if add_title:
         ax.set_title("Energy field in a Poincaré disk")
 
     if save:
         output_pdf_path = "energy_field.pdf"
         fig.savefig(
-            output_pdf_path, format="pdf", dpi=600, bbox_inches="tight", pad_inches=0
+            output_pdf_path,
+            format="pdf",
+            dpi=600,
+            bbox_inches="tight",
         )
 
 

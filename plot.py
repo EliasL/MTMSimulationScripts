@@ -11,7 +11,7 @@ from Management.multiServerJob import (
     get_server_short_name,
 )
 from Management.simulationManager import findOutputPath
-from Plotting.plotAll import plotAll
+from plotAll import plotAll
 from Plotting.remotePlotting import stressPlotWithImages, energyPlotWithImages, plotLog
 from tqdm import tqdm
 

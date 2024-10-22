@@ -374,11 +374,11 @@ def stressPlotWithImages(configs, paths=None):
         ylim=(0, 0.27),
         mark_pos=(0.8, 0.15),
         image_pos=[
-            [0.35, 0.02],  # first image, bottom middle
+            [0.32, 0.01],  # first image, bottom middle
             [0.03, 0.5],  # second image, upper left
             [0.6, 0.55],  # upper right
         ],
-        image_size=[0.3, 0.4, 0.4],
+        image_size=[0.37, 0.4, 0.4],
         Y="Avg RSS",
         metric="stress",
     )
@@ -391,11 +391,11 @@ def energyPlotWithImages(configs, paths=None):
         ylim=(0, 0.047),
         mark_pos=(0.7, 0.95),
         image_pos=[
-            [0.03, 0.4],  # first image, center left
-            [0.3, 0.02],  # second image, lower center
-            [0.6, 0.2],  # upper right
+            [0.02, 0.5],  # first image, upper left
+            [0.29, 0.02],  # second image, lower center
+            [0.6, 0.1],  # upper right
         ],
-        image_size=[0.4, 0.3, 0.4],
+        image_size=[0.4, 0.4, 0.4],
         Y="Avg energy",
         metric="energy",
     )

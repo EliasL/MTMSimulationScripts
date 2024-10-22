@@ -13,8 +13,8 @@ import json
 from simplification.cutil import simplify_coords_vwp
 from tqdm import tqdm
 from pathlib import Path
-from pyplotFunctions import plot_mesh
-from dataFunctions import get_data_from_name
+from Plotting.pyplotFunctions import plot_mesh
+from Plotting.dataFunctions import get_data_from_name
 
 
 def plotYOverX(
@@ -589,8 +589,8 @@ def makePlot(
     use_title=False,
     title=None,
     plot_average=False,
-    xlim=(-np.inf, np.inf),
-    ylim=(-np.inf, np.inf),
+    xlim=None,
+    ylim=None,
     indicateLastPoint=False,
     plot_roll_average=False,
     plot_raw=True,
@@ -645,9 +645,10 @@ def makePlot(
     lines = []
     data = []
     xData = []
-
-    ax.set_xlim(*xlim)
-    ax.set_ylim(*ylim)
+    if xlim:
+        ax.set_xlim(*xlim)
+    if ylim:
+        ax.set_ylim(*ylim)
 
     for i, csv_file_path in enumerate(csv_file_paths):
         if X is None:
@@ -660,8 +661,10 @@ def makePlot(
                 raise Warning("Cannot plot average with multiple Y columns")
 
         # Truncate data based on Lims
-        df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
-        df = df[(df[Y] >= ylim[0]) & (df[Y] <= ylim[1])]
+        if xlim:
+            df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
+        if ylim:
+            df = df[(df[Y] >= ylim[0]) & (df[Y] <= ylim[1])]
 
         data.append(df[Y].values)
         xData.append(df[X].values)
@@ -864,7 +867,7 @@ def addImagesToPlot(
     last_file = matching_files[-1][1]
 
     if not isinstance(size, list):
-        size = size * 3
+        size = [size] * 3
 
     for pos, size, vtu_file, index_fraction in zip(
         image_pos,
@@ -930,7 +933,7 @@ def addImagesToPlot(
         sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
         # Add the color bar to the figure
-        fig.colorbar(sm, ax=ax, shrink=0.5)
+        fig.colorbar(sm, ax=ax, shrink=0.5, pad=0.005)
 
 
 def removeBadData(df, Y, crash_count, csv_file_path):

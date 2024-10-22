@@ -10,7 +10,17 @@ import time
 import random
 from multiprocessing import Pool
 
-from dataFunctions import get_data_from_name
+
+import threading
+from MTMath.plotEnergy import (
+    plotEnergyField,
+    generate_energy_grid,
+    drawCScatter,
+    elastic_reduction,
+)
+from MTMath.contiPotential import ground_state_energy
+
+from .dataFunctions import get_data_from_name
 import matplotlib
 
 matplotlib.use("Agg")  # Use a non-interactive backend
@@ -51,13 +61,15 @@ class VTUData:
 
     def get_C(self):
         """
-        Returns [C11, C22, C12]
+        Returns a 3D array where each slice (2x2 matrix) corresponds to the
+        [C11, C22, C12] components.
         """
-        return [
-            vtk_to_numpy(
-                self.mesh.getCellData().GetArray(C) for C in ["C11", "C22", "C12"]
-            )
+        # Get the C11, C22, and C12 arrays from the VTK object
+        C11, C22, C12 = [
+            vtk_to_numpy(self.mesh.GetCellData().GetArray(C))
+            for C in ["C11", "C22", "C12"]
         ]
+        return arrsToMat(C11, C22, C12)
 
     def get_connectivity(self):
         # Extract Connectivity
@@ -66,6 +78,19 @@ class VTUData:
         # We reshape into 4 long arrays, and then drop the column of 3s
         connectivity = _connectivity.reshape(-1, 4)[:, 1:]
         return connectivity
+
+
+def arrsToMat(C11, C22, C12):
+    # Initialize the 3D array to store the 2x2 matrices
+    C = np.zeros((C11.shape[0], 2, 2))
+
+    # Fill the matrix with the corresponding values
+    C[:, 0, 0] = C11  # (1,1) entry
+    C[:, 1, 1] = C22  # (2,2) entry
+    C[:, 0, 1] = C12  # (1,2) entry
+    C[:, 1, 0] = C12  # (2,1) entry, ensuring symmetry
+
+    return C
 
 
 def get_energy_range(vtu_files, cvs_file):
@@ -185,11 +210,11 @@ def save_and_close_plot(ax, path, transparent=False):
         patch.set_antialiased(True)  # Anti-alias shapes like rectangles, circles
 
     # Save the plot with transparent background
-    dpi = 300
+    dpi = 600
+    plt.tight_layout()
     plt.savefig(
         path, bbox_inches="tight", pad_inches=0, transparent=transparent, dpi=dpi
     )
-
     plt.close()
 
 
@@ -288,8 +313,8 @@ def plot_nodes(args):
 
 def plot_mesh(
     vtu_file,
-    global_min=3.93,
-    global_max=4.20,
+    global_min=0,
+    global_max=0.37,
     useStress=True,
     axis_limits=None,
     frame_index=None,
@@ -317,7 +342,8 @@ def plot_mesh(
         norm = mcolors.Normalize(vmin=-1.5, vmax=1.5)
         backgroundColor = plt.get_cmap(cmap)(0.5)
     else:
-        field = data.get_energy_field()
+        # The energy field is normalized to have energy=0 in the ground state
+        field = data.get_energy_field() - ground_state_energy()
         norm = mcolors.Normalize(vmin=global_min, vmax=global_max)
         backgroundColor = plt.get_cmap(cmap)(0)
 
@@ -339,14 +365,32 @@ def plot_mesh(
     return ax, cmap, norm
 
 
+# Define a lock to make sure only one thread initializes GRID
+grid_lock = threading.Lock()
+GRID = None  # Start with GRID as None to check later
+
+
+# This can be an expensive function, so we want to avoid recalculating it all the time
+def get_energy_grid(zoom=1):
+    # If GRID is not yet defined, generate it
+    global GRID
+    if GRID is None:
+        with grid_lock:  # Ensure thread-safety while initializing
+            if GRID is None:  # Double-check inside the lock
+                GRID = generate_energy_grid(
+                    resolution=1000, energy_lim=[None, 0.37], zoom=zoom
+                )
+    return GRID
+
+
 def plot_in_poincare_disk(
     vtu_file,
     frame_index=None,
     add_title=False,
     ax=None,
+    fig=None,
+    do_elastic_reduction=False,
 ):
-    from MTMath.plotEnergy import plotEnergyField, generate_energy_grid
-
     if ax is None:
         ax, fig = base_plot(
             vtu_file=vtu_file,
@@ -354,10 +398,69 @@ def plot_in_poincare_disk(
             add_title=add_title,
         )
     data = VTUData(vtu_file)
-    C11, C22, C12 = data.get_C()
+    C = data.get_C()
+    if do_elastic_reduction:
+        # Do the elastic reduction
+        C = arrsToMat(*elastic_reduction(C[:, 0, 0], C[:, 1, 1], C[:, 0, 1]))
+        zoom = 3
+    else:
+        zoom = 1
 
-    generate_energy_grid()
-    plotEnergyField()
+    g = get_energy_grid(zoom=zoom)
+    plotEnergyField(g, fig, ax, save=False, zoom=zoom, remove_max_color=zoom == 1)
+
+    vmax = 2000 if do_elastic_reduction else 1700
+    drawCScatter(ax, C, len(g), vmax=vmax, zoom=zoom, remove_max_color=False)
+
+    ax.set_title("Elements in Poincaré disk with point density")
+    return ax
+
+
+def plot_and_save_in_poincare_disk(args):
+    (
+        framePath,
+        vtu_file,
+        frame_index,
+        global_min,
+        global_max,
+        axis_limits,
+        transparent,
+    ) = args
+
+    ax = plot_in_poincare_disk(
+        vtu_file=vtu_file,
+        frame_index=frame_index,
+        add_title=True,
+    )
+
+    path = f"{framePath}/disk_frame_{frame_index:04d}.png"
+    save_and_close_plot(ax, path, transparent)
+
+    return path
+
+
+def plot_and_save_in_elastically_reduced_poincare_disk(args):
+    (
+        framePath,
+        vtu_file,
+        frame_index,
+        global_min,
+        global_max,
+        axis_limits,
+        transparent,
+    ) = args
+
+    ax = plot_in_poincare_disk(
+        vtu_file=vtu_file,
+        frame_index=frame_index,
+        add_title=True,
+        do_elastic_reduction=True,
+    )
+
+    path = f"{framePath}/eReduced_disk_frame_{frame_index:04d}.png"
+    save_and_close_plot(ax, path, transparent)
+
+    return path
 
 
 def plot_and_save_mesh(args, useStress=True):
@@ -371,7 +474,7 @@ def plot_and_save_mesh(args, useStress=True):
         transparent,
     ) = args
 
-    ax = plot_mesh(
+    ax, _, _ = plot_mesh(
         vtu_file=vtu_file,
         global_min=global_min,
         global_max=global_max,
