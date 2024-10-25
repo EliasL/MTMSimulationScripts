@@ -16,6 +16,7 @@ from MTMath.plotEnergy import (
     plotEnergyField,
     generate_energy_grid,
     drawCScatter,
+    lagrange_reduction,
     elastic_reduction,
 )
 from MTMath.contiPotential import ground_state_energy
@@ -23,7 +24,7 @@ from MTMath.contiPotential import ground_state_energy
 from .dataFunctions import get_data_from_name
 import matplotlib
 
-matplotlib.use("Agg")  # Use a non-interactive backend
+# matplotlib.use("Agg")  # Use a non-interactive backend
 
 
 class VTUData:

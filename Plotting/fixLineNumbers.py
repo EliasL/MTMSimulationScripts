@@ -6,13 +6,17 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 def fix_csv_files(paths, use_tqdm=True):
+    if len(paths) == 0:
+        return
+    fix_missing_column(paths, use_tqdm=use_tqdm)
+
     if isinstance(paths[0], list):
         paths = [item for sublist in paths for item in sublist]
     # Iterate over all files in the given folder
     for path in tqdm(paths, disable=not use_tqdm):
         if path.endswith(".csv"):
             # Read the CSV file into a DataFrame
-            df = pd.read_csv(path, low_memory=False)
+            df = pd.read_csv(path)
 
             # Create a Series that tracks the maximum value encountered so far
             cummax_series = df["Load"].cummax()
@@ -27,39 +31,46 @@ def fix_csv_files(paths, use_tqdm=True):
             df_cleaned.to_csv(path, index=False)
 
 
+def process_file(path):
+    # This function processes a single file
+    temp_path = f"{path[:-3]}.temp.csv"
+    # Open the original file for reading and a temporary file for writing
+    with open(path, "r") as file, open(temp_path, "w") as temp_file:
+        firstLine = True
+        for line in file:
+            if not line[:7] == "Line nr" and firstLine:
+                break
+            else:
+                firstLine = False
+
+                # Get the first element
+                n, rest = line.split(sep=",", maxsplit=1)
+                # We want to remove the line numbers, but keep the floats
+                # that might come if the lines numbers have been removed in
+                # the middle of the file
+                if "." not in n:
+                    # Remove it
+                    temp_file.write(rest)
+                else:
+                    temp_file.write(line)
+
+    # After processing, replace the original file with the modified one
+    os.replace(temp_path, path)
+
+
 def fix_missing_column(paths, use_tqdm=True):
-    # This function processes each file in the given paths
-    # It removes the first column if the first header is "Line nr"
-    # and continues removing rows if the values in the first column
-    # are floats equal to 1, until a non-1, non-float is found.
+    # This function processes each file in the given paths using multithreading.
+    # Each file will be processed in a separate thread.
+    # A progress bar will be displayed if use_tqdm is True.
 
-    for path in tqdm(paths, disable=not use_tqdm):
-        # Read the file into a dataframe (assuming CSV format)
-        df = pd.read_csv(path)
-
-        # Check if the first column header is "Line nr"
-        if df.columns[0] == "Line nr":
-            # Iterate over the rows in the first column
-            for i, val in enumerate(df.iloc[:, 0]):
-                try:
-                    # Try to convert the value to a float
-                    float_val = float(val)
-
-                    # If it's a float and equals 1, continue checking
-                    if float_val == 1.0:
-                        break
-                    else:
-                        # Stop once we find a value that isn't 1
-                        break
-                except ValueError:
-                    # If we hit a value that can't be converted to float, stop
-                    break
-
-            # Remove the first column up to the valid row
-            df = df.iloc[i:, 1:]  # Skip rows and drop the first column
-
-            # Optionally, save the cleaned dataframe back to a file
-            df.to_csv(path + "test.txt", index=False)
+    # Create a ThreadPoolExecutor for parallel processing
+    with ThreadPoolExecutor() as executor:
+        # Submit each file processing task to the executor
+        if use_tqdm:
+            # Wrap the executor with tqdm to show the progress bar
+            list(tqdm(executor.map(process_file, paths), total=len(paths)))
+        else:
+            list(executor.map(process_file, paths))
 
 
 def fix_csv_files_in_folder(folder_path, use_tqdm=True):

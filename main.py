@@ -13,6 +13,7 @@ from Management.multiServerJob import (
     bigJob,
     confToCommand,
     basicJob,
+    allPlasticEventsJob,
     propperJob,
     propperJob1,
     propperJob2,
@@ -93,8 +94,10 @@ def runOnServer():
 
 
 def runOnLocalMachine():
-    configs, labels = propperJob(3, seeds=[0], size=150, group_by_seeds=False)
-    run_many_locally(configs)
+    # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
+    configs, labels = allPlasticEventsJob()
+    dump = "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0/dumps/dump_l0.2.mtsb"
+    run_many_locally(configs, dump=dump, newOutput=True)
 
 
 def startJobs():
@@ -158,8 +161,8 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-# runOnLocalMachine()
-startJobs()
+runOnLocalMachine()
+# startJobs()
 # plotBigJob()
 # plotPropperJob()
 # threadTest()

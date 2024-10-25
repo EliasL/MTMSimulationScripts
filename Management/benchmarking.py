@@ -2,7 +2,7 @@ from simulationManager import SimulationManager, findOutputPath
 from configGenerator import ConfigGenerator, SimulationConfig
 import matplotlib
 
-matplotlib.use("Agg")  # Use a non-interactive backend suitable for scripts
+# matplotlib.use("Agg")  # Use a non-interactive backend suitable for scripts
 import matplotlib.pyplot as plt
 import numpy as np
 from multiprocessing import Pool

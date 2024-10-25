@@ -16,6 +16,12 @@ from pathlib import Path
 from Plotting.pyplotFunctions import plot_mesh
 from Plotting.dataFunctions import get_data_from_name
 
+if True:
+    import warnings
+
+    # This line converts all RuntimeWarnings into errors (exceptions).
+    warnings.simplefilter("error", RuntimeWarning)
+
 
 def plotYOverX(
     X,
@@ -52,7 +58,11 @@ def plotYOverX(
     if indicateLastPoint:
         # Add a scatter point at the last point
         kwargs["label"] = ""
-        point = ax.scatter(X_simplified[-1], Y_simplified[-1], **kwargs)
+        k2 = kwargs.copy()
+        if "alpha" in k2:
+            # Make the end points more visible if you want
+            k2["alpha"] = k2["alpha"] * 1
+        point = ax.scatter(X_simplified[-1], Y_simplified[-1], **k2)
     else:
         point = None
 
@@ -132,7 +142,7 @@ def pros_d(df, min_npd, strainLims):
 def getPowerLawFit(
     dfs,
     minNrOfDeformations=0,
-    minEnergy=0,
+    dropLim=[None, None],
     maxEnergy=np.inf,
     bootstrap=False,
     split=True,
@@ -147,29 +157,30 @@ def getPowerLawFit(
     # limits. That way, the two regions we are interested in analysing is
     # given by (O1, I1) and (I2, O2).
 
-    # If we split, we find the largest energy value of the system and analyse
-    # the pre and post yield seperately
     if split:
-        pre_yield_drops = [
-            pros_d(
-                df=df,
-                min_npd=minNrOfDeformations,
-                strainLims=(outerStrainLims[0], innerStrainLims[0]),
-            )
-            for df in dfs
-        ]
-        post_yield_drops = [
-            pros_d(
-                df=df,
-                min_npd=minNrOfDeformations,
-                strainLims=(innerStrainLims[1], outerStrainLims[1]),
-            )
-            for df in dfs
-        ]
+        combined_drops = [None, None]
+        if outerStrainLims[0] < innerStrainLims[0]:
+            pre_yield_drops = [
+                pros_d(
+                    df=df,
+                    min_npd=minNrOfDeformations,
+                    strainLims=(outerStrainLims[0], innerStrainLims[0]),
+                )
+                for df in dfs
+            ]
+            combined_drops[0] = np.concatenate(pre_yield_drops)
 
-        combined_drops = [
-            np.concatenate(drops) for drops in (pre_yield_drops, post_yield_drops)
-        ]
+        if outerStrainLims[1] > innerStrainLims[1]:
+            post_yield_drops = [
+                pros_d(
+                    df=df,
+                    min_npd=minNrOfDeformations,
+                    strainLims=(innerStrainLims[1], outerStrainLims[1]),
+                )
+                for df in dfs
+            ]
+            combined_drops[1] = np.concatenate(post_yield_drops)
+
     else:
         combined_drops = [
             np.concatenate(
@@ -208,10 +219,7 @@ def getPowerLawFit(
                 drops,
                 n_bootstrap,
                 lambda drops: powerlaw.Fit(
-                    drops,
-                    xmin=minEnergy,
-                    xmax=maxEnergy,
-                    fit_method="Likelihood",
+                    drops, xmin=dropLim[0], xmax=dropLim[1], fit_method="Likelihood"
                 ),
             )
 
@@ -224,15 +232,119 @@ def getPowerLawFit(
     else:
         combined_fits = []
         for drops in combined_drops:
-            if len(drops) == 0:
+            if drops is None:
+                combined_fits.append(None)
                 continue
 
             fit = powerlaw.Fit(
-                drops, xmin=minEnergy, xmax=maxEnergy, fit_method="Likelihood"
+                drops, xmin=dropLim[0], xmax=dropLim[1], fit_method="Likelihood"
             )
             combined_fits.append(fit)
 
         return combined_fits, combined_drops
+
+
+# List of distributions to compare
+DISTRIBUTIONS = {
+    "lognormal": ["mu", "sigma"],
+    "exponential": ["Lambda"],
+    "truncated_power_law": ["alpha", "Lambda"],
+    "power_law": ["alpha"],
+    # "negative_binomial": ["r", "p"],
+    "stretched_exponential": ["Lambda", "beta"],
+    # "gamma": ["k", "theta"],
+}
+
+
+def plotPowerLaw(
+    drops, ax, fit, label, part_label, dist="truncated_power_law", add_fit=True
+):
+    # np.savetxt(f"{label}{part_label}.csv", drops, delimiter=",")
+    global color_index, index
+
+    # Get the current color
+    color = colors[label]
+
+    fit.plot_ccdf(
+        original_data=True,
+        ax=ax,
+        marker=markers[index],
+        facecolors="none",
+        edgecolors=color,
+        s=100,
+        label=f"{label}{part_label}",
+    )
+
+    extraLabel = " ".join(
+        [
+            rf"$\{v.lower()}$: " + f"{getattr(getattr(fit,dist), v):.2f}"
+            if len(v) > 1
+            else (rf"${v}$: ") + f"{getattr(getattr(fit,dist), v):.2f}"
+            for v in DISTRIBUTIONS[dist]
+        ]
+    )
+    # Now, plot the best-fitting distribution
+    if add_fit:
+        # Plot power-law fit
+        getattr(fit, dist).plot_ccdf(
+            ax=ax,
+            linestyle="--",
+            label=f"fit: {extraLabel}",
+            color="b",
+        )
+        renormalizeMostRecentPlot(ax)
+
+    print(f"{label}{part_label}: dist: {dist}, {extraLabel}")
+
+    return ax
+
+
+def renormalizeMostRecentPlot(ax):
+    """
+    When we plott the ccdf fit over a subregion of the whole data, it will be
+    normalized to a different region than the whole region of the data, so we
+    need to readjust the plot.
+    NB: Requires a line and a scatter plot to be the most recent additions to
+    the ax.
+    """
+    # Get fit data
+    fit_line = ax.lines[-1]
+    fit_y_data = fit_line.get_ydata()
+    fit_x_data = fit_line.get_xdata()
+    fit_region = [np.min(fit_x_data), np.max(fit_x_data)]
+
+    # Get scatter data (last collection)
+    data_scatter = ax.collections[-1]
+    scatter_y_data = data_scatter.get_offsets()[
+        :, 1
+    ]  # Use offsets to get y values for scatter plot
+    scatter_x_data = data_scatter.get_offsets()[
+        :, 0
+    ]  # Use offsets to get x values for scatter plot
+
+    # Find the region for the scatter data that corresponds to the fit region
+    scatter_region_indices = (scatter_x_data >= fit_region[0]) & (
+        scatter_x_data <= fit_region[1]
+    )
+
+    # Subset scatter data to the fit region
+    scatter_x_data_region = scatter_x_data[scatter_region_indices]
+    scatter_y_data_region = scatter_y_data[scatter_region_indices]
+
+    # Integrate the y data over x for both fit and scatter data in the region of the fit
+    area_fit = np.trapz(fit_y_data, fit_x_data)  # Numerical integration for fit data
+    area_scatter = np.trapz(scatter_y_data_region, scatter_x_data_region)
+
+    # Compute the scaling factor to adjust the fit data to match the scatter data area
+    scaling_factor = area_scatter / area_fit
+
+    # Apply the scaling factor to the fit y-data
+    scaled_fit_y_data = fit_y_data * scaling_factor
+
+    # Set the new y data
+    fit_line.set_ydata(scaled_fit_y_data)
+    # Redraw the figure to reflect the changes
+    ax.figure.canvas.draw()
 
 
 def doBootstrap(drops, n, fit_func):
@@ -251,27 +363,22 @@ def doBootstrap(drops, n, fit_func):
         fit = fit_func(bootstrap_sample)
         fits.append(fit)
 
-    for p in [
-        "alpha",
-        "Lambda",
-        "D",
-        "xmin",
-        "V",
-        "Asquare",
-        "Kappa",
-    ]:
-        values = np.array(
-            list(
-                map(
-                    lambda fit: getattr(getattr(fit, "truncated_power_law"), p),
-                    fits,
+    for dist, params in DISTRIBUTIONS.items():
+        result[dist] = {}
+        all_params = ["D", "xmin", "V", "Asquare", "Kappa"] + params
+        for p in all_params:
+            values = np.array(
+                list(
+                    map(
+                        lambda fit: getattr(getattr(fit, dist), p),
+                        fits,
+                    )
                 )
             )
-        )
-        mean = np.mean(values)
-        std = np.std(values)
-        result[p] = mean
-        result[f"{p}_std"] = std
+            mean = np.mean(values)
+            std = np.std(values)
+            result[dist][p] = mean
+            result[dist][f"{p}_std"] = std
     return result
 
 
@@ -293,10 +400,11 @@ def plotSplitPowerLaw(
     fig=None,
     ax=None,
     label="",
-    minEnergy=0,
-    innerStrainLims=(np.inf, -np.inf),
     plot_pre_yield=True,
     plot_post_yield=True,
+    add_fit=True,
+    dist="truncated_power_law",
+    **kwargs,
 ):
     global color_index, index, line_index
     if ax is None:
@@ -305,22 +413,26 @@ def plotSplitPowerLaw(
     # Trim data based on dislocations
     minNrOfDeformations = 0
 
-    c_fits, c_drops = getPowerLawFit(
-        dfs, minNrOfDeformations, minEnergy, innerStrainLims=innerStrainLims
-    )
+    c_fits, c_drops = getPowerLawFit(dfs, minNrOfDeformations, **kwargs)
 
-    for fit, drops, part_label, index in zip(
-        c_fits, c_drops, [" pre yield", " post yield"], [0, 1]
-    ):
-        if len(drops) == 0:
+    for fit, drops, part_label in zip(c_fits, c_drops, [" pre yield", " post yield"]):
+        if drops is None:
             continue
-        if part_label == "pre yield" and not plot_pre_yield:
+        if part_label == " pre yield" and not plot_pre_yield:
             continue
-        if part_label == "post yield" and not plot_post_yield:
+        if part_label == " post yield" and not plot_post_yield:
             continue
         if not (plot_post_yield and plot_pre_yield):
             part_label = ""
-        ax = plotPowerLaw(drops, ax, fit, label, part_label)
+        ax = plotPowerLaw(
+            drops,
+            ax,
+            fit,
+            label,
+            part_label,
+            dist=dist,
+            add_fit=add_fit,
+        )
 
     # Increment the global call count
     color_index += 1
@@ -334,55 +446,6 @@ def plotSplitPowerLaw(
     ax.set_xscale("log")
     ax.set_yscale("log")
     return fig, ax
-
-
-def plotPowerLaw(drops, ax, fit, label, part_label):
-    # np.savetxt(f"{label}{part_label}.csv", drops, delimiter=",")
-
-    global color_index, index
-    xmin, xmax = np.min(drops), np.max(drops)
-
-    # Set up bins and plot histogram
-    bins = np.logspace(np.log10(xmin), np.log10(xmax), 12)
-    hist, bin_edges = np.histogram(drops, bins=bins, density=True)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-
-    # Get the current color
-    color = colors[label]
-
-    # Plot the histogram with marker only, but don't show in legend
-    ax.scatter(
-        bin_centers,
-        hist,
-        marker=markers[index],
-        facecolors="none",
-        edgecolors=color,
-        s=100,
-        zorder=-(color_index * 2 + 1),
-    )
-
-    # Plot the line only, but don't show in legend
-    ax.plot(
-        fit.truncated_power_law.parent_Fit.data,
-        fit.truncated_power_law.pdf(),
-        line_styles[index],
-        label="_nolegend_",
-        color=color,
-        zorder=-color_index * 2,
-    )
-
-    # Create a dummy plot for the legend with both marker and line style
-    ax.plot(
-        [],
-        [],
-        line_styles[index],
-        marker=markers[index],
-        label=rf"{label.split(' seed')[0].replace('minimizer=', '')}{part_label} $\alpha$={fit.truncated_power_law.alpha:.2f}, $\lambda$={fit.truncated_power_law.Lambda:.2f}",
-        color=color,
-    )
-    print(f"{label} {part_label}: {fit.truncated_power_law.alpha}")
-
-    return ax
 
 
 def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
@@ -464,7 +527,7 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
             # ax.xaxis.set_major_locator(MaxNLocator(3))
             # Remove axis names for inner axes
             if i % 3 == 0:  # Not the first column
-                ax.set_ylabel("Frequency")
+                ax.set_ylabel(r"$P(>E)$")
             if i >= 6:  # Not the bottom row
                 ax.set_xlabel(r"$-\Delta E$")
 
@@ -483,7 +546,7 @@ def getPrettyLabel(string):
 # Example usage can be added as necessary with DataFrames having 'Nr plastic deformations' and 'Avg energy'
 
 
-def plotSlidingPowerLaw(dfs, fig=None, ax=None, label=""):
+def plotSlidingPowerLaw(dfs, dist="truncated_power_law", fig=None, ax=None, label=""):
     global color_index, index, line_index
     if ax is None:
         fig, ax = plt.subplots()
@@ -493,8 +556,8 @@ def plotSlidingPowerLaw(dfs, fig=None, ax=None, label=""):
     minEnergies = np.logspace(np.log10(1e-6), np.log10(1e-3), 30)
     exponents = []
 
-    for minEnergy in tqdm(minEnergies):
-        c_fits, c_drops = getPowerLawFit(dfs, minNrOfDeformations, minEnergy)
+    for minDropValue in tqdm(minEnergies):
+        c_fits, c_drops = getPowerLawFit(dfs, minNrOfDeformations, minDropValue)
         exponents.append(c_fits[1].truncated_power_law.alpha)
     exponents = np.array(exponents)
 
@@ -504,7 +567,14 @@ def plotSlidingPowerLaw(dfs, fig=None, ax=None, label=""):
 
 
 def plotSlidingWindowPowerLaw(
-    dfs, minEnergy=0, windowRadius=0.1, fig=None, ax1=None, ax2=None, label=""
+    dfs,
+    dist="truncated_power_law",
+    dropLim=[None, None],
+    windowRadius=0.1,
+    fig=None,
+    ax1=None,
+    ax2=None,
+    label="",
 ):
     if ax1 is None:
         fig, ax1 = plt.subplots()
@@ -530,7 +600,7 @@ def plotSlidingWindowPowerLaw(
         r, c_drops = getPowerLawFit(
             dfs,
             minNrOfDeformations,
-            minEnergy=minEnergy,
+            dropLim=dropLim,
             bootstrap=True,
             split=False,
             outerStrainLims=(center - windowRadius, center + windowRadius),
@@ -538,10 +608,11 @@ def plotSlidingWindowPowerLaw(
         # TODO Check individual plots
         # ax1 = plotPowerLaw(c_drops, ax1, r, label, f": {center}")
         # plt.show()
-        exponents.append(r["alpha"])
-        cutoffs.append(r["Lambda"])
-        exponent_errors.append(r["alpha_std"])
-        cutoff_errors.append(r["Lambda_std"])
+        exponents.append(r[dist]["alpha"])
+        exponent_errors.append(r[dist]["alpha_std"])
+        if "Lambda" in r[dist]:
+            cutoffs.append(r[dist]["Lambda"])
+            cutoff_errors.append(r[dist]["Lambda_std"])
 
     # Convert lists to numpy arrays for easier manipulation
     exponents = np.array(exponents)
@@ -613,6 +684,7 @@ def makePlot(
     legend_loc="best",
     plot_pre_yield=True,
     plot_post_yield=True,
+    dist="truncated_power_law",
 ):
     if len(csv_file_paths) == 0 or (
         len(csv_file_paths) > 0 and len(csv_file_paths[0]) == 0
@@ -665,6 +737,9 @@ def makePlot(
             df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
         if ylim:
             df = df[(df[Y] >= ylim[0]) & (df[Y] <= ylim[1])]
+
+        if df[X][-1] < 1:
+            print(f"{csv_file_path} is not done!")
 
         data.append(df[Y].values)
         xData.append(df[X].values)
@@ -745,6 +820,7 @@ def makePlot(
             "include_label": legend,
             "plot_pre_yeild": plot_pre_yield,
             "plot_post_yield": plot_post_yield,
+            "dist": dist,
         }
         fig, ax, line = plotSplitPowerLaw(data, **kwargs)
 
@@ -936,25 +1012,16 @@ def addImagesToPlot(
         fig.colorbar(sm, ax=ax, shrink=0.5, pad=0.005)
 
 
-def removeBadData(df, Y, crash_count, csv_file_path):
-    # Check for Y values greater than some value (0.07?) and truncate
-    if Y == "Avg energy":
-        max_change = 0.0005
-        max_value = 0.01
-    elif Y == "Avg RSS":
-        max_change = 0.01
-        max_value = 0.4
+def removeBadData(df, crash_count, csv_file_path):
+    # The max energy of an element should be around 4.2-6
+    # If the energy of an element is 10, something has probably gone wrong
+    max_e = "Max energy"
+    max_value = 10
 
-    diffs = np.diff(df[Y])
-    if (diffs > max_change).any():
+    if (df[max_e] > max_value).any():
         crash_count += 1
-        # Create a boolean mask, inserting 'True' at the beginning to maintain the length
-        mask_change = np.insert(diffs <= max_change, 0, True)
-        mask_value = df[Y] < max_value
-
-        # Combine both masks using logical AND
-        combined_mask = mask_change & mask_value
-        df = df[combined_mask]
+        mask = df[max_e] < max_value
+        df = df[mask]
         # print(f"Crash in {csv_file_path}.")
     return df, crash_count
 
@@ -971,6 +1038,9 @@ def makeComparisonPlot(
     save=True,
     xlim=None,
     ylim=None,
+    mark=None,
+    mark_pos=(0.8, 0.95),
+    mark_fontsize=17,
     **kwargs,
 ):
     global color_index, index, line_index
@@ -979,11 +1049,11 @@ def makeComparisonPlot(
     if Y == "Avg energy":
         y_name = r"Avg energy ($E$)"
         if name == "":
-            name == "Avg energy"
+            name = "Avg energy"
     elif Y == "Avg RSS":
         y_name = r"Avg stress ($\sigma$)"
         if name == "":
-            name == "Avg stress"
+            name = "Avg stress"
     x_name = r"Strain ($\gamma$)"
     title = f"{name}"
 
@@ -1014,13 +1084,11 @@ def makeComparisonPlot(
         # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             # print(csv_file_path)
-            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Avg energy"])
+            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Max energy"])
             # df = df[0:50000]
             if df.empty:
                 continue
-            df, crash_count = removeBadData(
-                df, "Avg energy", crash_count, csv_file_path
-            )
+            df, crash_count = removeBadData(df, crash_count, csv_file_path)
 
             data.append(df[Y].values)
 
@@ -1076,6 +1144,11 @@ def makeComparisonPlot(
         ax.set_ylabel(y_name)
     if use_title:
         ax.set_title(title)
+
+    if mark:
+        assert mark_pos is not None
+        add_mark(ax, f"({mark})", *mark_pos, fontsize=mark_fontsize)
+
     ax.autoscale_view()
 
     if save:
@@ -1101,7 +1174,7 @@ def makeLogPlotComparison(
     slide=False,
     window=False,
     windowRadius=0.1,
-    minEnergy=1e-6,
+    dropLim=[None, None],
     outerStrainLims=[-np.inf, np.inf],
     innerStrainLims=(0.45, 0.6),
     use_title=False,
@@ -1115,8 +1188,10 @@ def makeLogPlotComparison(
     plot_post_yield=True,
     mark=None,
     mark_pos=(0.8, 0.95),
-    mark_fontsize=20,
+    mark_fontsize=17,
+    add_fit=True,
     legend_loc="best",
+    dist="truncated_power_law",
     **kwargs,
 ):
     global color_index, index, line_index
@@ -1143,8 +1218,10 @@ def makeLogPlotComparison(
     if name == "":
         if Y == "Avg energy":
             name == "Avg energy power law"
+            unit = "E"
         elif Y == "Avg RSS":
             name == "Avg stress power law"
+            unit = r"\sigma"
 
     if slide:
         x_name = "Energy cutoff"
@@ -1166,29 +1243,40 @@ def makeLogPlotComparison(
             x_name = "Magnitude of energy drops"
         elif Y == "Avg RSS":
             x_name = "Magnitude of stress drops"
-        y_name = "Frequency"
+        y_name = rf"$P(>{unit})$"
 
-    title += " $\\Delta E_{\\mathrm{min}}$=" + f"{minEnergy}"
+    title += (
+        r" $\\Delta "
+        + f"{unit}"
+        + "_{\\mathrm{min}}$="
+        + f"{dropLim[0]}"
+        + f"{unit}"
+        + "_{\\mathrm{max}}$="
+        + f"{dropLim[1]}"
+    )
+
     crash_count = 0
     # For each configuration
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
         dfs = []
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
-            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
+            df = pd.read_csv(
+                csv_file_path, usecols=[X, Y, "Nr plastic deformations", "Max energy"]
+            )
             # Truncate data based on xlim
             df = df[(df[X] >= outerStrainLims[0]) & (df[X] <= outerStrainLims[1])]
-            # Check for Y values greater than 10 and truncate
-
-            df, crash_count = removeBadData(df, Y, crash_count, csv_file_path)
+            df, crash_count = removeBadData(df, crash_count, csv_file_path)
             dfs.append(df)
         label = getPrettyLabel(kwargs["labels"][i][0])
         log_kwargs = {
             "fig": fig,
             "ax": ax,
+            "dist": dist,
             "label": label,
             "plot_pre_yield": plot_pre_yield,
             "plot_post_yield": plot_post_yield,
+            "add_fit": add_fit,
         }
 
         if slide:
@@ -1196,7 +1284,8 @@ def makeLogPlotComparison(
         if window:
             fig, ax, ax2 = plotSlidingWindowPowerLaw(
                 dfs,
-                minEnergy=minEnergy,
+                dist=dist,
+                dropLim=dropLim,
                 windowRadius=windowRadius,
                 fig=fig,
                 ax1=ax,
@@ -1205,7 +1294,11 @@ def makeLogPlotComparison(
             )
         else:
             fig, ax = plotSplitPowerLaw(
-                dfs, minEnergy=minEnergy, innerStrainLims=innerStrainLims, **log_kwargs
+                dfs,
+                dropLim=dropLim,
+                innerStrainLims=innerStrainLims,
+                outerStrainLims=outerStrainLims,
+                **log_kwargs,
             )
         if crash_count > 0:
             print(f"Found {crash_count} crashes using {label}.")
@@ -1279,7 +1372,7 @@ def makeEnergyAvalancheComparison(
     X = "Load"
     Y = "Avg energy"
     x_name = "Magnitude of energy drops"
-    y_name = "Frequency"
+    y_name = r"$P(>E)$"
     lims = "" if xlim == [-np.inf, np.inf] else f", xlim: {xlim[0]}-{xlim[1]}"
 
     crash_count = 0
@@ -1289,15 +1382,13 @@ def makeEnergyAvalancheComparison(
         dfs = []  # panda dataframes
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
-            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Nr plastic deformations"])
+            df = pd.read_csv(
+                csv_file_path, usecols=[X, Y, "Nr plastic deformations", "Max energy"]
+            )
             # Truncate data based on xlim
             df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
             # Truncate data based on dislocations
-            # df = df[(df["Nr plastic deformations"] >= 0)]
-            # Check for Y values greater than 1 and truncate
-            if (df[Y] > 1).any():
-                crash_count += 1
-                df = df[df[Y] <= 1]
+            df, crash_count = removeBadData(df, crash_count, csv_file_path)
             dfs.append(df)
         fig, ax = plotEnergyAvalancheHistogram(dfs)
 
@@ -1374,7 +1465,7 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
         X="Load",
         Y="Avg energy",
         x_name="Magnitude of energy drops",
-        y_name="Frequency",
+        y_name=r"$P(>E)$",
         title="Powerlaw",
         plot_raw=False,
         plot_power_law=True,

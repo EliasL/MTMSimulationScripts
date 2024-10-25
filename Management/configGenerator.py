@@ -56,6 +56,10 @@ class SimulationConfig:
         self.maxIt = 10000
 
         # Logging settings
+        # Saves the mesh if number of plastic events (npe) > number of
+        # elements(ne) * plasticityEventThreshold (t).
+        # if npe > ne*t:
+        #   save frame
         self.plasticityEventThreshold = 0.1
         self.showProgress = 1
 

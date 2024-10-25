@@ -4,6 +4,7 @@ from Management.runSimulation import run_locally
 import ast
 import sys
 import concurrent.futures
+import functools
 
 
 # Custom class to prepend thread names to output
@@ -24,19 +25,24 @@ class ThreadOutputWrapper:
         self.original_stdout.flush()
 
 
-def task(config):
-    run_locally(config, build=False, taskName=config.minimizer)
+def task(config, **kwargs):
+    # This is where the task is executed
+    run_locally(config, taskName=config.minimizer, **kwargs)
 
 
-# Function to launch the work on different threads
-def run_many_locally(configs):
+def run_many_locally(configs, **kwargs):
     # First build the project once so the task does not have to build it
     manager = SimulationManager(SimulationConfig())
     manager.build()
+
     # Use ThreadPoolExecutor to run the task on different threads
     with concurrent.futures.ThreadPoolExecutor() as executor:
+        # Use functools.partial to pre-bind the dump argument to the task function
+        task_with_dump = functools.partial(task, build=False, **kwargs)
+
         # Map the configs to threads and run the work
-        executor.map(task, configs)
+        # Pass only configs to the mapped function, dump is already bound
+        executor.map(task_with_dump, configs)
 
 
 def parse_args():

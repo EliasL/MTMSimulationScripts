@@ -44,25 +44,31 @@ def OneDPotential():
     plt.show()
 
 
-def lagrange_reduction(C11, C22, C12, loops=600):
+def lagrange_reduction(C11, C22, C12, loops=1000):
     for i in range(loops):
         mask1 = C12 < 0
+        # m1 (flip) operation
         C12[mask1] *= -1
 
         mask2 = C22 < C11
-        # Swap operation
+        # m2 (swap) operation
         C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
 
         mask3 = 2 * C12 > C11
         # Stop the loop if no changes are made
         if not np.any(mask1 | mask2 | mask3):
             break
+        # m3 operation
         C22[mask3] += C11[mask3] - 2 * C12[mask3]
         C12[mask3] -= C11[mask3]
+
+        if i + 1 == loops:
+            raise (RuntimeError("Not enough loops"))
+
     return C11, C22, C12
 
 
-def elastic_reduction(C11, C22, C12, loops=600):
+def elastic_reduction(C11, C22, C12, loops=1000):
     """
     The idea here is that we want to undo the last m1 or m2 transformation we
     did after the last m3 transformation. To do that, we keep track of the last
@@ -100,6 +106,9 @@ def elastic_reduction(C11, C22, C12, loops=600):
             last_swap_C11 = ~mask3 & last_swap_C11
             last_flip_C12 = ~mask3 & last_flip_C12
 
+        if i + 1 == loops:
+            raise (RuntimeError("Not enough loops"))
+
     # Now we want to undo the m1 and m2 transformations (Which is the same as
     # doing them again)
 
@@ -131,7 +140,9 @@ def generate_energy_grid(
 
     # Calculate the mask for points inside the unit circle
     # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
-    mask = X**2 + Y**2 <= 1 - 1e-9
+    mask = X**2 + Y**2 >= 1 - 1e-9
+    X[mask] = np.nan
+    Y[mask] = np.nan
 
     # Precompute some common terms used in a, b, c12, c22, and c11 calculations
     denominator = X**2 - 2 * X + Y**2 + 1
@@ -151,7 +162,7 @@ def generate_energy_grid(
     energy_grid = np.full_like(X, np.nan)
 
     # Apply the phi function only to the points inside the unit circle
-    energy_grid[mask] = phi(C11[mask], C22[mask], C12[mask], beta, K, 1)
+    energy_grid = phi(C11, C22, C12, beta, K, 1)
 
     energy_grid -= ground_state_energy()
 

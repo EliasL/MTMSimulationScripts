@@ -83,6 +83,6 @@ def debugPlotAll():
 
 
 if __name__ == "__main__":
-    # plotPropperJob()
-    plotSampleRuns()
+    plotPropperJob()
+    # plotSampleRuns()
     # debugPlotAll()

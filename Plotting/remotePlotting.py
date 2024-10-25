@@ -14,6 +14,7 @@ from makePlots import (
 import matplotlib.pyplot as plt
 from fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
 from tqdm import tqdm
+import numpy as np
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
@@ -307,9 +308,12 @@ def get_folders_from_servers(configs):
     return new_paths
 
 
-def set_font_size(ax, axis_size=10, legend_size=10, extra_size=0):
+def set_font_size(ax, axis_size=17, legend_size=17, tick_size=17, extra_size=0):
+    # Add extra_size to the main font sizes
     axis_size += extra_size
     legend_size += extra_size
+    tick_size += extra_size
+
     # Set axis labels font size
     ax.set_xlabel(ax.get_xlabel(), fontsize=axis_size)
     ax.set_ylabel(ax.get_ylabel(), fontsize=axis_size)
@@ -319,6 +323,9 @@ def set_font_size(ax, axis_size=10, legend_size=10, extra_size=0):
     if legend is not None:
         for text in legend.get_texts():
             text.set_fontsize(legend_size)
+
+    # Set tick labels font size for both x and y axes
+    ax.tick_params(axis="both", which="major", labelsize=tick_size)
 
 
 def createPlotsWithImages(configs, paths, metric, **kwargs):
@@ -401,18 +408,21 @@ def energyPlotWithImages(configs, paths=None):
     )
 
 
+log_yLim_max = 1.2
+
+
 def plotWholeRangePowerLaw(paths, Y, **kwargs):
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     # Define limits
     if Y == "Avg energy":
-        ylim = [1e-2, 2e7]
+        ylim = [2e-5, log_yLim_max]
     elif Y == "Avg RSS":
-        ylim = [1e-2, 2e4]
-    for ax, (group, method) in zip(axes, zip(paths, ["L-BFGS", "CG", "FIRE"])):
+        ylim = [5e-7, log_yLim_max]
+    for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
         makeLogPlotComparison(
             [group],
-            innerStrainLims=(1, 1),
+            innerStrainLims=(1, np.inf),
             plot_post_yield=False,
             save=False,
             use_y_axis_name=method == "L-BFGS",
@@ -420,11 +430,16 @@ def plotWholeRangePowerLaw(paths, Y, **kwargs):
             ax=ax,
             fig=fig,
             legend_loc="lower left",
+            show=False,
             ylim=ylim,
+            add_fit=True,
+            mark=mark,
+            mark_pos=(0.8, 0.8),
             **kwargs,
         )
         set_font_size(ax)
 
+    fig.tight_layout()
     name = "energy" if Y == "Avg energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_full_range.pdf")
@@ -436,13 +451,13 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
     # Define limits
     if Y == "Avg energy":
         ylim = (0.005, 0.02)
-        log_ylim = [1, 3e7]
+        log_ylim = [5e-4, log_yLim_max]
     elif Y == "Avg RSS":
         ylim = (0, 0.2)
-        log_ylim = [0.5, 4e4]
+        log_ylim = [1e-6, log_yLim_max]
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    for i, (group, method) in zip(range(3), zip(paths, ["L-BFGS", "CG", "FIRE"])):
+    for i, group, method, mark in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
 
         makeComparisonPlot(
@@ -454,6 +469,8 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
             use_y_axis_name=method == "L-BFGS",
             fig=fig,
             save=False,
+            mark=mark.upper(),
+            mark_pos=(0.8, 0.2),
             **kwargs,
         )
 
@@ -465,15 +482,18 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
             save=False,
             use_y_axis_name=method == "L-BFGS",
             Y=Y,
+            ylim=log_ylim,
             ax=axes[1, i],
             fig=fig,
             legend_loc="lower left",
-            ylim=log_ylim,
+            mark=mark,
+            mark_pos=(0.8, 0.8),
             **kwargs,
         )
         set_font_size(axes[0, i])
         set_font_size(axes[1, i])
 
+    fig.tight_layout()
     name = "energy" if Y == "Avg energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_preYield.pdf")
@@ -485,13 +505,13 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
     # Define limits
     if Y == "Avg energy":
         ylim = (0.02, 0.05)
-        log_ylim = [1, 3e7]
+        log_ylim = [1e-4, log_yLim_max]
     elif Y == "Avg RSS":
         ylim = (0.05, 0.2)
-        log_ylim = [0.5, 4e4]
+        log_ylim = [1e-6, log_yLim_max]
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    for i, group, method in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"]):
+    for i, group, method, mark in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
 
         makeComparisonPlot(
@@ -503,14 +523,16 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
             use_y_axis_name=method == "L-BFGS",
             fig=fig,
             save=False,
+            mark=mark,
+            mark_pos=(0.8, 0.2),
             **kwargs,
         )
 
         makeLogPlotComparison(
             [group],
-            outerStrainLims=(postYield[0], 1),
-            innerStrainLims=(postYield[1], 1),
-            plot_post_yield=False,
+            outerStrainLims=(0, postYield[1]),
+            innerStrainLims=(0, postYield[0]),
+            plot_pre_yield=False,
             save=False,
             use_y_axis_name=method == "L-BFGS",
             Y=Y,
@@ -518,11 +540,14 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
             fig=fig,
             legend_loc="lower left",
             ylim=log_ylim,
+            mark=mark,
+            mark_pos=(0.8, 0.8),
             **kwargs,
         )
         set_font_size(axes[0, i])
         set_font_size(axes[1, i])
 
+    fig.tight_layout()
     name = "energy" if Y == "Avg energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_postYield.pdf")
@@ -531,9 +556,9 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
 def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
     # Define limits
     if Y == "Avg energy":
-        ylim = [0.63, 0.95]
+        ylim = [0.62, 0.83]
     elif Y == "Avg RSS":
-        ylim = [0.51, 0.73]
+        ylim = [0.95, 1.34]
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
@@ -551,16 +576,32 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
             ylim=ylim,
             show_lambda=show_lambda,
             mark=mark,
-            mark_pos=(0.8, 0.3),
-            mark_fontsize=29,
+            mark_pos=(0.8, 0.8),
             **kwargs,
         )
-        set_font_size(ax, extra_size=3 * len(paths))
+        set_font_size(ax)
 
+    fig.tight_layout()
     name = "energy" if Y == "Avg energy" else "stress"
     name = name + "_withLambda" if show_lambda else name
     # Display all plots in a row
     plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
+
+
+# This function sets the global font scaling
+def set_global_font_sizes(scale=1.0):
+    # Update matplotlib rcParams for fonts using the scale factor
+    plt.rcParams.update(
+        {
+            "font.size": 13 * scale,  # Base font size
+            "axes.titlesize": 15 * scale,  # Title font size
+            "axes.labelsize": 13 * scale,  # Axis label font size
+            "xtick.labelsize": 10 * scale,  # X-tick label font size
+            "ytick.labelsize": 10 * scale,  # Y-tick label font size
+            "legend.fontsize": 13 * scale,  # Legend font size
+            "figure.titlesize": 15 * scale,  # Figure title font size
+        }
+    )
 
 
 def plotLog(config_groups, labels, **kwargs):
@@ -568,14 +609,19 @@ def plotLog(config_groups, labels, **kwargs):
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
     kwargs["labels"] = labels
+
     print("Plotting...")
     # Iterate over the groups and methods, and plot each one in a separate subplot
-    for Y in ["Avg energy", "Avg RSS"]:
-        # makeComparisonPlot(paths, Y=Y, **kwargs)
+    for Y, dropLim in zip(
+        ["Avg energy", "Avg RSS"],
+        [[1e-7, None], [3e-4, None]],
+    ):
+        kwargs["dropLim"] = dropLim
+        makeComparisonPlot(paths, Y=Y, **kwargs)
         ## makeLogPlotComparison(paths, Y=Y, **kwargs)
-        # plotWholeRangePowerLaw(paths, Y, **kwargs)
-        # plotPreYieldPowerLaw(paths, Y, **kwargs)
-        # plotPostYieldPowerLaw(paths, Y, **kwargs)
+        plotWholeRangePowerLaw(paths, Y, **kwargs)
+        plotPreYieldPowerLaw(paths, Y, **kwargs)
+        plotPostYieldPowerLaw(paths, Y, **kwargs)
         plotWindowPowerLaw(paths, Y, **kwargs)
 
     # makeLogPlotComparison(paths, f"{name} - EnergyPowerLawWindow", window=True, **kwargs)
