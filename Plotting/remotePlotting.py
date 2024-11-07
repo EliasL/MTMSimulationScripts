@@ -333,7 +333,7 @@ def createPlotsWithImages(configs, paths, metric, **kwargs):
         # Download the folders associated with the configs from the server
         paths = get_folders_from_servers(configs)
 
-    base = 5 if len(configs) == 3 else 10
+    base = 5 if len(configs) == 3 else 7
     # Create a figure with subplots, one for each configuration
     fig, axes = plt.subplots(1, len(configs), figsize=(base * len(configs), base))
 
@@ -346,7 +346,7 @@ def createPlotsWithImages(configs, paths, metric, **kwargs):
     # Loop over the configurations, paths, and axes
     for ax, path, config, mark in zip(axes, paths, configs, "abc"):
         # Call the provided plot function (either makeStressPlot or makeEnergyPlot)
-        makePlot(
+        fig, ax = makePlot(
             path + "/macroData.csv",
             name=config.name + f"_{metric}+.pdf",
             add_images=True,
@@ -360,10 +360,11 @@ def createPlotsWithImages(configs, paths, metric, **kwargs):
             mark=mark if not sp else None,
             legend=config.minimizer,
             legend_loc="upper left",
-            mark_fontsize=20 + 3 * len(configs),
+            mark_fontsize=20 + 2 * len(configs),
             **kwargs,
         )
-        set_font_size(ax, extra_size=3 * len(configs))
+        set_font_size(ax, extra_size=2 * len(configs))
+        fig.tight_layout()
 
     if sp:
         method = configs[0].minimizer
@@ -379,9 +380,9 @@ def stressPlotWithImages(configs, paths=None):
         configs=configs,
         paths=paths,
         ylim=(0, 0.27),
-        mark_pos=(0.8, 0.15),
+        mark_pos=(0.85, 0.15),
         image_pos=[
-            [0.32, 0.01],  # first image, bottom middle
+            [0.3, 0.01],  # first image, bottom middle
             [0.03, 0.5],  # second image, upper left
             [0.6, 0.55],  # upper right
         ],
@@ -434,7 +435,7 @@ def plotWholeRangePowerLaw(paths, Y, **kwargs):
             ylim=ylim,
             add_fit=True,
             mark=mark,
-            mark_pos=(0.8, 0.8),
+            mark_pos=(0.85, 0.9),
             **kwargs,
         )
         set_font_size(ax)
@@ -470,7 +471,7 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
             fig=fig,
             save=False,
             mark=mark.upper(),
-            mark_pos=(0.8, 0.2),
+            mark_pos=(0.85, 0.1),
             **kwargs,
         )
 
@@ -487,7 +488,7 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
             fig=fig,
             legend_loc="lower left",
             mark=mark,
-            mark_pos=(0.8, 0.8),
+            mark_pos=(0.85, 0.9),
             **kwargs,
         )
         set_font_size(axes[0, i])
@@ -524,7 +525,7 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
             fig=fig,
             save=False,
             mark=mark,
-            mark_pos=(0.8, 0.2),
+            mark_pos=(0.85, 0.1),
             **kwargs,
         )
 
@@ -541,7 +542,7 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
             legend_loc="lower left",
             ylim=log_ylim,
             mark=mark,
-            mark_pos=(0.8, 0.8),
+            mark_pos=(0.85, 0.9),
             **kwargs,
         )
         set_font_size(axes[0, i])
@@ -576,7 +577,7 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
             ylim=ylim,
             show_lambda=show_lambda,
             mark=mark,
-            mark_pos=(0.8, 0.8),
+            mark_pos=(0.85, 0.9),
             **kwargs,
         )
         set_font_size(ax)
@@ -586,22 +587,6 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
     name = name + "_withLambda" if show_lambda else name
     # Display all plots in a row
     plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
-
-
-# This function sets the global font scaling
-def set_global_font_sizes(scale=1.0):
-    # Update matplotlib rcParams for fonts using the scale factor
-    plt.rcParams.update(
-        {
-            "font.size": 13 * scale,  # Base font size
-            "axes.titlesize": 15 * scale,  # Title font size
-            "axes.labelsize": 13 * scale,  # Axis label font size
-            "xtick.labelsize": 10 * scale,  # X-tick label font size
-            "ytick.labelsize": 10 * scale,  # Y-tick label font size
-            "legend.fontsize": 13 * scale,  # Legend font size
-            "figure.titlesize": 15 * scale,  # Figure title font size
-        }
-    )
 
 
 def plotLog(config_groups, labels, **kwargs):

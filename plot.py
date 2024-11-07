@@ -37,9 +37,14 @@ def energyField():
     )
 
     g, x, y = generate_energy_grid(
-        resolution=1000, return_XY=True, energy_lim=[None, 4.3]
+        resolution=200,
+        return_XY=True,
+        zoom=1,
+        energy_lim=[None, 0.37],
+        poincareDisk=True,
     )
-    make3DEnergyField(g, x, y, zScale=0.8, zoom=0.2, add_front_hole=True)
+
+    make3DEnergyField(g, x, y, zScale=0.6, add_front_hole=True)
 
 
 # MDPI Article plot
@@ -79,10 +84,11 @@ def debugPlotAll():
     outputPath = findOutputPath()
     # config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
     config = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0/config.conf"
-    plotAll(config, outputPath, makeGIF=False, transparent=False, noVideo=False)
+    plotAll(config, outputPath, makeGIF=False, transparent=False, noVideos=False)
 
 
 if __name__ == "__main__":
-    plotPropperJob()
+    # plotPropperJob()
     # plotSampleRuns()
     # debugPlotAll()
+    energyField()

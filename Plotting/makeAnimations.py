@@ -7,10 +7,10 @@ import imageio.v2 as imageio  # Adjusted import here
 from .settings import settings
 from .pyplotFunctions import (
     make_images,
-    plot_nodes,
+    plot_and_save_nodes,
     plot_and_save_mesh,
     plot_and_save_in_poincare_disk,
-    plot_and_save_in_elastically_reduced_poincare_disk,
+    plot_and_save_in_e_reduced_poincare_disk,
 )
 from .dataFunctions import parse_pvd_file, get_data_from_name
 from .makePvd import create_collection
@@ -68,11 +68,40 @@ def framesToGif(frames, outFile, fps):
     imageio.mimsave(outFile, frames, "GIF", duration=1 / fps, loop=0)
 
 
+def combine_videoes(path, n1, n2):
+    v1 = os.path.join(path, f"{n1}_video.mp4")
+    v2 = os.path.join(path, f"{n2}_video.mp4")
+    assert os.path.isfile(v1), f"The file {v1} does not exsist"
+    assert os.path.isfile(v2), f"The fire {v2} does not exsist"
+    # Split the command into a list of arguments to avoid using shell=True
+    command = [
+        "ffmpeg",
+        "-y",  # Automatically overwrite existing file
+        "-i",
+        v1,
+        "-i",
+        v2,
+        # Filter complex for scaling and cropping to make sure width and height are even
+        "-filter_complex",
+        "[0:v]scale=-1:1080,crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v0];"  # Crop if width/height are odd
+        "[1:v]scale=-1:1080,crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v1];"
+        "[v0][v1]hstack=inputs=2",
+        os.path.join(path, f"{n1}_and_{n2}.mp4"),
+    ]
+    subprocess.run(command)
+
+
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
 def makeAnimations(
-    path, macro_data=None, pvd_file=None, makeGIF=False, transparent=False
+    path,
+    macro_data=None,
+    pvd_file=None,
+    makeGIF=False,
+    transparent=False,
+    combine=True,
+    use_tqdm=True,
 ):
-    framePath = os.path.join(path, settings["FRAMEFOLDERPATH"])
+    frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macro_data is None:
         macro_data = os.path.join(path, settings["MACRODATANAME"] + ".csv")
     if pvd_file is None:
@@ -107,20 +136,20 @@ def makeAnimations(
 
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
-    for function, fileName in zip(
-        [
-            plot_and_save_mesh,
-            plot_and_save_in_poincare_disk,
-            plot_and_save_in_elastically_reduced_poincare_disk,
-            plot_nodes,
-        ],
-        ["mesh", "disk", "erDisk", "nodes"],
-    ):
-        if (
-            fileName == "nodes" or fileName == "mesh" and True
-        ):  # Skip making some videos
-            continue
-        images = make_images(function, framePath, vtu_files, macro_data, transparent)
+    for function, fileName in [
+        # (plot_and_save_mesh, "mesh"),
+        # (plot_and_save_in_poincare_disk, "disk"),
+        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
+        # (plot_and_save_nodes, "nodes"),
+    ]:
+        images = make_images(
+            vtu_files,
+            macro_data,
+            frameFunction=function,
+            frame_path=frame_path,
+            transparent=transparent,
+            use_tqdm=use_tqdm,
+        )
 
         outPath = os.path.join(path, f"{fileName}_video.mp4")
         framesToMp4(images, outPath, fps)
@@ -133,6 +162,9 @@ def makeAnimations(
                 os.path.join(path, f"{fileName}_video.gif"),
             ] + images  # Append the list of image paths to the command
             subprocess.run(GIFCommand)
+    if combine:
+        combine_videoes(path, "mesh", "erDisk")
+        combine_videoes(path, "mesh", "disk")
 
 
 if __name__ == "__main__":

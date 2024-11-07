@@ -62,6 +62,7 @@ def plotYOverX(
         if "alpha" in k2:
             # Make the end points more visible if you want
             k2["alpha"] = k2["alpha"] * 1
+
         point = ax.scatter(X_simplified[-1], Y_simplified[-1], **k2)
     else:
         point = None
@@ -527,9 +528,9 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
             # ax.xaxis.set_major_locator(MaxNLocator(3))
             # Remove axis names for inner axes
             if i % 3 == 0:  # Not the first column
-                ax.set_ylabel(r"$P(>E)$")
+                ax.set_ylabel(r"$P>\langle E \rangle$")
             if i >= 6:  # Not the bottom row
-                ax.set_xlabel(r"$-\Delta E$")
+                ax.set_xlabel(r"$-\Delta \langle E \rangle$")
 
     return fig, axs
 
@@ -693,15 +694,15 @@ def makePlot(
         return
     if x_name is None:
         if X == "Load":
-            x_name = r"Strain ($\gamma$)"
+            x_name = r"Strain $\gamma$"
         else:
             x_name = X
 
     if y_name is None and use_y_axis_name:
         if Y == "Avg RSS":
-            y_name = r"Stress ($\sigma$)"
+            y_name = r"Stress $\langle \sigma \rangle$"
         elif Y == "Avg energy":
-            y_name = r"Energy ($E$)"
+            y_name = r"Energy $\langle E \rangle$"
         else:
             y_name = Y
 
@@ -738,7 +739,7 @@ def makePlot(
         if ylim:
             df = df[(df[Y] >= ylim[0]) & (df[Y] <= ylim[1])]
 
-        if df[X][-1] < 1:
+        if df[X].iloc[-1] < 1:
             print(f"{csv_file_path} is not done!")
 
         data.append(df[Y].values)
@@ -875,7 +876,7 @@ def makePlot(
             data[i],
             image_pos,
             image_size,
-            use_stress=Y == "Avg RSS",
+            mesh_property="stress",
             add_cbar=add_cbar,
         )
     ax.set_xlabel(x_name)
@@ -885,12 +886,10 @@ def makePlot(
             ax.set_title(f"{y_name} over {x_name}")
         else:
             ax.set_title(title)
-    ax.autoscale_view()
+
     if mark:
         assert mark_pos is not None
         add_mark(ax, f"({mark})", *mark_pos, fontsize=mark_fontsize)
-
-    fig.tight_layout()
 
     if save:
         figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
@@ -916,7 +915,15 @@ def add_mark(ax, mark, x, y, color="black", fontsize=30):
 
 
 def addImagesToPlot(
-    ax, fig, csv_file_path, x, y, image_pos, size=0.4, use_stress=True, add_cbar=True
+    ax,
+    fig,
+    csv_file_path,
+    x,
+    y,
+    image_pos,
+    size=0.4,
+    mesh_property="energy",
+    add_cbar=True,
 ):
     # First we get the folder with vtu_files
     framesPath = Path(csv_file_path).parent / "data"
@@ -959,7 +966,7 @@ def addImagesToPlot(
             ax=ax_inset,
             add_rombus=False,
             shift=False,
-            useStress=use_stress,
+            mesh_property=mesh_property,
         )
         ax_inset.axis("off")
 
@@ -1008,8 +1015,14 @@ def addImagesToPlot(
         # Create a ScalarMappable object with the colormap and norm
         sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
 
+        if mesh_property == "stress":
+            label = r"Stress $\sigma$"
+        elif mesh_property == "energy":
+            label = r"Energy $E$"
+        elif mesh_property == "m":
+            label = r"Dislocations $\textbf{m}_3$"
         # Add the color bar to the figure
-        fig.colorbar(sm, ax=ax, shrink=0.5, pad=0.005)
+        fig.colorbar(sm, ax=ax, shrink=0.5, pad=0.005, label=label)
 
 
 def removeBadData(df, crash_count, csv_file_path):
@@ -1047,14 +1060,14 @@ def makeComparisonPlot(
     color_index, index, line_index = 0, 0, 0
     X = "Load"
     if Y == "Avg energy":
-        y_name = r"Avg energy ($E$)"
+        y_name = r"Energy $\langle E \rangle$"
         if name == "":
             name = "Avg energy"
     elif Y == "Avg RSS":
-        y_name = r"Avg stress ($\sigma$)"
+        y_name = r"Stress $\langle \sigma \rangle$"
         if name == "":
             name = "Avg stress"
-    x_name = r"Strain ($\gamma$)"
+    x_name = r"Strain $\gamma$"
     title = f"{name}"
 
     if fig is None or ax is None:
@@ -1149,8 +1162,6 @@ def makeComparisonPlot(
         assert mark_pos is not None
         add_mark(ax, f"({mark})", *mark_pos, fontsize=mark_fontsize)
 
-    ax.autoscale_view()
-
     if save:
         # Get the parent directory of the CSV file
         csv_directory = Path(grouped_csv_file_paths[0][0]).parent.parent
@@ -1226,16 +1237,16 @@ def makeLogPlotComparison(
     if slide:
         x_name = "Energy cutoff"
         # Use LaTeX format for Greek letter alpha
-        y_name = "Exponent for post yield ($\\alpha$)"
+        y_name = "Exponent for post yield $\\alpha$"
         name += " slide"
     if window:
         x_name = "Strain center"
         # Use LaTeX format for Greek letter alpha
-        y_name = "Exponent ($\\alpha$)"
+        y_name = "Exponent $\\alpha$"
         title += f" wr={windowRadius},"
         ax2 = ax.twinx()
         # Use LaTeX format for Greek letter lambda
-        ax2.set_ylabel("Cutoff ($\\lambda$)")
+        ax2.set_ylabel("Cutoff $\\lambda$")
         name += " window"
     else:
         title += f" {iLims},"
@@ -1243,7 +1254,7 @@ def makeLogPlotComparison(
             x_name = "Magnitude of energy drops"
         elif Y == "Avg RSS":
             x_name = "Magnitude of stress drops"
-        y_name = rf"$P(>{unit})$"
+        y_name = rf"$P(>\langle {unit} \rangle)$"
 
     title += (
         r" $\\Delta "
@@ -1327,7 +1338,7 @@ def makeLogPlotComparison(
         ax.set_ylabel(y_name)
     if use_title:
         ax.set_title(title)
-    ax.autoscale_view()
+
     if save:
         # # Get the parent directory of the CSV file
         # csv_directory = Path(grouped_csv_file_paths[0][0]).parent.parent

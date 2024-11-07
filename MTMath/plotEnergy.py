@@ -70,28 +70,25 @@ def lagrange_reduction(C11, C22, C12, loops=1000):
 
 def elastic_reduction(C11, C22, C12, loops=1000):
     """
-    The idea here is that we want to undo the last m1 or m2 transformation we
-    did after the last m3 transformation. To do that, we keep track of the last
-    m1 and m2 transformations we do, and if we perform an m3 transformation, we
-    forget that we did an m1 or m2 transformation. Then, at the end, we undo the
-    relevant m1 and m2 transformations
+    We transform the reduced C an extra time with m1 or m2 such that the number
+    of m1 and m2 transformations is even. We also make sure to transform first
     """
     # We create a mask of false everywhere
-    last_swap_C11 = C11 != C11
-    last_flip_C12 = C12 != C12
+    odd_swaps_C11 = C11 != C11
+    odd_flips_C12 = C12 != C12
     for i in range(loops):
         mask1 = C12 < 0
         C12[mask1] *= -1
 
         # Stores the last change made to C12
-        last_flip_C12 = last_flip_C12 | mask1
+        odd_flips_C12 = np.logical_xor(odd_flips_C12, mask1)
 
         mask2 = C22 < C11
         # Swap operation
         C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
 
         # Stores the last change made to C11 and C22
-        last_swap_C11 = last_swap_C11 | mask2
+        odd_swaps_C11 = np.logical_xor(odd_swaps_C11, mask2)
 
         mask3 = 2 * C12 > C11
         # Stop the loop if no changes are made
@@ -101,61 +98,83 @@ def elastic_reduction(C11, C22, C12, loops=1000):
             C22[mask3] += C11[mask3] - 2 * C12[mask3]
             C12[mask3] -= C11[mask3]
 
-            # Now we update the last swap and flip. Anywhere we made a m3
-            # transformation, we should forget that we did a m1 or m2
-            last_swap_C11 = ~mask3 & last_swap_C11
-            last_flip_C12 = ~mask3 & last_flip_C12
-
         if i + 1 == loops:
             raise (RuntimeError("Not enough loops"))
 
     # Now we want to undo the m1 and m2 transformations (Which is the same as
     # doing them again)
 
-    C12[last_flip_C12] *= -1
-    C11[last_swap_C11], C22[last_swap_C11] = (
-        C22[last_swap_C11].copy(),
-        C11[last_swap_C11].copy(),
+    C12[odd_flips_C12] *= -1
+    C11[odd_swaps_C11], C22[odd_swaps_C11] = (
+        C22[odd_swaps_C11].copy(),
+        C11[odd_swaps_C11].copy(),
     )
 
     return C11, C22, C12
 
 
 def generate_energy_grid(
-    resolution=500, beta=-0.25, K=4, energy_lim=[None, 0.37], return_XY=False, zoom=1
+    resolution=500,
+    beta=-0.25,
+    K=4,
+    energy_lim=[None, 0.37],
+    return_XY=False,
+    zoom=1,
+    poincareDisk=True,
 ):
     # Load the potential and its derivatives
     phi, divPhi, divDivPhi = numericContiPotential()
 
-    # Define the range for x and y based on the unit circle
-    radius = 1.0
+    # Poicare disk
+    if poincareDisk:
+        # Define the range for x and y based on the unit circle
+        radius = 1.0 / zoom
 
-    x_min, x_max = -radius / zoom, radius / zoom
-    y_min, y_max = -radius / zoom, radius / zoom
+        x_min, x_max = -radius, radius
+        y_min, y_max = -radius, radius
 
-    # Create the meshgrid for the x and y coordinates
-    X, Y = np.meshgrid(
-        np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
-    )
+        # Create the meshgrid for the x and y coordinates
+        X, Y = np.meshgrid(
+            np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
+        )
 
-    # Calculate the mask for points inside the unit circle
-    # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
-    mask = X**2 + Y**2 >= 1 - 1e-9
-    X[mask] = np.nan
-    Y[mask] = np.nan
+        # Calculate the mask for points inside the unit circle
+        # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
+        mask = (X**2 + Y**2) >= (1 - 1e-9)
+        X[mask] = np.nan
+        Y[mask] = np.nan
+        # Precompute some common terms used in a, b, c12, c22, and c11 calculations
+        denominator = X**2 - 2 * X + Y**2 + 1
+        a = (2 * Y) / denominator
+        b = -(X**2 + Y**2 - 1) / denominator
 
-    # Precompute some common terms used in a, b, c12, c22, and c11 calculations
-    denominator = X**2 - 2 * X + Y**2 + 1
-    a = (2 * Y) / denominator
-    b = -(X**2 + Y**2 - 1) / denominator
+        # Avoid division by zero or near-zero by masking those values in b
+        safe_b = np.where(b == 0, np.nan, b)
 
-    # Avoid division by zero or near-zero by masking those values in b
-    safe_b = np.where(b == 0, np.nan, b)
+        # Calculate c12, c22, and c11
+        C12 = a / safe_b
+        C22 = 1 / safe_b
+        C11 = (1 + C12**2) / C22
+    else:
+        # Define the range for x and y based on the unit circle
+        radius = (0.5) / zoom
 
-    # Calculate c12, c22, and c11 using vectorized operations
-    C12 = a / safe_b
-    C22 = 1 / safe_b
-    C11 = (1 + C12**2) / C22
+        x_min, x_max = 0, 1
+        y_min, y_max = -0.5, 0.5
+
+        # Create the meshgrid for the x and y coordinates
+        X, Y = np.meshgrid(
+            np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
+        )
+        # Calculate the mask for points inside the unit circle
+        # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
+        mask = ((X - 0.5) ** 2 + Y**2) >= (0.5 - 1e-9) ** 2
+        X[mask] = np.nan
+        Y[mask] = np.nan
+        C12 = Y
+        C11 = X
+        C22 = 1 - C11
+
     C11, C22, C12 = lagrange_reduction(C11, C22, C12)
 
     # Initialize the energy grid with NaNs for points outside the unit circle
@@ -175,6 +194,10 @@ def generate_energy_grid(
 
     energy_grid = np.clip(energy_grid, *energy_lim)
     if return_XY:
+        # We don't need to have nan in X and Y, only in the energy grid
+        X, Y = np.meshgrid(
+            np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
+        )
         return energy_grid, X, Y
     else:
         return energy_grid
@@ -193,19 +216,20 @@ def C2PoincareDisk(C):
     return x, y
 
 
-def drawC(ax, C, scale):
+def drawC(ax, C, grid_size, zoom=1, c="w", linestyle="--", linewidth=0.6, **kwargs):
     x, y = C2PoincareDisk(C)
     ax.plot(
-        x * scale / 2 + scale / 2,
-        y * scale / 2 + scale / 2,
-        c="black",
-        linewidth=0.6,
-        linestyle="--",
+        x * zoom * grid_size / 2 + grid_size / 2,
+        y * zoom * grid_size / 2 + grid_size / 2,
+        c=c,
+        linewidth=linewidth,
+        linestyle=linestyle,
+        **kwargs,
     )
 
 
 def drawCScatter(
-    ax, C, scale, remove_max_color=True, vmax=None, log_scale=True, zoom=1
+    ax, C, grid_size, remove_max_color=True, vmax=None, log_scale=True, zoom=1
 ):
     x, y = C2PoincareDisk(C)
     # Create a density estimate
@@ -234,8 +258,8 @@ def drawCScatter(
 
     # Plot with scatter, adjusting color based on density
     scatter = ax.scatter(
-        x * zoom * scale / 2 + scale / 2,
-        y * zoom * scale / 2 + scale / 2,
+        x * zoom * grid_size / 2 + grid_size / 2,
+        y * zoom * grid_size / 2 + grid_size / 2,
         c=density1,
         s=0.2,
         linewidth=0,
@@ -246,7 +270,7 @@ def drawCScatter(
     plt.colorbar(scatter, ax=ax, label="Kernel density estimate", pad=-0.0005)
 
 
-def drawFundamentalDomain(ax, scale):
+def drawFundamentalDomain(ax, **kwargs):
     nr = 1000
     zero = np.array([0] * nr)
     # VERTICAL LINE
@@ -255,14 +279,14 @@ def drawFundamentalDomain(ax, scale):
     # det=1, C12=C21, C11=C22
     C = np.array([[t, np.sqrt(t**2 - 1)], [np.sqrt(t**2 - 1), t]]).transpose(2, 0, 1)
 
-    drawC(ax, C, scale)
+    drawC(ax, C, **kwargs)
 
     # HORIZONTAL LINE
     # Values from -1<t<1 are outside of the circle
     t = np.sinh(np.linspace(np.arcsinh(0.0000001), np.arcsinh(1), nr))
     # det=1, C12=C21, C12=0
     C = np.array([[t, zero], [zero, 1 / t]]).transpose(2, 0, 1)
-    drawC(ax, C, scale)
+    drawC(ax, C, **kwargs)
 
     # FUNDAMENTAL DOMAIN (0.01 to avoid div by 0)
     # https://www.wolframalpha.com/input?i=0%3Ca%3Cd%2C+b%3Da%2F2%2C+++a*d-b*c%3D1%2C+b%3Dc
@@ -270,7 +294,16 @@ def drawFundamentalDomain(ax, scale):
     # Negative values are outside of the circle
     # det=1, C12=C21,
     C = np.array([[t, t / 2], [t / 2, (t**2 + 4) / (4 * t)]]).transpose(2, 0, 1)
-    drawC(ax, C, scale)
+    drawC(ax, C, **kwargs)
+
+
+def drawShearPath(ax, **kwargs):
+    nr = 1000
+    one = np.array([1] * nr)
+
+    t = np.sinh(np.linspace(np.arcsinh(0.001), np.arcsinh(300), nr))
+    C = np.array([[one, t], [t, one + t**2]]).transpose(2, 0, 1)
+    drawC(ax, C, **kwargs)
 
 
 def plotEnergyField(
@@ -318,7 +351,10 @@ def plotEnergyField(
     fig.gca().add_patch(circle)
 
     # Draw fundamental domain
-    # drawFundamentalDomain(ax, grid_size)
+    drawFundamentalDomain(ax, grid_size=grid_size, zoom=zoom)
+
+    # Draw shear path
+    drawShearPath(ax, grid_size=grid_size, zoom=zoom, linestyle="-")
 
     # Draw elastic domain
     # TODO
@@ -419,7 +455,7 @@ def plot_arch(
     X_mesh, Y_mesh = np.meshgrid(X[0], Y[:, 0])
     X_flat = X_mesh.flatten()
     Y_flat = Y_mesh.flatten()
-    energy_flat = energy_grid.flatten()
+    energy_flat = np.nan_to_num(energy_grid, nan=0).flatten()
 
     z_circle = interpolate.griddata(
         (X_flat, Y_flat),
@@ -448,7 +484,8 @@ def make3DEnergyField(
     Y,
     energy_lim=None,
     zScale=0.3,
-    zoom=0,
+    data_radius=0.8,
+    zoom=1,
     add_front_hole=True,
     remove_max_color=True,
     left_arch=False,
@@ -470,7 +507,7 @@ def make3DEnergyField(
     # Calculate the radii from the meshgrid (X, Y)
     radii = np.sqrt(X**2 + Y**2)
     # Create the first mask for points outside the main circle
-    center_mask = radii > 0.8
+    center_mask = radii > data_radius
 
     if add_front_hole:
         # For a better view of the landscape, we also want to hide a small portion
@@ -517,7 +554,7 @@ def make3DEnergyField(
     # Add a color bar
     cbar = fig.colorbar(surf, location="right")
 
-    zLabel = r"Energy density ($\Phi$)"
+    zLabel = r"Energy density $\Phi$"
     cbar.set_label(zLabel)
 
     default_font_size = plt.rcParams["font.size"]  # Fetch default font size
@@ -529,22 +566,23 @@ def make3DEnergyField(
     # ax.set_title("Energy Surface Plot")
 
     # Set x and y limits based on the valid data (non-NaN values in the energy grid)
-    valid_x_min = np.nanmin(X[~mask])
-    valid_x_max = np.nanmax(X[~mask])
-    valid_y_min = np.nanmin(Y[~mask])
-    valid_y_max = np.nanmax(Y[~mask])
+    x_min = np.nanmin(X[~mask])
+    x_max = np.nanmax(X[~mask])
+    y_min = np.nanmin(Y[~mask])
+    y_max = np.nanmax(Y[~mask])
 
-    xDiff = valid_x_max - valid_x_min
-    yDiff = valid_y_max - valid_y_min
-    ax.set_xlim(valid_x_min + xDiff * zoom / 2, valid_x_max - xDiff * zoom / 2)
-    ax.set_ylim(valid_y_min + yDiff * zoom / 2, valid_y_max - yDiff * zoom / 2)
+    def lim(zoom, lim):
+        width = np.diff(lim)
+        center = lim[0] + width / 2
+        shift = (width / 2) / zoom
+        return center - shift, center + shift
+
+    ax.set_xlim(*lim(zoom, [x_min, x_max]))
+    ax.set_ylim(*lim(zoom, [y_min, y_max]))
 
     # Adjust limits and view angle for better visualization
-    ax.set_zlim(
-        energy_lim[0] - 0.5 / zScale * np.diff(energy_lim),
-        energy_lim[1] + 0.5 / zScale * np.diff(energy_lim),
-    )
+    ax.set_zlim(*lim(zScale, energy_lim))
     ax.view_init(elev=35, azim=80)  # Set the view angle (elevation and azimuth)
     fig.tight_layout()
     plt.savefig("Plots/3DEnergy.png", dpi=500)
-    # plt.show()
+    plt.show()

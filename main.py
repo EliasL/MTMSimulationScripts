@@ -7,7 +7,7 @@ from Management.runOnCluster import (
     build_on_all_servers,
     build_on_server,
 )
-from runSimulations import run_many_locally
+from runSimulations import run_many_locally, run_locally
 from Management.connectToCluster import Servers
 from Management.multiServerJob import (
     bigJob,
@@ -23,6 +23,17 @@ from Management.multiServerJob import (
     get_server_short_name,
 )
 from Management.clusterStatus import get_all_server_info, display_server_info
+
+
+def benchmark():
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50)
+    run_locally(configs[0])
+
+    # log
+    # 1% RT: 1m 57s  ETR: 2h 34m 36s Load: 0.160600
+
+    # Better bounding box
+    #
 
 
 def parameterExploring():
@@ -61,10 +72,10 @@ def lotsOThreads():
 
 
 def threadTest():
-    nrThreads = [8, 16, 32, 64]
+    nrThreads = [8]  # , 16, 32, 64]
     nrSeeds = 1
     size = 150
-    build_on_server(Servers.mesopsl)
+    build_on_server(Servers.dalembert)
     configs, labels = propperJob(nrThreads, nrSeeds, size)
     print("Starting jobs...")
     commands = confToCommand(configs)
@@ -76,13 +87,16 @@ def threadTest():
         + str(
             {
                 '"commands"': str(commands).replace('"', "\u203d"),
-                '"job_name"': '"ej"',
+                '"job_name"': '"tTest"',
                 '"nrThreads"': sum(nrThreads),
             }
         )
     )
     print(full_pre_command)
-    # run_remote_command(Servers.mesopsl, full_pre_command)
+    if False:
+        run_remote_command(Servers.mesopsl, full_pre_command)
+    else:
+        print("Not sent to server")
 
 
 def runOnServer():
@@ -96,8 +110,7 @@ def runOnServer():
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
     configs, labels = allPlasticEventsJob()
-    dump = "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0/dumps/dump_l0.2.mtsb"
-    run_many_locally(configs, dump=dump, newOutput=True)
+    run_many_locally(configs)
 
 
 def startJobs():
@@ -161,8 +174,9 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-runOnLocalMachine()
+# runOnLocalMachine()
 # startJobs()
 # plotBigJob()
 # plotPropperJob()
 # threadTest()
+benchmark()

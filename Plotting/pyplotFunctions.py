@@ -3,8 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
-from vtk import vtkXMLUnstructuredGridReader
-from vtk.util.numpy_support import vtk_to_numpy  # type: ignore
 from tqdm import tqdm
 import time
 import random
@@ -21,83 +19,17 @@ from MTMath.plotEnergy import (
 )
 from MTMath.contiPotential import ground_state_energy
 
-from .dataFunctions import get_data_from_name
-import matplotlib
+from .dataFunctions import get_data_from_name, VTUData, arrsToMat
 
 # matplotlib.use("Agg")  # Use a non-interactive backend
-
-
-class VTUData:
-    def __init__(self, vtu_file_path):
-        self.vtu_file_path = vtu_file_path
-        self.mesh = self._read_vtu_file()
-        result = get_data_from_name(vtu_file_path)
-        self.BC = result["BC"]
-        self.load = float(result["load"])
-
-    def _read_vtu_file(self):
-        # Create a reader for the VTU file
-        reader = vtkXMLUnstructuredGridReader()
-        reader.SetFileName(self.vtu_file_path)
-        reader.Update()
-
-        # Get the 'vtkUnstructuredGrid' object from the reader
-        return reader.GetOutput()
-
-    def get_nodes(self):
-        return vtk_to_numpy(self.mesh.GetPoints().GetData())
-
-    def get_force_field(self):
-        # NB this is "force". Check the C++ code, might not be what you think
-        return vtk_to_numpy(self.mesh.GetPointData().GetArray("stress_field"))
-
-    def get_stress_field(self):
-        return vtk_to_numpy(self.mesh.GetCellData().GetArray("P12"))
-
-    def get_energy_field(self):
-        return vtk_to_numpy(self.mesh.GetCellData().GetArray("energy_field"))
-
-    def get_fixed_status(self):
-        return vtk_to_numpy(self.mesh.GetPointData().GetArray("fixed"))
-
-    def get_C(self):
-        """
-        Returns a 3D array where each slice (2x2 matrix) corresponds to the
-        [C11, C22, C12] components.
-        """
-        # Get the C11, C22, and C12 arrays from the VTK object
-        C11, C22, C12 = [
-            vtk_to_numpy(self.mesh.GetCellData().GetArray(C))
-            for C in ["C11", "C22", "C12"]
-        ]
-        return arrsToMat(C11, C22, C12)
-
-    def get_connectivity(self):
-        # Extract Connectivity
-        _connectivity = vtk_to_numpy(self.mesh.GetCells().GetData())
-        # _connectivity is in a special format: 3 a b c 3 d e f 3 ...
-        # We reshape into 4 long arrays, and then drop the column of 3s
-        connectivity = _connectivity.reshape(-1, 4)[:, 1:]
-        return connectivity
-
-
-def arrsToMat(C11, C22, C12):
-    # Initialize the 3D array to store the 2x2 matrices
-    C = np.zeros((C11.shape[0], 2, 2))
-
-    # Fill the matrix with the corresponding values
-    C[:, 0, 0] = C11  # (1,1) entry
-    C[:, 1, 1] = C22  # (2,2) entry
-    C[:, 0, 1] = C12  # (1,2) entry
-    C[:, 1, 0] = C12  # (2,1) entry, ensuring symmetry
-
-    return C
 
 
 def get_energy_range(vtu_files, cvs_file):
     df = pd.read_csv(cvs_file, usecols=["Max energy"])
     max_energy = df["Max energy"].max()
+    # Sometimes, the energy is too high because of a crash
     if max_energy > 100:
+        # Then we take the second last
         max_energy = df["Max energy"][:-1].max()
     # We assume that the minimum energy throughout the whole run is the minimum
     # of the initial state
@@ -155,7 +87,15 @@ def add_padding(axis_limits, padding_ratio):
     return adjusted_x_min, adjusted_x_max, adjusted_y_min, adjusted_y_max
 
 
-def base_plot(vtu_file=None, axis_limits=None, add_title=True, frame_index=None):
+def base_plot(
+    vtu_file=None,
+    previous_vtu_file=None,
+    axis_limits=None,
+    add_title=True,
+    frame_index=None,
+    AvgEnergy=None,
+    AvgRSS=None,
+):
     dpi = 250
     width = 2000
     height = 1000
@@ -169,12 +109,39 @@ def base_plot(vtu_file=None, axis_limits=None, add_title=True, frame_index=None)
         ax.set_ylim(y_min, y_max)
 
     if add_title:
-        metadata = get_data_from_name(vtu_file)
-        lines = [
-            f"{metadata['name']}",
-            f"Frame: {frame_index}, " + f"Load: {float(metadata['load']):.3f}",
+        metaData = get_data_from_name(vtu_file)
+        load = float(metaData["load"])
+        load_step = float(metaData["loadIncrement"])
+        if previous_vtu_file:
+            previous_load = float(get_data_from_name(previous_vtu_file)["load"])
+            steps_since_last_frame = int((load - previous_load) / load_step)
+        else:
+            steps_since_last_frame = 0
+        nrPlasticEvents = metaData["nrM"]
+
+        # Data for the table
+        data = [
+            [
+                rf"$\gamma$: {load:.5f}",
+                rf"$\langle E \rangle$: {AvgEnergy:.3f}",
+                rf"$\langle \sigma \rangle$: {AvgRSS:.3f}",
+                rf"$p$: {nrPlasticEvents}",
+                # rf"$\Delta_k$: {steps_since_last_frame}",
+                f"f: {frame_index}",
+            ],
         ]
-        ax.set_title("\n".join(lines), fontsize=8)
+        # Create the table with invisible borders and gridlines
+        table = ax.table(cellText=data, cellLoc="center", loc="top", edges="open")
+
+        # Customize table appearance
+        table.scale(1, 1.5)  # Adjust table scale (e.g., to fit text size)
+        table.auto_set_font_size(False)
+        table.set_fontsize(8)
+
+        # Remove the cell edges to keep it invisible
+        for cell in table.get_celld().values():
+            cell.set_linewidth(0)
+
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -219,53 +186,14 @@ def save_and_close_plot(ax, path, transparent=False):
     plt.close()
 
 
-def calculate_valid_indices(n, m):
-    # Create a 2D grid of indices
-    indices = np.arange(n * m).reshape(n, m)
-    valid_indices = indices[: n - 1, : m - 1].flatten()
-    return valid_indices
-
-
-def trim_connections(nr_nodes, connections):
-    # Connections is an Nx3 array where the three numbers indicate
-    # the indexes of the nodes that should form elements
-    # This function removes all the elements that connect nodes that
-    # have an index larger than nr_nodes
-
-    mask = np.all(connections < nr_nodes, axis=1)
-
-    # Use the mask to filter the connections
-    trimmed_connections = connections[mask]
-
-    return trimmed_connections
-
-
-def plot_nodes(args):
-    (
-        framePath,
-        vtu_file,
-        frame_index,
-        global_min,
-        global_max,
-        axis_limits,
-        transparent,
-    ) = args
-    ax, fig = base_plot(
-        vtu_file=vtu_file, axis_limits=axis_limits, frame_index=frame_index
-    )
+def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kwargs):
+    if ax is None:
+        ax, fig = base_plot(vtu_file=vtu_file, axis_limits=axis_limits, **kwargs)
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
     fixed = data.get_fixed_status()
     dims = get_data_from_name(vtu_file)["dims"]
-    n, m = dims
-    if data.BC == "PBC":
-        # When using PBC, we want to hide the last row and column
-        # Calculate valid indices (excluding last row and column) using the NumPy function
-        valid_indices = calculate_valid_indices(n, m)
 
-        # Filter nodes and fixed status using the computed indices
-        nodes = nodes[valid_indices]
-        fixed = fixed[valid_indices]
     #                            Fixed color, Free color
     color = np.where(fixed == 1, "#2a3857", "#d24646")
     x, y = nodes[:, 0], nodes[:, 1]
@@ -279,22 +207,21 @@ def plot_nodes(args):
         0.6 * fig.dpi * (fig.get_size_inches()[1] / (axis_limits[3] - axis_limits[2]))
     )
     # Calculate circle size in points, considering 's' as the area in points squared
-    circle_diameter = (
-        0.3 * grid_size
-    )  # Adjust the 0.25 factor as necessary to prevent overlap
+    circle_diameter = 0.5 * grid_size
     circle_radius = circle_diameter / 2
     circle_point_size = (circle_radius * inches_per_data_unit) ** 2
 
     # Grid
-    connectivity = data.get_connectivity()
-    connectivity = trim_connections(len(x), connectivity)
+    if show_connections:
+        connectivity = data.get_connectivity()
     shifts = calculate_shifts(nodes, data.BC, data.load)
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
-            # Mesh lines between nodes
-            triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
-            ax.triplot(triang, color="black", linewidth=0.5, alpha=0.3)
+            if show_connections:
+                # Mesh lines between nodes
+                triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
+                ax.triplot(triang, color="black", linewidth=0.1, alpha=0.3)
 
             ax.scatter(
                 sheared_x,
@@ -303,34 +230,25 @@ def plot_nodes(args):
                 c=color,
                 marker="o",
                 alpha=1,
-                edgecolors="none",
+                linewidth=0,
             )
 
     draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
-    path = f"{framePath}/node_frame_{frame_index:04d}.png"
-    save_and_close_plot(fig, ax, path, transparent)
-    return path
+    return ax
 
 
 def plot_mesh(
     vtu_file,
     global_min=0,
     global_max=0.37,
-    useStress=True,
-    axis_limits=None,
-    frame_index=None,
-    add_title=False,
+    mesh_property="energy",
     ax=None,
     shift=True,
     add_rombus=True,
+    **kwargs,
 ):
     if ax is None:
-        ax, fig = base_plot(
-            vtu_file=vtu_file,
-            axis_limits=axis_limits,
-            frame_index=frame_index,
-            add_title=add_title,
-        )
+        ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
     data = VTUData(vtu_file)
     nodes = data.get_nodes()
     connectivity = data.get_connectivity()
@@ -338,15 +256,36 @@ def plot_mesh(
 
     cmap = "coolwarm"
 
-    if useStress:
-        field = data.get_stress_field()
-        norm = mcolors.Normalize(vmin=-1.5, vmax=1.5)
-        backgroundColor = plt.get_cmap(cmap)(0.5)
-    else:
+    hatch = None
+    norm = None
+
+    if mesh_property == "energy":
         # The energy field is normalized to have energy=0 in the ground state
         field = data.get_energy_field() - ground_state_energy()
         norm = mcolors.Normalize(vmin=global_min, vmax=global_max)
         backgroundColor = plt.get_cmap(cmap)(0)
+    elif mesh_property == "stress":
+        field = data.get_stress_field()
+        norm = mcolors.Normalize(vmin=-1.5, vmax=1.5)
+        backgroundColor = plt.get_cmap(cmap)(0.5)
+    elif mesh_property == "m":
+        cmap = "viridis"
+        nrm1, nrm2, nrm3 = data.get_m_nr_field()
+        field = nrm3
+        backgroundColor = plt.get_cmap(cmap)(0)
+        hatch_patterns = {
+            0: "",
+            1: "\\",  # Backslash for nrm1 % 2 == 1
+            2: "/",  # Forward slash for nrm2 % 2 == 1
+            3: "x",  # 'x' for both conditions being true
+        }
+
+        # Assuming nrm1 and nrm2 are defined
+        # Calculate the hatch value
+        hatch_value = (nrm1 % 2) + (nrm2 % 2) * 2
+
+        # Retrieve the hatch pattern string
+        hatch = hatch_patterns.get(hatch_value, "")
 
     if shift:
         shifts = calculate_shifts(nodes, data.BC, data.load)
@@ -358,7 +297,12 @@ def plot_mesh(
             triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
             ax.triplot(triang, color=backgroundColor, lw=0.1)
             ax.tripcolor(
-                triang, facecolors=field, norm=norm, cmap=cmap, edgecolors="none"
+                triang,
+                facecolors=field,
+                norm=norm,
+                cmap=cmap,
+                edgecolors="none",
+                hatch=hatch,
             )
 
     if add_rombus:
@@ -385,20 +329,12 @@ def get_energy_grid(zoom=1):
 
 
 def plot_in_poincare_disk(
-    vtu_file,
-    frame_index=None,
-    add_title=False,
-    ax=None,
-    fig=None,
-    do_elastic_reduction=False,
+    vtu_file, ax=None, fig=None, do_elastic_reduction=False, **kwargs
 ):
     if ax is None:
-        ax, fig = base_plot(
-            vtu_file=vtu_file,
-            frame_index=frame_index,
-            add_title=add_title,
-        )
+        ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
     data = VTUData(vtu_file)
+
     C = data.get_C()
     if do_elastic_reduction:
         # Do the elastic reduction
@@ -408,134 +344,128 @@ def plot_in_poincare_disk(
         zoom = 1
 
     g = get_energy_grid(zoom=zoom)
-    plotEnergyField(g, fig, ax, save=False, zoom=zoom, remove_max_color=zoom == 1)
+    plotEnergyField(
+        g, fig, ax, save=False, add_title=False, zoom=zoom, remove_max_color=zoom == 1
+    )
 
     vmax = 2000 if do_elastic_reduction else 1700
     drawCScatter(ax, C, len(g), vmax=vmax, zoom=zoom, remove_max_color=False)
 
-    ax.set_title("Elements in Poincaré disk with point density")
     return ax
 
 
-def plot_and_save_in_poincare_disk(args):
-    (
-        framePath,
-        vtu_file,
-        frame_index,
-        global_min,
-        global_max,
-        axis_limits,
-        transparent,
-    ) = args
+def plot_and_save_in_poincare_disk(frame_path, frame_index, transparent, **kwargs):
+    # Remove unwanted keywords
+    for key in ["global_min", "global_max", "axis_limits"]:
+        kwargs.pop(key)
+    ax = plot_in_poincare_disk(frame_index=frame_index, **kwargs)
 
-    ax = plot_in_poincare_disk(
-        vtu_file=vtu_file,
-        frame_index=frame_index,
-        add_title=True,
-    )
-
-    path = f"{framePath}/disk_frame_{frame_index:04d}.png"
+    path = f"{frame_path}/disk_frame_{frame_index:04d}.png"
     save_and_close_plot(ax, path, transparent)
 
     return path
 
 
-def plot_and_save_in_elastically_reduced_poincare_disk(args):
-    (
-        framePath,
-        vtu_file,
-        frame_index,
-        global_min,
-        global_max,
-        axis_limits,
-        transparent,
-    ) = args
-
-    ax = plot_in_poincare_disk(
-        vtu_file=vtu_file,
-        frame_index=frame_index,
-        add_title=True,
-        do_elastic_reduction=True,
-    )
-
-    path = f"{framePath}/eReduced_disk_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-
-    return path
-
-
-def plot_and_save_mesh(args, useStress=True):
-    (
-        framePath,
-        vtu_file,
-        frame_index,
-        global_min,
-        global_max,
-        axis_limits,
-        transparent,
-    ) = args
-
-    ax, _, _ = plot_mesh(
-        vtu_file=vtu_file,
-        global_min=global_min,
-        global_max=global_max,
-        useStress=useStress,
-        axis_limits=axis_limits,
-        frame_index=frame_index,
-        add_title=True,
-    )
-
-    path = f"{framePath}/mesh_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-    return path
-
-
-def retry_frame_function(frameFunction, args, max_retries=3):
-    # Maybe not needed any more?
-    return frameFunction(args)
-    for attempt in range(max_retries):
-        try:
-            return frameFunction(args)
-        except Exception as e:
-            if attempt == max_retries - 1:
-                print(f"Error for file {args[1]}: {str(e)}")
-            time.sleep(random.uniform(0.1, 1))  # Random delay between 0.1 and 1 second
-    print(f"Failed to process file {args[1]} after {max_retries} attempts.")
-    return None
-
-
-def process_frame(args):
-    # Unpack the frameFunction from args and apply retry logic
-    frameFunction, other_args = args[0], args[1:]
-    return retry_frame_function(frameFunction, other_args)
-
-
-def make_images(
-    frameFunction, framePath, vtu_files, macro_data, transparent=False, num_processes=10
+def plot_and_save_in_e_reduced_poincare_disk(
+    frame_path, frame_index, transparent, **kwargs
 ):
-    # Assuming vtu_files is defined, calculate global axis limits
+    # Remove unwanted keywords
+    for key in ["global_min", "global_max", "axis_limits"]:
+        kwargs.pop(key)
+    ax = plot_in_poincare_disk(
+        frame_index=frame_index, do_elastic_reduction=True, **kwargs
+    )
+
+    path = f"{frame_path}/eReduced_disk_frame_{frame_index:04d}.png"
+    save_and_close_plot(ax, path, transparent)
+
+    return path
+
+
+def plot_and_save_mesh(frame_path, frame_index, transparent, **kwargs):
+    ax, _, _ = plot_mesh(frame_index=frame_index, add_title=True, **kwargs)
+
+    path = f"{frame_path}/mesh_frame_{frame_index:04d}.png"
+    save_and_close_plot(ax, path, transparent)
+    return path
+
+
+def plot_and_save_nodes(frame_path, frame_index, transparent, **kwargs):
+    # Remove unwanted keywords
+    for key in ["global_min", "global_max"]:
+        kwargs.pop(key)
+    ax = plot_nodes(frame_index=frame_index, add_title=True, **kwargs)
+
+    path = f"{frame_path}/node_frame_{frame_index:04d}.png"
+    save_and_close_plot(ax, path, transparent)
+    return path
+
+
+def process_frame(kwargs):
+    kwargs = kwargs.copy()
+    # Unpack frameFunction from kwargs and apply retry logic
+    frameFunction = kwargs.pop("frameFunction")
+    # Call frameFunction with remaining keyword arguments
+    return frameFunction(**kwargs)
+
+
+def getCorespondingEnergyAndRSS(vtu_files, macro_data):
+    df = pd.read_csv(macro_data, usecols=["Load", "Avg energy", "Avg RSS"])
+    AvgEnergy = []
+    AvgRSS = []
+    for vtu_file in vtu_files:
+        load = float(get_data_from_name(vtu_file)["load"])
+
+        # Assuming "Load" is a unique identifier, we can filter directly
+        matching_row = df[df["Load"] == load]
+
+        # Check if we found a match
+        if not matching_row.empty:
+            # Extract the corresponding "Avg energy" and "Avg RSS" values
+            avg_energy = matching_row["Avg energy"].values[0]
+            avg_rss = matching_row["Avg RSS"].values[0]
+
+            # Append the extracted values to the respective lists
+            AvgEnergy.append(avg_energy)
+            AvgRSS.append(avg_rss)
+        else:
+            raise (EOFError("We would expect to have an exact match for the load!"))
+
+    # Return the lists or use them as needed
+    return AvgEnergy, AvgRSS
+
+
+def make_images(vtu_files, macro_data, num_processes=10, use_tqdm=True, **kwargs):
+    # Calculate global axis limits and energy range
     axis_limits = get_axis_limits(macro_data)
-    # global_min, global_max = precalculate_global_stress range(vtu_files)
     global_min, global_max = get_energy_range(vtu_files, macro_data)
-    args_list = [
-        (
-            frameFunction,
-            framePath,
-            vtu_file,
-            frame_index,
-            global_min,
-            global_max,
-            axis_limits,
-            transparent,
-        )
-        for frame_index, vtu_file in enumerate(vtu_files)
+    AvgEnergy, AvgRSS = getCorespondingEnergyAndRSS(vtu_files, macro_data)
+    # Create a list of dictionaries for keyword arguments
+    kwargs_list = [
+        {
+            "vtu_file": vtu_files[i],
+            "previous_vtu_file": vtu_files[i - 1] if i != 0 else None,
+            "frame_index": i,
+            "global_min": global_min,
+            "global_max": global_max,
+            "axis_limits": axis_limits,
+            "AvgEnergy": AvgEnergy[i],
+            "AvgRSS": AvgRSS[i],
+            **kwargs,
+        }
+        for i in range(len(vtu_files))
     ]
-    # Use line below to debug
-    image_paths = process_frame(args_list[0])
+
+    # Use line below to debug with first item in kwargs_list
+    image_paths = process_frame(kwargs_list[0])
 
     with Pool(processes=num_processes) as pool:
         image_paths = list(
-            tqdm(pool.imap(process_frame, args_list), total=len(vtu_files))
+            tqdm(
+                pool.imap(process_frame, kwargs_list),
+                total=len(vtu_files),
+                disable=not use_tqdm,
+            )
         )
 
     return image_paths
