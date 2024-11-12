@@ -11,3 +11,4 @@ tqdm
 paramiko
 tabulate
 fabric
+manim
