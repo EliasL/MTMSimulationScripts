@@ -19,6 +19,13 @@
             "console": "integratedTerminal"
         },
         {
+            "name": "plotAll.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "plotAll.py",
+            "console": "integratedTerminal"
+        },
+        {
             "name": "Current File",
             "type": "debugpy",
             "request": "launch",

@@ -97,6 +97,7 @@ class SimulationManager:
         overwriteSettings=False,
         overwriteData=False,
         silent=False,
+        newOutput=False,
     ):
         if build:
             self.build()
@@ -109,11 +110,28 @@ class SimulationManager:
 
         start_time = time.time()
         # We can choose to use the previous settings, or overwrite them using new ones
+        # Initialize the base command
+        command = [self.program_path, "-d", dumpFile]
+
+        # Conditionally add flags and paths based on inputs
+        if overwriteSettings:
+            command.extend(["-c", self.conf_file])
+        if newOutput:
+            command.extend(["-o", self.outputPath])
+
+        if overwriteData:
+            command.append("-r")
+
+        # Join the command list into a single string
+        final_command = " ".join(command)
+
+        # Now pass the final command to the run_command function
         run_command(
-            f"{self.program_path} -d {dumpFile}{' -c ' + self.conf_file if overwriteSettings else '' + ' -r' if overwriteData else ''}",
+            final_command,
             echo=not silent,
             taskName=self.taskName,
-        )  # Stop the timer right after the command completes
+        )
+        # Stop the timer right after the command completes
         end_time = time.time()
         # Calculate the duration
         duration = end_time - start_time

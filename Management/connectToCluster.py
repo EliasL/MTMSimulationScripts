@@ -40,7 +40,7 @@ class Servers:
     default = pascal
 
 
-def uploadProject(cluster_address="Servers.default", verbose=False):
+def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
     # Get the directory of the current script
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -93,6 +93,8 @@ def uploadProject(cluster_address="Servers.default", verbose=False):
         "Plots/",
         "--exclude",
         ".git",
+        "--exclude",
+        "venv/",
         local_path_SS,
         clusterPath,
     ]
@@ -109,6 +111,99 @@ def uploadProject(cluster_address="Servers.default", verbose=False):
 
     if verbose:
         print("Project folders successfully uploaded.")
+
+    if setup:
+        run_setup(cluster_address, verbose)
+
+
+def run_setup(cluster_address, verbose):
+    ssh_command = [
+        "ssh",
+        f"elundheim@{cluster_address}",
+        "cd ~/simulation/SimulationScripts && pip3 install ./Management ./Plotting",
+    ]
+
+    output_options = None if verbose else subprocess.DEVNULL
+
+    if verbose:
+        print("Running setup")
+    subprocess.run(
+        ssh_command, check=True, stdout=output_options, stderr=output_options
+    )
+
+
+def run_full_setup(cluster_address, verbose=False):
+    return  # This doesn't quite work
+    ssh_command = [
+        "ssh",
+        f"elundheim@{cluster_address}",
+        "cd ~/simulation/SimulationScripts && ./setup_env.sh",
+    ]
+
+    output_options = None if verbose else subprocess.DEVNULL
+
+    if verbose:
+        print("Running setup")
+    subprocess.run(
+        ssh_command, check=True, stdout=output_options, stderr=output_options
+    )
+
+
+def download_folders(cluster_address, configs, destination):
+    # Connect to the server
+    ssh = connectToCluster(cluster_address, False)
+
+    # Check if /data2 exists, otherwise use /data
+    stdin, stdout, stderr = ssh.exec_command(
+        "if [ -d /data2 ]; then echo '/data2'; else echo '/data'; fi"
+    )
+    base_dir = stdout.read().strip().decode()
+
+    user = "elundheim"
+    data_path = os.path.join(base_dir, user)
+
+    remote_folder_name = "MTS2D_output"
+    remote_folder_path = f"/{data_path}/{remote_folder_name}"
+    # List all folders within the output folder
+    command = f"cd {remote_folder_path}; ls -d */"
+    stdin, stdout, stderr = ssh.exec_command(command)
+    folders = stdout.read().strip().decode().split("\n")
+    folders = [folder.rstrip("/") for folder in folders]  # Clean up folder names
+
+    # Now we check if our folder is in this cluster
+    outPaths = []
+    for config in configs:
+        folderToDownload = config.generate_name(withExtension=False)
+
+        if folderToDownload not in folders:
+            # No match: we do nothing
+            continue
+        else:
+            remote_ssh_folder_path = (
+                f"elundheim@{cluster_address}:{remote_folder_path}/{folderToDownload}"
+            )
+            local_folder_path = os.path.join(destination, folderToDownload)
+
+            # Ensure local directory exists
+            if not os.path.exists(local_folder_path):
+                os.makedirs(local_folder_path)
+
+            # rsync command to download folder without overwriting existing files
+            rsync_command = [
+                "rsync",
+                "-avz",
+                "--progress",
+                remote_ssh_folder_path,
+                destination,
+            ]
+
+            # Run the rsync command
+            subprocess.run(rsync_command)
+
+            # If the rsync was successful, return the local folder path
+            outPaths.append((local_folder_path, config))
+
+    return outPaths
 
 
 def get_ssh_config():

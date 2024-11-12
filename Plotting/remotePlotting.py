@@ -7,19 +7,26 @@ import random
 import threading
 import pandas as pd
 from makePlots import (
-    makeEnergyPlot,
-    makePowerLawPlot,
+    makePlot,
+    makeComparisonPlot,
+    makeLogPlotComparison,
 )
-
+import matplotlib.pyplot as plt
+from fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
+from tqdm import tqdm
+import numpy as np
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 # Now we can import from Management
-from connectToCluster import connectToCluster, Servers
+from connectToCluster import connectToCluster, Servers, download_folders
 from configGenerator import ConfigGenerator, SimulationConfig
 
 FOLDER_PATH = "/Users/elias/Work/PhD/Code/remoteData"
 FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
+MACRO_PATH = os.path.join(FOLDER_PATH, "macro")
+PLOTS_PATH = os.path.join(FOLDER_PATH, "plots")
+RAW_DATA_PATH = os.path.join(FOLDER_PATH, "data")
 
 
 def handleLocalPath(dataPath, configs):
@@ -85,9 +92,8 @@ def get_csv_from_server(server, configs):
     folders = [folder.rstrip("/") for folder in folders]  # Clean up folder names
     names = [config.generate_name(False) for config in configs]
     newPaths = []
-    os.makedirs(
-        FOLDER_PATH, exist_ok=True
-    )  # This line ensures the MTS2D folder is created
+    # This line ensures the MTS2D folder is created
+    os.makedirs(MACRO_PATH, exist_ok=True)
 
     # Using ThreadPoolExecutor to download files in parallel
     with ThreadPoolExecutor(max_workers=7) as executor:
@@ -98,7 +104,7 @@ def get_csv_from_server(server, configs):
                 folders,
                 data_path,
                 remote_folder_name,
-                FOLDER_PATH,
+                MACRO_PATH,
                 ssh,
             ): name
             for name in names
@@ -111,6 +117,9 @@ def get_csv_from_server(server, configs):
                     nr_files += 1
                 update_progress(len(names))
 
+    # This fix is needed due to an old bug in the C++ program (fixed now)
+    # so when downloading some data from the server, we need a fix
+    fix_csv_files(newPaths, use_tqdm=False)
     return newPaths
 
 
@@ -148,7 +157,7 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
     remaining_configs = []
     last_search_folder = False
     # Folders to search in
-    search_folders = ["/tmp/MTS2D", FOLDER_PATH]
+    search_folders = ["/tmp/MTS2D", MACRO_PATH]
     for folder in search_folders:
         # Create folder if it does not exist
         os.makedirs(folder, exist_ok=True)
@@ -183,7 +192,7 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
 
 
 def configToPath(config):
-    return f"{FOLDER_PATH}/{config.name}.csv"
+    return f"{MACRO_PATH}/{config.name}.csv"
 
 
 def flatToStructure(config_groups, label_groups):
@@ -213,7 +222,9 @@ def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
     if not isinstance(configs[0], SimulationConfig):
         nested = True
         configs = [config for sublist in config_groups for config in sublist]
+
     global completed_servers, nr_files
+
     completed_servers, nr_files = 0, 0
     # First check if the files have already been downloaded
     paths, configs = search_for_cvs_files(configs, useOldFiles, forceUpdate)
@@ -273,6 +284,336 @@ def get_csv_from_folder(folderPath):
     ]
 
 
+def get_folders_from_servers(configs):
+    print("Searching servers for folders...")
+    # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
+    pathsAndConfig = []
+    with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+        future_to_server = {
+            executor.submit(download_folders, server, configs, RAW_DATA_PATH): server
+            for server in Servers.servers
+        }
+        for future in as_completed(future_to_server):
+            pAndC = future.result()
+            pathsAndConfig.extend(pAndC)
+
+    new_paths = [None] * len(configs)  # old order
+    for i in range(len(configs)):
+        for p, c in pathsAndConfig:
+            if c.name == configs[i].name:
+                new_paths[i] = p
+                continue
+
+    fix_csv_files_in_data_folder(Path(new_paths[0]).parent)
+    return new_paths
+
+
+def set_font_size(ax, axis_size=17, legend_size=17, tick_size=17, extra_size=0):
+    # Add extra_size to the main font sizes
+    axis_size += extra_size
+    legend_size += extra_size
+    tick_size += extra_size
+
+    # Set axis labels font size
+    ax.set_xlabel(ax.get_xlabel(), fontsize=axis_size)
+    ax.set_ylabel(ax.get_ylabel(), fontsize=axis_size)
+
+    # Adjust the font size for the legend, if it exists
+    legend = ax.get_legend()
+    if legend is not None:
+        for text in legend.get_texts():
+            text.set_fontsize(legend_size)
+
+    # Set tick labels font size for both x and y axes
+    ax.tick_params(axis="both", which="major", labelsize=tick_size)
+
+
+def createPlotsWithImages(configs, paths, metric, **kwargs):
+    if not paths:
+        # Download the folders associated with the configs from the server
+        paths = get_folders_from_servers(configs)
+
+    base = 5 if len(configs) == 3 else 7
+    # Create a figure with subplots, one for each configuration
+    fig, axes = plt.subplots(1, len(configs), figsize=(base * len(configs), base))
+
+    # If there's only one configuration, axes won't be a list, so convert it into one
+    if len(configs) == 1:
+        axes = [axes]
+
+    colors = {"FIRE": "#d24646", "LBFGS": "#008743", "CG": "#ffa701"}
+    sp = len(configs) == 1  # Single plot
+    # Loop over the configurations, paths, and axes
+    for ax, path, config, mark in zip(axes, paths, configs, "abc"):
+        # Call the provided plot function (either makeStressPlot or makeEnergyPlot)
+        fig, ax = makePlot(
+            path + "/macroData.csv",
+            name=config.name + f"_{metric}+.pdf",
+            add_images=True,
+            ax=ax,
+            fig=fig,
+            save=False,
+            xlim=(0.15, 1),
+            colors=[colors[config.minimizer]],
+            use_y_axis_name=config.minimizer == "LBFGS" if not sp else True,
+            add_cbar=config.minimizer == "FIRE" if not sp else True,
+            mark=mark if not sp else None,
+            legend=config.minimizer,
+            legend_loc="upper left",
+            mark_fontsize=20 + 2 * len(configs),
+            **kwargs,
+        )
+        set_font_size(ax, extra_size=2 * len(configs))
+        fig.tight_layout()
+
+    if sp:
+        method = configs[0].minimizer
+    else:
+        method = "combined"
+
+    # Save the combined figure
+    plt.savefig(f"Plots/{method}_{metric}_plots.pdf")
+
+
+def stressPlotWithImages(configs, paths=None):
+    createPlotsWithImages(
+        configs=configs,
+        paths=paths,
+        ylim=(0, 0.27),
+        mark_pos=(0.85, 0.15),
+        image_pos=[
+            [0.3, 0.01],  # first image, bottom middle
+            [0.03, 0.5],  # second image, upper left
+            [0.6, 0.55],  # upper right
+        ],
+        image_size=[0.37, 0.4, 0.4],
+        Y="Avg RSS",
+        metric="stress",
+    )
+
+
+def energyPlotWithImages(configs, paths=None):
+    createPlotsWithImages(
+        configs=configs,
+        paths=paths,
+        ylim=(0, 0.047),
+        mark_pos=(0.7, 0.95),
+        image_pos=[
+            [0.02, 0.5],  # first image, upper left
+            [0.29, 0.02],  # second image, lower center
+            [0.6, 0.1],  # upper right
+        ],
+        image_size=[0.4, 0.4, 0.4],
+        Y="Avg energy",
+        metric="energy",
+    )
+
+
+log_yLim_max = 1.2
+
+
+def plotWholeRangePowerLaw(paths, Y, **kwargs):
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    # Define limits
+    if Y == "Avg energy":
+        ylim = [2e-5, log_yLim_max]
+    elif Y == "Avg RSS":
+        ylim = [5e-7, log_yLim_max]
+    for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
+        kwargs["labels"] = [[method]]
+        makeLogPlotComparison(
+            [group],
+            innerStrainLims=(1, np.inf),
+            plot_post_yield=False,
+            save=False,
+            use_y_axis_name=method == "L-BFGS",
+            Y=Y,
+            ax=ax,
+            fig=fig,
+            legend_loc="lower left",
+            show=False,
+            ylim=ylim,
+            add_fit=True,
+            mark=mark,
+            mark_pos=(0.85, 0.9),
+            **kwargs,
+        )
+        set_font_size(ax)
+
+    fig.tight_layout()
+    name = "energy" if Y == "Avg energy" else "stress"
+    # Display all plots in a row
+    plt.savefig(f"Plots/combined_{name}_powerlaw_full_range.pdf")
+
+
+def plotPreYieldPowerLaw(paths, Y, **kwargs):
+    # Define preyield range
+    preYield = (0.15, 0.45)
+    # Define limits
+    if Y == "Avg energy":
+        ylim = (0.005, 0.02)
+        log_ylim = [5e-4, log_yLim_max]
+    elif Y == "Avg RSS":
+        ylim = (0, 0.2)
+        log_ylim = [1e-6, log_yLim_max]
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    for i, group, method, mark in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"], "abc"):
+        kwargs["labels"] = [[method]]
+
+        makeComparisonPlot(
+            [group],
+            Y=Y,
+            xlim=preYield,
+            ylim=ylim,
+            ax=axes[0, i],
+            use_y_axis_name=method == "L-BFGS",
+            fig=fig,
+            save=False,
+            mark=mark.upper(),
+            mark_pos=(0.85, 0.1),
+            **kwargs,
+        )
+
+        makeLogPlotComparison(
+            [group],
+            outerStrainLims=(preYield[0], 1),
+            innerStrainLims=(preYield[1], 1),
+            plot_post_yield=False,
+            save=False,
+            use_y_axis_name=method == "L-BFGS",
+            Y=Y,
+            ylim=log_ylim,
+            ax=axes[1, i],
+            fig=fig,
+            legend_loc="lower left",
+            mark=mark,
+            mark_pos=(0.85, 0.9),
+            **kwargs,
+        )
+        set_font_size(axes[0, i])
+        set_font_size(axes[1, i])
+
+    fig.tight_layout()
+    name = "energy" if Y == "Avg energy" else "stress"
+    # Display all plots in a row
+    plt.savefig(f"Plots/combined_{name}_powerlaw_preYield.pdf")
+
+
+def plotPostYieldPowerLaw(paths, Y, **kwargs):
+    # Define preyield range
+    postYield = (0.7, 1)
+    # Define limits
+    if Y == "Avg energy":
+        ylim = (0.02, 0.05)
+        log_ylim = [1e-4, log_yLim_max]
+    elif Y == "Avg RSS":
+        ylim = (0.05, 0.2)
+        log_ylim = [1e-6, log_yLim_max]
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    for i, group, method, mark in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"], "abc"):
+        kwargs["labels"] = [[method]]
+
+        makeComparisonPlot(
+            [group],
+            Y=Y,
+            xlim=postYield,
+            ylim=ylim,
+            ax=axes[0, i],
+            use_y_axis_name=method == "L-BFGS",
+            fig=fig,
+            save=False,
+            mark=mark,
+            mark_pos=(0.85, 0.1),
+            **kwargs,
+        )
+
+        makeLogPlotComparison(
+            [group],
+            outerStrainLims=(0, postYield[1]),
+            innerStrainLims=(0, postYield[0]),
+            plot_pre_yield=False,
+            save=False,
+            use_y_axis_name=method == "L-BFGS",
+            Y=Y,
+            ax=axes[1, i],
+            fig=fig,
+            legend_loc="lower left",
+            ylim=log_ylim,
+            mark=mark,
+            mark_pos=(0.85, 0.9),
+            **kwargs,
+        )
+        set_font_size(axes[0, i])
+        set_font_size(axes[1, i])
+
+    fig.tight_layout()
+    name = "energy" if Y == "Avg energy" else "stress"
+    # Display all plots in a row
+    plt.savefig(f"Plots/combined_{name}_powerlaw_postYield.pdf")
+
+
+def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
+    # Define limits
+    if Y == "Avg energy":
+        ylim = [0.62, 0.83]
+    elif Y == "Avg RSS":
+        ylim = [0.95, 1.34]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
+        kwargs["labels"] = [[method]]
+
+        makeLogPlotComparison(
+            [group],
+            plot_post_yield=False,
+            save=False,
+            use_y_axis_name=method == "L-BFGS",
+            Y=Y,
+            ax=ax,
+            fig=fig,
+            legend_loc="lower right",
+            window=True,
+            ylim=ylim,
+            show_lambda=show_lambda,
+            mark=mark,
+            mark_pos=(0.85, 0.9),
+            **kwargs,
+        )
+        set_font_size(ax)
+
+    fig.tight_layout()
+    name = "energy" if Y == "Avg energy" else "stress"
+    name = name + "_withLambda" if show_lambda else name
+    # Display all plots in a row
+    plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
+
+
+def plotLog(config_groups, labels, **kwargs):
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    kwargs["labels"] = labels
+
+    print("Plotting...")
+    # Iterate over the groups and methods, and plot each one in a separate subplot
+    for Y, dropLim in zip(
+        ["Avg energy", "Avg RSS"],
+        [[1e-7, None], [3e-4, None]],
+    ):
+        kwargs["dropLim"] = dropLim
+        makeComparisonPlot(paths, Y=Y, **kwargs)
+        ## makeLogPlotComparison(paths, Y=Y, **kwargs)
+        plotWholeRangePowerLaw(paths, Y, **kwargs)
+        plotPreYieldPowerLaw(paths, Y, **kwargs)
+        plotPostYieldPowerLaw(paths, Y, **kwargs)
+        plotWindowPowerLaw(paths, Y, **kwargs)
+
+    # makeLogPlotComparison(paths, f"{name} - EnergyPowerLawWindow", window=True, **kwargs)
+    # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", **kwargs)
+    # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
+
+
 if __name__ == "__main__":
     seeds = range(0, 60)
     configs = ConfigGenerator.generate_over_seeds(
@@ -292,9 +633,7 @@ if __name__ == "__main__":
         "/Volumes/data/MTS2D_output/FailedStrangeFireSimulatinos"
     )
     if paths:
-        makeEnergyPlot(
-            paths, "ParamExploration.pdf", show=True, legend=False, yLims=(-100, 2)
-        )
+        makePlot(paths, "ParamExploration.pdf", show=True, legend=False, ylim=(-100, 2))
         # makeTimePlot(paths, "Run time.pdf", show=True, legend=True)
         # makeItterationsPlot(paths, "ParamExploration.pdf", show=True)
         # makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", show=True)

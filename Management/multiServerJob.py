@@ -9,7 +9,7 @@ from .dataManager import DataManager
 
 
 def confToCommand(config):
-    base_command = "python3 ~/simulation/SimulationScripts/Management/runSimulations.py"
+    base_command = "python3 ~/simulation/SimulationScripts/runSimulations.py"
     return (
         base_command
         + " "
@@ -230,9 +230,32 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
     return configs, labels
 
 
-def propperJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+def allPlasticEventsJob():
     configs, labels = ConfigGenerator.generate(
-        seed=range(nrSeeds),
+        seed=range(1),
+        group_by_seeds=False,
+        rows=100,
+        cols=100,
+        startLoad=0.15,
+        nrThreads=3,
+        minimizer=["LBFGS", "CG", "FIRE"],
+        loadIncrement=1e-5,
+        LBFGSEpsg=1e-5,
+        CGEpsg=1e-5,
+        eps=1e-5,
+        maxLoad=1.0,
+        scenario="simpleShear",
+        # Save all events
+        plasticityEventThreshold=1e-6,
+    )
+    return configs, labels
+
+
+def propperJob(nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None):
+    if seeds is None:
+        seeds = range(nrSeeds)
+    configs, labels = ConfigGenerator.generate(
+        seed=seeds,
         group_by_seeds=group_by_seeds,
         rows=size,
         cols=size,

@@ -3,11 +3,19 @@ from .configGenerator import SimulationConfig
 
 
 def run_locally(
-    config=SimulationConfig(), resume=True, dump=None, plot=False, build=True, **kwargs
+    config=SimulationConfig(),
+    resume=True,
+    dump=None,
+    plot=False,
+    build=True,
+    newOutput=False,
+    **kwargs,
 ):
     manager = SimulationManager(config, overwriteData=not resume, **kwargs)
     if dump:
-        manager.resumeSimulation(dumpFile=dump, overwriteSettings=True, build=build)
+        manager.resumeSimulation(
+            dumpFile=dump, overwriteSettings=True, build=build, newOutput=newOutput
+        )
     else:
         manager.runSimulation(resumeIfPossible=resume, build=build)
     if plot:

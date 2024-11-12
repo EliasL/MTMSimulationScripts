@@ -7,12 +7,13 @@ from Management.runOnCluster import (
     build_on_all_servers,
     build_on_server,
 )
-from Management.runSimulations import run_many_locally
+from runSimulations import run_many_locally, run_locally
 from Management.connectToCluster import Servers
 from Management.multiServerJob import (
     bigJob,
     confToCommand,
     basicJob,
+    allPlasticEventsJob,
     propperJob,
     propperJob1,
     propperJob2,
@@ -22,6 +23,17 @@ from Management.multiServerJob import (
     get_server_short_name,
 )
 from Management.clusterStatus import get_all_server_info, display_server_info
+
+
+def benchmark():
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50)
+    run_locally(configs[0])
+
+    # log
+    # 1% RT: 1m 57s  ETR: 2h 34m 36s Load: 0.160600
+
+    # Better bounding box
+    #
 
 
 def parameterExploring():
@@ -34,27 +46,13 @@ def plotBigJob():
     nrThreads = 3
     nrSeeds = 40
     configs, labels = bigJob(nrThreads, nrSeeds, group_by_seeds=True)
-    # xLims = [0.25, 0.55]
+    # xlim = [0.25, 0.55]
     pe.plotLog(
         configs,
         "200x200, load:0.15-1, PBC, seeds:40",
         labels=labels,
         # show=True,
-        # xLims=xLims,
-    )
-
-
-def plotPropperJob():
-    nrThreads = 3
-    nrSeeds = 40
-    configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
-    # xLims = [0.25, 0.55]
-    pe.plotLog(
-        configs,
-        "100x100, load:0.15-1, PBC, seeds:40",
-        labels=labels,
-        # show=True,
-        # xLims=xLims,
+        # xlim=xlim,
     )
 
 
@@ -63,21 +61,21 @@ def lotsOThreads():
     nrSeeds = 3
     size = 150
     configs, labels = propperJob(nrThreads, nrSeeds, size=size, group_by_seeds=True)
-    # xLims = [0.25, 0.55]
+    # xlim = [0.25, 0.55]
     pe.plotLog(
         configs,
         f"{size}x{size}, load:0.15-1, PBC, t{nrThreads}, seeds:{nrSeeds}",
         labels=labels,
         # show=True,
-        # xLims=xLims,
+        # xlim=xlim,
     )
 
 
 def threadTest():
-    nrThreads = [8, 16, 32, 64]
+    nrThreads = [8]  # , 16, 32, 64]
     nrSeeds = 1
     size = 150
-    build_on_server(Servers.mesopsl)
+    build_on_server(Servers.dalembert)
     configs, labels = propperJob(nrThreads, nrSeeds, size)
     print("Starting jobs...")
     commands = confToCommand(configs)
@@ -89,13 +87,16 @@ def threadTest():
         + str(
             {
                 '"commands"': str(commands).replace('"', "\u203d"),
-                '"job_name"': '"ej"',
+                '"job_name"': '"tTest"',
                 '"nrThreads"': sum(nrThreads),
             }
         )
     )
     print(full_pre_command)
-    # run_remote_command(Servers.mesopsl, full_pre_command)
+    if False:
+        run_remote_command(Servers.mesopsl, full_pre_command)
+    else:
+        print("Not sent to server")
 
 
 def runOnServer():
@@ -107,7 +108,8 @@ def runOnServer():
 
 
 def runOnLocalMachine():
-    configs, labels = propperJob(3, 1, size=150, group_by_seeds=False)
+    # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
+    configs, labels = allPlasticEventsJob()
     run_many_locally(configs)
 
 
@@ -121,7 +123,7 @@ def startJobs():
     print("Building on all servers... ")
 
     build_on_all_servers()
-    for job in [propperJob1, propperJob2, propperJob3]:
+    for job in [propperJob3]:
         configs, labels = job()
         servers_commands = generateCommands(configs, configs[0].nrThreads)
         print("Starting jobs...")
@@ -172,8 +174,9 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-runOnLocalMachine()
+# runOnLocalMachine()
 # startJobs()
 # plotBigJob()
 # plotPropperJob()
 # threadTest()
+benchmark()

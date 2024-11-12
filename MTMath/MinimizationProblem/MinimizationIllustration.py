@@ -173,7 +173,7 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             result = minimize(
                 lambda x: f_wrapper(x),
                 x0,
-                method=opt_settings["method"],
+                method=opt_settings["method"].replace("L-BFGS", "L-BFGS-B"),
                 jac=lambda x: df(x, df_func),
                 options=opt_settings["options"],
                 callback=lambda xk: (
@@ -297,6 +297,34 @@ def mute_color(color, factor=0.5):
     return muted_rgb
 
 
+def normalize(v):
+    # Normalize the vector
+    norm = np.linalg.norm(v)
+    if norm == 0:
+        return v
+    return v / norm
+
+
+def remove_backtracking_points(path):
+    # List to store the new path after removing backtracking points
+    filtered_path = [path[0]]  # Always keep the first point
+
+    # Iterate through the path points, comparing directions
+    for i in range(1, len(path) - 1):
+        # Compute the direction vectors between consecutive points
+        direction1 = normalize(np.array(path[i]) - np.array(path[i - 1]))
+        direction2 = normalize(np.array(path[i + 1]) - np.array(path[i]))
+
+        # Check if the directions are opposite
+        if not np.allclose(direction1, -direction2, atol=1e-8):
+            # If not opposite, keep the point
+            filtered_path.append(path[i])
+
+    # Always keep the last point
+    filtered_path.append(path[-1])
+    return np.array(filtered_path)
+
+
 # Colors and styles for different method
 colors = {"FIRE": "#d24646", "L-BFGS": "#008743", "CG": "#ffa701"}
 muted_colors = {key: mute_color(color, factor=0.3) for key, color in colors.items()}
@@ -317,6 +345,7 @@ def plot_results(
     lims=None,
     next_lims=None,
     alg="all",
+    draw_f_evals=False,
 ):
     if ax is None:
         # Determine the aspect ratio from the lims
@@ -344,6 +373,8 @@ def plot_results(
             continue
         paths = data["paths"]
         for path in paths:
+            # we want to remove overlapping points from the fire algorithm where it has taken a step backwards
+            path = remove_backtracking_points(path)
             if len(paths) < 10:
                 ax.plot(
                     path[:, 0],
@@ -363,29 +394,19 @@ def plot_results(
                     marker=markers[method],
                     label=method,
                 )
-        if "feval_paths" in data and method != "FIRE":
+        if "feval_paths" in data and method != "FIRE" and draw_f_evals:
             xlim = ax.get_xlim()
             ylim = ax.get_ylim()
             for fPath in data["feval_paths"]:
-                if len(paths) < 10:
-                    ax.plot(
-                        fPath[:, 0],
-                        fPath[:, 1],
-                        styles[method],
-                        label="f-evals",
-                        color=muted_colors[method],
-                        marker="^",
-                        zorder=1,
-                    )
-                else:
-                    scatter(
-                        ax,
-                        fPath,
-                        onlyStart=True,
-                        color=colors[method],
-                        marker=markers[method],
-                        label=method,
-                    )
+                ax.plot(
+                    fPath[:, 0],
+                    fPath[:, 1],
+                    styles[method],
+                    label="f-evals",
+                    color=muted_colors[method],
+                    marker="^",
+                    zorder=1,
+                )
             ax.set_xlim(xlim)
             ax.set_ylim(ylim)
 
@@ -448,7 +469,13 @@ def plot_results(
 
 
 def plot_energy(
-    results, name, ax=None, itOrFeval="f-eval", alg="all", loc="lower left"
+    results,
+    name,
+    threshold=None,
+    ax=None,
+    itOrFeval="f-eval",
+    alg="all",
+    loc="lower left",
 ):
     if ax is None:
         aspect_ratio = 0.7  # Default to square if no limits are provided
@@ -491,6 +518,13 @@ def plot_energy(
                 marker="o",
                 zorder=2,
             )
+        if threshold:
+            # Get the current x-axis limits
+            xmin, xmax = ax.get_xlim()
+
+            # Draw a horizontal line across the entire plot
+            ax.hlines(threshold, xmin=xmin, xmax=xmax, color="b", linestyles="--")
+
     # Handling the legend and reordering
     handles, labels = ax.get_legend_handles_labels()
     order = ["FIRE", "CG", "L-BFGS"]  # Define custom order
@@ -658,6 +692,7 @@ def explore_six_hump_camel():
         plot_results(X, Y, Z, minima, results, name, loc="upper right")
 
 
+# MDPI Article plot
 def explore_three_hump_camel():
     # Combine all algorithms or split them into different plots
     split = True
@@ -694,21 +729,21 @@ def explore_three_hump_camel():
     w = 6
     h = 9
     # Create figure and axes for plot_results (1 row, 4 columns)
-    fig_results, res_ax = plt.subplots(1, 4, figsize=(w * 4, h))
+    fig_results, res_ax = plt.subplots(1, 3, figsize=(w * 3, h))
 
     # Create figure and axes for plot_energy (1 row, 4 columns)
     fig_energy, energy_ax = plt.subplots(1, 3, figsize=(w * 3, h))
 
-    algorithms = ["eField", "L-BFGS", "CG", "FIRE"]
-    labels = ["(e)", "(a)", "(b)", "(c)"]
+    algorithms = ["L-BFGS", "CG", "FIRE"]
+    labels = ["(a)", "(b)", "(c)"]
     if split:
         for idx, alg in enumerate(algorithms):
             # Pass each ax object to the plotting functions
             plot_results(X, Y, Z, minima, r, n, res_ax[idx], lims=zooms[i], alg=alg)
             add_mark(res_ax[idx], labels[idx], 0.03, 0.95, color="white")
-            if idx != 0:
-                plot_energy(r, n, energy_ax[idx - 1], alg=alg)
-                add_mark(energy_ax[idx - 1], labels[idx], 0.80, 0.95)
+
+            plot_energy(r, n, ax=energy_ax[idx], alg=alg)
+            add_mark(energy_ax[idx], labels[idx], 0.8, 0.95)
 
     else:
         # Plot without splitting across multiple axes if required
@@ -722,6 +757,8 @@ def explore_three_hump_camel():
     script_dir = os.path.dirname(os.path.realpath(__file__))
     rPath = os.path.join(script_dir, "Plots", n + "_results.pdf")
     ePath = os.path.join(script_dir, "Plots", n + "_energy.pdf")
+    # sPath = os.path.join(script_dir, "Plots", n + "_stress.pdf")
+    # TODO use stress as well instead of energy
     fig_results.savefig(rPath, bbox_inches="tight")
     fig_energy.savefig(ePath, bbox_inches="tight")
 

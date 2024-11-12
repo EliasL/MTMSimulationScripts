@@ -11,4 +11,10 @@ tqdm
 paramiko
 tabulate
 fabric
+opencv-python
+imageio
+vtk
+mplcursors
+powerlaw
+simplification
 manim
