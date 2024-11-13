@@ -9,6 +9,7 @@ from .pyplotFunctions import (
     make_images,
     plot_and_save_nodes,
     plot_and_save_mesh,
+    plot_and_save_m_mesh,
     plot_and_save_in_poincare_disk,
     plot_and_save_in_e_reduced_poincare_disk,
 )
@@ -138,8 +139,9 @@ def makeAnimations(
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in [
         # (plot_and_save_mesh, "mesh"),
+        (plot_and_save_m_mesh, "m_mesh"),
         # (plot_and_save_in_poincare_disk, "disk"),
-        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
+        # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
         # (plot_and_save_nodes, "nodes"),
     ]:
         images = make_images(

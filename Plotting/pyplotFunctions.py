@@ -390,6 +390,16 @@ def plot_and_save_mesh(frame_path, frame_index, transparent, **kwargs):
     return path
 
 
+def plot_and_save_m_mesh(frame_path, frame_index, transparent, **kwargs):
+    ax, _, _ = plot_mesh(
+        frame_index=frame_index, add_title=True, mesh_property="m", **kwargs
+    )
+
+    path = f"{frame_path}/mesh_frame_{frame_index:04d}.png"
+    save_and_close_plot(ax, path, transparent)
+    return path
+
+
 def plot_and_save_nodes(frame_path, frame_index, transparent, **kwargs):
     # Remove unwanted keywords
     for key in ["global_min", "global_max"]:
