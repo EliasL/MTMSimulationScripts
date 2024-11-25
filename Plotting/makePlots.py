@@ -28,22 +28,34 @@ def plotYOverX(
     Y,
     fig=None,
     ax=None,
-    indicateLastPoint=True,
+    indicateLastPoint=False,
     tolerance=1e-12,
     xlim=None,
     ylim=None,
     **kwargs,
 ):
-    # If no axis is provided, create a new figure and axis
-    if ax is None:
-        fig, ax = plt.subplots()
+    # Ensure X and Y are NumPy arrays
+    X = np.asarray(X)
+    Y = np.asarray(Y)
 
-    if xlim:
-        ax.set_xlim(xlim)
-    if ylim:
-        ax.set_ylim(ylim)
+    # Input validation
+    if X.shape != Y.shape:
+        raise ValueError("X and Y must have the same shape.")
 
-    # Simplify the points if tolerance is provided
+    # Apply xlim and ylim to crop the data
+    mask = np.ones_like(X, dtype=bool)
+    if xlim is not None:
+        mask &= (X >= xlim[0]) & (X <= xlim[1])
+    if ylim is not None:
+        mask &= (Y >= ylim[0]) & (Y <= ylim[1])
+    X = X[mask]
+    Y = Y[mask]
+
+    # Handle empty data after cropping
+    if X.size == 0 or Y.size == 0:
+        raise ValueError("No data points remain after applying xlim and ylim.")
+
+    # Simplify the points after cropping
     if tolerance is not None:
         points = np.column_stack((X, Y))
         simplified_points = simplify_coords_vwp(points, tolerance)
@@ -52,20 +64,24 @@ def plotYOverX(
     else:
         X_simplified = X
         Y_simplified = Y
+
+    # If no axis is provided, create a new figure and axis
+    if ax is None:
+        fig, ax = plt.subplots()
+
     # Plot on the provided axis
     (line,) = ax.plot(X_simplified, Y_simplified, **kwargs)
 
-    if indicateLastPoint:
+    # Optionally highlight the last point
+    point = None
+    if indicateLastPoint and X_simplified.size > 0:
         # Add a scatter point at the last point
-        kwargs["label"] = ""
-        k2 = kwargs.copy()
-        if "alpha" in k2:
-            # Make the end points more visible if you want
-            k2["alpha"] = k2["alpha"] * 1
-
-        point = ax.scatter(X_simplified[-1], Y_simplified[-1], **k2)
-    else:
-        point = None
+        kwargs_without_label = {k: v for k, v in kwargs.items() if k != "label"}
+        if "alpha" in kwargs_without_label:
+            kwargs_without_label["alpha"] = min(
+                kwargs_without_label["alpha"] * 1.5, 1.0
+            )
+        point = ax.scatter(X_simplified[-1], Y_simplified[-1], **kwargs_without_label)
 
     # Return the axis object for further use
     return fig, ax, line, point
@@ -257,6 +273,71 @@ DISTRIBUTIONS = {
 }
 
 
+def pdf(data, xmin=None, xmax=None, linear_bins=False, **kwargs):
+    """
+    Returns the probability density function (normalized histogram) of the
+    data.
+
+    Parameters
+    ----------
+    data : list or array
+    xmin : float, optional
+        Minimum value of the PDF. If None, uses the smallest value in the data.
+    xmax : float, optional
+        Maximum value of the PDF. If None, uses the largest value in the data.
+    linear_bins : float, optional
+        Whether to use linearly spaced bins, as opposed to logarithmically
+        spaced bins (recommended for log-log plots).
+
+    Returns
+    -------
+    bin_edges : array
+        The edges of the bins of the probability density function.
+    probabilities : array
+        The portion of the data that is within the bin. Length 1 less than
+        bin_edges, as it corresponds to the spaces between them.
+    """
+    from numpy import logspace, histogram, floor, unique, asarray
+    from math import ceil, log10
+
+    data = asarray(data)
+    if not xmax:
+        xmax = max(data)
+    if not xmin:
+        xmin = min(data)
+
+    if (
+        xmin < 1
+    ):  # To compute the pdf also from the data below x=1, the data, xmax and xmin are rescaled dividing them by xmin.
+        xmax2 = xmax / xmin
+        xmin2 = 1
+    else:
+        xmax2 = xmax
+        xmin2 = xmin
+
+    if "bins" in kwargs.keys():
+        bins = kwargs.pop("bins")
+    elif linear_bins:
+        bins = range(int(xmin2), ceil(xmax2) + 1)
+    else:
+        log_min_size = log10(xmin2)
+        log_max_size = log10(xmax2)
+        number_of_bins = ceil((log_max_size - log_min_size) * 10)
+        bins = logspace(log_min_size, log_max_size, num=number_of_bins)
+        bins[:-1] = floor(bins[:-1])
+        bins[-1] = ceil(bins[-1])
+        bins = unique(bins)
+
+    if xmin < 1:  # Needed to include also data x<1 in pdf.
+        hist, edges = histogram(data / xmin, bins, density=True)
+        edges = edges * xmin  # transform result back to original
+        hist = hist / xmin  # rescale hist, so that np.sum(hist*edges)==1
+    else:
+        hist, edges = histogram(data, bins, density=True)
+
+    return edges, hist
+
+
 def plotPowerLaw(
     drops, ax, fit, label, part_label, dist="truncated_power_law", add_fit=True
 ):
@@ -266,13 +347,15 @@ def plotPowerLaw(
     # Get the current color
     color = colors[label]
 
-    fit.plot_ccdf(
+    fit.plot_pdf(
         original_data=True,
         ax=ax,
         marker=markers[index],
-        facecolors="none",
-        edgecolors=color,
-        s=100,
+        linestyle="none",
+        markerfacecolor="none",
+        # markeredgecolors=color,
+        c=color,
+        # markersize=100,
         label=f"{label}{part_label}",
     )
 
@@ -287,20 +370,20 @@ def plotPowerLaw(
     # Now, plot the best-fitting distribution
     if add_fit:
         # Plot power-law fit
-        getattr(fit, dist).plot_ccdf(
+        getattr(fit, dist).plot_pdf(
             ax=ax,
             linestyle="--",
             label=f"fit: {extraLabel}",
-            color="b",
+            color="black",
         )
-        renormalizeMostRecentPlot(ax)
+        renormalizeMostRecentPlot(ax, fit, getattr(fit, dist))
 
     print(f"{label}{part_label}: dist: {dist}, {extraLabel}")
 
     return ax
 
 
-def renormalizeMostRecentPlot(ax):
+def renormalizeMostRecentPlot(ax, fit, dist):
     """
     When we plott the ccdf fit over a subregion of the whole data, it will be
     normalized to a different region than the whole region of the data, so we
@@ -314,23 +397,18 @@ def renormalizeMostRecentPlot(ax):
     fit_x_data = fit_line.get_xdata()
     fit_region = [np.min(fit_x_data), np.max(fit_x_data)]
 
-    # Get scatter data (last collection)
-    data_scatter = ax.collections[-1]
-    scatter_y_data = data_scatter.get_offsets()[
-        :, 1
-    ]  # Use offsets to get y values for scatter plot
-    scatter_x_data = data_scatter.get_offsets()[
-        :, 0
-    ]  # Use offsets to get x values for scatter plot
+    # Get original data
+    edges, hist = pdf(fit.data_original)
+    bin_centers = (edges[1:] + edges[:-1]) / 2.0
+    y_data = hist
+    x_data = bin_centers
 
     # Find the region for the scatter data that corresponds to the fit region
-    scatter_region_indices = (scatter_x_data >= fit_region[0]) & (
-        scatter_x_data <= fit_region[1]
-    )
+    scatter_region_indices = (x_data >= fit_region[0]) & (x_data <= fit_region[1])
 
     # Subset scatter data to the fit region
-    scatter_x_data_region = scatter_x_data[scatter_region_indices]
-    scatter_y_data_region = scatter_y_data[scatter_region_indices]
+    scatter_x_data_region = x_data[scatter_region_indices]
+    scatter_y_data_region = y_data[scatter_region_indices]
 
     # Integrate the y data over x for both fit and scatter data in the region of the fit
     area_fit = np.trapz(fit_y_data, fit_x_data)  # Numerical integration for fit data
@@ -388,6 +466,8 @@ line_styles = ["-", "--", "-.", ":"]
 markers = ["o", "v", "^", "s", "D", "p", "*"]
 colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 colors = {"FIRE": "#d24646", "L-BFGS": "#008743", "CG": "#ffa701"}
+colors = {"L-BFGS": "#3BCDDD", "CG": "#CDDD3B", "FIRE": "#DD3BCD"}
+colors = {"L-BFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
 color_index = 0
 index = 0
 
@@ -675,6 +755,7 @@ def makePlot(
     legend=None,
     add_shift=False,
     add_images=False,
+    metric="energy",
     image_pos=None,
     image_size=0.4,
     add_cbar=True,
@@ -876,7 +957,7 @@ def makePlot(
             data[i],
             image_pos,
             image_size,
-            mesh_property="stress",
+            mesh_property=metric,
             add_cbar=add_cbar,
         )
     ax.set_xlabel(x_name)
@@ -962,6 +1043,7 @@ def addImagesToPlot(
         #                           (left, bottom, width, height)
         ax_inset = ax.inset_axes((pos[0], pos[1], size, size))
         _, cmap, norm = plot_mesh(
+            e_lims=[0, 0.37],
             vtu_file=vtu_file,
             ax=ax_inset,
             add_rombus=False,
@@ -1039,7 +1121,7 @@ def removeBadData(df, crash_count, csv_file_path):
     return df, crash_count
 
 
-def makeComparisonPlot(
+def makeAverageComparisonPlot(
     grouped_csv_file_paths,
     Y="Avg energy",
     name="",
@@ -1177,6 +1259,13 @@ def makeComparisonPlot(
     return fig, ax
 
 
+def add_power_law_line(ax, slope, x_lim, y_pos=1, c="black", linestyle="--", **kwargs):
+    x = np.logspace(np.log10(x_lim[0]), np.log10(x_lim[1]), 100)
+    y = y_pos * x**slope
+    ax.plot(x, y, label=rf"fit: $\alpha={slope}$", c=c, linestyle=linestyle, **kwargs)
+    ax.legend()
+
+
 def makeLogPlotComparison(
     grouped_csv_file_paths,
     Y="Avg energy",
@@ -1254,7 +1343,7 @@ def makeLogPlotComparison(
             x_name = "Magnitude of energy drops"
         elif Y == "Avg RSS":
             x_name = "Magnitude of stress drops"
-        y_name = rf"$P(>\langle {unit} \rangle)$"
+        y_name = rf"$p(\Delta \langle {unit} \rangle)$"
 
     title += (
         r" $\\Delta "

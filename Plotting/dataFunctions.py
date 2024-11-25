@@ -39,9 +39,9 @@ class VTUData:
         return vtk_to_numpy(self.mesh.GetPointData().GetArray("fixed"))
 
     def get_m_nr_field(self):
-        nrm1 = vtk_to_numpy(self.mesh.getCellData().GetArray("nrm1"))
-        nrm2 = vtk_to_numpy(self.mesh.getCellData().GetArray("nrm2"))
-        nrm3 = vtk_to_numpy(self.mesh.getCellData().GetArray("nrm3"))
+        nrm1 = vtk_to_numpy(self.mesh.GetCellData().GetArray("nrm1")).astype(int)
+        nrm2 = vtk_to_numpy(self.mesh.GetCellData().GetArray("nrm2")).astype(int)
+        nrm3 = vtk_to_numpy(self.mesh.GetCellData().GetArray("nrm3")).astype(int)
         return nrm1, nrm2, nrm3
 
     def get_C(self):

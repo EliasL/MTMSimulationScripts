@@ -101,6 +101,10 @@ def makeAnimations(
     transparent=False,
     combine=True,
     use_tqdm=True,
+    fps=30,
+    seconds_per_unit_shear=15,
+    min_time=7,
+    reuse_images=False,
 ):
     frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macro_data is None:
@@ -122,9 +126,7 @@ def makeAnimations(
     loadChange = float(last["load"]) - float(first["load"])
 
     # Length of video in seconds
-    videoLength = 15 * loadChange
-    # Define the frame rate
-    fps = 30
+    videoLength = seconds_per_unit_shear * loadChange
     nrSteps = videoLength * fps
 
     # we select a reduced number of frames
@@ -133,16 +135,16 @@ def makeAnimations(
     if len(vtu_files) < nrSteps:
         # If we don't have enough frames, we need to make each frame last longer
         # We will make the video last 7 seconds
-        fps = len(vtu_files) / 7
+        fps = len(vtu_files) / min_time
 
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in [
-        # (plot_and_save_mesh, "mesh"),
-        (plot_and_save_m_mesh, "m_mesh"),
-        # (plot_and_save_in_poincare_disk, "disk"),
-        # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
         # (plot_and_save_nodes, "nodes"),
+        (plot_and_save_m_mesh, "m_mesh"),
+        (plot_and_save_mesh, "mesh"),
+        (plot_and_save_in_poincare_disk, "disk"),
+        # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
     ]:
         images = make_images(
             vtu_files,
@@ -151,6 +153,8 @@ def makeAnimations(
             frame_path=frame_path,
             transparent=transparent,
             use_tqdm=use_tqdm,
+            reuse_images=reuse_images,
+            fileName=fileName,
         )
 
         outPath = os.path.join(path, f"{fileName}_video.mp4")
@@ -165,8 +169,10 @@ def makeAnimations(
             ] + images  # Append the list of image paths to the command
             subprocess.run(GIFCommand)
     if combine:
-        combine_videoes(path, "mesh", "erDisk")
+        # combine_videoes(path, "mesh", "erDisk")
+        combine_videoes(path, "m_mesh", "mesh")
         combine_videoes(path, "mesh", "disk")
+        combine_videoes(path, "m_mesh", "disk")
 
 
 if __name__ == "__main__":

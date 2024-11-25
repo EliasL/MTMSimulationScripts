@@ -8,18 +8,19 @@ from collections import Counter
 import os
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
+import matplotlib.gridspec as gridspec
 
 # Set larger sizes for all elements
 scale = 2
 plt.rcParams.update(
     {
-        "font.size": scale * 14,  # Adjust font size
+        "font.size": scale * 10,  # Adjust font size
         "axes.titlesize": scale * 16,  # Adjust axis title size
         "axes.labelsize": scale * 14,  # Adjust axis label size
         "xtick.labelsize": scale * 12,  # Adjust x-axis tick label size
         "ytick.labelsize": scale * 12,  # Adjust y-axis tick label size
         "lines.linewidth": scale * 2,  # Adjust line width
-        "axes.linewidth": scale * 1.5,  # Adjust axes line width
+        "axes.linewidth": scale * 1,  # Adjust axes line width
         "lines.markersize": scale * 6,  # Adjust marker size
     }
 )
@@ -135,6 +136,7 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             "nit": [],
             "nfev": [],
             "path_energy": [],
+            "f-eval_stress": [],
             "f-eval_energy": [],
             "min_energy": [],
             "min_pos": [],
@@ -160,12 +162,23 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             f_eval_points = []  # Track function evaluations
             path_energies = []  # Track energy at each point
             fEval_energies = []  # Track energy at each point
+            fEval_stress = []  # Track stress at each point
 
             # Wrapper for the objective function to track function evaluations
-            def f_wrapper(x, func=f_func):
+            def f_wrapper(x):
                 f_eval_points.append(x.copy())
-                (fEval_energies.append(func(x[0], x[1])),)  # Calculate and store energy
-                return func(x[0], x[1])
+                (
+                    fEval_energies.append(f_func(x[0], x[1])),
+                )  # Calculate and store energy
+                (
+                    fEval_stress.append(
+                        [
+                            df_func[0](x[0], x[1]),
+                            df_func[1](x[0], x[1]),
+                        ]
+                    ),
+                )  # Calculate and store energy
+                return f_func(x[0], x[1])
 
             path = []  # Track optimization path
 
@@ -191,6 +204,7 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             results[opt_name]["nfev"].append(result.nfev)
             results[opt_name]["path_energy"].append(np.array(path_energies))
             results[opt_name]["f-eval_energy"].append(np.array(fEval_energies))
+            results[opt_name]["f-eval_stress"].append(np.array(fEval_stress))
 
         # FIRE optimization requires separate handling
         result_fire = optimize_fire2(
@@ -199,10 +213,18 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             lambda x, params=None: df(x, df_func),
             None,
             atol=tol,
-            dt=0.3,
+            dt=0.1,
         )
         x_opt, f_opt, nit, path = result_fire
+
         energies_fire = [f_func(p[0], p[1]) for p in path]
+        stresses_fire = [
+            [
+                df_func[0](p[0], p[1]),
+                df_func[1](p[0], p[1]),
+            ]
+            for p in path
+        ]
 
         results["FIRE"]["paths"].append(np.array(path))
         results["FIRE"]["feval_paths"].append(np.array(path))
@@ -210,6 +232,7 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
         results["FIRE"]["nfev"].append(nit)
         results["FIRE"]["path_energy"].append(np.array(energies_fire))
         results["FIRE"]["f-eval_energy"].append(np.array(energies_fire))
+        results["FIRE"]["f-eval_stress"].append(np.array(stresses_fire))
     add_solutions(results, f_func, df_func)
     return results
 
@@ -236,7 +259,7 @@ def scatter(ax, path, onlyStart=False, **kwargs):
     if kwargs["marker"] == "o":
         kwargs["facecolors"] = "none"
         kwargs["edgecolors"] = kwargs.pop("color", "grey")
-        kwargs["linewidths"] = 3  # Increase the edge line width here
+        kwargs["linewidth"] = 3  # Increase the edge line width here
     if onlyStart:
         ax.scatter(path[0, 0], path[0, 1], **kwargs)
     else:
@@ -326,10 +349,30 @@ def remove_backtracking_points(path):
 
 
 # Colors and styles for different method
-colors = {"FIRE": "#d24646", "L-BFGS": "#008743", "CG": "#ffa701"}
+colors = {"L-BFGS": "#008743", "CG": "#ffa701", "FIRE": "#d24646"}
+colors = {"L-BFGS": "#1ECBE1", "CG": "#CBE11E", "FIRE": "#E11ECB"}
+colors = {"L-BFGS": "#3BCDDD", "CG": "#CDDD3B", "FIRE": "#DD3BCD"}
+colors = {"L-BFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
 muted_colors = {key: mute_color(color, factor=0.3) for key, color in colors.items()}
 markers = {"FIRE": "x", "L-BFGS": "+", "CG": "o"}
 styles = {"FIRE": "-", "L-BFGS": "-", "CG": "-"}
+
+
+def get_cmap(remove_max_color, clip_contour, Z):
+    # Set the maximum value to cap
+    cmap = "coolwarm"
+    levels = 25
+    if remove_max_color:
+        cmap = plt.get_cmap(cmap, levels)  # 256 colors
+        newcolors = cmap(np.linspace(0, 1, levels))
+        n = 2
+        fade_to_white = np.linspace(1, 0, n)[:, None]  # Transition factor
+        newcolors[-n:, :3] = fade_to_white * newcolors[-n:, :3] + (1 - fade_to_white)
+        cmap = mcolors.ListedColormap(newcolors)
+    if clip_contour:
+        max_value = 4  # Example value
+        Z = np.clip(Z, None, max_value)  # Clip Z values above max_value
+    return cmap, levels, Z
 
 
 # Plotting functions
@@ -339,13 +382,14 @@ def plot_results(
     Z,
     minima,
     results,
-    name,
     ax=None,
     loc="upper right",
     lims=None,
     next_lims=None,
     alg="all",
     draw_f_evals=False,
+    remove_max_color=False,
+    clip_contour=False,
 ):
     if ax is None:
         # Determine the aspect ratio from the lims
@@ -364,10 +408,10 @@ def plot_results(
         figsize = (fig_width, base_height)  # Create the dynamic figsize
         _, ax = plt.subplots(1, 1, figsize=figsize)
 
-    # Contour plot with limited data if zooming
-    contour = ax.contourf(X, Y, Z, levels=20, cmap="viridis")  # noqa: F841
+    cmap, levels, Z = get_cmap(remove_max_color, clip_contour, Z)
 
-    # Plot the paths for each optimization method
+    # Plot the contour with the clipped data
+    contour = ax.contourf(X, Y, Z, levels=levels, cmap=cmap)
     for method, data in results.items() if results else []:
         if alg != "all" and alg != method:
             continue
@@ -411,7 +455,8 @@ def plot_results(
             ax.set_ylim(ylim)
 
     # Add a color bar for the contour plot
-    # fig.colorbar(contour, ax=ax, label="Height")
+    if alg == "FIRE" and False:
+        ax.get_figure().colorbar(contour, ax=ax, label=r"$f(\mathbf{x})$", shrink=0.8)
 
     # Handle legend and plot aesthetics
     # Assuming you have a plotting object ax
@@ -433,7 +478,7 @@ def plot_results(
     elif alg == "all" or alg in results.keys():
         ax.legend(loc=loc)
     # Use this to remove y-ticks of all but one image
-    if alg in results.keys():  # and alg != "L-BFGS":
+    if alg in results.keys() and alg != "L-BFGS":
         ax.set_yticks([])
 
     ax.set_aspect("equal")
@@ -455,25 +500,15 @@ def plot_results(
         ax.set_ylim(lims[1])
     if next_lims is not None:
         draw_lims_rectangle(ax, next_lims)
-
-    # Layout and save figure
-    plt.tight_layout()
-    # This gets the directory of the script
-    script_dir = os.path.dirname(os.path.realpath(__file__))
-    if alg != "all":
-        name = name + f"_{alg}"
-    path = os.path.join(script_dir, "Plots", name + ".pdf")
-    # print(f"Saving to {path}")
-    # plt.savefig(path, bbox_inches="tight")
-    # plt.show()
+    return ax
 
 
-def plot_energy(
+def plot_stress(
     results,
-    name,
     threshold=None,
     ax=None,
     itOrFeval="f-eval",
+    use_energy=False,
     alg="all",
     loc="lower left",
 ):
@@ -494,24 +529,25 @@ def plot_energy(
         if alg != "all" and alg != method:
             continue
         if alg == "all" or alg == "L-BFGS":
-            ax.set_ylabel(r"$f(\mathbf{x}) - f(\mathbf{x^*})$")
+            ax.set_ylabel(r"$|\Delta f(\mathbf{x})|$")
 
         # Decide whether to plot against iterations or function evaluations
         if itOrFeval == "f-eval":
             # Get the energy data to plot
-            energies = data["f-eval_energy"]
-            ax.set_xlabel("Number of function evaluations")
+            stress_lists = data["f-eval_stress"]
+            ax.set_xlabel("Function evaluations")
         elif itOrFeval == "iterations":
             # Get the energy data to plot
-            energies = data["path_energy"]
-            ax.set_xlabel("Number of itterations")
+            stress_lists = data["path_energy"]
+            ax.set_xlabel("Itterations")
         else:
             raise ValueError(f"Unknown option for itOrFeval: {itOrFeval}")
         # Plot energy vs iteration/f-eval for each path
-        for i, energy in enumerate(energies):
+        for i, stress in enumerate(stress_lists):
+            stress_mag = np.linalg.norm(stress, axis=1)
             ax.plot(
-                range(1, len(energy) + 1),  # X-axis is iteration or f-eval count
-                energy - data["min_energy"][i],  # Y-axis is energy
+                range(1, len(stress) + 1),  # X-axis is iteration or f-eval count
+                stress_mag,  # Y-axis is energy
                 styles[method],  # Use predefined style for the method
                 label=method,
                 color=colors[method],
@@ -523,7 +559,7 @@ def plot_energy(
             xmin, xmax = ax.get_xlim()
 
             # Draw a horizontal line across the entire plot
-            ax.hlines(threshold, xmin=xmin, xmax=xmax, color="b", linestyles="--")
+            ax.hlines(threshold, xmin=xmin, xmax=xmax, color="black", linestyles="--")
 
     # Handling the legend and reordering
     handles, labels = ax.get_legend_handles_labels()
@@ -659,55 +695,103 @@ def explore_hill_with_hole():
         plot_results(X, Y, Z, minima, results, name)
 
 
-def explore_six_hump_camel():
+def explore_six_hump_camel_different_minima():
     X, Y, Z = define_six_hump_camelback()
     grad_Z = calculate_gradient(Z, X, Y)
     f_func, df_func = lambdify_functions(X, Y, Z, grad_Z)
-    s = 2.3
     x_range = np.linspace(-3, 3, 10)
     y_range = np.linspace(-3, 3, 10)
     minima = find_minima(x_range, y_range, f_func, df_func)
-    x = np.linspace(-0.2, s + 0.2, 100)
-    y = np.linspace(0, s, 100)
-    X, Y = np.meshgrid(x, y)
-    Z = f((X, Y), f_func)
 
-    initial_points_simple = np.array([[1.7, 0.7]])
+    initial_points = np.array([[1.3, 2]])
 
-    for initial_points, name in zip(
-        [
-            None,
-            initial_points_simple,
-        ],
-        [
-            "six_hump_eField",
-            "six_hump_simple",
-        ],
-    ):
-        if initial_points is not None:
-            results = run_optimizations(initial_points, f_func, df_func)
-            summarize_end_points(results)
-        else:
-            results = None
-        plot_results(X, Y, Z, minima, results, name, loc="upper right")
+    results = run_optimizations(initial_points, f_func, df_func)
+    summarize_end_points(results)
+
+    lim = [[-0.5, 2], [-1.2, 2.3]]
+    X, Y, Z = make_mesh(lim, f_func)
+
+    w = 5
+    h = 6
+    # Create figure and axes for plot_results (1 row, 4 columns)
+    fig_results, res_ax = plt.subplots(
+        1,
+        4,
+        figsize=(w * 3, h),
+        gridspec_kw={"width_ratios": [1, 1, 1, 0.1]},
+    )
+
+    # Create figure and axes for plot_energy (1 row, 4 columns)
+    fig_stress, energy_ax = plt.subplots(1, 3, figsize=(w * 3, h))
+
+    algorithms = ["L-BFGS", "CG", "FIRE"]
+    labels = ["(a)", "(b)", "(c)"]
+    y_values = np.concatenate(
+        [np.linalg.norm(results[alg]["f-eval_stress"], axis=0) for alg in algorithms]
+    )
+
+    global_y_min = np.min(y_values) * 1.7
+    global_y_max = np.max(y_values) * 1.7
+
+    for idx, alg in enumerate(algorithms):
+        # Pass each ax object to the plotting functions
+        plot_results(
+            X,
+            Y,
+            Z,
+            minima,
+            results,
+            res_ax[idx],
+            lims=lim,
+            alg=alg,
+            loc="upper left",
+            remove_max_color=True,
+            clip_contour=True,
+        )
+        add_mark(res_ax[idx], labels[idx], 0.80, 0.95)
+
+        ax = plot_stress(
+            results, ax=energy_ax[idx], alg=alg, threshold=1e-5, loc="lower left"
+        )
+
+        ax.set_ylim(global_y_min, global_y_max)
+        # Use this to remove y-ticks of all but one image
+        if alg != "L-BFGS":
+            ax.set_yticks([])
+
+        add_mark(energy_ax[idx], labels[idx], 0.75, 0.95)
+
+    cmap, levels, Z = get_cmap(True, True, Z)
+    # Plot the contour with the clipped data
+    contour = res_ax[-1].contourf(X, Y, Z, levels=levels, cmap=cmap)
+    fig_results.colorbar(contour, cax=res_ax[-1], label=r"$f(\mathbf{x})$")
+
+    # Layout and save figure
+    fig_results.tight_layout()
+    fig_stress.tight_layout()
+    # This gets the directory of the script
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+    rPath = os.path.join(script_dir, "Plots", "six_hump_results_different.pdf")
+    sPath = os.path.join(script_dir, "Plots", "six_hump_stress_different.pdf")
+    fig_results.savefig(rPath, bbox_inches="tight")
+    fig_stress.savefig(sPath, bbox_inches="tight")
 
 
-# MDPI Article plot
-def explore_three_hump_camel():
+def explore_six_hump_camel():
     # Combine all algorithms or split them into different plots
     split = True
 
-    X, Y, Z = define_three_hump_camelback()
+    X, Y, Z = define_six_hump_camelback()
     grad_Z = calculate_gradient(Z, X, Y)
     f_func, df_func = lambdify_functions(X, Y, Z, grad_Z)
     x_range = np.linspace(-3, 3, 10)
     y_range = np.linspace(-3, 3, 10)
     minima = find_minima(x_range, y_range, f_func, df_func)
 
-    initial_points = np.array([[1.25, 0.3]])
+    initial_points = np.array([[-0.5, 1]])
 
-    r = run_optimizations(initial_points, f_func, df_func)
-    summarize_end_points(r)
+    results = run_optimizations(initial_points, f_func, df_func)
+    summarize_end_points(results)
 
     # Fixed center point and aspect ratio
     center = (1.747553, -0.873776)
@@ -721,49 +805,83 @@ def explore_three_hump_camel():
         calculate_lims(center, aspect_ratio, zoom_factor)
         for zoom_factor in zoom_factors
     ]
-    zooms = [[[1, 2.2], [-1.5, 0.5]]] + zooms
+    zooms = [[[-0.8, 0.8], [-0.2, 1.5]]] + zooms
     i = 0
     X, Y, Z = make_mesh(zooms[i], f_func)
-    n = "three_hump_simple"
 
-    w = 6
-    h = 9
+    w = 5
+    h = 5
     # Create figure and axes for plot_results (1 row, 4 columns)
-    fig_results, res_ax = plt.subplots(1, 3, figsize=(w * 3, h))
+    fig_results, res_ax = plt.subplots(
+        1,
+        4,
+        figsize=(w * 3, h),
+        gridspec_kw={"width_ratios": [1, 1, 1, 0.1]},
+    )
 
     # Create figure and axes for plot_energy (1 row, 4 columns)
-    fig_energy, energy_ax = plt.subplots(1, 3, figsize=(w * 3, h))
+    fig_stress, energy_ax = plt.subplots(1, 3, figsize=(w * 3, h))
 
     algorithms = ["L-BFGS", "CG", "FIRE"]
     labels = ["(a)", "(b)", "(c)"]
+    y_values = np.concatenate(
+        [np.linalg.norm(results[alg]["f-eval_stress"], axis=0) for alg in algorithms]
+    )
+
+    global_y_min = np.min(y_values) * 1.7
+    global_y_max = np.max(y_values) * 3
     if split:
         for idx, alg in enumerate(algorithms):
             # Pass each ax object to the plotting functions
-            plot_results(X, Y, Z, minima, r, n, res_ax[idx], lims=zooms[i], alg=alg)
-            add_mark(res_ax[idx], labels[idx], 0.03, 0.95, color="white")
+            plot_results(
+                X,
+                Y,
+                Z,
+                minima,
+                results,
+                res_ax[idx],
+                lims=zooms[i],
+                alg=alg,
+                loc="upper left",
+            )
+            add_mark(res_ax[idx], labels[idx], 0.8, 0.95)
 
-            plot_energy(r, n, ax=energy_ax[idx], alg=alg)
+            ax = plot_stress(
+                results, ax=energy_ax[idx], alg=alg, threshold=1e-5, loc="lower left"
+            )
+
+            ax.set_ylim(global_y_min, global_y_max)
+            # Use this to remove y-ticks of all but one image
+            if alg != "L-BFGS":
+                ax.set_yticks([])
+
             add_mark(energy_ax[idx], labels[idx], 0.8, 0.95)
 
     else:
         # Plot without splitting across multiple axes if required
-        plot_results(X, Y, Z, minima, r, n, lims=zooms[i])
-        plot_energy(r, n, alt=alg)
+        plot_results(X, Y, Z, minima, results, lims=zooms[i])
+        plot_stress(results, alt=alg)
+
+    # Add color bar
+    cmap, levels, Z = get_cmap(False, False, Z)
+    # Plot the contour with the clipped data
+    contour = res_ax[-1].contourf(X, Y, Z, levels=levels, cmap=cmap)
+    fig_results.colorbar(contour, cax=res_ax[-1], label=r"$f(\mathbf{x})$")
 
     # Layout and save figure
     fig_results.tight_layout()
-    fig_energy.tight_layout()
+    fig_stress.tight_layout()
     # This gets the directory of the script
     script_dir = os.path.dirname(os.path.realpath(__file__))
-    rPath = os.path.join(script_dir, "Plots", n + "_results.pdf")
-    ePath = os.path.join(script_dir, "Plots", n + "_energy.pdf")
-    # sPath = os.path.join(script_dir, "Plots", n + "_stress.pdf")
-    # TODO use stress as well instead of energy
+
+    sPath = os.path.join(script_dir, "Plots", "six_hump_stress.pdf")
+    fig_stress.savefig(sPath, bbox_inches="tight")
+
+    rPath = os.path.join(script_dir, "Plots", "six_hump_results.pdf")
     fig_results.savefig(rPath, bbox_inches="tight")
-    fig_energy.savefig(ePath, bbox_inches="tight")
 
 
 if __name__ == "__main__":
     # explore_hill_with_hole()
-    # explore_six_hump_camel()
-    explore_three_hump_camel()
+    explore_six_hump_camel_different_minima()
+    explore_six_hump_camel()

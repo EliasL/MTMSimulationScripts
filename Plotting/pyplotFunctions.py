@@ -4,10 +4,9 @@ import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
 from tqdm import tqdm
-import time
-import random
+import os
 from multiprocessing import Pool
-
+from pathlib import Path
 
 import threading
 from MTMath.plotEnergy import (
@@ -164,26 +163,26 @@ def draw_rhombus(ax, N, load, BC):
 
 # Function to save the figure with transparent background and close it
 def save_and_close_plot(ax, path, transparent=False):
-    # Set anti-aliasing for lines, text, patches, etc.
-    for line in ax.get_lines():
-        line.set_antialiased(True)  # Anti-alias lines
+    # # Set anti-aliasing for lines, text, patches, etc.
+    # for line in ax.get_lines():
+    #     line.set_antialiased(True)  # Anti-alias lines
 
-    for text in ax.texts:
-        text.set_fontproperties(
-            text.get_fontproperties()
-        )  # Ensure text rendering uses proper anti-aliasing
+    # for text in ax.texts:
+    #     text.set_fontproperties(
+    #         text.get_fontproperties()
+    #     )  # Ensure text rendering uses proper anti-aliasing
 
-    # You can also anti-alias patches or other graphical elements
-    for patch in ax.patches:
-        patch.set_antialiased(True)  # Anti-alias shapes like rectangles, circles
+    # # You can also anti-alias patches or other graphical elements
+    # for patch in ax.patches:
+    #     patch.set_antialiased(True)  # Anti-alias shapes like rectangles, circles
 
     # Save the plot with transparent background
     dpi = 600
-    plt.tight_layout()
-    plt.savefig(
+    fig = ax.get_figure()
+    fig.savefig(
         path, bbox_inches="tight", pad_inches=0, transparent=transparent, dpi=dpi
     )
-    plt.close()
+    plt.close(fig)
 
 
 def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kwargs):
@@ -239,12 +238,12 @@ def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kw
 
 def plot_mesh(
     vtu_file,
-    global_min=0,
-    global_max=0.37,
+    e_lims=None,
     mesh_property="energy",
     ax=None,
     shift=True,
     add_rombus=True,
+    add_m12_marks=False,
     **kwargs,
 ):
     if ax is None:
@@ -256,13 +255,15 @@ def plot_mesh(
 
     cmap = "coolwarm"
 
-    hatch = None
     norm = None
 
     if mesh_property == "energy":
         # The energy field is normalized to have energy=0 in the ground state
-        field = data.get_energy_field() - ground_state_energy()
-        norm = mcolors.Normalize(vmin=global_min, vmax=global_max)
+        g = ground_state_energy()
+        field = data.get_energy_field() - g
+        if e_lims is None:
+            e_lims = (min(field), max(field))
+        norm = mcolors.Normalize(vmin=e_lims[0], vmax=e_lims[1])
         backgroundColor = plt.get_cmap(cmap)(0)
     elif mesh_property == "stress":
         field = data.get_stress_field()
@@ -272,29 +273,26 @@ def plot_mesh(
         cmap = "viridis"
         nrm1, nrm2, nrm3 = data.get_m_nr_field()
         field = nrm3
+        norm = mcolors.Normalize(vmin=0, vmax=6)
         backgroundColor = plt.get_cmap(cmap)(0)
-        hatch_patterns = {
-            0: "",
-            1: "\\",  # Backslash for nrm1 % 2 == 1
-            2: "/",  # Forward slash for nrm2 % 2 == 1
-            3: "x",  # 'x' for both conditions being true
-        }
 
-        # Assuming nrm1 and nrm2 are defined
-        # Calculate the hatch value
-        hatch_value = (nrm1 % 2) + (nrm2 % 2) * 2
-
-        # Retrieve the hatch pattern string
-        hatch = hatch_patterns.get(hatch_value, "")
+        # Define markers for each state
+        marker_patterns = ["", ".", 11, "d"]
+        marker_patterns = ["", "_", "|", "+"]
+        colors = ["", (0.7, 0.7, 0.7), (0.8, 0.2, 0.2), (1, 0.5, 0.5)]
+        # Calculate the indices in a fully vectorized way
+        state_indices = (nrm1 % 2) + (nrm2 % 2) * 2
 
     if shift:
         shifts = calculate_shifts(nodes, data.BC, data.load)
     else:
         shifts = [0]
+
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
-            triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
+            sheared_y = y + dy
+            triang = mtri.Triangulation(sheared_x, sheared_y, connectivity)
             ax.triplot(triang, color=backgroundColor, lw=0.1)
             ax.tripcolor(
                 triang,
@@ -302,8 +300,28 @@ def plot_mesh(
                 norm=norm,
                 cmap=cmap,
                 edgecolors="none",
-                hatch=hatch,
             )
+
+            if mesh_property == "m" and add_m12_marks:
+                # Compute centroids of triangles
+                triangles = triang.triangles  # Indices of vertices for each triangle
+                centroids_x = np.mean(sheared_x[triangles], axis=1)
+                centroids_y = np.mean(sheared_y[triangles], axis=1)
+
+                # Plot markers at centroids for each state
+                for i in range(4):
+                    if i == 0:
+                        continue  # Skip if no m1 or m2
+                    mask = state_indices == i
+                    ax.scatter(
+                        centroids_x[mask],
+                        centroids_y[mask],
+                        marker=marker_patterns[i],
+                        color=colors[i],  # Customize marker color as needed
+                        s=1,
+                        linewidths=0.15,
+                        zorder=10,  # Ensure markers are plotted above other elements
+                    )
 
     if add_rombus:
         draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
@@ -354,59 +372,86 @@ def plot_in_poincare_disk(
     return ax
 
 
-def plot_and_save_in_poincare_disk(frame_path, frame_index, transparent, **kwargs):
-    # Remove unwanted keywords
-    for key in ["global_min", "global_max", "axis_limits"]:
-        kwargs.pop(key)
-    ax = plot_in_poincare_disk(frame_index=frame_index, **kwargs)
-
-    path = f"{frame_path}/disk_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-
-    return path
+def plot_and_save_in_poincare_disk(**kwargs):
+    return plot_and_save(
+        plot_func=plot_in_poincare_disk,
+        remove_keys=["global_min", "global_max", "axis_limits"],
+        **kwargs,
+    )
 
 
-def plot_and_save_in_e_reduced_poincare_disk(
-    frame_path, frame_index, transparent, **kwargs
+def plot_and_save_in_e_reduced_poincare_disk(**kwargs):
+    return plot_and_save(
+        plot_func=plot_in_poincare_disk,
+        remove_keys=["global_min", "global_max", "axis_limits"],
+        plot_args={"do_elastic_reduction": True},
+        **kwargs,
+    )
+
+
+def plot_and_save_mesh(**kwargs):
+    return plot_and_save(
+        plot_func=plot_mesh,
+        plot_args={"add_title": True},
+        return_axes_index=0,
+        **kwargs,
+    )
+
+
+def plot_and_save_m_mesh(**kwargs):
+    return plot_and_save(
+        plot_func=plot_mesh,
+        plot_args={"add_title": True, "mesh_property": "m"},
+        return_axes_index=0,
+        **kwargs,
+    )
+
+
+def plot_and_save_nodes(**kwargs):
+    return plot_and_save(
+        plot_func=plot_nodes,
+        remove_keys=["global_min", "global_max"],
+        plot_args={"add_title": True},
+        **kwargs,
+    )
+
+
+def plot_and_save(
+    plot_func,
+    fileName,
+    frame_path,
+    frame_index,
+    transparent,
+    remove_keys=None,
+    plot_args=None,
+    return_axes_index=0,
+    reuse_images=False,
+    **kwargs,
 ):
+    # Build the path
+
+    # Join using Path, which allows simpler syntax
+    path = Path(frame_path) / f"{fileName}_frame_{frame_index:04d}.png"
+
+    # If we want to resuse and the path already exsists
+    if reuse_images and os.path.exists(path):
+        return path
+
     # Remove unwanted keywords
-    for key in ["global_min", "global_max", "axis_limits"]:
-        kwargs.pop(key)
-    ax = plot_in_poincare_disk(
-        frame_index=frame_index, do_elastic_reduction=True, **kwargs
-    )
-
-    path = f"{frame_path}/eReduced_disk_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-
-    return path
-
-
-def plot_and_save_mesh(frame_path, frame_index, transparent, **kwargs):
-    ax, _, _ = plot_mesh(frame_index=frame_index, add_title=True, **kwargs)
-
-    path = f"{frame_path}/mesh_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-    return path
-
-
-def plot_and_save_m_mesh(frame_path, frame_index, transparent, **kwargs):
-    ax, _, _ = plot_mesh(
-        frame_index=frame_index, add_title=True, mesh_property="m", **kwargs
-    )
-
-    path = f"{frame_path}/mesh_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-    return path
-
-
-def plot_and_save_nodes(frame_path, frame_index, transparent, **kwargs):
-    # Remove unwanted keywords
-    for key in ["global_min", "global_max"]:
-        kwargs.pop(key)
-    ax = plot_nodes(frame_index=frame_index, add_title=True, **kwargs)
-
-    path = f"{frame_path}/node_frame_{frame_index:04d}.png"
+    if remove_keys:
+        for key in remove_keys:
+            kwargs.pop(key, None)
+    # Merge additional plot arguments
+    if plot_args:
+        kwargs.update(plot_args)
+    # Call the plot function
+    plot_result = plot_func(frame_index=frame_index, **kwargs)
+    # Handle functions that return multiple values
+    if isinstance(plot_result, tuple):
+        ax = plot_result[return_axes_index]
+    else:
+        ax = plot_result
+    # Save and close the plot
     save_and_close_plot(ax, path, transparent)
     return path
 

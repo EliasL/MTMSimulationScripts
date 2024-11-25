@@ -16,7 +16,8 @@
             "type": "debugpy",
             "request": "launch",
             "program": "plot.py",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "justMyCode": false,
         },
         {
             "name": "plotAll.py",

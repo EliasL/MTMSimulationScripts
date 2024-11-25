@@ -74,7 +74,7 @@ class SimulationManager:
                 pass
             if dump is not None:
                 # We resume instead of starting normally
-                return self.resumeSimulation(silent=silent)
+                return self.resumeSimulation(silent=silent, build=build)
 
         # Start the timer right before running the command
         start_time = time.time()

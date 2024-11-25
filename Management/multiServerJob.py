@@ -232,7 +232,7 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
 
 def allPlasticEventsJob():
     configs, labels = ConfigGenerator.generate(
-        seed=range(1),
+        seed=[41],
         group_by_seeds=False,
         rows=100,
         cols=100,

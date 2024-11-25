@@ -41,7 +41,6 @@ def plotAll(configFile, noVideos=False, noPlots=False, **kwargs):
 
 
 def handle_args_and_plot():
-    import sys
     import argparse
 
     parser = argparse.ArgumentParser(description="Process some arguments.")
@@ -63,9 +62,27 @@ def handle_args_and_plot():
 
 
 if __name__ == "__main__":
-    handle_args_and_plot()
+    import sys
 
-    # outputPath = findOutputPath()
-    # # config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
-    config = "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0/config.conf"
-    plotAll(config, makeGIF=False, transparent=False, noPlots=True)
+    if len(sys.argv) > 1:
+        handle_args_and_plot()
+    else:
+        # outputPath = findOutputPath()
+        # # config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
+
+        configs = [
+            # "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s0/config.conf",
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s0/config.conf",
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s0/config.conf",
+        ]
+
+        for c in configs:
+            plotAll(
+                c,
+                makeGIF=False,
+                transparent=False,
+                noPlots=True,
+                combine=True,
+                fps=60,
+                seconds_per_unit_shear=100,
+            )
