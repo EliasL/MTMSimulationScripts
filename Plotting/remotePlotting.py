@@ -6,14 +6,14 @@ import time
 import random
 import threading
 import pandas as pd
-from makePlots import (
+from .makePlots import (
     makePlot,
     makeAverageComparisonPlot,
     makeLogPlotComparison,
     add_power_law_line,
 )
 import matplotlib.pyplot as plt
-from fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
+from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
 from tqdm import tqdm
 import numpy as np
 
@@ -459,6 +459,7 @@ def plotWholeRangePowerLaw(paths, Y, **kwargs):
         kwargs["labels"] = [[method]]
         makeLogPlotComparison(
             [group],
+            outerStrainLims=(0.31, 1),
             innerStrainLims=(1, np.inf),
             plot_post_yield=False,
             save=False,
@@ -560,8 +561,8 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
 
         makeLogPlotComparison(
             [group],
-            outerStrainLims=(0, postYield[1]),
-            innerStrainLims=(0, postYield[0]),
+            outerStrainLims=(0.31, postYield[1]),
+            innerStrainLims=(0.31, postYield[0]),
             plot_pre_yield=False,
             save=False,
             use_y_axis_name=method == "L-BFGS",

@@ -53,7 +53,7 @@ class SimulationConfig:
         self.eps = 0.000
         self.epsRel = 0.0
         self.delta = 0.0
-        self.maxIt = 10000
+        self.maxIt = 100000
 
         # Logging settings
         # Saves the mesh if number of plastic events (npe) > number of
@@ -61,6 +61,7 @@ class SimulationConfig:
         # if npe > ne*t:
         #   save frame
         self.plasticityEventThreshold = 0.1
+        self.energyDropThreshold = 1e-3
         self.showProgress = 1
 
         if configPath is not None:

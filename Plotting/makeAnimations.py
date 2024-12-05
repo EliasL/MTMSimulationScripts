@@ -10,17 +10,21 @@ from .pyplotFunctions import (
     plot_and_save_nodes,
     plot_and_save_mesh,
     plot_and_save_m_mesh,
+    plot_and_save_m_diff_mesh,
+    plot_and_save_plot,
     plot_and_save_in_poincare_disk,
     plot_and_save_in_e_reduced_poincare_disk,
 )
 from .dataFunctions import parse_pvd_file, get_data_from_name
 from .makePvd import create_collection
 
+from datetime import datetime, timedelta
+
 
 # This function selects a subset of the vtu files to speed up the animation
 # process. (For example, if the video would be 2 hours long, or have a fps of
 # 2000, there is no need to use all the frames, so we skip a few)
-def select_vtu_files(vtu_files, nrSteps):
+def select_vtu_files(vtu_files, nrSteps, all_images=False):
     # Always include the first and last frames
     if len(vtu_files) <= 2 or nrSteps <= 2:
         return vtu_files
@@ -29,7 +33,10 @@ def select_vtu_files(vtu_files, nrSteps):
     step_size = int(max(1, len(vtu_files) // (nrSteps - 1)))
 
     # Select files at regular intervals
-    selected_files = vtu_files[::step_size]
+    if all_images:
+        selected_files = vtu_files
+    else:
+        selected_files = vtu_files[::step_size]
 
     # Ensure the last file is included, if it's not already
     if selected_files[-1] != vtu_files[-1]:
@@ -69,27 +76,67 @@ def framesToGif(frames, outFile, fps):
     imageio.mimsave(outFile, frames, "GIF", duration=1 / fps, loop=0)
 
 
-def combine_videoes(path, n1, n2):
-    v1 = os.path.join(path, f"{n1}_video.mp4")
-    v2 = os.path.join(path, f"{n2}_video.mp4")
-    assert os.path.isfile(v1), f"The file {v1} does not exsist"
-    assert os.path.isfile(v2), f"The fire {v2} does not exsist"
-    # Split the command into a list of arguments to avoid using shell=True
-    command = [
-        "ffmpeg",
-        "-y",  # Automatically overwrite existing file
-        "-i",
-        v1,
-        "-i",
-        v2,
-        # Filter complex for scaling and cropping to make sure width and height are even
-        "-filter_complex",
-        "[0:v]scale=-1:1080,crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v0];"  # Crop if width/height are odd
-        "[1:v]scale=-1:1080,crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v1];"
-        "[v0][v1]hstack=inputs=2",
-        os.path.join(path, f"{n1}_and_{n2}.mp4"),
-    ]
-    subprocess.run(command)
+def combine_videoes(path, n1, n2, n3=None, n4=None):
+    if n3 is None and n4 is None:
+        v1 = os.path.join(path, f"{n1}_video.mp4")
+        v2 = os.path.join(path, f"{n2}_video.mp4")
+        assert os.path.isfile(v1), f"The file {v1} does not exsist"
+        assert os.path.isfile(v2), f"The fire {v2} does not exsist"
+        # Split the command into a list of arguments to avoid using shell=True
+        command = [
+            "ffmpeg",
+            "-y",  # Automatically overwrite existing file
+            "-i",
+            v1,
+            "-i",
+            v2,
+            # Filter complex for scaling and cropping to make sure width and height are even
+            "-filter_complex",
+            "[0:v]scale=-1:1080,crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v0];"  # Crop if width/height are odd
+            "[1:v]scale=-1:1080,crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v1];"
+            "[v0][v1]hstack=inputs=2",
+            os.path.join(path, f"{n1}_and_{n2}.mp4"),
+        ]
+        subprocess.run(command)
+    elif n3 is not None and n4 is not None:
+        v1 = os.path.join(path, f"{n1}_video.mp4")
+        v2 = os.path.join(path, f"{n2}_video.mp4")
+        v3 = os.path.join(path, f"{n3}_video.mp4")
+        v4 = os.path.join(path, f"{n4}_video.mp4")
+        assert os.path.isfile(v1), f"The file {v1} does not exist"
+        assert os.path.isfile(v2), f"The file {v2} does not exist"
+        assert os.path.isfile(v3), f"The file {v3} does not exist"
+        assert os.path.isfile(v4), f"The file {v4} does not exist"
+
+        output_file = os.path.join(path, f"{n1}_{n2}_{n3}_{n4}.mp4")
+        dim1 = "1920:1080"
+        dim2 = "1920:500"
+        filter_complex = (
+            f"[0:v]scale={dim1},crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v0];"
+            f"[1:v]scale={dim1},crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v1];"
+            f"[2:v]scale={dim2}:force_original_aspect_ratio=decrease,pad={dim2}:(ow-iw)/2:(oh-ih)/2[v2];"
+            f"[3:v]scale={dim2}:force_original_aspect_ratio=decrease,pad={dim2}:(ow-iw)/2:(oh-ih)/2[v3];"
+            "[v0][v2]vstack=inputs=2[left];"
+            "[v1][v3]vstack=inputs=2[right];"
+            "[left][right]hstack=inputs=2"
+        )
+
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            v1,
+            "-i",
+            v2,
+            "-i",
+            v3,
+            "-i",
+            v4,
+            "-filter_complex",
+            filter_complex,
+            output_file,
+        ]
+        subprocess.run(command)
 
 
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
@@ -103,6 +150,7 @@ def makeAnimations(
     use_tqdm=True,
     fps=30,
     seconds_per_unit_shear=15,
+    all_images=False,
     min_time=7,
     reuse_images=False,
 ):
@@ -130,7 +178,7 @@ def makeAnimations(
     nrSteps = videoLength * fps
 
     # we select a reduced number of frames
-    vtu_files = select_vtu_files(vtu_files, nrSteps)
+    vtu_files = select_vtu_files(vtu_files, nrSteps, all_images)
 
     if len(vtu_files) < nrSteps:
         # If we don't have enough frames, we need to make each frame last longer
@@ -141,14 +189,17 @@ def makeAnimations(
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in [
         # (plot_and_save_nodes, "nodes"),
-        (plot_and_save_m_mesh, "m_mesh"),
-        (plot_and_save_mesh, "mesh"),
         (plot_and_save_in_poincare_disk, "disk"),
+        (plot_and_save_mesh, "mesh"),
+        (plot_and_save_plot, "e_drop_plot"),
+        (plot_and_save_plot, "energy_plot"),
+        (plot_and_save_m_diff_mesh, "m_diff_mesh"),
+        (plot_and_save_m_mesh, "m_mesh"),
         # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
     ]:
         images = make_images(
             vtu_files,
-            macro_data,
+            macro_data=macro_data,
             frameFunction=function,
             frame_path=frame_path,
             transparent=transparent,
@@ -157,22 +208,49 @@ def makeAnimations(
             fileName=fileName,
         )
 
+        # Path to the output video file
         outPath = os.path.join(path, f"{fileName}_video.mp4")
-        framesToMp4(images, outPath, fps)
-        if makeGIF:
-            GIFCommand = [
-                "/opt/homebrew/bin/gifski",
-                "--quality",
-                "100",  # Set to maximum quality
-                "-o",
-                os.path.join(path, f"{fileName}_video.gif"),
-            ] + images  # Append the list of image paths to the command
-            subprocess.run(GIFCommand)
+
+        # Get the last modification time of the last image in the list
+        last_image_mod_time = os.path.getmtime(images[-1])
+
+        # Get the last modification time of the output video file
+        outPath_mod_time = os.path.getmtime(outPath) if os.path.exists(outPath) else 0
+
+        # Convert modification times to datetime objects
+        last_image_mod_datetime = datetime.fromtimestamp(last_image_mod_time)
+        outPath_mod_datetime = datetime.fromtimestamp(outPath_mod_time)
+
+        # Calculate the time difference
+        time_difference = last_image_mod_datetime - outPath_mod_datetime
+
+        # Check if the time difference is greater than 2 hours
+        if time_difference > timedelta(hours=2):
+            # If is is larger than two hours, the video was probably not generated with these images
+
+            framesToMp4(images, outPath, fps)
+            if makeGIF:
+                GIFCommand = [
+                    "/opt/homebrew/bin/gifski",
+                    "--quality",
+                    "100",  # Set to maximum quality
+                    "-o",
+                    os.path.join(path, f"{fileName}_video.gif"),
+                ] + images  # Append the list of image paths to the command
+                subprocess.run(GIFCommand)
+        else:
+            # The video and the last image were generated at about the same time,
+            # so the video does not need to be re-rendered
+            pass
     if combine:
-        # combine_videoes(path, "mesh", "erDisk")
-        combine_videoes(path, "m_mesh", "mesh")
-        combine_videoes(path, "mesh", "disk")
-        combine_videoes(path, "m_mesh", "disk")
+        try:
+            combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
+            combine_videoes(path, "m_mesh", "mesh")
+            combine_videoes(path, "mesh", "disk")
+            combine_videoes(path, "m_mesh", "disk")
+            # combine_videoes(path, "mesh", "erDisk")
+        except:
+            pass
 
 
 if __name__ == "__main__":

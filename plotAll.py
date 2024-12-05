@@ -71,9 +71,17 @@ if __name__ == "__main__":
         # # config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
 
         configs = [
-            # "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s0/config.conf",
-            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s0/config.conf",
-            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s0/config.conf",
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s42/config.conf",
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s42/config.conf",
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s42/config.conf",
+        ]
+        configs = [
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06energyDropThreshold1e-10s41/config.conf"
+        ]
+        configs = [
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.1,1e-05,1.0PBCt3initialGuessNoise1e-06LBFGSEpsg1e-08CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06energyDropThreshold1e-10s41/config.conf",
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.1,1e-05,1.1PBCt3initialGuessNoise1e-06LBFGSEpsg1e-08CGEpsg1e-05eps1e-05energyDropThreshold1e-10s41/config.conf",
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.1,1e-05,1.1PBCt3initialGuessNoise1e-06LBFGSEpsg1e-08CGEpsg1e-05eps1e-05energyDropThreshold1e-10s42/config.conf",
         ]
 
         for c in configs:
@@ -84,5 +92,7 @@ if __name__ == "__main__":
                 noPlots=True,
                 combine=True,
                 fps=60,
-                seconds_per_unit_shear=100,
+                seconds_per_unit_shear=2,
+                all_images=True,
+                reuse_images=True,
             )

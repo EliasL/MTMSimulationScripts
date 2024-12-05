@@ -6,7 +6,6 @@ from Management.multiServerJob import (
     propperJob1,
     propperJob2,
     propperJob3,
-    generateCommands,
     JobManager,
     get_server_short_name,
 )

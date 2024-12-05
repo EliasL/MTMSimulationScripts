@@ -116,10 +116,17 @@ class SimulationManager:
         # Conditionally add flags and paths based on inputs
         if overwriteSettings:
             command.extend(["-c", self.conf_file])
+
         if newOutput:
+            # Output does not specify the folder, but only the storage drive path
+            # The data folder inside the output folder is completely determined by
+            # the name variable in the config file
             command.extend(["-o", self.outputPath])
 
         if overwriteData:
+            # If the data folder already contains a csv macrodata file with
+            # a load value equal to the maxLoad value, it will not run and
+            # overwrite values unless this flag is set
             command.append("-r")
 
         # Join the command list into a single string

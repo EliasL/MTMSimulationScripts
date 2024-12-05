@@ -22,7 +22,7 @@ class Servers:
     # List of server variables for iteration or list-like access
     servers = [
         galois,
-        pascal,
+        # pascal,
         schwartz,
         lagrange,
         # condorcet,

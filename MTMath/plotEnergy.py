@@ -237,8 +237,12 @@ def drawCScatter(
 
     # Scott rule
     bandwidth = len(x) ** (-1 / 6)
-    kde = gaussian_kde(xy, bw_method=bandwidth)
-    density1 = kde(xy)
+    try:
+        kde = gaussian_kde(xy, bw_method=bandwidth)
+        density1 = kde(xy)
+    except np.linalg.LinAlgError:
+        # Assign a uniform value to make all points appear red
+        density1 = np.ones_like(x) * 1e10  # High value to map to red
 
     cmap = "inferno"
     if remove_max_color:

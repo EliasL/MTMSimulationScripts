@@ -131,7 +131,7 @@ def display_server_info(server_info):
     headers = []
     for server, info in server_info.items():
         if isinstance(info, str):  # Error handling case
-            data.append([server, "Error", info, "N/A"])
+            data.append((-1, [server, "Error", info, "N/A"]))
             continue
 
         name = get_server_short_name(server)

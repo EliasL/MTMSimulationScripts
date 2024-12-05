@@ -6,15 +6,13 @@ import matplotlib.lines as mlines
 import pandas as pd
 import numpy as np
 import re
-import mplcursors
 from datetime import timedelta
 import powerlaw
 import json
 from simplification.cutil import simplify_coords_vwp
 from tqdm import tqdm
 from pathlib import Path
-from Plotting.pyplotFunctions import plot_mesh
-from Plotting.dataFunctions import get_data_from_name
+from .dataFunctions import get_data_from_name
 
 if True:
     import warnings
@@ -65,7 +63,8 @@ def plotYOverX(
         X_simplified = X
         Y_simplified = Y
 
-    # If no axis is provided, create a new figure and axis
+    # If no axis is provided, create
+    # a new figure and axis
     if ax is None:
         fig, ax = plt.subplots()
 
@@ -137,7 +136,10 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
 def pros_d(df, min_npd, strainLims):
     e = [key for key in df.columns if key not in ["Load", "Nr plastic deformations"]][0]
 
-    diffs = np.diff(df[e])
+    if e == "Avg energy" and "Avg energy change" in df:
+        diffs = df["Avg energy change"]
+    else:
+        diffs = np.diff(df[e])
 
     # Combine all conditions into a single mask using element-wise logical AND
     mask = (
@@ -151,9 +153,23 @@ def pros_d(df, min_npd, strainLims):
 
     # Filter the diffs array
     diffs = diffs[mask]
+    drop_mask = diffs < 0
+    drops = -diffs[drop_mask]
 
+    # plt.plot(range(len(drops)), drops)
+    # plt.yscale("log")
+    # plt.xlabel("Drop number")
+    # plt.ylabel(r"$-\Delta E$")
+    # plt.show()
+
+    # load = df["Load"][:-1][mask][drop_mask]
+    # plt.plot(load, drops)
+    # plt.yscale("log")
+    # plt.xlabel(r"$\gamma$")
+    # plt.ylabel(r"$-\Delta E$")
+    # plt.show()
     # Return the negative drops and flipp them
-    return -diffs[diffs < 0]
+    return drops
 
 
 def getPowerLawFit(
@@ -256,6 +272,23 @@ def getPowerLawFit(
             fit = powerlaw.Fit(
                 drops, xmin=dropLim[0], xmax=dropLim[1], fit_method="Likelihood"
             )
+
+            # plt.scatter(
+            #     range(len(drops)),
+            #     drops,
+            #     facecolor="none",
+            #     edgecolors=(0, 0, 1, 0.5),
+            #     s=1,
+            # )
+            # plt.yscale("log")
+            # plt.xlabel("Drop number")
+            # plt.ylabel(r"$-\Delta E$")
+            # plt.show()
+            # fit.plot_pdf(original_data=True)
+            # plt.ylabel("PDF")
+            # plt.xlabel(r"$-\Delta E$")
+            # plt.show()
+
             combined_fits.append(fit)
 
         return combined_fits, combined_drops
@@ -906,7 +939,6 @@ def makePlot(
         }
         fig, ax, line = plotSplitPowerLaw(data, **kwargs)
 
-    cursor = mplcursors.cursor(lines)  # noqa: F841
     # cursor.connect(
     #   "add", lambda sel: sel.annotation.set_text(labels[sel.index]))
 
@@ -1006,6 +1038,8 @@ def addImagesToPlot(
     mesh_property="energy",
     add_cbar=True,
 ):
+    from .pyplotFunctions import plot_mesh
+
     # First we get the folder with vtu_files
     framesPath = Path(csv_file_path).parent / "data"
 
@@ -1362,7 +1396,14 @@ def makeLogPlotComparison(
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(
-                csv_file_path, usecols=[X, Y, "Nr plastic deformations", "Max energy"]
+                csv_file_path,
+                usecols=[
+                    X,
+                    Y,
+                    "Nr plastic deformations",
+                    "Max energy",
+                    # "Avg energy change",
+                ],
             )
             # Truncate data based on xlim
             df = df[(df[X] >= outerStrainLims[0]) & (df[X] <= outerStrainLims[1])]

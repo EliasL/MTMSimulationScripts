@@ -107,7 +107,13 @@ def get_data_from_name(nameOrPath):
     for part in parts[1:-1]:
         key, value = part.split("=")
         # Add the key-value pair to the dictionary
-        result[key] = value
+        try:
+            result[key] = int(value)
+        except ValueError:
+            try:
+                result[key] = float(value)
+            except ValueError:
+                result[key] = value
 
     # We can now extract some extra stuff from the name
     # It will for example have the form:
@@ -118,13 +124,54 @@ def get_data_from_name(nameOrPath):
 
     # Extract start load, load increment, and max load
     load_parts = result["name"].split(",")[1:]
-    result["startLoad"] = load_parts[0].split("l")[1]
-    result["loadIncrement"] = load_parts[1]
+    result["startLoad"] = float(load_parts[0].split("l")[1])
+    result["loadIncrement"] = float(load_parts[1])
     if "NPBC" in load_parts[2]:
-        result["maxLoad"] = load_parts[2].split("NPBC")[0]
+        result["maxLoad"] = float(load_parts[2].split("NPBC")[0])
         result["BC"] = "NPBC"
     else:
-        result["maxLoad"] = load_parts[2].split("PBC")[0]
+        result["maxLoad"] = float(load_parts[2].split("PBC")[0])
         result["BC"] = "PBC"
 
     return result
+
+
+def get_file_number(vtu_file):
+    return int(vtu_file.split(".")[-2])
+
+
+def get_previous_data(vtu_file):
+    """
+    Given the path to a vtu file, it attempts to find the vtu file that comes
+    before it by using the .number.vtu in the file name
+    """
+    # Get the directory and filename
+    directory = os.path.dirname(vtu_file)
+    # Get all .vtu files in the same directory
+    files = [f for f in os.listdir(directory) if f.endswith(".vtu")]
+
+    # Extract numbers and create a list of tuples (number, filename)
+    file_numbers = []
+    for f in files:
+        num = get_file_number(f)
+        file_numbers.append((num, f))
+
+    # Sort the list based on the extracted numbers
+    file_numbers.sort()
+
+    # Extract the number from the given vtu_file
+    given_num = get_file_number(vtu_file)
+
+    # Find the previous file with a smaller number
+    previous_file = None
+    for num, f in file_numbers:
+        if num < given_num:
+            previous_file = f
+        elif num >= given_num:
+            break  # Since the list is sorted, we can break early
+
+    # Return the full path to the previous file
+    if previous_file:
+        return os.path.join(directory, previous_file)
+    else:
+        return None  # No previous file found
