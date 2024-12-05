@@ -22,7 +22,7 @@ class Servers:
     # List of server variables for iteration or list-like access
     servers = [
         galois,
-        # pascal,
+        # pascal, #down for the moment
         schwartz,
         lagrange,
         # condorcet,
@@ -44,12 +44,27 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
     # Get the directory of the current script
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Define the local paths based on the script directory
-
     # Define the local paths based on the script directory and resolve them to absolute paths
     local_path_MTS2D = os.path.abspath(os.path.join(script_dir, "..", "..", "MTS2D"))
     local_path_SS = os.path.abspath(os.path.join(script_dir, ".."))
     clusterPath = f"elundheim@{cluster_address}:~/simulation/"
+
+    # Common exclude list
+    exclude_list = [
+        ".git",
+        "build",
+        "build-release",
+        "libs/**-build",
+        "libs/**-subbuild",
+        "Visuals/",
+        "Plots/",
+        "venv/",
+        "bootstrapData",
+        "_gael_2D",
+        "profiling",
+        "Debugging",
+        "MTMath",
+    ]
 
     ssh_command = [
         "ssh",
@@ -65,40 +80,23 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         ssh_command, check=True, stdout=output_options, stderr=output_options
     )
 
-    rsync_command_MTS2D = [
-        "rsync",
-        "-avz",
-        "--progress",
-        "--exclude",
-        ".git",
-        "--exclude",
-        "build",
-        "--exclude",
-        "build-release",
-        "--exclude",
-        "libs/**-build",
-        "--exclude",
-        "libs/**-subbuild",
-        "--exclude",
-        "Visuals/",
-        local_path_MTS2D,
-        clusterPath,
-    ]
+    # Helper function to build rsync command with exclude list
+    def build_rsync_command(source_path):
+        rsync_command = [
+            "rsync",
+            "-avz",
+            "--progress",
+        ]
+        for item in exclude_list:
+            rsync_command.extend(["--exclude", item])
+        rsync_command.extend([source_path, clusterPath])
+        return rsync_command
 
-    rsync_command_SS = [
-        "rsync",
-        "-avz",
-        "--progress",
-        "--exclude",
-        "Plots/",
-        "--exclude",
-        ".git",
-        "--exclude",
-        "venv/",
-        local_path_SS,
-        clusterPath,
-    ]
+    # Build rsync commands for MTS2D and SimulationScripts
+    rsync_command_MTS2D = build_rsync_command(local_path_MTS2D)
+    rsync_command_SS = build_rsync_command(local_path_SS)
 
+    # Execute rsync commands
     subprocess.run(
         rsync_command_MTS2D,
         check=True,

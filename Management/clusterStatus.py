@@ -26,7 +26,7 @@ def get_server_info(ssh_client):
 
     # Execute combined command for cores and node information
     # This returns "jobsRunning\njobsWaiting\nAlocated/Idle/Other/TotalCores"
-    command = "squeue -h -t R | wc -l;\squeue -h -t PD | wc -l;\sinfo -h -o '%C'"
+    command = "squeue -h -t R | wc -l; squeue -h -t PD | wc -l; sinfo -h -o '%C'"
     stdin, stdout, stderr = ssh_client.exec_command(command)
     outputs = stdout.read().decode().split("\n")
     si.nrJobsRunning = int(outputs[0])
@@ -102,7 +102,7 @@ def score_and_color_server(info):
 
     # Define the metrics to evaluate
     metrics = {
-        "Idle Cores": (info.nrFreeCores, info.nrTotalCores, 50, 15),
+        "CPUs": (info.nrFreeCores, info.nrTotalCores, 50, 15),
         # "Idle Nodes": (info.nrIdleNodes, info.nrNodesTotal, 1, 0),
         # "GB RAM": (info.freeRAM, info.totalRAM, 50, 15),
         "Jobs R": (info.nrJobsRunning, None, 2, 10),

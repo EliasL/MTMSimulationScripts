@@ -345,7 +345,7 @@ class JobManager:
             ]
             for job in self.slurmJobs:
                 row = [
-                    job["server"],
+                    get_server_short_name(job["server"]),
                     job["job_id"],
                     job["state"],
                     job["cpus"],

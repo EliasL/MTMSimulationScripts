@@ -16,7 +16,7 @@ class SimulationConfig:
         self.cols = 3
         self.usingPBC = 1  # 0=False, 1=True
         self.scenario = "simpleShear"
-        self.nrThreads = 1
+        self.nrThreads = 1  # This needs to be 1. Don't change. (see queueLocalJobs)
         self.seed = 0
         self.QDSD = 0.00  # Quenched dissorder standard deviation
         self.initialGuessNoise = 0.05
@@ -312,6 +312,38 @@ class ConfigGenerator:
     @staticmethod
     def generate_over_seeds(seeds, **kwargs):
         return [SimulationConfig(seed=seed, **kwargs) for seed in seeds]
+
+    @staticmethod
+    def splitKwargs(kwargs):
+        """
+        Splits the given kwargs dictionary into two dictionaries:
+        one containing keys corresponding to properties of the SimulationConfig class,
+        and one containing the rest.
+
+        Parameters:
+            kwargs (dict): The input dictionary to split.
+
+        Returns:
+            tuple: A tuple of two dictionaries:
+                - The first dictionary contains keys matching properties of SimulationConfig.
+                - The second dictionary contains all other keys.
+        """
+
+        # Retrieve properties of the SimulationConfig class
+        config_properties = set(dir(SimulationConfig()))
+
+        # Dictionaries for matching and non-matching keys
+        matching_keys = {}
+        non_matching_keys = {}
+
+        # Iterate over kwargs to classify keys
+        for key, value in kwargs.items():
+            if key in config_properties:
+                matching_keys[key] = value
+            else:
+                non_matching_keys[key] = value
+
+        return matching_keys, non_matching_keys
 
 
 def get_custom_configs(scenario):

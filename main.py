@@ -80,7 +80,8 @@ def threadTest():
     build_on_server(Servers.poincare)
     configs, labels = basicJob(nrThreads, nrSeeds, size)
     print("Starting jobs...")
-    queueJobs(Servers.poincare, configs)
+
+    queueJobs(Servers.poincare, configs, resume=False)
 
 
 def runOnServer():
@@ -142,5 +143,5 @@ def stopJobs():
 # startJobs()
 # plotBigJob()
 # plotPropperJob()
-threadTest()
+# threadTest()
 # benchmark()

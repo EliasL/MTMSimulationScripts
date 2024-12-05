@@ -8,15 +8,21 @@ from .jobManager import JobManager
 from .dataManager import DataManager
 
 
-def confToCommand(config):
+def confToCommand(config, **kwargs):
     base_command = "python3 ~/simulation/SimulationScripts/runSimulations.py"
     return (
         base_command
-        + " "
-        + " ".join(  # We need to add "" to strings
-            f'{key}="{value}"' if isinstance(value, str) else f"{key}={value}"
-            for key, value in ConfigGenerator.get_kwargs(config).items()
-        )
+        # Get args from config
+        + dictToString(ConfigGenerator.get_kwargs(config))
+        # We add other arguments as well
+        + dictToString(kwargs)
+    )
+
+
+def dictToString(dictionary):
+    return " " + " ".join(  # We need to add "" to strings
+        f'{key}="{value}"' if isinstance(value, str) else f"{key}={value}"
+        for key, value in dictionary.items()
     )
 
 
@@ -101,13 +107,21 @@ def distributeConfigs(configs, threads_per_seed=1):
     )
 
 
-def queueJobs(server, configs):
+def queueJobs(server, configs, job_name="el", **kwargs):
+    """
+    Kwargs:
+    resume=True,
+    dump=None,
+    plot=False,
+    newOutput=False,
+    """
+
     pre_command = "python3 ~/simulation/SimulationScripts/Management/queueLocalJobs.py"
 
     if isinstance(configs, SimulationConfig):
         configs = [configs]
 
-    commands = [confToCommand(conf) for conf in configs]
+    commands = [confToCommand(conf, **kwargs) for conf in configs]
 
     full_pre_command = (
         pre_command
@@ -115,8 +129,7 @@ def queueJobs(server, configs):
         + str(
             {
                 '"commands"': str(commands).replace('"', "\u203d"),
-                '"job_name"': '"ej"',
-                '"nrThreads"': configs[0].nrThreads,
+                '"job_name"': f'"{job_name}"',
             }
         )
     )
