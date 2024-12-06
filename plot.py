@@ -9,9 +9,16 @@ from Management.multiServerJob import (
     JobManager,
     get_server_short_name,
 )
+
 from Management.simulationManager import findOutputPath
 from plotAll import plotAll
-from Plotting.remotePlotting import stressPlotWithImages, energyPlotWithImages, plotLog
+from Plotting.remotePlotting import (
+    stressPlotWithImages,
+    energyPlotWithImages,
+    plotLog,
+    plotAverage,
+    plotTime,
+)
 from tqdm import tqdm
 
 
@@ -74,9 +81,13 @@ def plotSampleRuns():
         pbar.update(1)
 
 
-# MDPI Article plot
-def plotEnergyPowerLaw():
-    pass
+def plotThreadTest():
+    nrThreads = 1  # [1, 2, 4, 8, 16, 32, 64]
+    nrSeeds = 1
+    size = 100
+    configs, labels = basicJob(nrThreads, nrSeeds, size, group_by_seeds=True)
+    # plotAverage(configs, labels)
+    plotTime(configs, labels)
 
 
 def debugPlotAll():
@@ -88,6 +99,7 @@ def debugPlotAll():
 
 if __name__ == "__main__":
     # plotSampleRuns()
-    plotPropperJob()
+    # plotPropperJob()
     # debugPlotAll()
     # energyField()
+    plotThreadTest()

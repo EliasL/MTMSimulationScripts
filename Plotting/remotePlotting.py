@@ -20,8 +20,8 @@ import numpy as np
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 # Now we can import from Management
-from connectToCluster import connectToCluster, Servers, download_folders
-from configGenerator import ConfigGenerator, SimulationConfig
+from Management.connectToCluster import connectToCluster, Servers, download_folders
+from Management.configGenerator import ConfigGenerator, SimulationConfig
 
 FOLDER_PATH = "/Users/elias/Work/PhD/Code/remoteData"
 FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
@@ -192,11 +192,15 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
     return paths, remaining_configs
 
 
-def configToPath(config):
-    return f"{MACRO_PATH}/{config.name}.csv"
+def configToPath(config, paths=None):
+    if paths:
+        # Search for the coresponding path and config
+        return [path for path in paths if config.name in path][0]
+    else:
+        return f"{MACRO_PATH}/{config.name}.csv"
 
 
-def flatToStructure(config_groups, label_groups):
+def flatToStructure(config_groups, label_groups, found_paths=None):
     # This function searches for where the file WOULD be if it was
     # successfully downloaded, therefore preserving the structure of the groups
     paths = []
@@ -205,9 +209,12 @@ def flatToStructure(config_groups, label_groups):
         group_paths = []
         group_labels = []
         for config, label in zip(group, label_group):
-            if os.path.isfile(configToPath(config)):
-                group_paths.append(configToPath(config))
+            path = configToPath(config, found_paths)
+            if os.path.isfile(path):
+                group_paths.append(path)
                 group_labels.append(label)
+            else:
+                raise RuntimeError("Missing file?")
         if group_paths:
             paths.append(group_paths)
             labels.append(group_labels)
@@ -232,7 +239,7 @@ def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
     if len(configs) == 0:
         print("All files already downloaded.")
         if nested:
-            paths, labels = flatToStructure(config_groups, labels)
+            paths, labels = flatToStructure(config_groups, labels, paths)
         return paths, labels
     elif len(paths) != 0:
         print(f"{len(paths)} files found, searching for the remaining {len(configs)}.")
@@ -246,11 +253,12 @@ def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
         print(f"{len(localPaths)} files found. Not searching servers.")
         paths = paths + localPaths
         if nested:
-            paths, labels = flatToStructure(config_groups, labels)
+            paths, labels = flatToStructure(config_groups, labels, paths)
         return paths, labels
 
     print("Searching servers for files...")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
+    get_csv_from_server(Servers.poincare, configs)
     with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
         future_to_server = {
             executor.submit(get_csv_from_server, server, configs): server
@@ -619,6 +627,28 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
     name = name + "_withLambda" if show_lambda else name
     # Display all plots in a row
     plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
+
+
+def plotAverage(config_groups, labels, **kwargs):
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    kwargs["labels"] = labels
+
+    print("Plotting...")
+    for Y in ["Avg energy", "Avg RSS"]:
+        makeAverageComparisonPlot(paths, Y=Y, **kwargs)
+
+
+def plotTime(config_groups, labels, **kwargs):
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=True
+    )
+    kwargs["labels"] = labels
+
+    print("Plotting...")
+    for Y in ["Minimization time", "Write time", "Run time"]:
+        makeAverageComparisonPlot(paths, Y=Y, xlim=[0.1501, 1], **kwargs)
 
 
 def plotLog(config_groups, labels, **kwargs):

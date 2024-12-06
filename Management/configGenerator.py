@@ -182,6 +182,31 @@ class SimulationConfig:
 class ConfigGenerator:
     @staticmethod
     def generate(group_by_seeds=False, **kwargs):
+        """
+        This function creates all combinations of configurations. If a config
+        object is given where the method, seeds and steps are lists like so:
+        method=[LBFGS, CG]
+        seeds=[1,2]
+        step=[0.1,0.2],
+        This function will generate 2x2x2=8 config objects.
+
+        The structure of the objects will by default be such that the methods
+        are separated in their own lists:
+
+        [
+            [(LBFGS, 1,0.1), (LBFGS, 1,0.2), (LBFGS, 2,0.1), (LBFGS, 2,0.2)],
+            [(CG,    1,0.1), (CG,    1,0.2), (CG,    2,0.1), (CG,    2,0.2)],
+        ]
+
+        If group_by_seeds is True, the groups are instead decided by the seed
+
+        [
+            [(LBFGS, 1,0.1), (LBFGS, 1,0.2), (CG, 1,0.1), (CG, 1,0.2)], # seed 1
+            [(LBFGS, 2,0.1), (LBFGS, 2,0.2), (CG, 2,0.1), (CG, 2,0.2)], # seed 2
+        ]
+
+        """
+
         # Separate 'seed' from other parameters if it's present
         seeds = kwargs.pop(
             "seed", [None]

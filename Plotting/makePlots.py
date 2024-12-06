@@ -21,6 +21,30 @@ if True:
     warnings.simplefilter("error", RuntimeWarning)
 
 
+def durations_to_seconds(durations):
+    # Create a mapping from unit to number of seconds
+    unit_map = {
+        "d": 86400,  # 24 hours * 3600 sec/hour
+        "h": 3600,  # 60 minutes * 60 sec/minute
+        "m": 60,  # 60 sec
+        "s": 1,
+    }
+
+    result = []
+    for duration in durations:
+        total_seconds = 0
+        # Split by space to handle multiple tokens like "1m 38s"
+        parts = duration.split()
+        for part in parts:
+            # Last character is the unit, rest is the number
+            number = float(part[:-1])
+            unit = part[-1]
+            # Convert and accumulate
+            total_seconds += number * unit_map[unit]
+        result.append(total_seconds)
+    return result
+
+
 def plotYOverX(
     X,
     Y,
@@ -505,8 +529,17 @@ color_index = 0
 index = 0
 
 
-def get_method(i, kwargs):
-    return getPrettyLabel(kwargs["labels"][i][0])
+def get_method(cvs_file_path):
+    if not isinstance(cvs_file_path, str):
+        cvs_file_path = cvs_file_path[0]
+    if "minimizerFIRE" in cvs_file_path:
+        return "FIRE"
+
+    elif "minimizerCG" in cvs_file_path:
+        return "CG"
+
+    else:
+        return "L-BFGS"
 
 
 def plotSplitPowerLaw(
@@ -1183,6 +1216,10 @@ def makeAverageComparisonPlot(
         y_name = r"Stress $\langle \sigma \rangle$"
         if name == "":
             name = "Avg stress"
+    elif "time" in Y:
+        y_name = "Seconds"
+        name = Y
+
     x_name = r"Strain $\gamma$"
     title = f"{name}"
 
@@ -1208,12 +1245,16 @@ def makeAverageComparisonPlot(
             line_index += 1
 
         # Get the current color
-        color = colors[get_method(i, kwargs)]
+        color = colors[get_method(csv_file_paths)]
 
         # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             # print(csv_file_path)
             df = pd.read_csv(csv_file_path, usecols=[X, Y, "Max energy"])
+            # If Y contains strings, we will assume it is a time, and convert it to
+            # seconds
+            if isinstance(df[Y][0], str):
+                df[Y] = durations_to_seconds(df[Y])
             # df = df[0:50000]
             if df.empty:
                 continue
@@ -1250,7 +1291,7 @@ def makeAverageComparisonPlot(
         average = np.divide(
             average, count, out=np.zeros_like(average), where=count != 0
         )
-        label = getPrettyLabel(kwargs["labels"][i][0])
+        label = get_method(csv_file_paths)
         a_kwargs = {
             "fig": fig,
             "ax": ax,
@@ -1285,7 +1326,8 @@ def makeAverageComparisonPlot(
         plotPath = csv_directory / "plots"
 
         figPath = os.path.join(plotPath, name + ".pdf")
-        fig.savefig(figPath)
+
+        # fig.savefig(figPath)
         fig.savefig("Plots/" + name + ".pdf")
         # print(f'Plot saved at: "{figPath}"')
     if show:

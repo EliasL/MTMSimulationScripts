@@ -34,12 +34,17 @@ def fix_csv_files(paths, use_tqdm=True):
 def process_file(path):
     # This function processes a single file
     temp_path = f"{path[:-3]}.temp.csv"
+
     # Open the original file for reading and a temporary file for writing
     with open(path, "r") as file, open(temp_path, "w") as temp_file:
         firstLine = True
         for line in file:
             if not line[:7] == "Line nr" and firstLine:
-                break
+                # If the first line doesn't start with "Line nr"
+                # then we break. We skip processing because original
+                # format doesn't match what we expect.
+                os.remove(temp_path)
+                return
             else:
                 firstLine = False
 

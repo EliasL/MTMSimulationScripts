@@ -74,14 +74,14 @@ def lotsOThreads():
 
 
 def threadTest():
-    nrThreads = [1, 2, 4, 8, 16, 32, 64]
+    nrThreads = 1  # [1, 2, 4, 8, 16, 32, 64]
     nrSeeds = 1
     size = 100
-    build_on_server(Servers.poincare)
+    #    build_on_server(Servers.poincare)
     configs, labels = basicJob(nrThreads, nrSeeds, size)
     print("Starting jobs...")
-
     queueJobs(Servers.poincare, configs, resume=False)
+    # run_many_locally(configs)
 
 
 def runOnServer():
@@ -139,7 +139,7 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-# runOnLocalMachine()
+runOnLocalMachine()
 # startJobs()
 # plotBigJob()
 # plotPropperJob()

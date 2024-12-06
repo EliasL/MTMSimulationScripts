@@ -283,7 +283,7 @@ def allPlasticEventsJob():
         group_by_seeds=False,
         rows=100,
         cols=100,
-        startLoad=0.1,
+        startLoad=0.15,
         initialGuessNoise=0.000001,
         nrThreads=8,
         minimizer=["LBFGS"],
@@ -291,7 +291,7 @@ def allPlasticEventsJob():
         LBFGSEpsg=1e-8,
         # CGEpsg=1e-5,
         # eps=1e-5,
-        maxLoad=1.02,
+        maxLoad=1.03,
         scenario="simpleShear",
         # Save all events
         # plasticityEventThreshold=1e-6,
@@ -334,6 +334,8 @@ def propperJob3():
 
 
 def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+    import numpy as np
+
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
         group_by_seeds=group_by_seeds,
@@ -341,10 +343,11 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         cols=size,
         startLoad=0.15,
         nrThreads=nrThreads,
-        minimizer="LBFGS",
+        minimizer="FIRE",
         loadIncrement=1e-5,
-        LBFGSEpsg=1e-5,
-        maxLoad=1.0,
+        eps=1e-8,
+        # LBFGSEpsg=1e-5,
+        maxLoad=1 + np.arange(10) * 1e-11,
         scenario="simpleShear",
     )
     return configs, labels

@@ -54,7 +54,6 @@ lock = threading.Lock()  # Create a lock for thread-safe operations
 
 
 def update_progress(jobs=False, processes=False):
-    global completed_servers, nr_files
     if jobs:
         print(f"\r{nr_jobs_found} jobs found", end="")
     if processes:
