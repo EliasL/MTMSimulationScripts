@@ -4,10 +4,9 @@ import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
 from tqdm import tqdm
-import time
-import random
+import os
 from multiprocessing import Pool
-
+from pathlib import Path
 
 import threading
 from MTMath.plotEnergy import (
@@ -17,9 +16,12 @@ from MTMath.plotEnergy import (
     lagrange_reduction,
     elastic_reduction,
 )
-from MTMath.contiPotential import ground_state_energy
+from Management.multiServerJob import propperJob
 
-from .dataFunctions import get_data_from_name, VTUData, arrsToMat
+from MTMath.contiPotential import ground_state_energy
+from .makePlots import makePlot, makeLogPlotComparison
+from .remotePlotting import get_csv_files
+from .dataFunctions import get_data_from_name, VTUData, arrsToMat, get_previous_data
 
 # matplotlib.use("Agg")  # Use a non-interactive backend
 
@@ -35,7 +37,9 @@ def get_energy_range(vtu_files, cvs_file):
     # of the initial state
     energy_field = VTUData(vtu_files[0]).get_energy_field()
     min_energy = energy_field.min()
-    return min_energy, max_energy
+
+    g = ground_state_energy()
+    return min_energy - g, max_energy - g
 
 
 # This is a conceptual approach and might need adjustments to fit your specific data structure
@@ -89,18 +93,30 @@ def add_padding(axis_limits, padding_ratio):
 
 def base_plot(
     vtu_file=None,
-    previous_vtu_file=None,
+    previous_frame_vtu_file=None,
     axis_limits=None,
     add_title=True,
+    delta_title=False,
     frame_index=None,
-    AvgEnergy=None,
-    AvgRSS=None,
+    avgEnergy=None,
+    avgRSS=None,
+    delAvgEnergy=None,
+    delAvgRSS=None,
+    delLoad=None,
+    macroData=None,
+    macroDataRowIndex=None,
+    equalAspect=True,
+    remove_ticks=True,
+    dpi=400,
+    **kwargs,
 ):
-    dpi = 250
-    width = 2000
-    height = 1000
+    width = 1920
+    height = 1080
+    if not remove_ticks:
+        height = 500
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
-    ax.set_aspect("equal")
+    if equalAspect:
+        ax.set_aspect("equal")
 
     # Setting the axis limits
     if axis_limits:
@@ -110,26 +126,44 @@ def base_plot(
 
     if add_title:
         metaData = get_data_from_name(vtu_file)
-        load = float(metaData["load"])
-        load_step = float(metaData["loadIncrement"])
-        if previous_vtu_file:
-            previous_load = float(get_data_from_name(previous_vtu_file)["load"])
+        load = metaData["load"]
+        load_step = metaData["loadIncrement"]
+        nrPlasticEvents = metaData["nrM"]
+        if previous_frame_vtu_file:
+            previous_load = get_data_from_name(previous_frame_vtu_file)["load"]
             steps_since_last_frame = int((load - previous_load) / load_step)
         else:
             steps_since_last_frame = 0
-        nrPlasticEvents = metaData["nrM"]
 
-        # Data for the table
-        data = [
-            [
-                rf"$\gamma$: {load:.5f}",
-                rf"$\langle E \rangle$: {AvgEnergy:.3f}",
-                rf"$\langle \sigma \rangle$: {AvgRSS:.3f}",
-                rf"$p$: {nrPlasticEvents}",
-                # rf"$\Delta_k$: {steps_since_last_frame}",
-                f"f: {frame_index}",
-            ],
-        ]
+        if delta_title:
+            # If this parameter is set, we want to display the change in all the
+            # relevant properties. Notably, not since the last frame, but the
+            # previous minimization step
+
+            # Data for the table
+            data = [
+                [
+                    rf"$\Delta\gamma$: {delLoad:.5f}",
+                    rf"$\Delta\langle E \rangle$: {delAvgEnergy:.3f}",
+                    rf"$\Delta\langle \sigma \rangle$: {delAvgRSS:.3f}",
+                    rf"$p$: {nrPlasticEvents}",
+                    # rf"$\Delta_k$: {steps_since_last_frame}",
+                    f"f: {frame_index}",
+                ],
+            ]
+
+        else:
+            # Data for the table
+            data = [
+                [
+                    rf"$\gamma$: {load:.5f}",
+                    rf"$\langle E \rangle$: {avgEnergy:.3f}",
+                    rf"$\langle \sigma \rangle$: {avgRSS:.3f}",
+                    rf"$p$: {nrPlasticEvents}",
+                    # rf"$\Delta_k$: {steps_since_last_frame}",
+                    f"f: {frame_index}",
+                ],
+            ]
         # Create the table with invisible borders and gridlines
         table = ax.table(cellText=data, cellLoc="center", loc="top", edges="open")
 
@@ -141,9 +175,9 @@ def base_plot(
         # Remove the cell edges to keep it invisible
         for cell in table.get_celld().values():
             cell.set_linewidth(0)
-
-    ax.set_xticks([])
-    ax.set_yticks([])
+    if remove_ticks:
+        ax.set_xticks([])
+        ax.set_yticks([])
 
     return ax, fig
 
@@ -164,26 +198,29 @@ def draw_rhombus(ax, N, load, BC):
 
 # Function to save the figure with transparent background and close it
 def save_and_close_plot(ax, path, transparent=False):
-    # Set anti-aliasing for lines, text, patches, etc.
-    for line in ax.get_lines():
-        line.set_antialiased(True)  # Anti-alias lines
+    # # Set anti-aliasing for lines, text, patches, etc.
+    # for line in ax.get_lines():
+    #     line.set_antialiased(True)  # Anti-alias lines
 
-    for text in ax.texts:
-        text.set_fontproperties(
-            text.get_fontproperties()
-        )  # Ensure text rendering uses proper anti-aliasing
+    # for text in ax.texts:
+    #     text.set_fontproperties(
+    #         text.get_fontproperties()
+    #     )  # Ensure text rendering uses proper anti-aliasing
 
-    # You can also anti-alias patches or other graphical elements
-    for patch in ax.patches:
-        patch.set_antialiased(True)  # Anti-alias shapes like rectangles, circles
+    # # You can also anti-alias patches or other graphical elements
+    # for patch in ax.patches:
+    #     patch.set_antialiased(True)  # Anti-alias shapes like rectangles, circles
 
     # Save the plot with transparent background
-    dpi = 600
-    plt.tight_layout()
-    plt.savefig(
-        path, bbox_inches="tight", pad_inches=0, transparent=transparent, dpi=dpi
+    # dpi = 600
+    fig = ax.get_figure()
+    fig.savefig(
+        path,
+        bbox_inches="tight",
+        pad_inches=0,
+        transparent=transparent,  # dpi=dpi
     )
-    plt.close()
+    plt.close(fig)
 
 
 def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kwargs):
@@ -237,14 +274,26 @@ def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kw
     return ax
 
 
+def pretty_mesh_property(mesh_property):
+    if mesh_property == "energy":
+        return r"$E$"
+    elif mesh_property == "stress":
+        return r"$\sigma$"
+    elif mesh_property == "m":
+        return r"$\textbf{m}_3$"
+    elif mesh_property == "m_diff":
+        return r"$\Delta\textbf{m}_3$"
+
+
 def plot_mesh(
     vtu_file,
-    global_min=0,
-    global_max=0.37,
+    e_lims=None,
     mesh_property="energy",
     ax=None,
     shift=True,
     add_rombus=True,
+    add_m12_marks=False,
+    add_colorbar=True,
     **kwargs,
 ):
     if ax is None:
@@ -256,13 +305,15 @@ def plot_mesh(
 
     cmap = "coolwarm"
 
-    hatch = None
     norm = None
 
     if mesh_property == "energy":
         # The energy field is normalized to have energy=0 in the ground state
-        field = data.get_energy_field() - ground_state_energy()
-        norm = mcolors.Normalize(vmin=global_min, vmax=global_max)
+        g = ground_state_energy()
+        field = data.get_energy_field() - g
+        if e_lims is None:
+            e_lims = (min(field), max(field))
+        norm = mcolors.Normalize(vmin=e_lims[0], vmax=e_lims[1])
         backgroundColor = plt.get_cmap(cmap)(0)
     elif mesh_property == "stress":
         field = data.get_stress_field()
@@ -272,42 +323,154 @@ def plot_mesh(
         cmap = "viridis"
         nrm1, nrm2, nrm3 = data.get_m_nr_field()
         field = nrm3
+        norm = mcolors.Normalize(vmin=0, vmax=6)
         backgroundColor = plt.get_cmap(cmap)(0)
-        hatch_patterns = {
-            0: "",
-            1: "\\",  # Backslash for nrm1 % 2 == 1
-            2: "/",  # Forward slash for nrm2 % 2 == 1
-            3: "x",  # 'x' for both conditions being true
-        }
 
-        # Assuming nrm1 and nrm2 are defined
-        # Calculate the hatch value
-        hatch_value = (nrm1 % 2) + (nrm2 % 2) * 2
+        # Define markers for each state
+        marker_patterns = ["", ".", 11, "d"]
+        marker_patterns = ["", "_", "|", "+"]
+        colors = ["", (0.7, 0.7, 0.7), (0.8, 0.2, 0.2), (1, 0.5, 0.5)]
+        # Calculate the indices in a fully vectorized way
+        state_indices = (nrm1 % 2) + (nrm2 % 2) * 2
+    elif mesh_property == "m_diff":
+        cmap = "viridis"
+        _, _, nrm3 = data.get_m_nr_field()
 
-        # Retrieve the hatch pattern string
-        hatch = hatch_patterns.get(hatch_value, "")
+        previous_data_path = get_previous_data(vtu_file)
+        if previous_data_path:
+            previous_data = VTUData(previous_data_path)
+            _, _, previous_nrm3 = previous_data.get_m_nr_field()
+        else:
+            previous_nrm3 = nrm3
+        field = nrm3 - previous_nrm3
+        max_pastic = 3
+        if max(field) > max_pastic:
+            raise RuntimeError("Huge plastic jump!")
+        norm = mcolors.Normalize(vmin=0, vmax=max_pastic)
+        backgroundColor = plt.get_cmap(cmap)(0)
 
     if shift:
         shifts = calculate_shifts(nodes, data.BC, data.load)
     else:
         shifts = [0]
+
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
-            triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
+            sheared_y = y + dy
+            triang = mtri.Triangulation(sheared_x, sheared_y, connectivity)
             ax.triplot(triang, color=backgroundColor, lw=0.1)
-            ax.tripcolor(
+            mappable = ax.tripcolor(
                 triang,
                 facecolors=field,
                 norm=norm,
                 cmap=cmap,
                 edgecolors="none",
-                hatch=hatch,
             )
+
+            if mesh_property == "m" and add_m12_marks:
+                # Compute centroids of triangles
+                triangles = triang.triangles  # Indices of vertices for each triangle
+                centroids_x = np.mean(sheared_x[triangles], axis=1)
+                centroids_y = np.mean(sheared_y[triangles], axis=1)
+
+                # Plot markers at centroids for each state
+                for i in range(4):
+                    if i == 0:
+                        continue  # Skip if no m1 or m2
+                    mask = state_indices == i
+                    ax.scatter(
+                        centroids_x[mask],
+                        centroids_y[mask],
+                        marker=marker_patterns[i],
+                        color=colors[i],  # Customize marker color as needed
+                        s=1,
+                        linewidths=0.15,
+                        zorder=10,  # Ensure markers are plotted above other elements
+                    )
+
+    if add_colorbar:
+        plt.colorbar(mappable, ax=ax, label=pretty_mesh_property(mesh_property))
 
     if add_rombus:
         draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
     return ax, cmap, norm
+
+
+def make_static_plot(fileName, **kwargs):
+    ax, fig = base_plot(
+        add_title=False, equalAspect=False, remove_ticks=False, dpi=150, **kwargs
+    )
+    if fileName == "energy_plot":
+        fig, ax = makePlot(
+            kwargs["macro_data"],
+            ax=ax,
+            fig=fig,
+            Y="Avg energy",
+            save=False,
+            legend=True,
+        )
+
+    elif fileName == "e_drop_plot":
+        nrSeeds = 40
+        configs, labels = propperJob(3, nrSeeds, group_by_seeds=True)
+        paths, labels = get_csv_files(configs, labels=labels)
+        makeLogPlotComparison(
+            [paths[0]],  # We choose only the LBFGS
+            innerStrainLims=(1, np.inf),
+            outerStrainLims=(0.31, 1),
+            plot_post_yield=False,
+            save=False,
+            use_y_axis_name=True,
+            Y="Avg energy",
+            ax=ax,
+            fig=fig,
+            labels=labels,
+            legend_loc="lower left",
+            show=False,
+            add_fit=False,
+            **kwargs,
+        )
+    return fig, ax
+
+
+def remove_vlines(ax):
+    for line in ax.lines[:]:
+        xdata = line.get_xdata()
+        # Check if it's a vertical line
+        if len(xdata) <= 2 and len(set(xdata)) == 1:
+            line.remove()  # Remove the line from the plot
+
+
+def plot_plot(
+    vtu_file,
+    ax=None,
+    fig=None,
+    fileName=None,
+    macro_data=None,
+    macroDataRowIndex=None,
+    avgEnergy=None,
+    avgRSS=None,
+    delAvgEnergy=None,
+    delAvgRSS=None,
+    delLoad=None,
+    **kwargs,
+):
+    remove_vlines(ax)
+    data = VTUData(vtu_file)
+
+    if fileName == "energy_plot":
+        x = data.load
+    elif fileName == "e_drop_plot":
+        x = -delAvgEnergy
+
+    ax.axvline(
+        x=x,
+        color="red",
+        linewidth=0.5,
+    )
+
+    return ax
 
 
 # Define a lock to make sure only one thread initializes GRID
@@ -354,103 +517,246 @@ def plot_in_poincare_disk(
     return ax
 
 
-def plot_and_save_in_poincare_disk(frame_path, frame_index, transparent, **kwargs):
-    # Remove unwanted keywords
-    for key in ["global_min", "global_max", "axis_limits"]:
-        kwargs.pop(key)
-    ax = plot_in_poincare_disk(frame_index=frame_index, **kwargs)
-
-    path = f"{frame_path}/disk_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-
-    return path
-
-
-def plot_and_save_in_e_reduced_poincare_disk(
-    frame_path, frame_index, transparent, **kwargs
-):
-    # Remove unwanted keywords
-    for key in ["global_min", "global_max", "axis_limits"]:
-        kwargs.pop(key)
-    ax = plot_in_poincare_disk(
-        frame_index=frame_index, do_elastic_reduction=True, **kwargs
+def plot_and_save_in_poincare_disk(**kwargs):
+    return plot_and_save(
+        plot_func=plot_in_poincare_disk,
+        **kwargs,
     )
 
-    path = f"{frame_path}/eReduced_disk_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
 
+def plot_and_save_in_e_reduced_poincare_disk(**kwargs):
+    return plot_and_save(
+        plot_func=plot_in_poincare_disk,
+        do_elastic_reduction=True,
+        **kwargs,
+    )
+
+
+def plot_and_save_mesh(**kwargs):
+    return plot_and_save(
+        plot_func=plot_mesh,
+        mesh_property="energy",
+        **kwargs,
+    )
+
+
+def plot_and_save_m_mesh(**kwargs):
+    return plot_and_save(
+        plot_func=plot_mesh,
+        mesh_property="m",
+        **kwargs,
+    )
+
+
+def plot_and_save_plot(**kwargs):
+    return plot_and_save(
+        plot_func=plot_plot,
+        **kwargs,
+    )
+
+
+def plot_and_save_m_diff_mesh(**kwargs):
+    return plot_and_save(
+        plot_func=plot_mesh,
+        mesh_property="m_diff",
+        delta_title=True,
+        **kwargs,
+    )
+
+
+def plot_and_save_nodes(**kwargs):
+    return plot_and_save(
+        plot_func=plot_nodes,
+        remove_keys=["e_lims"],
+        **kwargs,
+    )
+
+
+def plot_and_save(
+    plot_func,
+    frame_path,
+    frame_index,
+    transparent,
+    return_axes_index=0,
+    reuse_images=False,
+    **kwargs,
+):
+    # Join using Path, which allows simpler syntax
+    fileName = kwargs["fileName"]
+    path = Path(frame_path) / fileName / f"{fileName}_frame_{frame_index:04d}.png"
+    os.makedirs(path.parent, exist_ok=True)
+
+    # If we want to resuse and the path already exsists
+    if reuse_images and os.path.exists(path):
+        return path
+
+    # Call the plot function
+    plot_result = plot_func(frame_index=frame_index, **kwargs)
+    # Handle functions that return multiple values
+    if isinstance(plot_result, tuple):
+        ax = plot_result[return_axes_index]
+    else:
+        ax = plot_result
+    # Save and close the plot
+    save_and_close_plot(ax, path, transparent)
     return path
 
 
-def plot_and_save_mesh(frame_path, frame_index, transparent, **kwargs):
-    ax, _, _ = plot_mesh(frame_index=frame_index, add_title=True, **kwargs)
-
-    path = f"{frame_path}/mesh_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-    return path
-
-
-def plot_and_save_nodes(frame_path, frame_index, transparent, **kwargs):
-    # Remove unwanted keywords
-    for key in ["global_min", "global_max"]:
-        kwargs.pop(key)
-    ax = plot_nodes(frame_index=frame_index, add_title=True, **kwargs)
-
-    path = f"{frame_path}/node_frame_{frame_index:04d}.png"
-    save_and_close_plot(ax, path, transparent)
-    return path
-
-
-def process_frame(kwargs):
+def process_frame(kwargs, attemps=0):
     kwargs = kwargs.copy()
     # Unpack frameFunction from kwargs and apply retry logic
     frameFunction = kwargs.pop("frameFunction")
-    # Call frameFunction with remaining keyword arguments
-    return frameFunction(**kwargs)
+
+    # Sometimes, we get: Exception has occurred: SyntaxError not a PNG file
+    # This is a bit random, so we just try again
+    try:
+        # Call frameFunction with remaining keyword arguments
+        return frameFunction(**kwargs)
+    except SyntaxError:
+        if attemps < 5:
+            kwargs["frameFunction"] = frameFunction
+            process_frame(kwargs, attemps=attemps + 1)
 
 
-def getCorespondingEnergyAndRSS(vtu_files, macro_data):
-    df = pd.read_csv(macro_data, usecols=["Load", "Avg energy", "Avg RSS"])
-    AvgEnergy = []
-    AvgRSS = []
+def get_corresponding_energy_and_rss(vtu_files, macro_data):
+    """
+    Extracts the corresponding "Avg energy" and "Avg RSS" values for each load in vtu_files,
+    along with the line numbers (indices) of the matching rows in the CSV file.
+
+    Parameters:
+        vtu_files (List[str]): List of VTU file names.
+        macro_data (str): Path to the CSV file containing macro data.
+
+    Returns:
+        Tuple[List[float], List[float], List[int]]: Lists of average energy, RSS values,
+        and line numbers of matching rows.
+    """
+    df = pd.read_csv(
+        macro_data,
+        usecols=[
+            "Load",
+            "Avg energy",
+            "Avg RSS",
+            "Avg energy change",
+            "Nr plastic deformations",
+        ],
+    )
+    avg_energy_list = []
+    change_avg_energy_list = []
+    avg_RSS_list = []
+    line_numbers = []
+    load_list = []
+
     for vtu_file in vtu_files:
-        load = float(get_data_from_name(vtu_file)["load"])
+        load = get_data_from_name(vtu_file)["load"]
+        load_list.append(load)
+        # Filter rows where "Load" matches the value
+        matching_rows = df[abs(df["Load"] - load) < 1e-10]
 
-        # Assuming "Load" is a unique identifier, we can filter directly
-        matching_row = df[df["Load"] == load]
+        # Check if there is exactly one matching row
+        if len(matching_rows) != 1:
+            raise ValueError(
+                f"'Load' value '{load}' is not unique or not found. Found {len(matching_rows)} matches."
+            )
 
-        # Check if we found a match
-        if not matching_row.empty:
-            # Extract the corresponding "Avg energy" and "Avg RSS" values
-            avg_energy = matching_row["Avg energy"].values[0]
-            avg_rss = matching_row["Avg RSS"].values[0]
+        # Get the index (line number) of the matching row
+        matching_row_index = matching_rows.index[0]
+        line_numbers.append(matching_row_index)
 
-            # Append the extracted values to the respective lists
-            AvgEnergy.append(avg_energy)
-            AvgRSS.append(avg_rss)
-        else:
-            raise (EOFError("We would expect to have an exact match for the load!"))
+        # Extract the matching row as a Series
+        matching_row = matching_rows.iloc[0]
 
-    # Return the lists or use them as needed
-    return AvgEnergy, AvgRSS
+        # Append the extracted values to the respective lists
+        avg_energy_list.append(matching_row["Avg energy"])
+        avg_RSS_list.append(matching_row["Avg RSS"])
+        change_avg_energy_list.append(matching_row["Avg energy change"])
+        if (
+            matching_row["Avg energy change"] < 0
+            and matching_row["Nr plastic deformations"] == 0
+        ):
+            print(f"No deformation energy drop: {matching_row_index}, load={load}")
+        if (
+            matching_row["Avg energy change"] < 0
+            and -matching_row["Avg energy change"] < 5e-8
+        ):
+            print(f"Super small energy drop: {matching_row_index}, load={load}")
+
+    # Find previous data and get change data as well
+    pLoad, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(macro_data, line_numbers)
+    change_avg_RSS_list = avg_RSS_list - pAvgRSS
+    del_load = load_list - pLoad
+
+    # Return the lists of values and line numbers
+    return (
+        avg_energy_list,
+        avg_RSS_list,
+        change_avg_energy_list,
+        change_avg_RSS_list,
+        del_load,
+        line_numbers,
+    )
 
 
-def make_images(vtu_files, macro_data, num_processes=10, use_tqdm=True, **kwargs):
+def get_previous_energy_and_rss(macro_data, current_line):
+    # Check if current_line is an integer
+    if isinstance(current_line, int):
+        df = pd.read_csv(macro_data, usecols=["Load", "Avg energy", "Avg RSS"])
+        # Select the previous row relative to current_line
+        p_row = df.iloc[current_line - 1]
+        return p_row["Load"], p_row["Avg energy"], p_row["Avg RSS"]
+    else:
+        # Handle the case where current_line is an iterable (e.g., list or array)
+        df = pd.read_csv(macro_data, usecols=["Load", "Avg energy", "Avg RSS"])
+        # Create empty lists to store previous values
+        prev_loads, prev_energies, prev_rss = [], [], []
+
+        for line in current_line:
+            # Ensure line index is valid (i.e., not the first row)
+            line = max(1, line)
+            p_row = df.iloc[line - 1]
+            prev_loads.append(p_row["Load"])
+            prev_energies.append(p_row["Avg energy"])
+            prev_rss.append(p_row["Avg RSS"])
+
+        # Return lists of previous values
+        return np.array(prev_loads), np.array(prev_energies), np.array(prev_rss)
+
+
+def make_images(vtu_files, num_processes=10, use_tqdm=True, **kwargs):
+    print("Preping video meta data...")
     # Calculate global axis limits and energy range
+    macro_data = kwargs["macro_data"]
     axis_limits = get_axis_limits(macro_data)
-    global_min, global_max = get_energy_range(vtu_files, macro_data)
-    AvgEnergy, AvgRSS = getCorespondingEnergyAndRSS(vtu_files, macro_data)
+    e_lims = get_energy_range(vtu_files, macro_data)
+    avgEnergy, avgRSS, delAvgEnergy, delAvgRSS, delLoad, macroDataRowIndex = (
+        get_corresponding_energy_and_rss(vtu_files, macro_data)
+    )
+
+    # Some ploting functions cannot handle multithreading
+    # in particular, if we want to reuse a plot many times
+    if "plot" in kwargs["fileName"]:
+        multithread = False
+        fig, ax = make_static_plot(**kwargs)
+        kwargs["ax"] = ax
+        kwargs["fig"] = fig
+
+    else:
+        multithread = True
+
     # Create a list of dictionaries for keyword arguments
     kwargs_list = [
         {
             "vtu_file": vtu_files[i],
-            "previous_vtu_file": vtu_files[i - 1] if i != 0 else None,
+            "previous_frame_vtu_file": vtu_files[i - 1] if i != 0 else None,
             "frame_index": i,
-            "global_min": global_min,
-            "global_max": global_max,
+            "e_lims": e_lims,
             "axis_limits": axis_limits,
-            "AvgEnergy": AvgEnergy[i],
-            "AvgRSS": AvgRSS[i],
+            "avgEnergy": avgEnergy[i],
+            "avgRSS": avgRSS[i],
+            "delAvgEnergy": delAvgEnergy[i],
+            "delAvgRSS": delAvgRSS[i],
+            "delLoad": delLoad[i],
+            "macroDataRowIndex": macroDataRowIndex[i],
             **kwargs,
         }
         for i in range(len(vtu_files))
@@ -459,13 +765,19 @@ def make_images(vtu_files, macro_data, num_processes=10, use_tqdm=True, **kwargs
     # Use line below to debug with first item in kwargs_list
     image_paths = process_frame(kwargs_list[0])
 
-    with Pool(processes=num_processes) as pool:
-        image_paths = list(
-            tqdm(
-                pool.imap(process_frame, kwargs_list),
-                total=len(vtu_files),
-                disable=not use_tqdm,
+    if multithread:
+        print("Starting threads...")
+        with Pool(processes=num_processes) as pool:
+            image_paths = list(
+                tqdm(
+                    pool.imap(process_frame, kwargs_list),
+                    total=len(vtu_files),
+                    disable=not use_tqdm,
+                )
             )
-        )
+    else:
+        image_paths = [
+            process_frame(kwargs) for kwargs in tqdm(kwargs_list, disable=not use_tqdm)
+        ]
 
     return image_paths

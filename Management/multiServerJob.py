@@ -2,25 +2,31 @@ from itertools import product
 from collections import OrderedDict
 from .configGenerator import ConfigGenerator, SimulationConfig
 
-from .runOnCluster import queue_remote_job, build_on_all_servers  # noqa: F401
+from .runOnCluster import queue_remote_job, build_on_all_servers, run_remote_command
 from .clusterStatus import get_all_server_info, get_server_short_name
 from .jobManager import JobManager
 from .dataManager import DataManager
 
 
-def confToCommand(config):
+def confToCommand(config, **kwargs):
     base_command = "python3 ~/simulation/SimulationScripts/runSimulations.py"
     return (
         base_command
-        + " "
-        + " ".join(  # We need to add "" to strings
-            f'{key}="{value}"' if isinstance(value, str) else f"{key}={value}"
-            for key, value in ConfigGenerator.get_kwargs(config).items()
-        )
+        # Get args from config
+        + dictToString(ConfigGenerator.get_kwargs(config))
+        # We add other arguments as well
+        + dictToString(kwargs)
     )
 
 
-def generateCommands(configs, threads_per_seed=1):
+def dictToString(dictionary):
+    return " " + " ".join(  # We need to add "" to strings
+        f'{key}="{value}"' if isinstance(value, str) else f"{key}={value}"
+        for key, value in dictionary.items()
+    )
+
+
+def distributeConfigs(configs, threads_per_seed=1):
     """
     We give each seed its own slurm job and we just fill the entire cluster with
     lots of small jobs with a high nice value so that others can get past if they
@@ -33,7 +39,8 @@ def generateCommands(configs, threads_per_seed=1):
     dm = DataManager()
     dm.findData(autoUpdate=True)
 
-    commands = OrderedDict()
+    # A dictionary with server names as keys, and all configs that should be run on that server
+    serverConfigDict = OrderedDict()
 
     remaining_configs = []
 
@@ -44,9 +51,9 @@ def generateCommands(configs, threads_per_seed=1):
         for server, (folders, sizes, free_space) in data.items():
             folders = map(lambda s: s.split("/")[-1], folders)
             if config.name in folders:
-                if server not in commands:
-                    commands[server] = []
-                commands[server].append(confToCommand(config))
+                if server not in serverConfigDict:
+                    serverConfigDict[server] = []
+                serverConfigDict[server].append(config)
                 configSolved = True
                 break
             else:
@@ -54,11 +61,13 @@ def generateCommands(configs, threads_per_seed=1):
         if not configSolved:
             remaining_configs.append(config)
 
-    print(f"Resuming {sum(len(lst) for lst in commands.values())} exsisting jobs.")
+    print(
+        f"Resuming {sum(len(lst) for lst in serverConfigDict.values())} exsisting jobs."
+    )
     if len(remaining_configs) > 0:
         print(f"Finding cpu space for {len(remaining_configs)} new jobs.")
     else:
-        return commands
+        return serverConfigDict
     print("Getting server info... ")
     serverInfo = get_all_server_info()
 
@@ -77,23 +86,61 @@ def generateCommands(configs, threads_per_seed=1):
             continue
 
         # Initialize command list for the server if not already present
-        if si.sName not in commands:
-            commands[si.sName] = []
+        if si.sName not in serverConfigDict:
+            serverConfigDict[si.sName] = []
 
         # Calculate the number of available slots (leave one CPU free)
-        available_slots = (si.nrFreeCores) // threads_per_seed - len(commands[si.sName])
+        available_slots = (si.nrFreeCores) // threads_per_seed - len(
+            serverConfigDict[si.sName]
+        )
 
         # Fill servers until they are full or no remaining configurations
         while available_slots > 0 and remaining_configs:
-            commands[si.sName].append(confToCommand(remaining_configs.pop(0)))
+            serverConfigDict[si.sName].append(remaining_configs.pop(0))
             available_slots -= 1
 
         # If no remaining configurations, return the filled commands
         if not remaining_configs:
-            return commands
+            return serverConfigDict
     raise RuntimeError(
         f"Not enough cores to run simulations! Need {len(remaining_configs)*threads_per_seed} cores."
     )
+
+
+def queueJobs(server, configs, job_name="el", **kwargs):
+    """
+    Kwargs:
+    resume=True,
+    dump=None,
+    plot=False,
+    newOutput=False,
+    """
+
+    pre_command = "python3 ~/simulation/SimulationScripts/Management/queueLocalJobs.py"
+
+    if isinstance(configs, SimulationConfig):
+        configs = [configs]
+
+    commands = [confToCommand(conf, **kwargs) for conf in configs]
+
+    full_pre_command = (
+        pre_command
+        + " "
+        + str(
+            {
+                '"commands"': str(commands).replace('"', "\u203d"),
+                '"job_name"': f'"{job_name}"',
+            }
+        )
+    )
+    run_remote_command(server, full_pre_command)
+    # result = subprocess.run(full_pre_command, shell=True, text=True)
+
+    # for command in commands:
+    #    jobId = queue_remote_job(server, command, "preciceJs", nrThreads)
+    #    # print(command)
+    #    pass
+    print(f"Started {len(commands)} jobs on {get_server_short_name(server)}")
 
 
 def oldGenerateCommands(configs, threads_per_seed=1):
@@ -232,21 +279,23 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
 
 def allPlasticEventsJob():
     configs, labels = ConfigGenerator.generate(
-        seed=range(1),
+        seed=[41],
         group_by_seeds=False,
         rows=100,
         cols=100,
         startLoad=0.15,
-        nrThreads=3,
-        minimizer=["LBFGS", "CG", "FIRE"],
+        initialGuessNoise=0.000001,
+        nrThreads=8,
+        minimizer=["LBFGS"],
         loadIncrement=1e-5,
-        LBFGSEpsg=1e-5,
-        CGEpsg=1e-5,
-        eps=1e-5,
-        maxLoad=1.0,
+        LBFGSEpsg=1e-8,
+        # CGEpsg=1e-5,
+        # eps=1e-5,
+        maxLoad=1.03,
         scenario="simpleShear",
         # Save all events
-        plasticityEventThreshold=1e-6,
+        # plasticityEventThreshold=1e-6,
+        energyDropThreshold=1e-10,
     )
     return configs, labels
 
@@ -285,6 +334,8 @@ def propperJob3():
 
 
 def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+    import numpy as np
+
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
         group_by_seeds=group_by_seeds,
@@ -292,10 +343,11 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         cols=size,
         startLoad=0.15,
         nrThreads=nrThreads,
-        minimizer="LBFGS",
+        minimizer="FIRE",
         loadIncrement=1e-5,
-        LBFGSEpsg=1e-5,
-        maxLoad=1.0,
+        eps=1e-8,
+        # LBFGSEpsg=1e-5,
+        maxLoad=1 + np.arange(10) * 1e-11,
         scenario="simpleShear",
     )
     return configs, labels

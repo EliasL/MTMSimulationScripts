@@ -16,7 +16,7 @@ class SimulationConfig:
         self.cols = 3
         self.usingPBC = 1  # 0=False, 1=True
         self.scenario = "simpleShear"
-        self.nrThreads = 1
+        self.nrThreads = 1  # This needs to be 1. Don't change. (see queueLocalJobs)
         self.seed = 0
         self.QDSD = 0.00  # Quenched dissorder standard deviation
         self.initialGuessNoise = 0.05
@@ -53,7 +53,7 @@ class SimulationConfig:
         self.eps = 0.000
         self.epsRel = 0.0
         self.delta = 0.0
-        self.maxIt = 10000
+        self.maxIt = 100000
 
         # Logging settings
         # Saves the mesh if number of plastic events (npe) > number of
@@ -61,6 +61,7 @@ class SimulationConfig:
         # if npe > ne*t:
         #   save frame
         self.plasticityEventThreshold = 0.1
+        self.energyDropThreshold = 1e-3
         self.showProgress = 1
 
         if configPath is not None:
@@ -181,6 +182,31 @@ class SimulationConfig:
 class ConfigGenerator:
     @staticmethod
     def generate(group_by_seeds=False, **kwargs):
+        """
+        This function creates all combinations of configurations. If a config
+        object is given where the method, seeds and steps are lists like so:
+        method=[LBFGS, CG]
+        seeds=[1,2]
+        step=[0.1,0.2],
+        This function will generate 2x2x2=8 config objects.
+
+        The structure of the objects will by default be such that the methods
+        are separated in their own lists:
+
+        [
+            [(LBFGS, 1,0.1), (LBFGS, 1,0.2), (LBFGS, 2,0.1), (LBFGS, 2,0.2)],
+            [(CG,    1,0.1), (CG,    1,0.2), (CG,    2,0.1), (CG,    2,0.2)],
+        ]
+
+        If group_by_seeds is True, the groups are instead decided by the seed
+
+        [
+            [(LBFGS, 1,0.1), (LBFGS, 1,0.2), (CG, 1,0.1), (CG, 1,0.2)], # seed 1
+            [(LBFGS, 2,0.1), (LBFGS, 2,0.2), (CG, 2,0.1), (CG, 2,0.2)], # seed 2
+        ]
+
+        """
+
         # Separate 'seed' from other parameters if it's present
         seeds = kwargs.pop(
             "seed", [None]
@@ -311,6 +337,38 @@ class ConfigGenerator:
     @staticmethod
     def generate_over_seeds(seeds, **kwargs):
         return [SimulationConfig(seed=seed, **kwargs) for seed in seeds]
+
+    @staticmethod
+    def splitKwargs(kwargs):
+        """
+        Splits the given kwargs dictionary into two dictionaries:
+        one containing keys corresponding to properties of the SimulationConfig class,
+        and one containing the rest.
+
+        Parameters:
+            kwargs (dict): The input dictionary to split.
+
+        Returns:
+            tuple: A tuple of two dictionaries:
+                - The first dictionary contains keys matching properties of SimulationConfig.
+                - The second dictionary contains all other keys.
+        """
+
+        # Retrieve properties of the SimulationConfig class
+        config_properties = set(dir(SimulationConfig()))
+
+        # Dictionaries for matching and non-matching keys
+        matching_keys = {}
+        non_matching_keys = {}
+
+        # Iterate over kwargs to classify keys
+        for key, value in kwargs.items():
+            if key in config_properties:
+                matching_keys[key] = value
+            else:
+                non_matching_keys[key] = value
+
+        return matching_keys, non_matching_keys
 
 
 def get_custom_configs(scenario):

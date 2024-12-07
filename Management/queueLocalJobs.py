@@ -22,7 +22,17 @@ def get_batch_script(command, job_name, nrThreads, outPath):
     return batch_script
 
 
-def queue_local_jobs(commands, job_name, nrThreads):
+def get_threads_from_command(command):
+    key = "nrThreads"
+    if key not in command:
+        # Return default nrThreads value
+        # It would be nice to import configGenerator, but its dificult to do
+        # when this is run from a cluster
+        return 1
+    return int(command.split(f" {key}=")[1].split(" ")[0])
+
+
+def queue_local_jobs(commands, job_name):
     base_path = "~/simulation/MTS2D/"
     # Expand the user's home directory and check if the path exists
     base_path = os.path.expanduser(base_path)
@@ -42,6 +52,7 @@ def queue_local_jobs(commands, job_name, nrThreads):
     batch_script_path = os.path.join(outPath, f"{job_name}.sh")
 
     for command in commands:
+        nrThreads = get_threads_from_command(command)
         batch_script = get_batch_script(command, job_name, nrThreads, outPath)
 
         # Write the batch script to a file

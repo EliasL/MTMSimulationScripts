@@ -6,21 +6,22 @@ import time
 import random
 import threading
 import pandas as pd
-from makePlots import (
+from .makePlots import (
     makePlot,
-    makeComparisonPlot,
+    makeAverageComparisonPlot,
     makeLogPlotComparison,
+    add_power_law_line,
 )
 import matplotlib.pyplot as plt
-from fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
+from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
 from tqdm import tqdm
 import numpy as np
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 # Now we can import from Management
-from connectToCluster import connectToCluster, Servers, download_folders
-from configGenerator import ConfigGenerator, SimulationConfig
+from Management.connectToCluster import connectToCluster, Servers, download_folders
+from Management.configGenerator import ConfigGenerator, SimulationConfig
 
 FOLDER_PATH = "/Users/elias/Work/PhD/Code/remoteData"
 FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
@@ -191,11 +192,15 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
     return paths, remaining_configs
 
 
-def configToPath(config):
-    return f"{MACRO_PATH}/{config.name}.csv"
+def configToPath(config, paths=None):
+    if paths:
+        # Search for the coresponding path and config
+        return [path for path in paths if config.name in path][0]
+    else:
+        return f"{MACRO_PATH}/{config.name}.csv"
 
 
-def flatToStructure(config_groups, label_groups):
+def flatToStructure(config_groups, label_groups, found_paths=None):
     # This function searches for where the file WOULD be if it was
     # successfully downloaded, therefore preserving the structure of the groups
     paths = []
@@ -204,9 +209,12 @@ def flatToStructure(config_groups, label_groups):
         group_paths = []
         group_labels = []
         for config, label in zip(group, label_group):
-            if os.path.isfile(configToPath(config)):
-                group_paths.append(configToPath(config))
+            path = configToPath(config, found_paths)
+            if os.path.isfile(path):
+                group_paths.append(path)
                 group_labels.append(label)
+            else:
+                raise RuntimeError("Missing file?")
         if group_paths:
             paths.append(group_paths)
             labels.append(group_labels)
@@ -231,7 +239,7 @@ def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
     if len(configs) == 0:
         print("All files already downloaded.")
         if nested:
-            paths, labels = flatToStructure(config_groups, labels)
+            paths, labels = flatToStructure(config_groups, labels, paths)
         return paths, labels
     elif len(paths) != 0:
         print(f"{len(paths)} files found, searching for the remaining {len(configs)}.")
@@ -245,11 +253,12 @@ def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
         print(f"{len(localPaths)} files found. Not searching servers.")
         paths = paths + localPaths
         if nested:
-            paths, labels = flatToStructure(config_groups, labels)
+            paths, labels = flatToStructure(config_groups, labels, paths)
         return paths, labels
 
     print("Searching servers for files...")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
+    get_csv_from_server(Servers.poincare, configs)
     with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
         future_to_server = {
             executor.submit(get_csv_from_server, server, configs): server
@@ -328,6 +337,42 @@ def set_font_size(ax, axis_size=17, legend_size=17, tick_size=17, extra_size=0):
     ax.tick_params(axis="both", which="major", labelsize=tick_size)
 
 
+def synchronize_y_limits(ax_list):
+    """
+    Synchronize the y-limits of a list of Axes objects based on the overall min and max y-values.
+
+    Parameters:
+    ax_list (list): List of Matplotlib Axes objects.
+    """
+    min_y = float("inf")
+    max_y = float("-inf")
+    ax_list = np.array(ax_list).flatten()
+
+    # Iterate over each Axes object to find the overall min and max y-values
+    for ax in ax_list:
+        # Get data from lines (e.g., plot, plot_date)
+        for line in ax.get_lines():
+            y_data = line.get_ydata()
+            if len(y_data) > 0:
+                min_y = min(min_y, np.nanmin(y_data))
+                max_y = max(max_y, np.nanmax(y_data))
+
+        # Get data from scatter plots
+        for collection in ax.collections:
+            offsets = collection.get_offsets()
+            if offsets.size > 0:
+                y_data = offsets[:, 1]  # Extract y-values
+                min_y = min(min_y, np.nanmin(y_data))
+                max_y = max(max_y, np.nanmax(y_data))
+
+    # Set the y-limits for all Axes objects
+    for ax in ax_list:
+        if ax.get_yscale() == "log":
+            ax.set_ylim(min_y * 0.5, max_y * 2)
+        else:
+            ax.set_ylim(min_y, max_y)
+
+
 def createPlotsWithImages(configs, paths, metric, **kwargs):
     if not paths:
         # Download the folders associated with the configs from the server
@@ -342,6 +387,7 @@ def createPlotsWithImages(configs, paths, metric, **kwargs):
         axes = [axes]
 
     colors = {"FIRE": "#d24646", "LBFGS": "#008743", "CG": "#ffa701"}
+    colors = {"LBFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
     sp = len(configs) == 1  # Single plot
     # Loop over the configurations, paths, and axes
     for ax, path, config, mark in zip(axes, paths, configs, "abc"):
@@ -350,6 +396,7 @@ def createPlotsWithImages(configs, paths, metric, **kwargs):
             path + "/macroData.csv",
             name=config.name + f"_{metric}+.pdf",
             add_images=True,
+            metric=metric,
             ax=ax,
             fig=fig,
             save=False,
@@ -409,20 +456,18 @@ def energyPlotWithImages(configs, paths=None):
     )
 
 
-log_yLim_max = 1.2
-
-
 def plotWholeRangePowerLaw(paths, Y, **kwargs):
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     # Define limits
     if Y == "Avg energy":
-        ylim = [2e-5, log_yLim_max]
+        ylim = [8e-3, 2e7]
     elif Y == "Avg RSS":
-        ylim = [5e-7, log_yLim_max]
+        ylim = [1e-5, 2e5]
     for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
         makeLogPlotComparison(
             [group],
+            outerStrainLims=(0.31, 1),
             innerStrainLims=(1, np.inf),
             plot_post_yield=False,
             save=False,
@@ -432,13 +477,19 @@ def plotWholeRangePowerLaw(paths, Y, **kwargs):
             fig=fig,
             legend_loc="lower left",
             show=False,
-            ylim=ylim,
-            add_fit=True,
+            add_fit=Y == "Avg RSS",
             mark=mark,
             mark_pos=(0.85, 0.9),
             **kwargs,
         )
+        if Y == "Avg energy":
+            add_power_law_line(ax, -0.85, [5e-7, 3e-4], 7e-1)
+            add_power_law_line(ax, -2.5, [3e-4, 9e-3], 1e-6, linestyle="-.")
+        if Y == "Avg RSS":
+            add_power_law_line(ax, -2.8, [3e-5, 5e-4], 5e-9, linestyle="-.")
         set_font_size(ax)
+
+    synchronize_y_limits(axes)
 
     fig.tight_layout()
     name = "energy" if Y == "Avg energy" else "stress"
@@ -450,22 +501,15 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
     # Define preyield range
     preYield = (0.15, 0.45)
     # Define limits
-    if Y == "Avg energy":
-        ylim = (0.005, 0.02)
-        log_ylim = [5e-4, log_yLim_max]
-    elif Y == "Avg RSS":
-        ylim = (0, 0.2)
-        log_ylim = [1e-6, log_yLim_max]
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     for i, group, method, mark in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
 
-        makeComparisonPlot(
+        makeAverageComparisonPlot(
             [group],
             Y=Y,
             xlim=preYield,
-            ylim=ylim,
             ax=axes[0, i],
             use_y_axis_name=method == "L-BFGS",
             fig=fig,
@@ -483,7 +527,6 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
             save=False,
             use_y_axis_name=method == "L-BFGS",
             Y=Y,
-            ylim=log_ylim,
             ax=axes[1, i],
             fig=fig,
             legend_loc="lower left",
@@ -494,6 +537,9 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
         set_font_size(axes[0, i])
         set_font_size(axes[1, i])
 
+    synchronize_y_limits(axes[0])
+    synchronize_y_limits(axes[1])
+
     fig.tight_layout()
     name = "energy" if Y == "Avg energy" else "stress"
     # Display all plots in a row
@@ -503,23 +549,15 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
 def plotPostYieldPowerLaw(paths, Y, **kwargs):
     # Define preyield range
     postYield = (0.7, 1)
-    # Define limits
-    if Y == "Avg energy":
-        ylim = (0.02, 0.05)
-        log_ylim = [1e-4, log_yLim_max]
-    elif Y == "Avg RSS":
-        ylim = (0.05, 0.2)
-        log_ylim = [1e-6, log_yLim_max]
 
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     for i, group, method, mark in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
 
-        makeComparisonPlot(
+        makeAverageComparisonPlot(
             [group],
             Y=Y,
             xlim=postYield,
-            ylim=ylim,
             ax=axes[0, i],
             use_y_axis_name=method == "L-BFGS",
             fig=fig,
@@ -531,8 +569,8 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
 
         makeLogPlotComparison(
             [group],
-            outerStrainLims=(0, postYield[1]),
-            innerStrainLims=(0, postYield[0]),
+            outerStrainLims=(0.31, postYield[1]),
+            innerStrainLims=(0.31, postYield[0]),
             plot_pre_yield=False,
             save=False,
             use_y_axis_name=method == "L-BFGS",
@@ -540,7 +578,7 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
             ax=axes[1, i],
             fig=fig,
             legend_loc="lower left",
-            ylim=log_ylim,
+            # ylim=log_ylim,
             mark=mark,
             mark_pos=(0.85, 0.9),
             **kwargs,
@@ -548,6 +586,8 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
         set_font_size(axes[0, i])
         set_font_size(axes[1, i])
 
+    synchronize_y_limits(axes[0])
+    synchronize_y_limits(axes[1])
     fig.tight_layout()
     name = "energy" if Y == "Avg energy" else "stress"
     # Display all plots in a row
@@ -589,6 +629,28 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
     plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
 
 
+def plotAverage(config_groups, labels, **kwargs):
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    kwargs["labels"] = labels
+
+    print("Plotting...")
+    for Y in ["Avg energy", "Avg RSS"]:
+        makeAverageComparisonPlot(paths, Y=Y, **kwargs)
+
+
+def plotTime(config_groups, labels, **kwargs):
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=True
+    )
+    kwargs["labels"] = labels
+
+    print("Plotting...")
+    for Y in ["Minimization time", "Write time", "Run time"]:
+        makeAverageComparisonPlot(paths, Y=Y, xlim=[0.1501, 1], **kwargs)
+
+
 def plotLog(config_groups, labels, **kwargs):
     paths, labels = get_csv_files(
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
@@ -599,15 +661,15 @@ def plotLog(config_groups, labels, **kwargs):
     # Iterate over the groups and methods, and plot each one in a separate subplot
     for Y, dropLim in zip(
         ["Avg energy", "Avg RSS"],
-        [[1e-7, None], [3e-4, None]],
+        [[5e-7, None], [5e-4, None]],
     ):
         kwargs["dropLim"] = dropLim
-        makeComparisonPlot(paths, Y=Y, **kwargs)
+        # makeAverageComparisonPlot(paths, Y=Y, **kwargs)
         ## makeLogPlotComparison(paths, Y=Y, **kwargs)
         plotWholeRangePowerLaw(paths, Y, **kwargs)
-        plotPreYieldPowerLaw(paths, Y, **kwargs)
-        plotPostYieldPowerLaw(paths, Y, **kwargs)
-        plotWindowPowerLaw(paths, Y, **kwargs)
+        # plotPreYieldPowerLaw(paths, Y, **kwargs)
+        # plotPostYieldPowerLaw(paths, Y, **kwargs)
+        # plotWindowPowerLaw(paths, Y, **kwargs)
 
     # makeLogPlotComparison(paths, f"{name} - EnergyPowerLawWindow", window=True, **kwargs)
     # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", **kwargs)

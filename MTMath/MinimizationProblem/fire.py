@@ -71,4 +71,5 @@ def optimize_fire2(x0, f, df, params, atol=1e-4, dt=1, logoutput=False):
             print(f(x, params), error)
 
     del V, F
+    path.append(x.copy())
     return [x, f(x, params), i, np.array(path)]

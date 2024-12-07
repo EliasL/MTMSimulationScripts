@@ -78,5 +78,7 @@ if __name__ == "__main__":
             "loadIncrement": 1e-6,
         }
 
-    (configs, labels) = ConfigGenerator.generate(**kwargs)
-    run_many_locally(configs)
+    confKwargs, runKwargs = ConfigGenerator.splitKwargs(kwargs)
+
+    (configs, labels) = ConfigGenerator.generate(**confKwargs)
+    run_many_locally(configs, **runKwargs)

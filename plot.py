@@ -6,13 +6,19 @@ from Management.multiServerJob import (
     propperJob1,
     propperJob2,
     propperJob3,
-    generateCommands,
     JobManager,
     get_server_short_name,
 )
+
 from Management.simulationManager import findOutputPath
 from plotAll import plotAll
-from Plotting.remotePlotting import stressPlotWithImages, energyPlotWithImages, plotLog
+from Plotting.remotePlotting import (
+    stressPlotWithImages,
+    energyPlotWithImages,
+    plotLog,
+    plotAverage,
+    plotTime,
+)
 from tqdm import tqdm
 
 
@@ -57,9 +63,9 @@ def plotSampleRuns():
     labels = [lab[seedNr] for lab in labels]
 
     paths = [
-        "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s3",
-        "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s3",
-        "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s3",
+        "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s41",
+        "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s41",
+        "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06s41",
     ]
     with tqdm(total=len(configs) * 2 + 2) as pbar:
         # Loop through each config and path, updating the progress bar
@@ -75,9 +81,13 @@ def plotSampleRuns():
         pbar.update(1)
 
 
-# MDPI Article plot
-def plotEnergyPowerLaw():
-    pass
+def plotThreadTest():
+    nrThreads = 1  # [1, 2, 4, 8, 16, 32, 64]
+    nrSeeds = 1
+    size = 100
+    configs, labels = basicJob(nrThreads, nrSeeds, size, group_by_seeds=True)
+    # plotAverage(configs, labels)
+    plotTime(configs, labels)
 
 
 def debugPlotAll():
@@ -88,7 +98,8 @@ def debugPlotAll():
 
 
 if __name__ == "__main__":
-    # plotPropperJob()
     # plotSampleRuns()
+    # plotPropperJob()
     # debugPlotAll()
-    energyField()
+    # energyField()
+    plotThreadTest()

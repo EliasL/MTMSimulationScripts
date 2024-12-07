@@ -8,7 +8,6 @@ from Management.dataManager import DataManager
 from Management.jobManager import JobManager
 from Management.multiServerJob import (
     bigJob,
-    generateCommands,
     build_on_all_servers,
     JobManager,
     get_server_short_name,

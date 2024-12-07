@@ -119,6 +119,8 @@ def run_remote_command(server_hostname, command, hide=False, silent=True):
             print(f"{server_hostname}: Command execution failed: {result.stderr}")
 
 
+# This function is depricated. It's slow to start jobs like this.
+# It's better to run queueLocalJobs on the server
 def queue_remote_job(server_hostname, command, job_name, nrThreads):
     base_path = "~/simulation/MTS2D/"
     outPath = os.path.join(base_path, "JobOutput")

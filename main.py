@@ -14,11 +14,13 @@ from Management.multiServerJob import (
     confToCommand,
     basicJob,
     allPlasticEventsJob,
+    queueJobs,
     propperJob,
     propperJob1,
     propperJob2,
     propperJob3,
-    generateCommands,
+    distributeConfigs,
+    confToCommand,
     JobManager,
     get_server_short_name,
 )
@@ -72,35 +74,18 @@ def lotsOThreads():
 
 
 def threadTest():
-    nrThreads = [8]  # , 16, 32, 64]
+    nrThreads = 1  # [1, 2, 4, 8, 16, 32, 64]
     nrSeeds = 1
-    size = 150
-    build_on_server(Servers.dalembert)
-    configs, labels = propperJob(nrThreads, nrSeeds, size)
+    size = 100
+    #    build_on_server(Servers.poincare)
+    configs, labels = basicJob(nrThreads, nrSeeds, size)
     print("Starting jobs...")
-    commands = confToCommand(configs)
-    pre_command = "python3 ~/simulation/SimulationScripts/Management/queueLocalJobs.py"
-    # pre_command = "python3 main.py start_jobs"
-    full_pre_command = (
-        pre_command
-        + " "
-        + str(
-            {
-                '"commands"': str(commands).replace('"', "\u203d"),
-                '"job_name"': '"tTest"',
-                '"nrThreads"': sum(nrThreads),
-            }
-        )
-    )
-    print(full_pre_command)
-    if False:
-        run_remote_command(Servers.mesopsl, full_pre_command)
-    else:
-        print("Not sent to server")
+    queueJobs(Servers.poincare, configs, resume=False)
+    # run_many_locally(configs)
 
 
 def runOnServer():
-    server = Servers.galois
+    server = Servers.poincare
     uploadProject(server)
     # Choose script to run
     remote_script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
@@ -110,7 +95,8 @@ def runOnServer():
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
     configs, labels = allPlasticEventsJob()
-    run_many_locally(configs)
+    # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.1,1e-05,1.0PBCt3initialGuessNoise1e-06LBFGSEpsg1e-08CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06energyDropThreshold1e-10s41/dumps/dump_l0.3.mtsb"
+    run_many_locally(configs)  # , dump=dump)
 
 
 def startJobs():
@@ -125,32 +111,11 @@ def startJobs():
     build_on_all_servers()
     for job in [propperJob3]:
         configs, labels = job()
-        servers_commands = generateCommands(configs, configs[0].nrThreads)
+        servers_confs = distributeConfigs(configs, configs[0].nrThreads)
         print("Starting jobs...")
-        pre_command = (
-            "python3 ~/simulation/SimulationScripts/Management/queueLocalJobs.py"
-        )
         # pre_command = "python3 main.py start_jobs"
-        for server, commands in servers_commands.items():
-            full_pre_command = (
-                pre_command
-                + " "
-                + str(
-                    {
-                        '"commands"': str(commands).replace('"', "\u203d"),
-                        '"job_name"': '"ej"',
-                        '"nrThreads"': configs[0].nrThreads,
-                    }
-                )
-            )
-            run_remote_command(server, full_pre_command)
-            # result = subprocess.run(full_pre_command, shell=True, text=True)
-
-            # for command in commands:
-            #    jobId = queue_remote_job(server, command, "preciceJs", nrThreads)
-            #    # print(command)
-            #    pass
-            print(f"Started {len(commands)} jobs on {get_server_short_name(server)}")
+        for server, configs in servers_confs.items():
+            queueJobs(server, configs)
     print("Done!")
     # j.showProcesses()
 
@@ -174,9 +139,9 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-# runOnLocalMachine()
+runOnLocalMachine()
 # startJobs()
 # plotBigJob()
 # plotPropperJob()
 # threadTest()
-benchmark()
+# benchmark()
