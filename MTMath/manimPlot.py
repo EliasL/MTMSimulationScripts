@@ -1,62 +1,73 @@
 import manim as M
-from contiPotential import numericContiPotential
+from manim import WHITE, BLUE, GREEN, YELLOW, DEGREES
 import numpy as np
+
+from contiPotential import numericContiPotential
 
 phi, _, _ = numericContiPotential()
 
 
-class FunctionSlicesThroughCube(M.ThreeDScene):
-    def func(self, x, y, z):
-        # Define your function here
-        return phi(
-            x,
-            y,
-            z,
-        )
-
+# Custom Scene to display the surface
+class SurfacePlot3D(M.ThreeDScene):
     def construct(self):
-        # Set up 3D axes
-        axes = M.ThreeDAxes(
-            x_range=[0, 1, 0.1],
-            y_range=[0, 1, 0.1],
-            z_range=[0, 1, 0.1],
-        )
+        # Setup the axes
+        axes = M.ThreeDAxes()
 
-        # Create a 3D volume surface for the function
+        # Define the surface using the matrices of X, Y, Z
+        def parametric_surface(u, v):
+            v = np.where(v == 0, np.nan, v)
+            C12 = u / v
+            C22 = 1 / v
+            C11 = (1 + C12**2) / C22
+            # z = phi(u, v, 1, -0.25, 4, 1)
+
+            # Precompute some common terms used in a, b, c12, c22, and c11 calculations
+            denominator = u**2 - 2 * u + v**2 + 1
+            a = (2 * v) / denominator
+            b = -(u**2 + v**2 - 1) / denominator
+
+            # Avoid division by zero or near-zero by masking those values in b
+            safe_b = np.where(b == 0, np.nan, b)
+
+            # Calculate c12, c22, and c11
+            C12 = a / safe_b
+            C22 = 1 / safe_b
+            C11 = (1 + C12**2) / C22
+
+            return np.nan_to_num(np.array([C11, C12, C22]))
+
+        # Create the surface using the parametric equation
         surface = M.Surface(
-            lambda u, v: axes.c2p(u, v, self.func(u, v, 0.5)),
-            u_range=[0, 1],
-            v_range=[0, 1],
-            fill_opacity=0.5,
-            checkerboard_colors=[M.BLUE_D, M.BLUE_E],
-            resolution=(20, 20),
+            lambda u, v: parametric_surface(u, v),
+            u_range=[-0.5, 0.5],  # Adjust according to your X and Y ranges
+            v_range=[-0.5, 0.5],  # Adjust according to your X and Y ranges
+            resolution=(50, 50),  # Adjust for higher resolution if needed
         )
 
-        # Add surface to the scene
-        self.set_camera_orientation(phi=75 * M.DEGREES, theta=45 * M.DEGREES)
+        # Surface color and opacity
+        surface.set_style(fill_opacity=0.8, stroke_color=WHITE)
+        surface.set_fill_by_value(axes=axes, colors=[BLUE, GREEN, YELLOW])
+
+        # Set initial camera orientation to view the surface
+        self.set_camera_orientation(phi=75 * DEGREES, theta=30 * DEGREES, zoom=0.1)
+
+        # Add axes and surface to the scene
         self.add(axes, surface)
 
-        # Create and animate slices along the z-axis
-        for z in np.linspace(0, 1, 10):
-            # Each slice represented by a new plane at z
-            slice_plane = M.Surface(
-                lambda u, v: axes.c2p(u, v, z),
-                u_range=[0, 1],
-                v_range=[0, 1],
-                fill_opacity=0.2,
-                color=M.YELLOW,
-                resolution=(10, 10),
-            )
+        # Begin ambient camera rotation with a slower rate
+        self.begin_ambient_camera_rotation(rate=1)  # Adjust rate for desired speed
 
-            # Show each slice and then fade it out
-            self.play(M.FadeIn(slice_plane), run_time=0.3)
-            self.play(M.FadeOut(slice_plane), run_time=0.3)
+        # Optional: Keep the scene running for a certain time to observe the rotation
+        self.wait(2)  # Wait for 20 seconds while the camera rotates
 
-        # Add camera rotation for perspective
-        self.begin_ambient_camera_rotation(rate=0.1)
-        self.wait(2)
-        self.stop_ambient_camera_rotation()
+        # If you want to stop the rotation after some time, you can use:
+        # self.stop_ambient_camera_rotation()
+
+        # Enter interactive mode (if needed)
+        self.interactive_embed()
 
 
-v = FunctionSlicesThroughCube()
-v.construct()
+# To render the scene
+if __name__ == "__main__":
+    scene = SurfacePlot3D()
+    scene.render()
