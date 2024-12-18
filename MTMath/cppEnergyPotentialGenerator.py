@@ -53,4 +53,4 @@ if __name__ == "__main__":
     sDiv = compute_second_derivatives(fDiv)
     ccode_first_only, ccode_all = generate_cpp_code(fDiv, sDiv)
     print("First Derivatives Only:\n", ccode_first_only)
-    print("\nFirst and Second Derivatives:\n", ccode_all)
+    # print("\nFirst and Second Derivatives:\n", ccode_all)

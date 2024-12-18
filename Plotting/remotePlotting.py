@@ -214,7 +214,9 @@ def flatToStructure(config_groups, label_groups, found_paths=None):
                 group_paths.append(path)
                 group_labels.append(label)
             else:
-                raise RuntimeError("Missing file?")
+                # "/Users/eliaslundheim/work/PhD/remoteData/macro/simpleShear,"
+                # "s200x200l0.15,1e-05,1.0PBCt56LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0.csv"
+                print(f"Warning: missing file:\n {path}")
         if group_paths:
             paths.append(group_paths)
             labels.append(group_labels)
@@ -642,13 +644,15 @@ def plotAverage(config_groups, labels, **kwargs):
 
 def plotTime(config_groups, labels, **kwargs):
     paths, labels = get_csv_files(
-        config_groups, labels=labels, useOldFiles=False, forceUpdate=True
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
     kwargs["labels"] = labels
 
     print("Plotting...")
     for Y in ["Minimization time", "Write time", "Run time"]:
-        makeAverageComparisonPlot(paths, Y=Y, xlim=[0.1501, 1], **kwargs)
+        makeAverageComparisonPlot(
+            paths, Y=Y, xlim=[0.1500, 1], use_title=True, **kwargs
+        )
 
 
 def plotLog(config_groups, labels, **kwargs):

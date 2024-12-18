@@ -1,95 +1,117 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from scipy.optimize import minimize
 
+# Ensure directories exist
+base_output_dir = "MTMath/MinimizationProblem"
+os.makedirs(base_output_dir, exist_ok=True)
 
-# Define the function to be animated
-def func(x, t):
-    return 1 - x / 7 + 0.5 * np.sin(2 * x) + np.sin(4 * x + t) * (1 + np.sin(t + 2)) / 2
-
-
-# Set up the figure and axis
-fig, ax = plt.subplots()
+# Define domain
 x = np.linspace(0, 10, 1000)
-(line,) = ax.plot(x, func(x, 0))
-(point,) = ax.plot([], [], "ro")  # point to mark the minimum
-
-# Set the axis limits
-ax.set_xlim(0, 10)
-ax.set_ylim(-3, 3)
-
-# Initialize the starting point for the minimizer
-previous_min_x = 9
 
 
-# Function to capture specific frames
-def save_frames():
-    global previous_min_x
-    # List of specific t values for the frames
-    t_values = [0, 1, 1]  # Adjust these as needed to capture the desired moments
-    for i, t in enumerate(t_values):
-        y = func(x, t)
-        ax.clear()  # Clear previous plot
-        ax.plot(x, y, label=f"Time = {t:.2f}")  # Plot curve for current t
+# Define given functions
+def func(x, t):
+    # Function that will be plotted and minimized at time t
+    return -x / 7 + 0.5 * np.sin(2 * x) + np.sin(4 * x + t) * (1 + np.sin(t + 2)) / 2
 
-        # Find and plot the minimum
-        if i == 1:
-            # Keep the same x with updated y-value
-            min_x = previous_min_x
-        else:
-            result = minimize(
-                lambda x0: func(x0, t), x0=previous_min_x, bounds=[(0, 10)]
-            )
-            min_x = result.x
 
-        min_y = func(min_x, t)
-        ax.plot(min_x, min_y, "ro")  # Plot the minimum point
+def simple(x, t):
+    return -x / 7 + np.sin(x + t)
 
-        # Set the axis limits
-        ax.set_xlim(0, 10)
-        ax.set_ylim(-3, 3)
 
-        # Save each frame as an image
-        plt.savefig(f"Math/MinimizationProblem/frame_{i}.png", dpi=150)
+def make_animation(
+    f,
+    t_start,
+    t_end,
+    output_name,
+    frames=400,
+    initial_guess=6.0,
+    label=r"$f(x,t)$",
+):
+    """
+    Create an animation for the given function f(x,t), from t_start to t_end.
+    Save as mp4 in the given output_name.
+    frames: number of frames in the animation.
+    initial_guess: initial guess for the minimizer.
+    """
+    # Create figure and axis for this animation
+    fig, ax = plt.subplots()
+    (line,) = ax.plot(x, f(x, t_start), label=label)
+    (point,) = ax.plot([], [], "ro", label="")
+    ax.set_xlim(0, 10)
+    ax.set_ylim(-3, 1.7)
+    ax.set_xlabel(r"$x$")
+    ax.set_ylabel(r"$f(x,t)$")
+    ax.legend()
 
-        # Update previous minimum
+    # Local variable to store the previous minimum x
+    previous_min_x = initial_guess
+
+    # Define the update function for FuncAnimation
+    def update(t):
+        nonlocal previous_min_x
+        y = f(x, t)
+        line.set_ydata(y)
+        # Minimize to find local min
+        res = minimize(lambda x0: f(x0, t), x0=previous_min_x, bounds=[(0, 10)])
+        min_x = res.x
+        min_y = f(min_x, t)
+        point.set_data(min_x, min_y)
         previous_min_x = min_x
+        # Avoid boundary locking
+        if min_x < 1:
+            previous_min_x = 9.0
+        return line, point
+
+    # Create animation
+    t_values = np.linspace(t_start, t_end, frames)
+    ani = animation.FuncAnimation(fig, update, frames=t_values, interval=30, blit=True)
+
+    # Save as MP4 using FFMpegWriter
+    Writer = animation.FFMpegWriter
+    writer = Writer(fps=30, codec="h264", bitrate=-1)
+    output_path = os.path.join(base_output_dir, output_name)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    ani.save(output_path, writer=writer, dpi=150)
+    plt.close(fig)  # Close figure after saving
 
 
-# Define the update function for the animation
-def update(t):
-    global previous_min_x
+# ---------------------------
+# Create the three videos
+# ---------------------------
 
-    y = func(x, t)
-    line.set_ydata(y)
-
-    # Find the local minimum starting from the previous minimum
-    result = minimize(lambda x0: func(x0, t), x0=previous_min_x, bounds=[(0, 10)])
-    min_x = result.x
-    min_y = func(min_x, t)
-
-    # Update the point
-    point.set_data(min_x, min_y)
-
-    # Update the previous minimum
-    previous_min_x = min_x
-
-    # Reset the point
-    if min_x < 1:
-        previous_min_x = 9
-
-    return line, point
-
-
-# Increase the frames and reduce the interval for smoother and faster animation
-ani = animation.FuncAnimation(
-    fig, update, frames=np.linspace(0, 6 * np.pi, 400), interval=30, blit=True
+# 1. Forward time using func
+make_animation(
+    f=func,
+    t_start=0,
+    t_end=6 * np.pi,
+    output_name="animated_wave_with_minimum_forward.mp4",
+    frames=400,
+    initial_guess=6.0,
+    label=r"$f(x,t) = -x/7+\sin(2x)/2+\sin(4x+t)(1+\sin(t+2))/2$",
 )
 
-# Save the animation as a high-resolution GIF with a high frame rate and transparency
-fName = "Math/MinimizationProblem/animated_wave_with_minimum_following.gif"
-ani.save(fName, writer="pillow", fps=600, dpi=150)
+# 2. Backward time using func
+make_animation(
+    f=func,
+    t_start=6 * np.pi,
+    t_end=0,
+    output_name="animated_wave_with_minimum_backward.mp4",
+    frames=400,
+    initial_guess=6.0,
+    label=r"$f(x,t) = -x/7+\sin(2x)/2+\sin(4x+t)(1+\sin(t+2))/2$",
+)
 
-# Display the animation
-plt.show()
+# 3. Forward time using simple
+make_animation(
+    f=simple,
+    t_start=0,
+    t_end=6 * np.pi,
+    output_name="animated_wave_with_minimum_simple.mp4",
+    frames=400,
+    initial_guess=6.0,
+    label=r"$g(x,t) = -x/7+sin(x+t)$",
+)

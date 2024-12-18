@@ -52,8 +52,13 @@ def phi_d(c11, c22, c12, beta):
     return beta * psi1(_I1, _I2, _I3) + psi2(_I1, _I2, _I3)
 
 
-def phi_v(detC, K, noise):
+def log_phi_v(detC, K, noise):
     return K * (detC * noise - log(detC * noise))
+
+
+def phi_v(detC, K, noise):
+    vol = detC * noise
+    return K * (vol - 0.02 * (vol - 1) / vol)
 
 
 def polynomialEnergy(c11, c22, c12, beta, K, noise):

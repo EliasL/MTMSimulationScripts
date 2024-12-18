@@ -32,7 +32,7 @@ def get_threads_from_command(command):
     return int(command.split(f" {key}=")[1].split(" ")[0])
 
 
-def queue_local_jobs(commands, job_name):
+def queue_local_jobs(commands, job_name, useQueueSystem=True):
     base_path = "~/simulation/MTS2D/"
     # Expand the user's home directory and check if the path exists
     base_path = os.path.expanduser(base_path)
@@ -59,12 +59,38 @@ def queue_local_jobs(commands, job_name):
         with open(batch_script_path, "w") as f:
             f.write(batch_script)
 
-        # Run the batch script locally using subprocess
-        result = subprocess.run(["sbatch", batch_script_path])
+        if useQueueSystem:
+            # Run the batch script locally using subprocess
+            result = subprocess.run(["sbatch", batch_script_path])
+            if result.returncode != 0:
+                print(f"Batch script execution failed: {result.stderr}")
+                return None
+        else:
+            print("Warning! Running processes outside of the SLURM queue system!")
+            print("Make sure you have the permission of Sylvain.")
+            run_command_outside_of_queue(command)
 
-        if result.returncode != 0:
-            print(f"Batch script execution failed: {result.stderr}")
-            return None
+
+def run_command_outside_of_queue(command):
+    # Does not work
+    # Expand the '~' to the absolute path
+    command = command.strip().split(" ")
+    path = command[1]
+    assert ".py" in path, f"This is maybe not the path? {path}"
+    script_path = os.path.expanduser(path)
+    # Define the command as a list
+    command[1] = script_path
+    try:
+        process = subprocess.Popen(
+            command,
+            stderr=subprocess.PIPE,
+        )
+        print(f"Process started with PID: {process.pid}")
+        return process
+    except FileNotFoundError as e:
+        print(f"Executable not found: {e}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 
 def install_editable_package():
@@ -88,6 +114,6 @@ if __name__ == "__main__":
         kwargs_string = "".join(sys.argv[1:])
         kwargs_string = kwargs_string.replace("\u203d", '"')
         kwargs = ast.literal_eval(kwargs_string)
-        queue_local_jobs(**kwargs)
+        queue_local_jobs(useQueueSystem=True, **kwargs)
     else:
         raise ValueError(f"No args {sys.argv}.")

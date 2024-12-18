@@ -371,8 +371,18 @@ class ConfigGenerator:
         return matching_keys, non_matching_keys
 
 
-def get_custom_configs(scenario):
-    if scenario == "periodicBoundaryTest":
+def get_custom_configs(scenario="large"):
+    if scenario == "large":
+        return SimulationConfig(
+            rows=100,
+            cols=100,
+            startLoad=0.15,
+            nrThreads=5,
+            loadIncrement=1e-5,
+            maxLoad=1.0,
+        )
+
+    elif scenario == "periodicBoundaryTest":
         return SimulationConfig(
             rows=4,
             cols=4,
@@ -383,25 +393,25 @@ def get_custom_configs(scenario):
             scenario="periodicBoundaryTest",
         )
 
-    if scenario == "singleDislocation":
+    elif scenario == "singleDislocation":
         return SimulationConfig(
             rows=6,
             cols=6,
             startLoad=0.0,
             nrThreads=6,
-            loadIncrement=0.00001,
+            loadIncrement=1e-5,
             maxLoad=0.001,
             scenario="singleDislocation",
         )
 
-    if scenario == "longSim":
+    elif scenario == "longSim":
         return SimulationConfig(
             rows=60,
             cols=60,
             startLoad=0.15,
             nrThreads=4,
-            loadIncrement=0.00001,
-            maxLoad=10,
+            loadIncrement=1e-5,
+            maxLoad=10.0,
             # scenario="simpleShearPeriodicBoundary")
             scenario="cyclicSimpleShear",
         )
@@ -414,6 +424,7 @@ if __name__ == "__main__":
     config = SimulationConfig(
         loadIncrement=0.01, minimizer="LBFGS", nrThreads=3, LBFGSEpsg=1e-5
     )
+    # config = get_custom_configs()
     if len(sys.argv) >= 2:
         scenario = sys.argv[1]
         config.scenario = scenario

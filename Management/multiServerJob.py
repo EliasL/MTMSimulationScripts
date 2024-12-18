@@ -279,7 +279,7 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
 
 def allPlasticEventsJob():
     configs, labels = ConfigGenerator.generate(
-        seed=[41],
+        seed=[42],
         group_by_seeds=False,
         rows=100,
         cols=100,
@@ -300,7 +300,11 @@ def allPlasticEventsJob():
     return configs, labels
 
 
-def propperJob(nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None):
+def propperJob(
+    nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None, minimizer=None
+):
+    if minimizer is None:
+        minimizer = ["LBFGS", "CG", "FIRE"]
     if seeds is None:
         seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(
@@ -310,7 +314,7 @@ def propperJob(nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None)
         cols=size,
         startLoad=0.15,
         nrThreads=nrThreads,
-        minimizer=["LBFGS", "CG", "FIRE"],
+        minimizer=minimizer,
         loadIncrement=1e-5,
         LBFGSEpsg=1e-5,
         CGEpsg=1e-5,
@@ -321,16 +325,16 @@ def propperJob(nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None)
     return configs, labels
 
 
-def propperJob1():
-    return propperJob(3, 40, 60)
+def propperJob1(**kwargs):
+    return propperJob(3, 40, 60, **kwargs)
 
 
-def propperJob2():
-    return propperJob(3, 40, 100)
+def propperJob2(**kwargs):
+    return propperJob(6, 20, 100, **kwargs)
 
 
-def propperJob3():
-    return propperJob(8, 20, 200)
+def propperJob3(**kwargs):
+    return propperJob(56, 1, 200, minimizer=["LBFGS", "CG"], **kwargs)
 
 
 def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
@@ -345,9 +349,13 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         nrThreads=nrThreads,
         minimizer="FIRE",
         loadIncrement=1e-5,
-        eps=1e-8,
+        eps=1e-5,
         # LBFGSEpsg=1e-5,
-        maxLoad=1 + np.arange(10) * 1e-11,
+        maxLoad=0.16 + np.arange(1, 10) * 1e-11,
         scenario="simpleShear",
     )
     return configs, labels
+
+
+def smallJob(**kwargs):
+    return basicJob(nrThreads=1, nrSeeds=1, **kwargs)

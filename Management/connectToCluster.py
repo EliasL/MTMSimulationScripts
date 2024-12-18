@@ -62,7 +62,6 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         "bootstrapData",
         "_gael_2D",
         "profiling",
-        "Debugging",
         "MTMath",
     ]
 

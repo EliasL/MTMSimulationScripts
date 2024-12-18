@@ -1,6 +1,6 @@
 from Management import parameterExploring as pe
+from Management.connectToCluster import uploadProject
 from Management.runOnCluster import (
-    uploadProject,
     run_remote_script,
     queue_remote_job,
     run_remote_command,
@@ -11,6 +11,7 @@ from runSimulations import run_many_locally, run_locally
 from Management.connectToCluster import Servers
 from Management.multiServerJob import (
     bigJob,
+    smallJob,
     confToCommand,
     basicJob,
     allPlasticEventsJob,
@@ -25,6 +26,7 @@ from Management.multiServerJob import (
     get_server_short_name,
 )
 from Management.clusterStatus import get_all_server_info, display_server_info
+from time import sleep
 
 
 def benchmark():
@@ -95,7 +97,7 @@ def runOnServer():
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
     configs, labels = allPlasticEventsJob()
-    # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.1,1e-05,1.0PBCt3initialGuessNoise1e-06LBFGSEpsg1e-08CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06energyDropThreshold1e-10s41/dumps/dump_l0.3.mtsb"
+    dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.03PBCt8initialGuessNoise1e-06LBFGSEpsg1e-08energyDropThreshold1e-10s41/dumps//dump_l0.3.mtsb"
     run_many_locally(configs)  # , dump=dump)
 
 
@@ -108,15 +110,18 @@ def startJobs():
     nrSeeds = 40
     print("Building on all servers... ")
 
-    build_on_all_servers()
-    for job in [propperJob3]:
+    build_on_all_servers(uploadOnly=False)
+    for job in [smallJob]:
         configs, labels = job()
         servers_confs = distributeConfigs(configs, configs[0].nrThreads)
         print("Starting jobs...")
-        # pre_command = "python3 main.py start_jobs"
         for server, configs in servers_confs.items():
-            queueJobs(server, configs)
+            queueJobs(server, configs, job_name="opt")
+            pass
     print("Done!")
+    # sleep(1)
+    # j = JobManager()
+    # j.findAndShowSlurmJobs()
     # j.showProcesses()
 
 
@@ -126,7 +131,14 @@ def stopJobs():
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
     # j.cancel_jobs_on_server(Servers.descartes, 80165)
     # j.cancel_jobs_on_server(Servers.schwartz, 466525)
-    j.cancelAllJobs(force=True)
+    j.cancel_jobs_on_server(
+        Servers.poincare,
+        [
+            654061,
+            654070,
+        ],
+    )
+    # j.cancelAllJobs(force=True)
     # j.showProcesses()
 
 
@@ -142,6 +154,5 @@ def stopJobs():
 runOnLocalMachine()
 # startJobs()
 # plotBigJob()
-# plotPropperJob()
 # threadTest()
 # benchmark()

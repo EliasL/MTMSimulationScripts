@@ -163,26 +163,37 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
             return None
 
 
-def build_on_server(server):
+def build_on_server(server, uploadOnly=False):
     shortName = get_server_short_name(server)
     print(f"Uploading to {shortName}...")
     uploadProject(server)
+
+    if uploadOnly:
+        print(f"Upload only to {shortName} completed.")
+        return  # Exit the function after uploading
+
     project_path = "~/simulation/MTS2D/build-release/"
-    build_command = f"mkdir -p {project_path} && cd {project_path} && cmake -DCMAKE_BUILD_TYPE=Release .. && make"
+    build_command = (
+        f"mkdir -p {project_path} && "
+        f"cd {project_path} && "
+        f"cmake -DCMAKE_BUILD_TYPE=Release .. && "
+        f"make"
+    )
 
     print(f"Building on {shortName}...")
     run_remote_command(server, build_command, hide=True)
     print(f"{shortName} is ready!")
 
 
-def build_on_all_servers():
+def build_on_all_servers(uploadOnly=False):
     # This function should start build jobs on all servers, and then wait until
     # a build fails or all builds are completed
     servers = Servers.servers
     with ThreadPoolExecutor(max_workers=len(servers)) as executor:
         # Future to server mapping
         future_to_server = {
-            executor.submit(build_on_server, server): server for server in servers
+            executor.submit(build_on_server, server, uploadOnly): server
+            for server in servers
         }
 
         for future in as_completed(future_to_server):

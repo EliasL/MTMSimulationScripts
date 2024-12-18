@@ -2,6 +2,7 @@ from Management.multiServerJob import (
     bigJob,
     confToCommand,
     basicJob,
+    smallJob,
     propperJob,
     propperJob1,
     propperJob2,
@@ -33,6 +34,13 @@ def plotPropperJob():
         # show=True,
         # xlim=xlim,
     )
+
+
+def plotPropperJob3():
+    configs, labels = propperJob3(group_by_seeds=True)
+    # xlim = [0.25, 0.55]
+    # plotLog(configs, labels=labels)
+    plotAverage(configs, labels)
 
 
 # MDPI Article plot
@@ -86,6 +94,7 @@ def plotThreadTest():
     nrSeeds = 1
     size = 100
     configs, labels = basicJob(nrThreads, nrSeeds, size, group_by_seeds=True)
+    configs, labels = smallJob(group_by_seeds=True)
     # plotAverage(configs, labels)
     plotTime(configs, labels)
 
@@ -99,7 +108,7 @@ def debugPlotAll():
 
 if __name__ == "__main__":
     # plotSampleRuns()
-    # plotPropperJob()
+    # plotPropperJob3()
     # debugPlotAll()
-    # energyField()
-    plotThreadTest()
+    energyField()
+    # plotThreadTest()

@@ -8,6 +8,7 @@ import random
 from datetime import timedelta
 import re
 import threading
+from paramiko.ssh_exception import SSHException, NoValidConnectionsError
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .clusterStatus import Servers, get_server_short_name
@@ -358,19 +359,111 @@ class JobManager:
             print(tabulate(table, headers=headers, tablefmt="grid"))
 
     def cancel_jobs_on_server(self, server, job_ids):
-        """Function to cancel a job on a specific server."""
+        """
+        Cancel jobs on a specific server after verifying their existence using self.slurmJobs.
 
+        Parameters:
+            server (str): The server on which to cancel the jobs.
+            job_ids (str or list): A single job ID or a list of job IDs to cancel.
+        """
+
+        # Ensure job_ids is a list
         if not isinstance(job_ids, list):
             job_ids = [job_ids]
 
+        # Check if self.slurmJobs is available
+        if self.slurmJobs is None:
+            print("WARNING: self.slurmJobs is None. Job existence will not be checked.")
+
         try:
-            ssh = connectToCluster(server, False)
+            # Establish SSH connection
+            ssh_client = connectToCluster(server, False)
+
             for job_id in job_ids:
-                command = f"scancel {job_id}"
-                ssh.exec_command(command)
-                print(f"Cancelled job {job_id} on {server}")
+                # Step 1: Check if the job exists using self.slurmJobs
+                job_exists = False
+                if self.slurmJobs is not None:
+                    for job in self.slurmJobs:
+                        if job["server"] == server and str(job["job_id"]) == str(
+                            job_id
+                        ):
+                            job_exists = True
+                            break
+                    if not job_exists:
+                        print(
+                            f"Job {job_id} does not exist on {server}. Skipping cancellation."
+                        )
+                        continue  # Skip to the next job_id
+                else:
+                    # If self.slurmJobs is None, skip existence check
+                    pass
+
+                # Step 2: Attempt to cancel the job
+                cancel_command = f"scancel {job_id}"
+                try:
+                    stdin, stdout, stderr = ssh_client.exec_command(cancel_command)
+                    cancel_error = stderr.read().decode().strip()
+
+                    if cancel_error:
+                        print(
+                            f"Error canceling job {job_id} on {server}: {cancel_error}"
+                        )
+                        continue  # Skip verification if cancellation failed
+
+                    print(f"Cancellation command sent for job {job_id} on {server}.")
+                except SSHException as ssh_exc:
+                    print(
+                        f"SSH error while canceling job {job_id} on {server}: {ssh_exc}"
+                    )
+                    continue
+                except Exception as exc:
+                    print(
+                        f"Unexpected error while canceling job {job_id} on {server}: {exc}"
+                    )
+                    continue  # Depending on your needs, you might want to handle this differently
+
+                # Step 3: Verify cancellation using squeue
+                check_command = f"squeue -j {job_id} -h"
+                try:
+                    stdin, stdout, stderr = ssh_client.exec_command(check_command)
+                    verify_output = stdout.read().decode().strip()
+                    verify_error = stderr.read().decode().strip()
+
+                    if verify_error:
+                        print(
+                            f"Error verifying cancellation for job {job_id} on {server}: {verify_error}"
+                        )
+                        continue  # Proceed to the next job_id
+
+                    if not verify_output:
+                        print(f"Successfully canceled job {job_id} on {server}.")
+                    else:
+                        print(
+                            f"Failed to cancel job {job_id} on {server}. It may still be running."
+                        )
+                except SSHException as ssh_exc:
+                    print(
+                        f"SSH error while verifying cancellation for job {job_id} on {server}: {ssh_exc}"
+                    )
+                    continue
+                except Exception as exc:
+                    print(
+                        f"Unexpected error while verifying cancellation for job {job_id} on {server}: {exc}"
+                    )
+                    continue
+
+        except (SSHException, NoValidConnectionsError) as conn_exc:
+            print(f"Error connecting to server {server}: {conn_exc}")
         except Exception as exc:
-            print(f"Error canceling job {job_id} on {server}: {exc}")
+            print(
+                f"An unexpected error occurred while connecting to server {server}: {exc}"
+            )
+        finally:
+            # Close SSH connection if it's open
+            try:
+                ssh_client.close()
+            except (AttributeError, SSHException) as close_exc:
+                print(f"Error closing SSH connection to {server}: {close_exc}")
 
     def cancelAllJobs(self, force=False, on=None):
         """Cancel all Slurm jobs listed in self.slurmJobs."""

@@ -9,6 +9,7 @@ import os
 import matplotlib.patches as patches
 import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
+from time import time
 
 # Set larger sizes for all elements
 scale = 2
@@ -125,10 +126,13 @@ def add_solutions(results, f_func, df_func, tol=1e-17):
 
 def run_optimizations(x0s, f_func, df_func, tol=1e-5):
     # Prepare data structures to store results
-    # Define the optimization methods
     methods = ["FIRE", "CG", "L-BFGS"]
 
-    # Initialize the results dictionary with the same structure for each method
+    # Note that comparing the time between scipy methods (CG, L-BFGS) and
+    # other libraries (FIRE) may not be fair, as scipy uses optimized c code
+    # where as the other libraries might not. Depending on why you compare the
+    # time spent, it might not be fair to compare them directly.
+
     results = {
         method: {
             "paths": [],
@@ -140,11 +144,11 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             "f-eval_energy": [],
             "min_energy": [],
             "min_pos": [],
+            "time": [],
         }
         for method in methods
     }
 
-    # Define the settings for the optimization algorithms
     optimizers = {
         "CG": {
             "method": "CG",
@@ -156,48 +160,48 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
         },
     }
 
-    for x0 in x0s:
-        # Loop over the optimizers that share similar structure
-        for opt_name, opt_settings in optimizers.items():
-            f_eval_points = []  # Track function evaluations
-            path_energies = []  # Track energy at each point
-            fEval_energies = []  # Track energy at each point
-            fEval_stress = []  # Track stress at each point
+    def f(x, f_func):
+        return f_func(x[0], x[1])
 
-            # Wrapper for the objective function to track function evaluations
+    def df(x, df_func):
+        return np.array([df_func[0](x[0], x[1]), df_func[1](x[0], x[1])])
+
+    # Run the optimization for each initial guess
+    for x0 in x0s:
+        # For CG and L-BFGS
+        for opt_name, opt_settings in optimizers.items():
+            f_eval_points = []
+            path_energies = []
+            fEval_energies = []
+            fEval_stress = []
+
             def f_wrapper(x):
                 f_eval_points.append(x.copy())
-                (
-                    fEval_energies.append(f_func(x[0], x[1])),
-                )  # Calculate and store energy
-                (
-                    fEval_stress.append(
-                        [
-                            df_func[0](x[0], x[1]),
-                            df_func[1](x[0], x[1]),
-                        ]
-                    ),
-                )  # Calculate and store energy
+                fEval_energies.append(f_func(x[0], x[1]))
+                fEval_stress.append([df_func[0](x[0], x[1]), df_func[1](x[0], x[1])])
                 return f_func(x[0], x[1])
 
-            path = []  # Track optimization path
+            path = []
 
-            # Perform the optimization using minimize
+            # Callback function to track per-iteration time
+            # We'll measure time differences between callbacks
+            def callback_func(xk):
+                path.append(xk.copy())
+                path_energies.append(f_func(xk[0], xk[1]))
+
+            start_time = time()
             result = minimize(
                 lambda x: f_wrapper(x),
                 x0,
                 method=opt_settings["method"].replace("L-BFGS", "L-BFGS-B"),
                 jac=lambda x: df(x, df_func),
                 options=opt_settings["options"],
-                callback=lambda xk: (
-                    path.append(xk.copy()),  # Track the path
-                    path_energies.append(
-                        f_func(xk[0], xk[1])
-                    ),  # Calculate and store energy
-                ),
+                callback=callback_func,
             )
+            end_time = time()
 
-            # Store results for this optimizer
+            total_time = end_time - start_time
+
             results[opt_name]["paths"].append(np.array([x0] + path))
             results[opt_name]["feval_paths"].append(np.array([x0] + f_eval_points))
             results[opt_name]["nit"].append(result.nit)
@@ -205,8 +209,10 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             results[opt_name]["path_energy"].append(np.array(path_energies))
             results[opt_name]["f-eval_energy"].append(np.array(fEval_energies))
             results[opt_name]["f-eval_stress"].append(np.array(fEval_stress))
+            results[opt_name]["time"].append(total_time)
 
-        # FIRE optimization requires separate handling
+        # FIRE optimization
+        start_time = time()
         result_fire = optimize_fire2(
             x0,
             lambda x, params=None: f(x, f_func),
@@ -215,16 +221,16 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
             atol=tol,
             dt=0.1,
         )
-        x_opt, f_opt, nit, path = result_fire
+        end_time = time()
 
+        x_opt, f_opt, nit, path = result_fire
         energies_fire = [f_func(p[0], p[1]) for p in path]
-        stresses_fire = [
-            [
-                df_func[0](p[0], p[1]),
-                df_func[1](p[0], p[1]),
-            ]
-            for p in path
-        ]
+        stresses_fire = [[df_func[0](p[0], p[1]), df_func[1](p[0], p[1])] for p in path]
+
+        # For FIRE, we don't have a built-in callback, so we only have total time.
+        # If you modify your FIRE optimizer to return intermediate step times,
+        # you could record them similarly.
+        total_time = end_time - start_time
 
         results["FIRE"]["paths"].append(np.array(path))
         results["FIRE"]["feval_paths"].append(np.array(path))
@@ -233,6 +239,9 @@ def run_optimizations(x0s, f_func, df_func, tol=1e-5):
         results["FIRE"]["path_energy"].append(np.array(energies_fire))
         results["FIRE"]["f-eval_energy"].append(np.array(energies_fire))
         results["FIRE"]["f-eval_stress"].append(np.array(stresses_fire))
+        results["FIRE"]["time"].append(total_time)
+
+    # Assuming add_solutions is defined elsewhere and unchanged
     add_solutions(results, f_func, df_func)
     return results
 
@@ -594,7 +603,7 @@ def plot_stress(
 
 def summarize_end_points(results):
     methods = results.keys()
-    table = [["Method", "Nr it.", "Nr f-eval", "Minimum 1", "Minimum 2"]]
+    table = [["Method", "Nr it.", "Nr f-eval", "Time", "Minimum 1", "Minimum 2"]]
 
     for method in methods:
         end_points = [
@@ -609,6 +618,7 @@ def summarize_end_points(results):
                 method,
                 total_nit,
                 total_nfev,
+                results[method]["time"][0],
                 counter.most_common(2)[0][1],
                 counter.most_common(2)[1][1] if len(counter) > 1 else 0,
             ]
