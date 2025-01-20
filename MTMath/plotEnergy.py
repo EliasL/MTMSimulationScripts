@@ -9,7 +9,7 @@ from scipy.stats import gaussian_kde
 from matplotlib.colors import LogNorm
 
 
-def OneDPotential():
+def oneDPotential():
     # Load the potential and its derivatives
     phi, divPhi, divDivPhi = numericContiPotential()
 
@@ -34,13 +34,56 @@ def OneDPotential():
     # You may need to adjust these arguments to match the correct inputs for phi
     potential_values = phi(C_00, C_11, C_01, 1.0, 1.0, 1.0)
 
-    fig, ax = plt.subplots(figsize=(12, 4))
+    fig, ax = plt.subplots(figsize=(7, 4))
     # Plot the extended vectors
     ax.plot(shear, potential_values)
 
     ax.set_xlabel(r"$\gamma$", fontsize=34)
     ax.set_ylabel(r"$\Phi$", fontsize=34)
 
+    plt.tight_layout()
+
+    plt.show()
+
+
+def oneDPotentialDissordered():
+    # Load the potential and its derivatives
+    phi, divPhi, divDivPhi = numericContiPotential()
+
+    # Define size and variables
+    distance = (-1.7, 1.7)
+    size = 100 * (distance[1] - distance[0])
+    shear = np.linspace(distance[0], distance[1], int(size))
+
+    # Create the deformation gradient tensor F for each value of shear
+    F = np.array([[[1, s % 1], [0, 1]] for s in shear])
+
+    # Compute the right Cauchy-Green tensor C as F^T * F for each deformation gradient
+    # Use matrix multiplication (@) for F.T @ F
+    C = np.array([f.T @ f for f in F])
+
+    # Extract the components from C for input into the potential function
+    C_00 = C[:, 0, 0]  # First row, first column (C[0, 0])
+    C_11 = C[:, 1, 1]  # Second row, second column (C[1, 1])
+    C_01 = C[:, 0, 1]  # First row, second column (C[1, 0])
+
+    # Pass the computed components to the phi function (assume constant extra arguments)
+    # You may need to adjust these arguments to match the correct inputs for phi
+    potential_values = phi(C_00, C_11, C_01, 1.0, 1.0, 1.0)
+
+    # Add sinusoidal waves to the potential
+    sinusoidal_wave = (
+        0.1 * np.sin(10 * shear) + 0.05 * np.sin(15 * shear) + 0.02 * np.sin(5 * shear)
+    )
+    potential_values += sinusoidal_wave
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    # Plot the extended vectors
+    ax.plot(shear, potential_values)
+
+    ax.set_xlabel(r"$\gamma$", fontsize=34)
+    ax.set_ylabel(r"$\Phi$", fontsize=34)
+    plt.tight_layout()
     plt.show()
 
 

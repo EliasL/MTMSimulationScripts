@@ -103,7 +103,7 @@ def distributeConfigs(configs, threads_per_seed=1):
         if not remaining_configs:
             return serverConfigDict
     raise RuntimeError(
-        f"Not enough cores to run simulations! Need {len(remaining_configs)*threads_per_seed} cores."
+        f"Not enough cores to run simulations! Need {len(remaining_configs) * threads_per_seed} cores."
     )
 
 
@@ -334,7 +334,7 @@ def propperJob2(**kwargs):
 
 
 def propperJob3(**kwargs):
-    return propperJob(56, 1, 200, minimizer=["LBFGS", "CG"], **kwargs)
+    return propperJob(56, 2, 200, minimizer=["LBFGS", "CG"], **kwargs)
 
 
 def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
@@ -346,12 +346,12 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         rows=size,
         cols=size,
         startLoad=0.15,
+        maxLoad=1.0,
         nrThreads=nrThreads,
-        minimizer="FIRE",
+        minimizer="LBFGS",
         loadIncrement=1e-5,
-        eps=1e-5,
-        # LBFGSEpsg=1e-5,
-        maxLoad=0.16 + np.arange(1, 10) * 1e-11,
+        # eps=1e-8,
+        LBFGSEpsg=1e-8,
         scenario="simpleShear",
     )
     return configs, labels

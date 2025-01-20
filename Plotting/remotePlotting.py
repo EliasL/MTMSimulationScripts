@@ -375,6 +375,14 @@ def synchronize_y_limits(ax_list):
             ax.set_ylim(min_y, max_y)
 
 
+def createVideoes():
+    if not paths:
+        # Download the folders associated with the configs from the server
+        paths = get_folders_from_servers(configs)
+
+    pass
+
+
 def createPlotsWithImages(configs, paths, metric, **kwargs):
     if not paths:
         # Download the folders associated with the configs from the server

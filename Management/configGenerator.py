@@ -2,6 +2,8 @@ from itertools import product
 import os
 from collections import OrderedDict
 from collections.abc import Iterable
+import subprocess
+from pathlib import Path
 
 
 class SimulationConfig:
@@ -137,11 +139,38 @@ class SimulationConfig:
         full_path = os.path.join(path, filename)  # Corrected line
         return full_path
 
+    @staticmethod
+    def get_git_tag_of_MTS2D():
+        # Determine the project path (three levels up + "MTS2D")
+        parent_folder = str(Path(__file__).resolve().parent.parent.parent)
+        project_path = os.path.join(parent_folder, "MTS2D")
+
+        # Get the current git tag, executing the command in the specified directory
+        try:
+            git_tag = (
+                subprocess.check_output(
+                    ["git", "describe", "--tags"],
+                    stderr=subprocess.DEVNULL,
+                    cwd=project_path,  # Specify the project directory
+                )
+                .strip()
+                .decode("utf-8")
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            git_tag = "unknown"  # Fallback if no git tag is found
+        return git_tag
+
     def write_to_file(self, path):
+        # Get the full path for the config file
         full_path = self.get_path_and_name(path)
+        git_tag = self.get_git_tag_of_MTS2D()
 
         with open(full_path, "w") as file:
+            # Add the git tag as a commented line at the top
+            file.write(f"# Version: {git_tag}\n")
             file.write("# Simulation Settings\n")
+
+            # Write the attributes and their values
             for attr, value in self.__dict__.items():
                 if attr != "NONAME":
                     file.write(f"{attr} = {value}\n")

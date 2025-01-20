@@ -39,16 +39,13 @@ def plotPropperJob():
 def plotPropperJob3():
     configs, labels = propperJob3(group_by_seeds=True)
     # xlim = [0.25, 0.55]
-    # plotLog(configs, labels=labels)
-    plotAverage(configs, labels)
+    plotLog(configs, labels=labels)
+    # plotAverage(configs, labels)
 
 
 # MDPI Article plot
 def energyField():
-    from MTMath.plotEnergy import (
-        generate_energy_grid,
-        make3DEnergyField,
-    )
+    from MTMath.plotEnergy import generate_energy_grid, make3DEnergyField
 
     g, x, y = generate_energy_grid(
         resolution=200,
@@ -59,6 +56,15 @@ def energyField():
     )
 
     make3DEnergyField(g, x, y, zScale=0.6, add_front_hole=True)
+
+
+def oneDPlot():
+    from MTMath.plotEnergy import oneDPotential, oneDPotentialDissordered
+
+    oneDPotential()
+
+
+# oneDPlot()
 
 
 # MDPI Article plot
@@ -108,7 +114,7 @@ def debugPlotAll():
 
 if __name__ == "__main__":
     # plotSampleRuns()
-    # plotPropperJob3()
+    plotPropperJob3()
     # debugPlotAll()
-    energyField()
+    # energyField()
     # plotThreadTest()

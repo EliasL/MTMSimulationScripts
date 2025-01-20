@@ -96,9 +96,10 @@ def runOnServer():
 
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
-    configs, labels = allPlasticEventsJob()
+    # configs, labels = allPlasticEventsJob()
+    configs, labels = basicJob(1, 1, size=100)
     dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.03PBCt8initialGuessNoise1e-06LBFGSEpsg1e-08energyDropThreshold1e-10s41/dumps//dump_l0.3.mtsb"
-    run_many_locally(configs)  # , dump=dump)
+    run_many_locally(configs, resume=True)  # , dump=dump)
 
 
 def startJobs():
@@ -111,7 +112,7 @@ def startJobs():
     print("Building on all servers... ")
 
     build_on_all_servers(uploadOnly=False)
-    for job in [smallJob]:
+    for job in [propperJob3]:
         configs, labels = job()
         servers_confs = distributeConfigs(configs, configs[0].nrThreads)
         print("Starting jobs...")

@@ -204,7 +204,7 @@ class SimulationManager:
         os.makedirs(build_dir_path)
         print(f"Recreated build directory: {build_dir_path}")
 
-    def build(self, autoClean=True):
+    def build(self, autoClean=False):
         print("Building...")
         error = run_command(self.build_command, taskName=self.taskName)
         if error != 0:
