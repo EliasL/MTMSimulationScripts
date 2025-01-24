@@ -178,7 +178,7 @@ class JobManager:
     def __init__(self) -> None:
         self.processes = []
         self.slurmJobs = []
-        self.user = "elundheim"
+        self.users = ["elundheim", "uog82gz"]
 
     # Function to be executed in each thread
 
@@ -225,33 +225,64 @@ class JobManager:
         ssh.close()  # Ensure the connection is closed after use
         return local_jobs
 
+    @staticmethod
+    def find_jobs_waiting_in_queue(ssh):
+        # Fetch all running jobs (once)
+        command = 'squeue -h -t PENDING -o "%A"'
+        stdin, stdout, stderr = ssh.exec_command(command)
+        stdout_lines = stdout.read().decode("utf-8").strip().split("\n")
+
+        # Extract job IDs as integers
+        pending_job_ids = [int(job_id) for job_id in stdout_lines if job_id.strip()]
+
+        # Define a helper function to estimate jobs ahead for a given job
+        def estimate_jobs_ahead(job_id):
+            return sum(
+                [pending_job_id < int(job_id) for pending_job_id in pending_job_ids]
+            )
+
+        # Return a function to calculate jobs ahead for any given job
+        return estimate_jobs_ahead
+
     def find_slurm_jobs_on_server(self, server):
         slurm_jobs = []
         ssh = connectToCluster(server, False)
+
         # Updated squeue command to include more details
-        command = f'squeue -u {self.user} -h -o "%A %T %C %l %L %M %D %R"'
-        stdin, stdout, stderr = ssh.exec_command(command)
-        stdout_lines = stdout.read().decode("utf-8").strip().split("\n")
-        # Filter out empty lines and split each line into fields
-        for line in stdout_lines:
-            if line.strip():
-                fields = line.strip().split()
-                job_details = {
-                    "server": server,
-                    "job_id": fields[0],
-                    "state": fields[1],
-                    "cpus": fields[2],
-                    "time_limit": fields[3],
-                    "time_left": fields[4],
-                    "elapsed": fields[5],
-                    "nodes": fields[6],
-                    "node_list": fields[7],
-                }
-                slurm_jobs.append(job_details)
-                with lock:
-                    global nr_jobs_found
-                    nr_jobs_found += 1
-                    update_progress(jobs=True)
+        # Function for finding job position in queue
+        estimate_jobs_ahead = None
+        for user in self.users:
+            command = f'squeue -u {user} -h -o "%A %T %C %l %L %M %D %R"'
+            stdin, stdout, stderr = ssh.exec_command(command)
+            stdout_lines = stdout.read().decode("utf-8").strip().split("\n")
+            # Filter out empty lines and split each line into fields
+            for line in stdout_lines:
+                if line.strip():
+                    fields = line.strip().split()
+                    job_details = {
+                        "server": server,
+                        "job_id": fields[0],
+                        "state": fields[1],
+                        "cpus": fields[2],
+                        "time_limit": fields[3],
+                        "time_left": fields[4],
+                        "elapsed": fields[5],
+                        "nodes": fields[6],
+                        "node_list": fields[7],
+                    }
+                    # Check if there is a point in getting the queue position
+                    if job_details["state"] == "PENDING":
+                        if estimate_jobs_ahead is None:
+                            # We only want to define this function once
+                            estimate_jobs_ahead = self.find_jobs_waiting_in_queue(ssh)
+                        job_details["wait_position"] = estimate_jobs_ahead(
+                            job_details["job_id"]
+                        )
+                    slurm_jobs.append(job_details)
+                    with lock:
+                        global nr_jobs_found
+                        nr_jobs_found += 1
+                        update_progress(jobs=True)
 
         return slurm_jobs
 
@@ -344,10 +375,13 @@ class JobManager:
                 "Node List",
             ]
             for job in self.slurmJobs:
+                state = job["state"]
+                if state == "PENDING":
+                    state += f" ({job['wait_position']})"
                 row = [
                     get_server_short_name(job["server"]),
                     job["job_id"],
-                    job["state"],
+                    state,
                     job["cpus"],
                     # job["time_limit"],
                     job["time_left"],

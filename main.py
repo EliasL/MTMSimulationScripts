@@ -87,19 +87,22 @@ def threadTest():
 
 
 def runOnServer():
-    server = Servers.poincare
-    uploadProject(server)
+    server = Servers.jeanZay
+    uploadProject(server, verbose=False, setup=False)
     # Choose script to run
-    remote_script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
-    run_remote_script(server, remote_script_path)
+    # remote_script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
+    # run_remote_script(server, remote_script_path)
+
+    configs, labels = smallJob(size=10)
+    # queueJobs(server, configs, job_name="opt")
 
 
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
-    # configs, labels = allPlasticEventsJob()
-    configs, labels = basicJob(1, 1, size=100)
-    dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.03PBCt8initialGuessNoise1e-06LBFGSEpsg1e-08energyDropThreshold1e-10s41/dumps//dump_l0.3.mtsb"
-    run_many_locally(configs, resume=True)  # , dump=dump)
+    configs, labels = allPlasticEventsJob()
+    # configs, labels = basicJob(20, 1, size=100)
+    dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
+    run_many_locally(configs, resume=True, dump=dump)
 
 
 def startJobs():

@@ -50,12 +50,12 @@ class SimulationConfig:
         self.falpha = 0.99
         self.dtStart = 0.01
         self.dtMax = self.dtStart * 3
-        self.dtMin = self.dtStart * 0.000001
+        self.dtMin = self.dtStart * 1e-10
         self.maxCompS = 0.01
         self.eps = 0.000
         self.epsRel = 0.0
         self.delta = 0.0
-        self.maxIt = 100000
+        self.maxIt = 200000
 
         # Logging settings
         # Saves the mesh if number of plastic events (npe) > number of
@@ -149,7 +149,7 @@ class SimulationConfig:
         try:
             git_tag = (
                 subprocess.check_output(
-                    ["git", "describe", "--tags"],
+                    ["git", "describe", "--tags", "--always"],
                     stderr=subprocess.DEVNULL,
                     cwd=project_path,  # Specify the project directory
                 )

@@ -501,7 +501,7 @@ def get_directory_size(ssh, path, free_space=False):
 
 def format_size(size, free_space):
     frac = f"{size}B/{free_space}B"
-    return f"{frac} ({round(calculate_fraction_percentage(frac),1)}%)"
+    return f"{frac} ({round(calculate_fraction_percentage(frac), 1)}%)"
 
 
 def parse_unit(unit):
@@ -631,4 +631,4 @@ def sum_folder_sizes_with_fraction(str_list):
     # Format the sum with the same denominator
 
     frac = f"{total_value:.0f}{total_unit}/{denominator}"
-    return f"{frac} ({round(calculate_fraction_percentage(frac),1)}%)"
+    return f"{frac} ({round(calculate_fraction_percentage(frac), 1)}%)"

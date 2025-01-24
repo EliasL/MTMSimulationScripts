@@ -205,6 +205,9 @@ class SimulationManager:
         print(f"Recreated build directory: {build_dir_path}")
 
     def build(self, autoClean=False):
+        moduleCommand = self.loadModulesCommand()
+        if moduleCommand:
+            self.build_command = moduleCommand + self.build_command
         print("Building...")
         error = run_command(self.build_command, taskName=self.taskName)
         if error != 0:
@@ -213,9 +216,9 @@ class SimulationManager:
                 self.clean()
                 error = run_command(self.build_command, taskName=self.taskName)
                 if error != 0:
-                    raise (Exception("Build error!"))
+                    raise (Exception(f"Build error! Error code {error}"))
             else:
-                raise (Exception("Build error!"))
+                raise (Exception(f"Build error! Error code {error}"))
         else:
             print("Build completed successfully.")
 
@@ -228,6 +231,17 @@ class SimulationManager:
 
         plotAll(self.conf_file, self.outputPath)
         pass
+
+    def loadModulesCommand(self):
+        # If cmake is not reccognized
+        if run_command("which cmake") == 0:
+            # No need to load modules
+            return None
+        else:
+            # Then we load the modules
+            command = "module load cmake llvm/15.0.6 && "
+            print("Loading modules: cmake")
+            return command
 
 
 # The reason why this is so complicated is that if we simply use .readline(), it
@@ -247,6 +261,7 @@ def run_command(command, echo=True, taskName=None):
         shell=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        # executable="/bin/bash",  # Use bash instead of default /bin/sh
         env=os.environ,
     )
 
@@ -294,6 +309,7 @@ def findOutputPath(
         "/media/elias/dataStorage/",
         "/data2/elundheim/",
         "/data/elundheim/",
+        "/lustre/fswork/projects/rech/bph/uog82gz/",  # JeanZay
         "/Users/elias/Work/PhD/Code/localData/",
         "/tmp/",
     ]

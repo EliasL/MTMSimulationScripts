@@ -2,10 +2,11 @@ import os
 import subprocess
 from connectToCluster import Servers
 from getpass import getpass
-import pexpect
+
+# import pexpect
 from urllib.request import urlretrieve
 from paramiko import SSHClient, AutoAddPolicy
-from scp import SCPClient
+# from scp import SCPClient
 
 
 def generate_ssh_key(key_path):
@@ -33,35 +34,35 @@ def copy_ssh_key_to_server(server, username, key_path, password):
         print(f"Failed to install SSH key on {server}: {e.stderr}")
 
 
-def change_password(server, username, old_password, new_password):
-    ssh_command = f"ssh {username}@{server}"
-    child = pexpect.spawn(ssh_command, timeout=3)  # Increase the timeout to 60 seconds
+# def change_password(server, username, old_password, new_password):
+#     ssh_command = f"ssh {username}@{server}"
+#     child = pexpect.spawn(ssh_command, timeout=3)  # Increase the timeout to 60 seconds
 
-    # Handle both the password prompt and any welcome messages or warnings
-    patterns = ["password:", "System restart required", f"{username}@.*\$ "]
-    index = child.expect(patterns)
-    if index == 0:
-        child.sendline(old_password)
-        # Now expect the shell prompt
-        child.expect(f"{username}@.*\$ ")
-    elif index == 1 or index == 2:
-        # Handle the system restart message or directly at the prompt
-        print("Handling special case or at prompt")
+#     # Handle both the password prompt and any welcome messages or warnings
+#     patterns = ["password:", "System restart required", f"{username}@.*\$ "]
+#     index = child.expect(patterns)
+#     if index == 0:
+#         child.sendline(old_password)
+#         # Now expect the shell prompt
+#         child.expect(f"{username}@.*\$ ")
+#     elif index == 1 or index == 2:
+#         # Handle the system restart message or directly at the prompt
+#         print("Handling special case or at prompt")
 
-    child.sendline("passwd")
-    child.expect([r"\(current\) UNIX password:\s*"])
-    child.sendline(old_password)
-    child.expect([r"Enter new UNIX password:\s*"])
-    child.sendline(new_password)
-    child.expect([r"Retype new UNIX password: "])
-    child.sendline(new_password)
-    child.expect(rf"{username}@[^\s:]*:.*\$ ")
-    print(f"Password changed on {server}")
-    child.close()
+#     child.sendline("passwd")
+#     child.expect([r"\(current\) UNIX password:\s*"])
+#     child.sendline(old_password)
+#     child.expect([r"Enter new UNIX password:\s*"])
+#     child.sendline(new_password)
+#     child.expect([r"Retype new UNIX password: "])
+#     child.sendline(new_password)
+#     child.expect(rf"{username}@[^\s:]*:.*\$ ")
+#     print(f"Password changed on {server}")
+#     child.close()
 
 
 def main():
-    username = "elundheim"  # Change this to your actual username on the servers
+    username = "uog82gz"  # Change this to your actual username on the servers
 
     key_path = os.path.expanduser("~/.ssh/id_rsa")  # Automatically get the SSH key path
     password = getpass(
@@ -72,7 +73,7 @@ def main():
     generate_ssh_key(key_path)
 
     # Loop through servers and copy the SSH key
-    for server in [Servers.mesopsl]:
+    for server in [Servers.jeanZay]:
         copy_ssh_key_to_server(server, username, key_path, password)
 
     # Prompt for the new password
@@ -106,16 +107,16 @@ def download_vscode_server(commit_id, local_path):
         print("File already downloaded.")
 
 
-def scp_transfer(local_path, remote_path, hostname, username, password=None):
-    ssh = SSHClient()
-    ssh.set_missing_host_key_policy(AutoAddPolicy())
-    ssh.connect(hostname, username=username, password=password)
-    scp = SCPClient(ssh.get_transport())
-    print(f"Transferring {local_path} to {hostname}:{remote_path}")
-    scp.put(local_path, remote_path)
-    scp.close()
-    ssh.close()
-    print("Transfer completed.")
+# def scp_transfer(local_path, remote_path, hostname, username, password=None):
+#     ssh = SSHClient()
+#     ssh.set_missing_host_key_policy(AutoAddPolicy())
+#     ssh.connect(hostname, username=username, password=password)
+#     scp = SCPClient(ssh.get_transport())
+#     print(f"Transferring {local_path} to {hostname}:{remote_path}")
+#     scp.put(local_path, remote_path)
+#     scp.close()
+#     ssh.close()
+#     print("Transfer completed.")
 
 
 if __name__ == "__main__":

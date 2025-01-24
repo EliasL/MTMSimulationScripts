@@ -1,4 +1,9 @@
-from Management.connectToCluster import uploadProject, Servers, get_server_short_name
+from Management.connectToCluster import (
+    uploadProject,
+    Servers,
+    get_server_short_name,
+    getServerUserName,
+)
 from Management.queueLocalJobs import get_batch_script
 from fabric import Connection
 import textwrap
@@ -8,12 +13,11 @@ from invoke import Responder
 import subprocess
 import os
 
-SERVER_USER = "elundheim"
-
 
 def run_remote_script(server_hostname, script_path, silent=False):
+    user = getServerUserName(server_hostname)
     # Establish the SSH connection
-    with Connection(host=server_hostname, user=SERVER_USER) as c:
+    with Connection(host=server_hostname, user=user) as c:
         # Execute the remote command (your Python script)
         # Set `hide=True` to suppress real-time output and capture it instead
         result = c.run(
@@ -58,6 +62,7 @@ class ProgressBarUpdater(Responder):
             else:
                 line = line.strip()
             # Initialize or update the progress bar based on the output
+            print(line)
             if self.total == -1:
                 self.total = int(line)
                 pbars[self.pbar_index] = tqdm(
@@ -79,7 +84,8 @@ class ProgressBarUpdater(Responder):
 def run_remote_script_with_progress(server, script_path, pbar_index, silent):
     """Run a remote script and process its output in real time, updating a tqdm progress bar."""
     updater = ProgressBarUpdater(server, pbar_index, silent)
-    with Connection(host=server, user=SERVER_USER) as c:
+    user = getServerUserName(server)
+    with Connection(host=server, user=user) as c:
         # Execute the script with unbuffered Python output and pseudo-terminal
         command = f"python3 -u {script_path}"
         c.run(command, watchers=[updater], hide=True)
@@ -92,7 +98,8 @@ def run_remote_script_with_progress(server, script_path, pbar_index, silent):
 
 def find_outpath_on_server(server_hostname):
     # Establish the SSH connection
-    with Connection(host=server_hostname, user=SERVER_USER) as c:
+    user = getServerUserName(server_hostname)
+    with Connection(host=server_hostname, user=user) as c:
         # Execute the remote command (your Python script)
         result = c.run(
             "python3 -u ~/simulation/SimulationScripts/Management/simulationManager.py",
@@ -104,7 +111,8 @@ def find_outpath_on_server(server_hostname):
 
 def run_remote_command(server_hostname, command, hide=False, silent=True):
     # Establish the SSH connection
-    with Connection(host=server_hostname, user=SERVER_USER) as c:
+    user = getServerUserName(server_hostname)
+    with Connection(host=server_hostname, user=user) as c:
         # Execute the remote command (your Python script)
         result = c.run(command, hide=hide, warn=True)
 
@@ -127,7 +135,8 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
     error_file = os.path.join(outPath, f"err-{job_name}.err")
 
     # Establish the SSH connection
-    with Connection(host=server_hostname, user=SERVER_USER) as c:
+    user = getServerUserName(server_hostname)
+    with Connection(host=server_hostname, user=user) as c:
         # Check if the simulation directory exists
         if c.run(f"test -d {base_path}", warn=True).failed:
             raise Exception(f"The directory {base_path} does not exist.")

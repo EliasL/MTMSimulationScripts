@@ -71,6 +71,7 @@ def find_data():
         "/data/elundheim",
         "/Volumes/data/",
         "/Users/elias/Work/PhD/Code/localData",
+        "/lustre/fswork/projects/rech/bph/uog82gz/",
     ]
     base_dir = first_existing_directory(preferred_directories)
     out_dir = os.path.join(base_dir, "MTS2D_output")

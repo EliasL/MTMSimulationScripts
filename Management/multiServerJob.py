@@ -279,19 +279,19 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
 
 def allPlasticEventsJob():
     configs, labels = ConfigGenerator.generate(
-        seed=[42],
+        seed=[0],
         group_by_seeds=False,
         rows=100,
         cols=100,
         startLoad=0.15,
-        initialGuessNoise=0.000001,
-        nrThreads=8,
+        # initialGuessNoise=0.000001,
+        nrThreads=20,
         minimizer=["LBFGS"],
         loadIncrement=1e-5,
         LBFGSEpsg=1e-8,
         # CGEpsg=1e-5,
-        # eps=1e-5,
-        maxLoad=1.03,
+        # eps=1e-8,
+        maxLoad=1.0,
         scenario="simpleShear",
         # Save all events
         # plasticityEventThreshold=1e-6,

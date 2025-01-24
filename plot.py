@@ -7,6 +7,7 @@ from Management.multiServerJob import (
     propperJob1,
     propperJob2,
     propperJob3,
+    allPlasticEventsJob,
     JobManager,
     get_server_short_name,
 )
@@ -19,6 +20,8 @@ from Plotting.remotePlotting import (
     plotLog,
     plotAverage,
     plotTime,
+    get_folders_from_servers,
+    createVideoes,
 )
 from tqdm import tqdm
 
@@ -39,7 +42,9 @@ def plotPropperJob():
 def plotPropperJob3():
     configs, labels = propperJob3(group_by_seeds=True)
     # xlim = [0.25, 0.55]
-    plotLog(configs, labels=labels)
+    # get_folders_from_servers(configs)
+    createVideoes(configs)
+    # plotLog(configs, labels=labels)
     # plotAverage(configs, labels)
 
 
@@ -114,7 +119,9 @@ def debugPlotAll():
 
 if __name__ == "__main__":
     # plotSampleRuns()
-    plotPropperJob3()
+    # plotPropperJob3()
     # debugPlotAll()
     # energyField()
     # plotThreadTest()
+    configs, labels = allPlasticEventsJob()
+    createVideoes(configs, all_images=True)

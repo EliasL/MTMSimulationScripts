@@ -107,11 +107,12 @@ def base_plot(
     macroDataRowIndex=None,
     equalAspect=True,
     remove_ticks=True,
-    dpi=400,
+    dpi=250,
     **kwargs,
 ):
-    width = 1920
-    height = 1080
+    quality = 1
+    width = 1920 * quality
+    height = 1080 * quality
     if not remove_ticks:
         height = 500
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
@@ -121,8 +122,14 @@ def base_plot(
     # Setting the axis limits
     if axis_limits:
         x_min, x_max, y_min, y_max = add_padding(axis_limits, 0.03)
-        ax.set_xlim(x_min, x_max)
-        ax.set_ylim(y_min, y_max)
+        if (
+            np.isfinite(x_min)
+            and np.isfinite(x_max)
+            and np.isfinite(y_min)
+            and np.isfinite(y_max)
+        ):
+            ax.set_xlim(x_min, x_max)
+            ax.set_ylim(y_min, y_max)
 
     if add_title:
         metaData = get_data_from_name(vtu_file)
@@ -167,10 +174,21 @@ def base_plot(
         # Create the table with invisible borders and gridlines
         table = ax.table(cellText=data, cellLoc="center", loc="top", edges="open")
 
+        table.set_fontsize(10)
+
         # Customize table appearance
-        table.scale(1, 1.5)  # Adjust table scale (e.g., to fit text size)
-        table.auto_set_font_size(False)
-        table.set_fontsize(8)
+        # plt.rcParams.update(
+        #     {
+        #         "font.size": scale * 10,  # Adjust font size
+        #         "axes.titlesize": scale * 16,  # Adjust axis title size
+        #         "axes.labelsize": scale * 14,  # Adjust axis label size
+        #         "xtick.labelsize": scale * 12,  # Adjust x-axis tick label size
+        #         "ytick.labelsize": scale * 12,  # Adjust y-axis tick label size
+        #         "lines.linewidth": scale * 2,  # Adjust line width
+        #         "axes.linewidth": scale * 1,  # Adjust axes line width
+        #         "lines.markersize": scale * 6,  # Adjust marker size
+        #     }
+        # )
 
         # Remove the cell edges to keep it invisible
         for cell in table.get_celld().values():
@@ -214,6 +232,7 @@ def save_and_close_plot(ax, path, transparent=False):
     # Save the plot with transparent background
     # dpi = 600
     fig = ax.get_figure()
+    fig.tight_layout()
     fig.savefig(
         path,
         bbox_inches="tight",

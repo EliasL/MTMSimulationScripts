@@ -14,6 +14,7 @@ from .makePlots import (
 )
 import matplotlib.pyplot as plt
 from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
+from Management.connectToCluster import getServerUserName
 from tqdm import tqdm
 import numpy as np
 
@@ -30,7 +31,7 @@ PLOTS_PATH = os.path.join(FOLDER_PATH, "plots")
 RAW_DATA_PATH = os.path.join(FOLDER_PATH, "data")
 
 
-def handleLocalPath(dataPath, configs):
+def handleLocalPath(dataPath, configs, returnCsv=True):
     local_data_folder_name = "MTS2D_output"
     names = [config.generate_name(False) for config in configs]
 
@@ -40,8 +41,11 @@ def handleLocalPath(dataPath, configs):
     for name in names:
         # Construct the path to the specific data folder for this configuration
         folder_path = os.path.join(base_path, name)
-        # Construct the path to the macroData.csv file within the data folder
-        file_path = os.path.join(folder_path, "macroData.csv")
+        if returnCsv:
+            # Construct the path to the macroData.csv file within the data folder
+            file_path = os.path.join(folder_path, "macroData.csv")
+        else:
+            file_path = folder_path
 
         # Check if the file exists
         if os.path.exists(file_path):
@@ -81,7 +85,7 @@ def get_csv_from_server(server, configs):
     )
     base_dir = stdout.read().strip().decode()
 
-    user = "elundheim"
+    user = getServerUserName(server)
     data_path = os.path.join(base_dir, user)
 
     remote_folder_name = "MTS2D_output"
@@ -223,6 +227,20 @@ def flatToStructure(config_groups, label_groups, found_paths=None):
     return paths, labels
 
 
+def flattenConfigList(listOfListsOfConfigs):
+    # Check if the first element is a list and contains instances of SimulationConfig
+    if isinstance(listOfListsOfConfigs[0], SimulationConfig):
+        # Here we don't need to flaten at all
+        return listOfListsOfConfigs
+    elif isinstance(listOfListsOfConfigs[0][0], SimulationConfig):
+        # Use list comprehension to flatten the list of lists
+        return [config for sublist in listOfListsOfConfigs for config in sublist]
+    else:
+        raise ValueError(
+            "The input must be a list or a list of lists of SimulationConfig instances."
+        )
+
+
 # This function searches all the servers for the given config file,
 # downloads the csv file associated with the config file to a temp file,
 # and returns the new local path to the csv
@@ -295,7 +313,8 @@ def get_csv_from_folder(folderPath):
     ]
 
 
-def get_folders_from_servers(configs):
+def get_folders_from_servers(configs, fix=True):
+    configs = flattenConfigList(configs)
     print("Searching servers for folders...")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
     pathsAndConfig = []
@@ -314,9 +333,15 @@ def get_folders_from_servers(configs):
             if c.name == configs[i].name:
                 new_paths[i] = p
                 continue
+    # Remove none objects not found
+    new_paths = [c for c in new_paths if c is not None]
 
-    fix_csv_files_in_data_folder(Path(new_paths[0]).parent)
-    return new_paths
+    if fix:
+        fix_csv_files_in_data_folder(Path(new_paths[0]).parent)
+
+    # We also check local files
+    localPaths = handleLocalPath(Servers.local_path_mac, configs, returnCsv=False)
+    return localPaths + new_paths
 
 
 def set_font_size(ax, axis_size=17, legend_size=17, tick_size=17, extra_size=0):
@@ -375,12 +400,14 @@ def synchronize_y_limits(ax_list):
             ax.set_ylim(min_y, max_y)
 
 
-def createVideoes():
+def createVideoes(configs, paths=None, **kwargs):
+    from .makeAnimations import makeAnimations
+
     if not paths:
         # Download the folders associated with the configs from the server
-        paths = get_folders_from_servers(configs)
-
-    pass
+        paths = get_folders_from_servers(configs, fix=False)
+    for path in paths:
+        makeAnimations(path, **kwargs)
 
 
 def createPlotsWithImages(configs, paths, metric, **kwargs):
@@ -679,7 +706,7 @@ def plotLog(config_groups, labels, **kwargs):
         # makeAverageComparisonPlot(paths, Y=Y, **kwargs)
         ## makeLogPlotComparison(paths, Y=Y, **kwargs)
         plotWholeRangePowerLaw(paths, Y, **kwargs)
-        # plotPreYieldPowerLaw(paths, Y, **kwargs)
+        plotPreYieldPowerLaw(paths, Y, **kwargs)
         # plotPostYieldPowerLaw(paths, Y, **kwargs)
         # plotWindowPowerLaw(paths, Y, **kwargs)
 

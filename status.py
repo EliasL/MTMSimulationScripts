@@ -95,7 +95,9 @@ if __name__ == "__main__":
         elif task == "disp_jobs":
             disp_jobs()
         else:
-            raise ValueError(f"No such task {task}.")
+            raise ValueError(
+                f"No such task {task}. The options are disp_<data/servers/jobs>"
+            )
     else:
         # disp_jobs()
         run_script()

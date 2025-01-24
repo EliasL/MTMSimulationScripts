@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Now we can import from Management
 from Management.simulationManager import findOutputPath
-from Management.configGenerator import SimulationConfig
+from Management.configGenerator import SimulationConfig, ConfigGenerator
 
 
 def plotAll(configFile, noVideos=False, noPlots=False, **kwargs):
@@ -82,6 +82,10 @@ if __name__ == "__main__":
             "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.1,1e-05,1.0PBCt3initialGuessNoise1e-06LBFGSEpsg1e-08CGEpsg1e-05eps1e-05plasticityEventThreshold1e-06energyDropThreshold1e-10s41/config.conf",
             "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.1,1e-05,1.1PBCt3initialGuessNoise1e-06LBFGSEpsg1e-08CGEpsg1e-05eps1e-05energyDropThreshold1e-10s41/config.conf",
             "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.1,1e-05,1.1PBCt3initialGuessNoise1e-06LBFGSEpsg1e-08CGEpsg1e-05eps1e-05energyDropThreshold1e-10s42/config.conf",
+        ]
+
+        configs = [
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/config.conf"
         ]
 
         for c in configs:

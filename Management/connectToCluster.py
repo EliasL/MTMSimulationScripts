@@ -1,5 +1,6 @@
 import os
 import subprocess
+from paramiko import SSHException
 
 
 class Servers:
@@ -15,7 +16,9 @@ class Servers:
     fourier = "fourier.pmmh-cluster.espci.fr"
     descartes = "descartes.pmmh-cluster.espci.fr"
 
-    mesopsl = "mesopsl.obspm.fr"
+    # mesopsl = "mesopsl.obspm.fr"
+
+    jeanZay = "jean-zay.idris.fr"
 
     local_path_mac = "/Volumes/data/"
 
@@ -31,6 +34,7 @@ class Servers:
         fourier,
         descartes,
         # mesopsl,
+        jeanZay,
     ]
 
     # If we want to search all the servers including the local storage, we can do that
@@ -40,14 +44,93 @@ class Servers:
     default = pascal
 
 
+def create_directories(cluster_address, cluster_base_path, verbose=False):
+    """
+    Connect to the cluster and create required directories.
+    """
+    try:
+        # Connect to the cluster
+        ssh = connectToCluster(cluster_address, verbose=verbose)
+
+        # Commands to create directories
+        commands = [
+            f"mkdir -p {cluster_base_path}",
+            # f"mkdir -p {cluster_base_path}MTS2D",
+            # f"mkdir -p {cluster_base_path}SimulationScripts",
+        ]
+        for cmd in commands:
+            if verbose:
+                print(f"Executing command: {cmd}")
+            stdin, stdout, stderr = ssh.exec_command(cmd)
+            if stdout.channel.recv_exit_status() != 0:
+                error_message = stderr.read().decode()
+                raise SSHException(f"Command failed: {cmd}\nError: {error_message}")
+
+        if verbose:
+            print("Directories created successfully.")
+    except SSHException as e:
+        print(f"Error during SSH operations: {e}")
+    finally:
+        # Close SSH connection
+        if "ssh" in locals():
+            ssh.close()
+            if verbose:
+                print("SSH connection closed.")
+
+
+def sync_folders(
+    cluster_address, cluster_base_path, exclude_list, local_paths, verbose=False
+):
+    """
+    Sync local folders to the cluster using rsync.
+    """
+
+    # Helper function to build rsync command with exclude list
+    """
+                                        /Users/eliaslundheim/work/PhD/MTS2D     jean-zay.idris.fr:~/simulation/
+    rsync -avz     -e "ssh -vvv -T"     /Users/eliaslundheim/work/PhD/MTS2D     jean-zay.idris.fr:~/simulation/
+    """
+
+    def build_rsync_command(source_path):
+        rsync_command = [
+            "rsync",
+            "-avz",
+            "-e",
+            "ssh -T",
+            # "--protocol=31",
+            "--progress",
+        ]
+        for item in exclude_list:
+            rsync_command.extend(["--exclude", item])
+        rsync_command.extend([source_path, f"{cluster_address}:{cluster_base_path}"])
+        return rsync_command
+
+    output_options = None if verbose else subprocess.DEVNULL
+
+    # Execute rsync commands for each local path
+    for local_path in local_paths:
+        rsync_command = build_rsync_command(local_path)
+        if verbose:
+            print(f"Executing rsync: {' '.join(rsync_command)}")
+        subprocess.run(
+            rsync_command, check=True, stdout=output_options, stderr=output_options
+        )
+
+    if verbose:
+        print("Folders successfully synced.")
+
+
 def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
+    """
+    Main function to create directories and sync folders to the cluster.
+    """
     # Get the directory of the current script
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
-    # Define the local paths based on the script directory and resolve them to absolute paths
+    # Define the local paths
     local_path_MTS2D = os.path.abspath(os.path.join(script_dir, "..", "..", "MTS2D"))
     local_path_SS = os.path.abspath(os.path.join(script_dir, ".."))
-    clusterPath = f"elundheim@{cluster_address}:~/simulation/"
+    cluster_base_path = "~/simulation/"
 
     # Common exclude list
     exclude_list = [
@@ -65,58 +148,28 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         "MTMath",
     ]
 
-    ssh_command = [
-        "ssh",
-        f"elundheim@{cluster_address}",
-        "mkdir -p ~/simulation ~/simulation/MTS2D ~/simulation/SimulationScripts",
-    ]
+    # Step 1: Create directories on the cluster
+    create_directories(cluster_address, cluster_base_path, verbose=verbose)
 
-    output_options = None if verbose else subprocess.DEVNULL
-
-    if verbose:
-        print("Creating directories")
-    subprocess.run(
-        ssh_command, check=True, stdout=output_options, stderr=output_options
+    # Step 2: Sync folders to the cluster
+    sync_folders(
+        cluster_address=f"{cluster_address}",
+        cluster_base_path=cluster_base_path,
+        exclude_list=exclude_list,
+        local_paths=[local_path_MTS2D, local_path_SS],
+        verbose=verbose,
     )
 
-    # Helper function to build rsync command with exclude list
-    def build_rsync_command(source_path):
-        rsync_command = [
-            "rsync",
-            "-avz",
-            "--progress",
-        ]
-        for item in exclude_list:
-            rsync_command.extend(["--exclude", item])
-        rsync_command.extend([source_path, clusterPath])
-        return rsync_command
-
-    # Build rsync commands for MTS2D and SimulationScripts
-    rsync_command_MTS2D = build_rsync_command(local_path_MTS2D)
-    rsync_command_SS = build_rsync_command(local_path_SS)
-
-    # Execute rsync commands
-    subprocess.run(
-        rsync_command_MTS2D,
-        check=True,
-        stdout=output_options,
-        stderr=output_options,
-    )
-    subprocess.run(
-        rsync_command_SS, check=True, stdout=output_options, stderr=output_options
-    )
-
-    if verbose:
-        print("Project folders successfully uploaded.")
-
+    # Step 3: Optionally run setup
     if setup:
         run_setup(cluster_address, verbose)
 
 
 def run_setup(cluster_address, verbose):
+    user = getServerUserName(cluster_address)
     ssh_command = [
         "ssh",
-        f"elundheim@{cluster_address}",
+        f"{user}@{cluster_address}",
         "cd ~/simulation/SimulationScripts && pip3 install ./Management ./Plotting",
     ]
 
@@ -156,7 +209,7 @@ def download_folders(cluster_address, configs, destination):
     )
     base_dir = stdout.read().strip().decode()
 
-    user = "elundheim"
+    user = getServerUserName(cluster_address)
     data_path = os.path.join(base_dir, user)
 
     remote_folder_name = "MTS2D_output"
@@ -177,7 +230,7 @@ def download_folders(cluster_address, configs, destination):
             continue
         else:
             remote_ssh_folder_path = (
-                f"elundheim@{cluster_address}:{remote_folder_path}/{folderToDownload}"
+                f"{user}@{cluster_address}:{remote_folder_path}/{folderToDownload}"
             )
             local_folder_path = os.path.join(destination, folderToDownload)
 
@@ -245,7 +298,14 @@ def connectToCluster(cluster_address=Servers.default, verbose=True):
 
     if verbose:
         print(f"SSH connection established to {cluster_address}.")
+
     return ssh
+
+
+def getServerUserName(cluster_address):
+    ssh_config = get_ssh_config()
+    config = ssh_config.lookup(cluster_address)
+    return config["user"]
 
 
 def get_server_short_name(full_address):

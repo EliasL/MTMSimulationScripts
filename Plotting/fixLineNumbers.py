@@ -15,6 +15,10 @@ def fix_csv_files(paths, use_tqdm=True):
     # Iterate over all files in the given folder
     for path in tqdm(paths, disable=not use_tqdm):
         if path.endswith(".csv"):
+            if path.endswith("temp.csv"):
+                # I don't understand why these files are being created...
+                os.remove(path)
+                return
             # Read the CSV file into a DataFrame
             df = pd.read_csv(path)
 
@@ -32,24 +36,22 @@ def fix_csv_files(paths, use_tqdm=True):
 
 
 def process_file(path):
+    # We only handle csv files
+    if not path.endswith(".csv"):
+        return
     # This function processes a single file
-    temp_path = f"{path[:-3]}.temp.csv"
+    temp_path = f"{path[:-3]}temp.csv"
 
     # Open the original file for reading and a temporary file for writing
-    with open(path, "r") as file, open(temp_path, "w") as temp_file:
-        firstLine = True
-        for line in file:
-            if not line[:7] == "Line nr" and firstLine:
-                # If the first line doesn't start with "Line nr"
-                # then we break. We skip processing because original
-                # format doesn't match what we expect.
-                os.remove(temp_path)
-                return
-            else:
-                firstLine = False
-
+    with open(path, "r") as oFile:
+        if oFile.readline()[:7] != "Line nr":
+            return
+        with open(temp_path, "w") as temp_file:
+            for line in oFile:
                 # Get the first element
                 n, rest = line.split(sep=",", maxsplit=1)
+                if n == "Line nr":
+                    continue
                 # We want to remove the line numbers, but keep the floats
                 # that might come if the lines numbers have been removed in
                 # the middle of the file
@@ -80,7 +82,9 @@ def fix_missing_column(paths, use_tqdm=True):
 
 def fix_csv_files_in_folder(folder_path, use_tqdm=True):
     paths = [
-        os.path.join(folder_path, filename) for filename in os.listdir(folder_path)
+        os.path.join(folder_path, filename)
+        for filename in os.listdir(folder_path)
+        if filename.endswith(".csv")
     ]
     fix_csv_files(paths, use_tqdm=use_tqdm)
 
