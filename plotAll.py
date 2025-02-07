@@ -10,7 +10,9 @@ from Management.simulationManager import findOutputPath
 from Management.configGenerator import SimulationConfig, ConfigGenerator
 
 
-def plotAll(configFile, noVideos=False, noPlots=False, **kwargs):
+def plotAll(configFile=None, noVideos=False, noPlots=False, **kwargs):
+    if configFile is None:
+        raise ValueError("No config file!")
     conf = SimulationConfig(configFile)
     subfolderName = conf.name
 
@@ -20,12 +22,12 @@ def plotAll(configFile, noVideos=False, noPlots=False, **kwargs):
     print(f"Plotting at {path}")
     csvPath = os.path.join(path, macroData)
     if not noPlots:
-        makePlot(csvPath, name=subfolderName + "_energy.pdf", Y="Avg energy")
-        makePlot(csvPath, name=subfolderName + "_stress.pdf", Y="Avg RSS")
+        makePlot(csvPath, name=subfolderName + "_energy.pdf", Y="Avg_energy")
+        makePlot(csvPath, name=subfolderName + "_stress.pdf", Y="Avg_RSS")
         makePlot(
             csvPath,
             name=subfolderName + "_stress+.pdf",
-            Y="Avg RSS",
+            Y="Avg_RSS",
             add_images=True,
             image_pos=[
                 [0.35, 0.02],  # first image, bottom middle
@@ -43,22 +45,67 @@ def plotAll(configFile, noVideos=False, noPlots=False, **kwargs):
 def handle_args_and_plot():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Process some arguments.")
-    parser.add_argument("-c", "--config", required=True, help="Config file")
-    parser.add_argument("-nP", "--noPlots", action="store_true", help="Disable plots")
-    parser.add_argument("-nV", "--noVideo", action="store_true", help="Disable video")
+    # Create an argument parser
+    parser = argparse.ArgumentParser(description="Process plotting and video options.")
+
+    # Add arguments
+    parser.add_argument("-c", "--configFile", required=True, help="Config file")
     parser.add_argument(
-        "-t", "--transparent", action="store_true", help="Make transparent videoes"
+        "--noPlots", action="store_true", help="Disable plots (default: False)"
     )
     parser.add_argument(
-        "-gif", "--makeGIF", action="store_true", default=False, help="Make gif"
+        "-nV",
+        "--noVideos",
+        action="store_true",
+        help="Disable video creation (default: False)",
+    )
+    parser.add_argument(
+        "-t",
+        "--transparent",
+        action="store_true",
+        help="Make videos transparent (default: False)",
+    )
+    parser.add_argument(
+        "--makeGIF", action="store_true", help="Create GIFs (default: False)"
+    )
+    parser.add_argument(
+        "--reuseImages",
+        type=bool,
+        choices=[True, False],
+        default=True,
+        help="Reuse existing images (default: True)",
+    )
+    parser.add_argument(
+        "--combineVideos",
+        type=bool,
+        choices=[True, False],
+        default=True,
+        help="Combine videos into one (default: True)",
+    )
+    parser.add_argument(
+        "--allImages",
+        type=bool,
+        choices=[True, False],
+        default=True,
+        help="Use all images for the process (default: False)",
     )
 
-    if len(sys.argv) > 1:
-        args = parser.parse_args()
-        plotAll(args.config, args.noVideo, makeGIF=args.makeGIF, use_tqdm=False)
-    else:
-        return
+    args = parser.parse_args()
+
+    # Convert Namespace to dict for **kwargs usage
+    kwargs = vars(args)
+
+    # clean the inputs
+    for key, value in kwargs.items():
+        if isinstance(value, str):
+            kwargs[key] = value.strip()
+
+    # Pass the arguments directly to plotAll
+    plotAll(
+        **kwargs,
+        fps=30,
+        seconds_per_unit_shear=2,
+    )
 
 
 if __name__ == "__main__":
@@ -88,15 +135,19 @@ if __name__ == "__main__":
             "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/config.conf"
         ]
 
+        configs = [
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l-0.15,-1e-05,-1.0PBCt20LBFGSEpsg1e-08s0/config.conf"
+        ]
+
         for c in configs:
             plotAll(
                 c,
                 makeGIF=False,
                 transparent=False,
                 noPlots=True,
-                combine=True,
+                combineVideos=True,
                 fps=60,
                 seconds_per_unit_shear=2,
-                all_images=True,
-                reuse_images=True,
+                allImages=True,
+                reuseImages=True,
             )

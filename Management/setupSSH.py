@@ -63,6 +63,7 @@ def copy_ssh_key_to_server(server, username, key_path, password):
 
 def main():
     username = "uog82gz"  # Change this to your actual username on the servers
+    username = "elundheim"  # Change this to your actual username on the servers
 
     key_path = os.path.expanduser("~/.ssh/id_rsa")  # Automatically get the SSH key path
     password = getpass(
@@ -73,7 +74,7 @@ def main():
     generate_ssh_key(key_path)
 
     # Loop through servers and copy the SSH key
-    for server in [Servers.jeanZay]:
+    for server in [Servers.pascal]:
         copy_ssh_key_to_server(server, username, key_path, password)
 
     # Prompt for the new password

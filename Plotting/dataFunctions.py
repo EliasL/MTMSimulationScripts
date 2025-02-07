@@ -22,27 +22,39 @@ class VTUData:
         # Get the 'vtkUnstructuredGrid' object from the reader
         return reader.GetOutput()
 
+    def get_point_data(self, field):
+        return vtk_to_numpy(self.mesh.GetPointData().GetArray(field))
+
+    def get_cell_data(self, field):
+        return vtk_to_numpy(self.mesh.GetCellData().GetArray(field))
+
     def get_nodes(self):
         return vtk_to_numpy(self.mesh.GetPoints().GetData())
 
     def get_force_field(self):
         # NB this is "force". Check the C++ code, might not be what you think
-        return vtk_to_numpy(self.mesh.GetPointData().GetArray("stress_field"))
+        return self.get_point_data("stress_field")
 
     def get_stress_field(self):
-        return vtk_to_numpy(self.mesh.GetCellData().GetArray("P12"))
+        return self.get_cell_data("P12")
 
     def get_energy_field(self):
-        return vtk_to_numpy(self.mesh.GetCellData().GetArray("energy_field"))
+        return self.get_cell_data("energy_field")
 
     def get_fixed_status(self):
-        return vtk_to_numpy(self.mesh.GetPointData().GetArray("fixed"))
+        return self.get_point_data("fixed")
 
     def get_m_nr_field(self):
-        nrm1 = vtk_to_numpy(self.mesh.GetCellData().GetArray("nrm1")).astype(int)
-        nrm2 = vtk_to_numpy(self.mesh.GetCellData().GetArray("nrm2")).astype(int)
-        nrm3 = vtk_to_numpy(self.mesh.GetCellData().GetArray("nrm3")).astype(int)
+        nrm1 = self.get_cell_data("nrm1").astype(int)
+        nrm2 = self.get_cell_data("nrm2").astype(int)
+        nrm3 = self.get_cell_data("nrm3").astype(int)
         return nrm1, nrm2, nrm3
+
+    def get_m3_nr_field(self):
+        return self.get_cell_data("nrm3").astype(int)
+
+    def get_m3_change_field(self):
+        return self.get_cell_data("deltaNrm3").astype(int)
 
     def get_C(self):
         """
@@ -50,10 +62,7 @@ class VTUData:
         [C11, C22, C12] components.
         """
         # Get the C11, C22, and C12 arrays from the VTK object
-        C11, C22, C12 = [
-            vtk_to_numpy(self.mesh.GetCellData().GetArray(C))
-            for C in ["C11", "C22", "C12"]
-        ]
+        C11, C22, C12 = [self.get_cell_data(C) for C in ["C11", "C22", "C12"]]
         return arrsToMat(C11, C22, C12)
 
     def get_connectivity(self):

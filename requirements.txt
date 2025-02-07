@@ -16,3 +16,4 @@ imageio
 vtk
 powerlaw
 simplification
+debugpy

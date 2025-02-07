@@ -166,8 +166,8 @@ class Process:
                         header_indices[header] -= 1
 
                 # load = last_line_values[header_indices["Load"]]
-                runTime = last_line_values[header_indices["Run time"]]
-                timeRemaining = last_line_values[header_indices["Est time remaining"]]
+                runTime = last_line_values[header_indices["Run_time"]]
+                timeRemaining = last_line_values[header_indices["Est_time_remaining"]]
 
                 # Log the results
                 self.timeEstimation = f"RT: {runTime}, ETR: {timeRemaining}"
@@ -316,8 +316,8 @@ class JobManager:
                 "Name",
                 "Server",
                 "Progress",
-                "Run time",
-                "Estimated time remaining",
+                "Run_time",
+                "Estimated_time_remaining",
             ]
             table = []
 

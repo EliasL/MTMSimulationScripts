@@ -30,16 +30,17 @@ class SimulationConfig:
 
         # Minimizer settings
         self.minimizer = "LBFGS"  # FIRE / LBFGS / CG
+        self.epsR = 1e-20  # stopping criteria - Residual foce
         # - LBFGS
         self.LBFGSNrCorrections = 10  # nr correction vector paris, variable m in A Limited Memory Algorithm for Bound Constrained Optimization
         self.LBFGSScale = 1.0
-        self.LBFGSEpsg = 0.1
+        self.LBFGSEpsg = 1e-15
         self.LBFGSEpsf = 0.0
         self.LBFGSEpsx = 0.0
         self.LBFGSMaxIterations = 0
         # - Conjugate Gradient
         self.CGScale = 1.0
-        self.CGEpsg = 0.0
+        self.CGEpsg = 1e-15
         self.CGEpsf = 0.0
         self.CGEpsx = 0.0
         self.CGMaxIterations = 0
@@ -52,7 +53,7 @@ class SimulationConfig:
         self.dtMax = self.dtStart * 3
         self.dtMin = self.dtStart * 1e-10
         self.maxCompS = 0.01
-        self.eps = 0.000
+        self.eps = 1e-15
         self.epsRel = 0.0
         self.delta = 0.0
         self.maxIt = 200000
@@ -62,9 +63,10 @@ class SimulationConfig:
         # elements(ne) * plasticityEventThreshold (t).
         # if npe > ne*t:
         #   save frame
-        self.plasticityEventThreshold = 0.1
-        self.energyDropThreshold = 1e-3
-        self.showProgress = 1
+        self.logDuringMinimization = 0  # 0=False, 1=True
+        self.plasticityEventThreshold = 0.05
+        self.energyDropThreshold = 1e-4
+        self.showProgress = 1  # 0=False, 1=True
 
         if configPath is not None:
             self.parse(configPath)
@@ -178,6 +180,7 @@ class SimulationConfig:
         return full_path
 
     def parse(self, path):
+        path = path.strip()
         if not os.path.isfile(path):
             raise FileNotFoundError(f"No config file found at {path}")
 
@@ -451,7 +454,7 @@ if __name__ == "__main__":
     import sys
 
     config = SimulationConfig(
-        loadIncrement=0.01, minimizer="LBFGS", nrThreads=3, LBFGSEpsg=1e-5
+        loadIncrement=0.01, minimizer="LBFGS", nrThreads=3, LBFGSEpsg=1e-5, epsR=1e-7
     )
     # config = get_custom_configs()
     if len(sys.argv) >= 2:

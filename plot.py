@@ -1,20 +1,16 @@
-from Management.multiServerJob import (
-    bigJob,
-    confToCommand,
-    basicJob,
+from Management.jobs import (
     smallJob,
-    propperJob,
-    propperJob1,
-    propperJob2,
-    propperJob3,
+    basicJob,
     allPlasticEventsJob,
-    JobManager,
-    get_server_short_name,
+    propperJob,
+    propperJob3,
+    avalanches,
 )
 
 from Management.simulationManager import findOutputPath
 from plotAll import plotAll
 from Plotting.remotePlotting import (
+    plotEnergy,
     stressPlotWithImages,
     energyPlotWithImages,
     plotLog,
@@ -117,11 +113,35 @@ def debugPlotAll():
     plotAll(config, outputPath, makeGIF=False, transparent=False, noVideos=False)
 
 
+def plotAvalanches():
+    configs, labels, dump = avalanches(nrThreads=20)
+    line_styles = [
+        (0, (2, 2, 3, 2)),  # Another variation
+        (0, (5, 2, 1, 2)),  # Dash-dot variation
+        (0, (3, 5, 1, 5)),  # Another custom
+        "-",
+        "-",
+        "-",
+        "-",
+        (0, (2, 2, 3, 2)),  # Another variation
+        (0, (5, 2, 1, 2)),  # Dash-dot variation
+        (0, (3, 5, 1, 5)),  # Another custom
+        (0, (2, 2, 3, 2)),  # Another variation
+        (0, (5, 2, 1, 2)),  # Dash-dot variation
+        (0, (3, 5, 1, 5)),  # Another custom
+    ]
+
+    plotEnergy(configs, labels, linestyles=line_styles)
+    plotTime(configs, labels)
+
+
 if __name__ == "__main__":
     # plotSampleRuns()
     # plotPropperJob3()
     # debugPlotAll()
     # energyField()
     # plotThreadTest()
-    configs, labels = allPlasticEventsJob()
-    createVideoes(configs, all_images=True)
+    # configs, labels = allPlasticEventsJob()
+    # createVideoes(configs, all_images=True)
+
+    plotAvalanches()

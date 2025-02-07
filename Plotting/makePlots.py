@@ -21,7 +21,7 @@ if True:
     warnings.simplefilter("error", RuntimeWarning)
 
 
-def durations_to_seconds(durations):
+def duration_to_seconds(duration):
     # Create a mapping from unit to number of seconds
     unit_map = {
         "d": 86400,  # 24 hours * 3600 sec/hour
@@ -30,18 +30,23 @@ def durations_to_seconds(durations):
         "s": 1,
     }
 
+    total_seconds = 0
+    # Split by space to handle multiple tokens like "1m 38s"
+    parts = duration.split()
+    for part in parts:
+        # Last character is the unit, rest is the number
+        number = float(part[:-1])
+        unit = part[-1]
+        # Convert and accumulate
+        total_seconds += number * unit_map[unit]
+    return total_seconds
+
+
+def durations_to_seconds(durations):
     result = []
     for duration in durations:
-        total_seconds = 0
-        # Split by space to handle multiple tokens like "1m 38s"
-        parts = duration.split()
-        for part in parts:
-            # Last character is the unit, rest is the number
-            number = float(part[:-1])
-            unit = part[-1]
-            # Convert and accumulate
-            total_seconds += number * unit_map[unit]
-        result.append(total_seconds)
+        s = duration_to_seconds(duration)
+        result.append(s)
     return result
 
 
@@ -158,16 +163,16 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
 
 # Process drops
 def pros_d(df, min_npd, strainLims):
-    e = [key for key in df.columns if key not in ["Load", "Nr plastic deformations"]][0]
+    e = [key for key in df.columns if key not in ["Load", "Nr_plastic_deformations"]][0]
 
-    if e == "Avg energy" and "Avg energy change" in df:
-        diffs = df["Avg energy change"]
+    if e == "Avg_energy" and "Avg_energy_change" in df:
+        diffs = df["Avg_energy_change"]
     else:
         diffs = np.diff(df[e])
 
     # Combine all conditions into a single mask using element-wise logical AND
     mask = (
-        (df["Nr plastic deformations"] >= min_npd)
+        (df["Nr_plastic_deformations"] >= min_npd)
         & (df["Load"] >= strainLims[0])
         & (df["Load"] <= strainLims[1])
     )
@@ -418,9 +423,9 @@ def plotPowerLaw(
 
     extraLabel = " ".join(
         [
-            rf"$\{v.lower()}$: " + f"{getattr(getattr(fit,dist), v):.2f}"
+            rf"$\{v.lower()}$: " + f"{getattr(getattr(fit, dist), v):.2f}"
             if len(v) > 1
-            else (rf"${v}$: ") + f"{getattr(getattr(fit,dist), v):.2f}"
+            else (rf"${v}$: ") + f"{getattr(getattr(fit, dist), v):.2f}"
             for v in DISTRIBUTIONS[dist]
         ]
     )
@@ -519,7 +524,16 @@ def doBootstrap(drops, n, fit_func):
 
 
 # Define global variables
-line_styles = ["-", "--", "-.", ":"]
+LINE_STYLES = [
+    "-",
+    "--",
+    "-.",
+    ":",
+    (0, (1, 1)),  # Dotted
+    (0, (5, 2, 1, 2)),  # Dash-dot variation
+    (0, (3, 5, 1, 5)),  # Another custom
+    (0, (2, 2, 3, 2)),  # Another variation
+]
 markers = ["o", "v", "^", "s", "D", "p", "*"]
 colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
 colors = {"FIRE": "#d24646", "L-BFGS": "#008743", "CG": "#ffa701"}
@@ -596,7 +610,7 @@ def plotSplitPowerLaw(
 
 
 def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
-    e = "Avg energy"
+    e = "Avg_energy"
     pre_yield_df = [df[0 : np.argmax(df[e]) + 1] for df in dfs]
     post_yield_df = [df[np.argmax(df[e]) + 1 :] for df in dfs]
 
@@ -620,9 +634,9 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
         }  # Dictionary to store data for each group
         for df in split_dfs:
             # Filter out zero and NaN values
-            df = df[df["Nr plastic deformations"] > 0]
+            df = df[df["Nr_plastic_deformations"] > 0]
 
-            group_index = np.floor(np.log2(df["Nr plastic deformations"])).astype(int)
+            group_index = np.floor(np.log2(df["Nr_plastic_deformations"])).astype(int)
             group_index = np.clip(
                 group_index, min_group_index, max_group_index
             )  # Clamp the group index
@@ -663,7 +677,7 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
                     color="#1f77b4",
                 )
 
-            ax.set_title(f"{2**exp}-{2**(exp+1)-1} p.e.")
+            ax.set_title(f"{2**exp}-{2 ** (exp + 1) - 1} p.e.")
             if i == len(axs) - 1:
                 ax.set_title(f"More than {2**exp} p.e.")
             ax.set_yscale("log")
@@ -687,10 +701,17 @@ def getPrettyLabel(string):
         s = string.split("minimizer=")[1].split(",")[0]
     if "," not in string:
         s = string
+    if "Eps" in string:
+        stopType = string.split("Eps")[1]
+        if stopType == "g":
+            stopType = r"\sigma"
+        if stopType == "x":
+            stopType = r"|\Delta \mathbf{u}|"
+        s = rf"\epsilon_{{{stopType}}}"
     return s.replace("LBFGS", "L-BFGS")
 
 
-# Example usage can be added as necessary with DataFrames having 'Nr plastic deformations' and 'Avg energy'
+# Example usage can be added as necessary with DataFrames having 'Nr_plastic_deformations' and 'Avg_energy'
 
 
 def plotSlidingPowerLaw(dfs, dist="truncated_power_law", fig=None, ax=None, label=""):
@@ -798,7 +819,7 @@ def makePlot(
     ax=None,
     fig=None,
     name="",
-    Y="Avg energy",
+    Y="Avg_energy",
     X="Load",
     x_name=None,
     y_name=None,
@@ -817,6 +838,7 @@ def makePlot(
     ylog=False,
     show=False,
     colors=None,
+    linestyles=None,
     plot_total=False,
     legend=None,
     add_shift=False,
@@ -833,6 +855,8 @@ def makePlot(
     plot_pre_yield=True,
     plot_post_yield=True,
     dist="truncated_power_law",
+    reverse_x_axis=None,
+    subtract=None,
 ):
     if len(csv_file_paths) == 0 or (
         len(csv_file_paths) > 0 and len(csv_file_paths[0]) == 0
@@ -846,9 +870,9 @@ def makePlot(
             x_name = X
 
     if y_name is None and use_y_axis_name:
-        if Y == "Avg RSS":
+        if Y == "Avg_RSS":
             y_name = r"Stress $\langle \sigma \rangle$"
-        elif Y == "Avg energy":
+        elif Y == "Avg_energy":
             y_name = r"Energy $\langle E \rangle$"
         else:
             y_name = Y
@@ -870,7 +894,10 @@ def makePlot(
     if ylim:
         ax.set_ylim(*ylim)
 
+    line_index = 0
     for i, csv_file_path in enumerate(csv_file_paths):
+        if i == subtract:
+            continue
         if X is None:
             break
         if isinstance(Y, str):
@@ -880,14 +907,26 @@ def makePlot(
             if plot_average:
                 raise Warning("Cannot plot average with multiple Y columns")
 
+        # If it is a string, we assume it is a time that we can convert to seconds
+        if isinstance(df[Y][0], str):
+            df[Y] = durations_to_seconds(df[Y])
         # Truncate data based on Lims
-        if xlim:
-            df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
-        if ylim:
-            df = df[(df[Y] >= ylim[0]) & (df[Y] <= ylim[1])]
+        # if xlim:
+        #    df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
+        # if ylim:
+        #    df = df[(df[Y] >= ylim[0]) & (df[Y] <= ylim[1])]
 
-        if df[X].iloc[-1] < 1:
-            print(f"{csv_file_path} is not done!")
+        if reverse_x_axis is None:
+            # Check if we should reverse the x axis
+            # We do this by checking which direction the X values go in by index
+            if df[X][1] - df[X][0] < 0:
+                reverse_x_axis = True
+            else:
+                reverse_x_axis = False
+
+        if subtract is not None:
+            sub_df = pd.read_csv(csv_file_paths[subtract], usecols=[Y])
+            df[Y] -= sub_df[Y].reindex(df.index, fill_value=0)
 
         data.append(df[Y].values)
         xData.append(df[X].values)
@@ -896,6 +935,14 @@ def makePlot(
 
         if colors:
             kwargs["color"] = colors[i]
+        if linestyles:
+            if isinstance(linestyles, bool):
+                kwargs["linestyle"] = LINE_STYLES[line_index]
+                line_index += 1
+                if line_index >= len(LINE_STYLES):
+                    line_index = 0
+            else:
+                kwargs["linestyle"] = linestyles[i]
         if len(csv_file_paths) > 10:
             kwargs["color"] = "gray"
             kwargs["alpha"] = 0.5
@@ -906,7 +953,7 @@ def makePlot(
             if labels is None:
                 kwargs["label"] = Y
             else:
-                kwargs["label"] = labels[i]
+                kwargs["label"] = labels[i]  # getPrettyLabel(labels[i])
                 # +((" - " + Y_) if not isinstance(Y, str) else "")
             if add_shift:
                 df[Y_] -= i * np.max(df[Y_]) / 500
@@ -1025,6 +1072,11 @@ def makePlot(
             mesh_property=metric,
             add_cbar=add_cbar,
         )
+    if reverse_x_axis:
+        print("Reversing x-axis!")
+        x_min, x_max = ax.get_xlim()
+        ax.set_xlim(x_max, x_min)  # Swap the limits
+
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
     if use_title:
@@ -1177,7 +1229,7 @@ def addImagesToPlot(
 def removeBadData(df, crash_count, csv_file_path):
     # The max energy of an element should be around 4.2-6
     # If the energy of an element is 10, something has probably gone wrong
-    max_e = "Max energy"
+    max_e = "Max_energy"
     max_value = 10
 
     if (df[max_e] > max_value).any():
@@ -1190,7 +1242,7 @@ def removeBadData(df, crash_count, csv_file_path):
 
 def makeAverageComparisonPlot(
     grouped_csv_file_paths,
-    Y="Avg energy",
+    Y="Avg_energy",
     name="",
     show=False,
     use_title=False,
@@ -1208,11 +1260,11 @@ def makeAverageComparisonPlot(
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
     X = "Load"
-    if Y == "Avg energy":
+    if Y == "Avg_energy":
         y_name = r"Energy $\langle E \rangle$"
         if name == "":
-            name = "Avg energy"
-    elif Y == "Avg RSS":
+            name = "Avg_energy"
+    elif Y == "Avg_RSS":
         y_name = r"Stress $\langle \sigma \rangle$"
         if name == "":
             name = "Avg stress"
@@ -1250,7 +1302,7 @@ def makeAverageComparisonPlot(
         # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             # print(csv_file_path)
-            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Max energy"])
+            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Max_energy"])
             # If Y contains strings, we will assume it is a time, and convert it to
             # seconds
             if isinstance(df[Y][0], str):
@@ -1266,7 +1318,7 @@ def makeAverageComparisonPlot(
                 "fig": fig,
                 "ax": ax,
                 "color": color,
-                "linestyle": line_styles[line_index],
+                "linestyle": LINE_STYLES[line_index],
                 "alpha": 0.05,
                 "zorder": color_index - 10,
                 "xlim": xlim,
@@ -1297,7 +1349,7 @@ def makeAverageComparisonPlot(
             "ax": ax,
             "label": label,
             "color": colors[label],
-            "linestyle": line_styles[line_index],
+            "linestyle": LINE_STYLES[line_index],
             "zorder": -color_index,
             "xlim": xlim,
             "ylim": ylim,
@@ -1344,7 +1396,7 @@ def add_power_law_line(ax, slope, x_lim, y_pos=1, c="black", linestyle="--", **k
 
 def makeLogPlotComparison(
     grouped_csv_file_paths,
-    Y="Avg energy",
+    Y="Avg_energy",
     name="",
     show=False,
     slide=False,
@@ -1392,10 +1444,10 @@ def makeLogPlotComparison(
     title = f"{name}{oLims},"
 
     if name == "":
-        if Y == "Avg energy":
+        if Y == "Avg_energy":
             name == "Avg energy power law"
             unit = "E"
-        elif Y == "Avg RSS":
+        elif Y == "Avg_RSS":
             name == "Avg stress power law"
             unit = r"\sigma"
 
@@ -1415,9 +1467,9 @@ def makeLogPlotComparison(
         name += " window"
     else:
         title += f" {iLims},"
-        if Y == "Avg energy":
+        if Y == "Avg_energy":
             x_name = "Magnitude of energy drops"
-        elif Y == "Avg RSS":
+        elif Y == "Avg_RSS":
             x_name = "Magnitude of stress drops"
         y_name = rf"$p(\Delta \langle {unit} \rangle)$"
 
@@ -1442,9 +1494,9 @@ def makeLogPlotComparison(
                 usecols=[
                     X,
                     Y,
-                    "Nr plastic deformations",
-                    "Max energy",
-                    # "Avg energy change",
+                    "Nr_plastic_deformations",
+                    "Max_energy",
+                    # "Avg_energy_change",
                 ],
             )
             # Truncate data based on xlim
@@ -1553,7 +1605,7 @@ def makeEnergyAvalancheComparison(
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
     X = "Load"
-    Y = "Avg energy"
+    Y = "Avg_energy"
     x_name = "Magnitude of energy drops"
     y_name = r"$P(>E)$"
     lims = "" if xlim == [-np.inf, np.inf] else f", xlim: {xlim[0]}-{xlim[1]}"
@@ -1566,7 +1618,7 @@ def makeEnergyAvalancheComparison(
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(
-                csv_file_path, usecols=[X, Y, "Nr plastic deformations", "Max energy"]
+                csv_file_path, usecols=[X, Y, "Nr_plastic_deformations", "Max_energy"]
             )
             # Truncate data based on xlim
             df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
@@ -1576,12 +1628,12 @@ def makeEnergyAvalancheComparison(
         fig, ax = plotEnergyAvalancheHistogram(dfs)
 
         if crash_count > 0:
-            print(f"Found {crash_count} crashes using {["L-BFGS", "CG", "FIRE"][i]}.")
+            print(f"Found {crash_count} crashes using {['L-BFGS', 'CG', 'FIRE'][i]}.")
         # Set the legend with the filtered handles and labels
         # ax.legend(loc=("best"))
         # ax.set_xlabel(x_name)
         # ax.set_ylabel(y_name)
-        title = f"{name}{lims}" + f'-{["L-BFGS", "CG", "FIRE"][i]}'
+        title = f"{name}{lims}" + f"-{['L-BFGS', 'CG', 'FIRE'][i]}"
         fig.suptitle(title, fontsize=16)  # Set the main
         plt.tight_layout()  # Adjust subplots to fit into figure area.
         # Get the parent directory of the CSV file
@@ -1632,7 +1684,7 @@ def makeTimePlot(csv_file_paths, name, **kwargs):
         csv_file_paths,
         name,
         x_name="Settings",
-        Y=["Run time"],
+        Y=["Run_time"],
         y_name="Run time (s)",
         plot_raw=False,
         plot_columns=True,
@@ -1646,7 +1698,7 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
         csv_file_paths,
         name,
         X="Load",
-        Y="Avg energy",
+        Y="Avg_energy",
         x_name="Magnitude of energy drops",
         y_name=r"$P(>E)$",
         title="Powerlaw",
@@ -1665,7 +1717,7 @@ if __name__ == "__main__":
             "/Volumes/data/MTS2D_output/simpleShear,s60x60l0.15,0.0002,1.0PBCt1minimizerFIRELBFGSEpsg0.0001eps0.01s0/macroData.csv",
         ],
         name="energy.pdf",
-        Y="Avg energy",
+        Y="Avg_energy",
     )
     # makeItterationsPlot(
     #     [

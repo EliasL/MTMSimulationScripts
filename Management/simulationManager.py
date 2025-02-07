@@ -107,6 +107,9 @@ class SimulationManager:
         # (index 0)
         if dumpFile is None:
             dumpFile = self.findDumpFile(index, name)
+        else:
+            if " " in dumpFile:
+                raise ValueError(f"Dump path cannot contain white space! {dumpFile}")
 
         start_time = time.time()
         # We can choose to use the previous settings, or overwrite them using new ones

@@ -14,6 +14,63 @@ import subprocess
 import os
 
 
+import os
+import debugpy
+from fabric import Connection
+import sys
+
+
+def run_remote_script_with_debug(server_hostname, script_path, silent=False):
+    """
+    Executes a Python script on a remote server, with optional support for debugging.
+    If the local script is in debug mode, it enables a remote debug session.
+
+    :param server_hostname: The hostname of the remote server.
+    :param script_path: The path to the script on the remote server.
+    :param silent: Suppress output if True.
+    """
+    user = getServerUserName(server_hostname)
+
+    # Check if the current script is running in debug mode
+    is_debug_mode = any(
+        getattr(debugpy, "is_client_connected", lambda: False)() or "pydevd" in module
+        for module in sys.modules
+    )
+
+    # Establish the SSH connection
+    with Connection(host=server_hostname, user=user) as c:
+        # Construct the remote command
+        command = f"python3 -u {script_path}"
+
+        if is_debug_mode:
+            # Add debugpy to the remote command
+            # Ensure debugpy is installed on the remote server
+            command = f"python3 -m debugpy --listen 0.0.0.0:5678 --wait-for-client {script_path}"
+            print("Running in debug mode: waiting for debugger to attach...")
+
+        # Execute the command on the remote server
+        result = c.run(
+            command,
+            hide=True,
+            warn=True,
+        )
+
+        # Output and errors are captured
+        output = result.stdout
+        errors = result.stderr
+
+        # Check the result
+        if result.ok and not silent:
+            print("Script executed successfully.")
+            print("Output from the script:")
+            print(output)
+        else:
+            print("Script execution failed:")
+            print(errors)
+
+        return output  # Optionally return output for further processing
+
+
 def run_remote_script(server_hostname, script_path, silent=False):
     user = getServerUserName(server_hostname)
     # Establish the SSH connection

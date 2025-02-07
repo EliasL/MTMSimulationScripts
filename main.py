@@ -1,43 +1,34 @@
 from Management import parameterExploring as pe
 from Management.connectToCluster import uploadProject
-from Management.runOnCluster import (
-    run_remote_script,
-    queue_remote_job,
-    run_remote_command,
-    build_on_all_servers,
-    build_on_server,
-)
+from Management.runOnCluster import build_on_all_servers
 from runSimulations import run_many_locally, run_locally
 from Management.connectToCluster import Servers
-from Management.multiServerJob import (
+from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
+from Management.jobs import (
+    cyclicLoading,
+    backwards,
+    largeAvalanche,
+    avalanches,
     bigJob,
     smallJob,
-    confToCommand,
     basicJob,
     allPlasticEventsJob,
-    queueJobs,
     propperJob,
     propperJob1,
     propperJob2,
     propperJob3,
-    distributeConfigs,
-    confToCommand,
-    JobManager,
-    get_server_short_name,
 )
-from Management.clusterStatus import get_all_server_info, display_server_info
-from time import sleep
 
 
 def benchmark():
     configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50)
     run_locally(configs[0])
 
-    # log
+    # log (nov. 2024)
     # 1% RT: 1m 57s  ETR: 2h 34m 36s Load: 0.160600
 
-    # Better bounding box
-    #
+    # Lots of changes (05.02.25) (still good)
+    # 1% RT: 1m 53s  ETR: 2h 30m 21s Load: 0.160470
 
 
 def parameterExploring():
@@ -83,26 +74,32 @@ def threadTest():
     configs, labels = basicJob(nrThreads, nrSeeds, size)
     print("Starting jobs...")
     queueJobs(Servers.poincare, configs, resume=False)
-    # run_many_locally(configs)
+    # run_many_locally(configs,taskNames=labels)
 
 
 def runOnServer():
-    server = Servers.jeanZay
-    uploadProject(server, verbose=False, setup=False)
+    server = Servers.poincare
+    uploadProject(server, verbose=True)  # , setup=True)
     # Choose script to run
     # remote_script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
     # run_remote_script(server, remote_script_path)
 
-    configs, labels = smallJob(size=10)
-    # queueJobs(server, configs, job_name="opt")
+    configs, labels = allPlasticEventsJob()
+    configs, labels = backwards(nrThreads=20, seeds=[1])
+    queueJobs(server, configs, job_name="bkw")
 
 
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
     configs, labels = allPlasticEventsJob()
     # configs, labels = basicJob(20, 1, size=100)
-    dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
-    run_many_locally(configs, resume=True, dump=dump)
+    # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
+    configs, labels, dump = largeAvalanche(nrThreads=20)
+    configs, labels, dump = avalanches(nrThreads=20, size=100)
+    # configs, labels = backwards(nrThreads=20)
+    # configs, labels = cyclicLoading(nrThreads=20)
+    # run_locally(configs[0], dump=dump)
+    run_many_locally(configs, taskNames=labels, resume=True)  # , dump=dump)
 
 
 def startJobs():
@@ -155,8 +152,8 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
-runOnLocalMachine()
+# runOnLocalMachine()
 # startJobs()
 # plotBigJob()
 # threadTest()
-# benchmark()
+benchmark()

@@ -1,17 +1,10 @@
 import subprocess
 from pathlib import Path
-import re
 from Management.clusterStatus import get_all_server_info, display_server_info
 from Management.dataManager import DataManager
 
 # from Management.configGenerator import ConfigGenerator
 from Management.jobManager import JobManager
-from Management.multiServerJob import (
-    bigJob,
-    build_on_all_servers,
-    JobManager,
-    get_server_short_name,
-)
 
 
 def disp_data():
@@ -19,11 +12,6 @@ def disp_data():
     # dm.clean_projects_on_servers()
     # dm.clean_projects_on_servers()
     # dm.delete_useless_dumps(False)
-    nrThreads = 1
-    nrSeeds = 40
-    configs, labels = bigJob(nrThreads, nrSeeds)
-    # dm.delete_data_from_configs(configs, dryRun=True)
-    # dm.delete_folders_below_size(100, dryRun=True)
     dm.printData()
     dm.findData(silent=True)
     print("^   Old data above   ^")

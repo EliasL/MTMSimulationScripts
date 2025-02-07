@@ -7,42 +7,36 @@ import concurrent.futures
 import functools
 
 
-# Custom class to prepend thread names to output
-class ThreadOutputWrapper:
-    def __init__(self, prefix, original_stdout):
-        self.prefix = prefix
-        self.original_stdout = original_stdout
-
-    def write(self, message):
-        # Check if the message is not an empty string or a newline
-        if message.strip():
-            # Add thread prefix and print to original stdout
-            self.original_stdout.write(f"[{self.prefix}] {message}")
-        else:
-            self.original_stdout.write(message)
-
-    def flush(self):
-        self.original_stdout.flush()
-
-
 def task(config, **kwargs):
     # This is where the task is executed
-    run_locally(config, taskName=config.minimizer, **kwargs)
+    if "taskName" not in kwargs:
+        kwargs["taskName"] = config.minimizer
+    run_locally(config, **kwargs)
 
 
-def run_many_locally(configs, **kwargs):
-    # First build the project once so the task does not have to build it
+def run_many_locally(configs, taskNames=None, **kwargs):
+    # Ensure taskNames is a list of correct length
+    if taskNames is None:
+        taskNames = [None] * len(configs)
+
+    if len(taskNames) != len(configs):
+        raise ValueError("Length of taskNames must match length of configs")
+
+    # First build the project once so each task does not have to build it
     manager = SimulationManager(SimulationConfig())
     manager.build()
+    kwargs["build"] = False
 
     # Use ThreadPoolExecutor to run the task on different threads
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        # Use functools.partial to pre-bind the dump argument to the task function
-        task_with_dump = functools.partial(task, build=False, **kwargs)
+        # Partial function with additional kwargs
+        def task_with_name(config, taskName):
+            if taskName:
+                kwargs["taskName"] = taskName
+            task(config, **kwargs)
 
-        # Map the configs to threads and run the work
-        # Pass only configs to the mapped function, dump is already bound
-        executor.map(task_with_dump, configs)
+        # Run the tasks in parallel with corresponding names
+        executor.map(task_with_name, configs, taskNames)
 
 
 def parse_args():
@@ -81,4 +75,4 @@ if __name__ == "__main__":
     confKwargs, runKwargs = ConfigGenerator.splitKwargs(kwargs)
 
     (configs, labels) = ConfigGenerator.generate(**confKwargs)
-    run_many_locally(configs, **runKwargs)
+    run_many_locally(configs, taskNames=labels, **runKwargs)

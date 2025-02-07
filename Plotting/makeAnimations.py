@@ -142,30 +142,30 @@ def combine_videoes(path, n1, n2, n3=None, n4=None):
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
 def makeAnimations(
     path,
-    macro_data=None,
-    pvd_file=None,
+    macroData=None,
+    pvdFile=None,
     makeGIF=False,
     transparent=False,
-    combine=True,
-    use_tqdm=True,
+    combineVideos=True,
+    useTqdm=True,
     fps=30,
     seconds_per_unit_shear=15,
-    all_images=False,
-    min_time=7,
-    reuse_images=False,
+    allImages=False,
+    minTime=7,
+    reuseImages=False,
 ):
     frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
-    if macro_data is None:
-        macro_data = os.path.join(path, settings["MACRODATANAME"] + ".csv")
-    if pvd_file is None:
-        pvd_file = os.path.join(path, settings["COLLECTIONNAME"] + ".pvd")
+    if macroData is None:
+        macroData = os.path.join(path, settings["MACRODATANAME"] + ".csv")
+    if pvdFile is None:
+        pvdFile = os.path.join(path, settings["COLLECTIONNAME"] + ".pvd")
 
-    if not os.path.exists(pvd_file):
-        print(f"No file found at: {pvd_file}")
+    if not os.path.exists(pvdFile):
+        print(f"No file found at: {pvdFile}")
         print("Creating pvd file...")
         create_collection(os.path.join(path, settings["DATAFOLDERPATH"]))
 
-    vtu_files = parse_pvd_file(path, pvd_file)
+    vtu_files = parse_pvd_file(path, pvdFile)
 
     # we don't want every frame to be created, so in order to find out what
     # frames should be drawn, we first check how much load change there is
@@ -178,12 +178,12 @@ def makeAnimations(
     nrSteps = videoLength * fps
 
     # we select a reduced number of frames
-    vtu_files = select_vtu_files(vtu_files, nrSteps, all_images)
+    vtu_files = select_vtu_files(vtu_files, nrSteps, allImages)
 
     if len(vtu_files) < nrSteps:
         # If we don't have enough frames, we need to make each frame last longer
         # We will make the video last 7 seconds
-        fps = len(vtu_files) / min_time
+        fps = len(vtu_files) / minTime
 
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
@@ -199,12 +199,12 @@ def makeAnimations(
     ]:
         images = make_images(
             vtu_files,
-            macro_data=macro_data,
+            macro_data=macroData,
             frameFunction=function,
             frame_path=frame_path,
             transparent=transparent,
-            use_tqdm=use_tqdm,
-            reuse_images=reuse_images,
+            use_tqdm=useTqdm,
+            reuse_images=reuseImages,
             fileName=fileName,
         )
 
@@ -242,7 +242,7 @@ def makeAnimations(
             # The video and the last image were generated at about the same time,
             # so the video does not need to be re-rendered
             pass
-    if combine:
+    if combineVideos:
         try:
             combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
             combine_videoes(path, "m_mesh", "mesh")

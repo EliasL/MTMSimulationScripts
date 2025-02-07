@@ -6,9 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 
 def fix_csv_files(paths, use_tqdm=True):
+    # Disable: Don't do it automatically.
+    return
     if len(paths) == 0:
         return
-    fix_missing_column(paths, use_tqdm=use_tqdm)
+    # fix_missing_column(paths, use_tqdm=use_tqdm)
 
     if isinstance(paths[0], list):
         paths = [item for sublist in paths for item in sublist]
@@ -21,6 +23,9 @@ def fix_csv_files(paths, use_tqdm=True):
                 return
             # Read the CSV file into a DataFrame
             df = pd.read_csv(path)
+
+            # Replace spaces in column names with underscores
+            df.columns = df.columns.str.replace(" ", "_", regex=False)
 
             # Create a Series that tracks the maximum value encountered so far
             cummax_series = df["Load"].cummax()
@@ -36,32 +41,43 @@ def fix_csv_files(paths, use_tqdm=True):
 
 
 def process_file(path):
-    # We only handle csv files
+    # Ensure only CSV files are processed
     if not path.endswith(".csv"):
         return
-    # This function processes a single file
-    temp_path = f"{path[:-3]}temp.csv"
 
-    # Open the original file for reading and a temporary file for writing
+    # Temporary file path
+    temp_path = f"{path[:-4]}_temp.csv"
+
+    # Open the original file for reading and the temporary file for writing
     with open(path, "r") as oFile:
-        if oFile.readline()[:7] != "Line nr":
+        header = oFile.readline()
+        # We don't need to modify this file
+        if header.startswith("Load_step"):
             return
         with open(temp_path, "w") as temp_file:
-            for line in oFile:
-                # Get the first element
-                n, rest = line.split(sep=",", maxsplit=1)
-                if n == "Line nr":
-                    continue
-                # We want to remove the line numbers, but keep the floats
-                # that might come if the lines numbers have been removed in
-                # the middle of the file
-                if "." not in n:
-                    # Remove it
-                    temp_file.write(rest)
-                else:
-                    temp_file.write(line)
+            # Read the first line (header)
+            if header.startswith("Line nr"):
+                # If the header starts with "Line nr", write the rest of the header (ignore "Line nr" column)
+                _, rest = header.split(sep=",", maxsplit=1)
+                # I also decided half way to use "_" instead of " "
+                rest = rest.replace(" ", "_")
+                temp_file.write(rest)
+            else:
+                # Otherwise, write the header as-is
+                temp_file.write(header)
 
-    # After processing, replace the original file with the modified one
+            # Process the rest of the file
+            for line in oFile:
+                # Split the line into the first element and the rest
+                n, rest = line.split(sep=",", maxsplit=1)
+                # If the first element is not a float, it's a line number; remove it
+                if "." in n:
+                    temp_file.write(line)  # If it's a float, keep the full line
+                else:
+                    # Otherwise, remove the line number and write the rest
+                    temp_file.write(rest)
+
+    # Replace the original file with the modified one
     os.replace(temp_path, path)
 
 

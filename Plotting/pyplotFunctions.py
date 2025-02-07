@@ -16,7 +16,7 @@ from MTMath.plotEnergy import (
     lagrange_reduction,
     elastic_reduction,
 )
-from Management.multiServerJob import propperJob
+from Management.jobs import propperJob
 
 from MTMath.contiPotential import ground_state_energy
 from .makePlots import makePlot, makeLogPlotComparison
@@ -27,12 +27,12 @@ from .dataFunctions import get_data_from_name, VTUData, arrsToMat, get_previous_
 
 
 def get_energy_range(vtu_files, cvs_file):
-    df = pd.read_csv(cvs_file, usecols=["Max energy"])
-    max_energy = df["Max energy"].max()
+    df = pd.read_csv(cvs_file, usecols=["Max_energy"])
+    max_energy = df["Max_energy"].max()
     # Sometimes, the energy is too high because of a crash
     if max_energy > 100:
         # Then we take the second last
-        max_energy = df["Max energy"][:-1].max()
+        max_energy = df["Max_energy"][:-1].max()
     # We assume that the minimum energy throughout the whole run is the minimum
     # of the initial state
     energy_field = VTUData(vtu_files[0]).get_energy_field()
@@ -150,10 +150,12 @@ def base_plot(
             # Data for the table
             data = [
                 [
-                    rf"$\Delta\gamma$: {delLoad:.5f}",
-                    rf"$\Delta\langle E \rangle$: {delAvgEnergy:.3f}",
-                    rf"$\Delta\langle \sigma \rangle$: {delAvgRSS:.3f}",
-                    rf"$p$: {nrPlasticEvents}",
+                    rf"$\Delta\gamma$: {delLoad:.1e}",
+                    rf"$\Delta\langle E \rangle$: {delAvgEnergy:.2e}",
+                    rf"$\Delta\langle \sigma \rangle$: {delAvgRSS:.2e}",
+                    # n_p is the number of times m3 was applied during lagrange reduction
+                    # N_p is sum(abs(\Delta n_p)) where sum is over the mesh
+                    rf"$N_p$: {nrPlasticEvents}",
                     # rf"$\Delta_k$: {steps_since_last_frame}",
                     f"f: {frame_index}",
                 ],
@@ -166,7 +168,7 @@ def base_plot(
                     rf"$\gamma$: {load:.5f}",
                     rf"$\langle E \rangle$: {avgEnergy:.3f}",
                     rf"$\langle \sigma \rangle$: {avgRSS:.3f}",
-                    rf"$p$: {nrPlasticEvents}",
+                    rf"$N_p$: {nrPlasticEvents}",
                     # rf"$\Delta_k$: {steps_since_last_frame}",
                     f"f: {frame_index}",
                 ],
@@ -175,20 +177,6 @@ def base_plot(
         table = ax.table(cellText=data, cellLoc="center", loc="top", edges="open")
 
         table.set_fontsize(10)
-
-        # Customize table appearance
-        # plt.rcParams.update(
-        #     {
-        #         "font.size": scale * 10,  # Adjust font size
-        #         "axes.titlesize": scale * 16,  # Adjust axis title size
-        #         "axes.labelsize": scale * 14,  # Adjust axis label size
-        #         "xtick.labelsize": scale * 12,  # Adjust x-axis tick label size
-        #         "ytick.labelsize": scale * 12,  # Adjust y-axis tick label size
-        #         "lines.linewidth": scale * 2,  # Adjust line width
-        #         "axes.linewidth": scale * 1,  # Adjust axes line width
-        #         "lines.markersize": scale * 6,  # Adjust marker size
-        #     }
-        # )
 
         # Remove the cell edges to keep it invisible
         for cell in table.get_celld().values():
@@ -299,9 +287,11 @@ def pretty_mesh_property(mesh_property):
     elif mesh_property == "stress":
         return r"$\sigma$"
     elif mesh_property == "m":
-        return r"$\textbf{m}_3$"
+        # p is the number of times m3 was applied during lagrange reduction
+        return r"$n_p$"
     elif mesh_property == "m_diff":
-        return r"$\Delta\textbf{m}_3$"
+        # p is the number of times m3 was applied during lagrange reduction
+        return r"$\Delta n_p$"
 
 
 def plot_mesh(
@@ -313,6 +303,9 @@ def plot_mesh(
     add_rombus=True,
     add_m12_marks=False,
     add_colorbar=True,
+    max_plastic=10,
+    max_plastic_change=4,
+    min_plastic_change=-2,
     **kwargs,
 ):
     if ax is None:
@@ -325,6 +318,7 @@ def plot_mesh(
     cmap = "coolwarm"
 
     norm = None
+    boundaries = None
 
     if mesh_property == "energy":
         # The energy field is normalized to have energy=0 in the ground state
@@ -342,7 +336,13 @@ def plot_mesh(
         cmap = "viridis"
         nrm1, nrm2, nrm3 = data.get_m_nr_field()
         field = nrm3
-        norm = mcolors.Normalize(vmin=0, vmax=6)
+        if max(field) > max_plastic:
+            raise RuntimeError(
+                f"Huge plastic deformation! Extend max_plastic to {max(field)}."
+            )
+
+        boundaries = np.arange(0, max_plastic + 1) - 0.5
+        norm = mcolors.BoundaryNorm(boundaries, plt.get_cmap(cmap).N)
         backgroundColor = plt.get_cmap(cmap)(0)
 
         # Define markers for each state
@@ -352,20 +352,32 @@ def plot_mesh(
         # Calculate the indices in a fully vectorized way
         state_indices = (nrm1 % 2) + (nrm2 % 2) * 2
     elif mesh_property == "m_diff":
-        cmap = "viridis"
-        _, _, nrm3 = data.get_m_nr_field()
+        field = data.get_m3_change_field()
+        if max(field) > max_plastic_change:
+            raise RuntimeError(
+                f"Huge plastic jump! Extend max_plastic_change to {max(field)}."
+            )
+        if min(field) < min_plastic_change:
+            raise RuntimeError(
+                f"Huge negative plastic jump! Extend min_plastic_change to {min(field)}."
+            )
 
-        previous_data_path = get_previous_data(vtu_file)
-        if previous_data_path:
-            previous_data = VTUData(previous_data_path)
-            _, _, previous_nrm3 = previous_data.get_m_nr_field()
-        else:
-            previous_nrm3 = nrm3
-        field = nrm3 - previous_nrm3
-        max_pastic = 3
-        if max(field) > max_pastic:
-            raise RuntimeError("Huge plastic jump!")
-        norm = mcolors.Normalize(vmin=0, vmax=max_pastic)
+            # Create a list of discrete colors
+        color_list = [
+            "blue",  # -2
+            "lightblue",  # -1
+            "white",  # 0 (center)
+            "lightcoral",  # 1
+            "red",  # 2
+            "darkred",  # 3
+        ]
+
+        # Create a ListedColormap from the color list
+        cmap = mcolors.ListedColormap(color_list)
+
+        # Define boundaries to align discrete colors
+        boundaries = np.arange(min_plastic_change, max_plastic_change + 1) - 0.5
+        norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         backgroundColor = plt.get_cmap(cmap)(0)
 
     if shift:
@@ -409,7 +421,12 @@ def plot_mesh(
                     )
 
     if add_colorbar:
-        plt.colorbar(mappable, ax=ax, label=pretty_mesh_property(mesh_property))
+        cbar = plt.colorbar(mappable, ax=ax, label=pretty_mesh_property(mesh_property))
+        # Set ticks to the midpoint of each region
+        if boundaries is not None:
+            ticks = boundaries[:-1] + 0.5
+            cbar.set_ticks(ticks)
+            cbar.set_ticklabels([str(int(t)) for t in ticks])
 
     if add_rombus:
         draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
@@ -425,7 +442,7 @@ def make_static_plot(fileName, **kwargs):
             kwargs["macro_data"],
             ax=ax,
             fig=fig,
-            Y="Avg energy",
+            Y="Avg_energy",
             save=False,
             legend=True,
         )
@@ -441,7 +458,7 @@ def make_static_plot(fileName, **kwargs):
             plot_post_yield=False,
             save=False,
             use_y_axis_name=True,
-            Y="Avg energy",
+            Y="Avg_energy",
             ax=ax,
             fig=fig,
             labels=labels,
@@ -639,7 +656,7 @@ def process_frame(kwargs, attemps=0):
 
 def get_corresponding_energy_and_rss(vtu_files, macro_data):
     """
-    Extracts the corresponding "Avg energy" and "Avg RSS" values for each load in vtu_files,
+    Extracts the corresponding "Avg_energy" and "Avg_RSS" values for each load in vtu_files,
     along with the line numbers (indices) of the matching rows in the CSV file.
 
     Parameters:
@@ -654,10 +671,10 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data):
         macro_data,
         usecols=[
             "Load",
-            "Avg energy",
-            "Avg RSS",
-            "Avg energy change",
-            "Nr plastic deformations",
+            "Avg_energy",
+            "Avg_RSS",
+            "Avg_energy_change",
+            "Nr_plastic_deformations",
         ],
     )
     avg_energy_list = []
@@ -686,17 +703,17 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data):
         matching_row = matching_rows.iloc[0]
 
         # Append the extracted values to the respective lists
-        avg_energy_list.append(matching_row["Avg energy"])
-        avg_RSS_list.append(matching_row["Avg RSS"])
-        change_avg_energy_list.append(matching_row["Avg energy change"])
+        avg_energy_list.append(matching_row["Avg_energy"])
+        avg_RSS_list.append(matching_row["Avg_RSS"])
+        change_avg_energy_list.append(matching_row["Avg_energy_change"])
         if (
-            matching_row["Avg energy change"] < 0
-            and matching_row["Nr plastic deformations"] == 0
+            matching_row["Avg_energy_change"] < 0
+            and matching_row["Nr_plastic_deformations"] == 0
         ):
             print(f"No deformation energy drop: {matching_row_index}, load={load}")
         if (
-            matching_row["Avg energy change"] < 0
-            and -matching_row["Avg energy change"] < 5e-8
+            matching_row["Avg_energy_change"] < 0
+            and -matching_row["Avg_energy_change"] < 5e-8
         ):
             print(f"Super small energy drop: {matching_row_index}, load={load}")
 
@@ -719,13 +736,13 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data):
 def get_previous_energy_and_rss(macro_data, current_line):
     # Check if current_line is an integer
     if isinstance(current_line, int):
-        df = pd.read_csv(macro_data, usecols=["Load", "Avg energy", "Avg RSS"])
+        df = pd.read_csv(macro_data, usecols=["Load", "Avg_energy", "Avg_RSS"])
         # Select the previous row relative to current_line
         p_row = df.iloc[current_line - 1]
-        return p_row["Load"], p_row["Avg energy"], p_row["Avg RSS"]
+        return p_row["Load"], p_row["Avg_energy"], p_row["Avg_RSS"]
     else:
         # Handle the case where current_line is an iterable (e.g., list or array)
-        df = pd.read_csv(macro_data, usecols=["Load", "Avg energy", "Avg RSS"])
+        df = pd.read_csv(macro_data, usecols=["Load", "Avg_energy", "Avg_RSS"])
         # Create empty lists to store previous values
         prev_loads, prev_energies, prev_rss = [], [], []
 
@@ -734,8 +751,8 @@ def get_previous_energy_and_rss(macro_data, current_line):
             line = max(1, line)
             p_row = df.iloc[line - 1]
             prev_loads.append(p_row["Load"])
-            prev_energies.append(p_row["Avg energy"])
-            prev_rss.append(p_row["Avg RSS"])
+            prev_energies.append(p_row["Avg_energy"])
+            prev_rss.append(p_row["Avg_RSS"])
 
         # Return lists of previous values
         return np.array(prev_loads), np.array(prev_energies), np.array(prev_rss)

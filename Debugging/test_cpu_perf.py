@@ -30,10 +30,6 @@ def cpu_intensive_work(iterations):
     # ------------------------------------------------------
     x = 0.0
     for i in range(iterations):
-        # --------------------------------------------------
-        # A sample computation that isn't easily optimized away:
-        # repeatedly perform a trigonometric operation.
-        # --------------------------------------------------
         x += math.sin(i) * math.cos(i)
     return x
 

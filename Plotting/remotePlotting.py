@@ -11,6 +11,7 @@ from .makePlots import (
     makeAverageComparisonPlot,
     makeLogPlotComparison,
     add_power_law_line,
+    duration_to_seconds,
 )
 import matplotlib.pyplot as plt
 from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
@@ -52,6 +53,7 @@ def handleLocalPath(dataPath, configs, returnCsv=True):
             # If it exists, add its path to the list of existing paths
             existing_paths.append(file_path)
 
+    # fix_csv_files(existing_paths, use_tqdm=False)
     return existing_paths
 
 
@@ -124,7 +126,7 @@ def get_csv_from_server(server, configs):
 
     # This fix is needed due to an old bug in the C++ program (fixed now)
     # so when downloading some data from the server, we need a fix
-    fix_csv_files(newPaths, use_tqdm=False)
+    # fix_csv_files(newPaths, use_tqdm=False)
     return newPaths
 
 
@@ -183,16 +185,18 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
                 # Check if file is less than 24 hours old
                 file_mod_time = os.path.getmtime(file_path)
                 # 3600 seconds = 1 hour
+                estTimeRemaining = pd.read_csv(file_path)["Est time remaining"].iloc[-1]
+                timeInSeconds = duration_to_seconds(estTimeRemaining)
                 if time.time() - file_mod_time < 24 * 3600 or useOldFiles:
                     paths.append(file_path)
                 # check if the file is done.
-                elif pd.read_csv(file_path)["Est time remaining"].iloc[-1] == "0.000s":
+                elif timeInSeconds <= 0:
                     paths.append(file_path)
                 else:
                     remaining_configs.append(config)
             elif last_search_folder:
                 remaining_configs.append(config)
-
+    # fix_csv_files(paths)
     return paths, remaining_configs
 
 
@@ -471,7 +475,7 @@ def stressPlotWithImages(configs, paths=None):
             [0.6, 0.55],  # upper right
         ],
         image_size=[0.37, 0.4, 0.4],
-        Y="Avg RSS",
+        Y="Avg_RSS",
         metric="stress",
     )
 
@@ -488,7 +492,7 @@ def energyPlotWithImages(configs, paths=None):
             [0.6, 0.1],  # upper right
         ],
         image_size=[0.4, 0.4, 0.4],
-        Y="Avg energy",
+        Y="Avg_energy",
         metric="energy",
     )
 
@@ -496,9 +500,9 @@ def energyPlotWithImages(configs, paths=None):
 def plotWholeRangePowerLaw(paths, Y, **kwargs):
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     # Define limits
-    if Y == "Avg energy":
+    if Y == "Avg_energy":
         ylim = [8e-3, 2e7]
-    elif Y == "Avg RSS":
+    elif Y == "Avg_RSS":
         ylim = [1e-5, 2e5]
     for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
@@ -514,22 +518,22 @@ def plotWholeRangePowerLaw(paths, Y, **kwargs):
             fig=fig,
             legend_loc="lower left",
             show=False,
-            add_fit=Y == "Avg RSS",
+            add_fit=Y == "Avg_RSS",
             mark=mark,
             mark_pos=(0.85, 0.9),
             **kwargs,
         )
-        if Y == "Avg energy":
+        if Y == "Avg_energy":
             add_power_law_line(ax, -0.85, [5e-7, 3e-4], 7e-1)
             add_power_law_line(ax, -2.5, [3e-4, 9e-3], 1e-6, linestyle="-.")
-        if Y == "Avg RSS":
+        if Y == "Avg_RSS":
             add_power_law_line(ax, -2.8, [3e-5, 5e-4], 5e-9, linestyle="-.")
         set_font_size(ax)
 
     synchronize_y_limits(axes)
 
     fig.tight_layout()
-    name = "energy" if Y == "Avg energy" else "stress"
+    name = "energy" if Y == "Avg_energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_full_range.pdf")
 
@@ -578,7 +582,7 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
     synchronize_y_limits(axes[1])
 
     fig.tight_layout()
-    name = "energy" if Y == "Avg energy" else "stress"
+    name = "energy" if Y == "Avg_energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_preYield.pdf")
 
@@ -626,16 +630,16 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
     synchronize_y_limits(axes[0])
     synchronize_y_limits(axes[1])
     fig.tight_layout()
-    name = "energy" if Y == "Avg energy" else "stress"
+    name = "energy" if Y == "Avg_energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_postYield.pdf")
 
 
 def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
     # Define limits
-    if Y == "Avg energy":
+    if Y == "Avg_energy":
         ylim = [0.62, 0.83]
-    elif Y == "Avg RSS":
+    elif Y == "Avg_RSS":
         ylim = [0.95, 1.34]
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
@@ -660,20 +664,22 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
         set_font_size(ax)
 
     fig.tight_layout()
-    name = "energy" if Y == "Avg energy" else "stress"
+    name = "energy" if Y == "Avg_energy" else "stress"
     name = name + "_withLambda" if show_lambda else name
     # Display all plots in a row
     plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
 
 
-def plotAverage(config_groups, labels, **kwargs):
+def plotAverage(config_groups, labels, useStress=False, **kwargs):
     paths, labels = get_csv_files(
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
     kwargs["labels"] = labels
-
+    yColumns = ["Avg_energy"]
+    if useStress:
+        yColumns.append("Avg_RSS")
     print("Plotting...")
-    for Y in ["Avg energy", "Avg RSS"]:
+    for Y in yColumns:
         makeAverageComparisonPlot(paths, Y=Y, **kwargs)
 
 
@@ -681,13 +687,30 @@ def plotTime(config_groups, labels, **kwargs):
     paths, labels = get_csv_files(
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
-    kwargs["labels"] = labels
-
     print("Plotting...")
-    for Y in ["Minimization time", "Write time", "Run time"]:
-        makeAverageComparisonPlot(
-            paths, Y=Y, xlim=[0.1500, 1], use_title=True, **kwargs
+    for Y in ["Minimization_time", "Write_time", "Run_time", "Est_time_remaining"]:
+        fig, ax = makePlot(
+            paths,
+            Y=Y,
+            name=f"{Y.replace(' ', '_')}.pdf",
+            labels=labels,
+            legend=True,
+            use_title=True,
+            **kwargs,
         )
+
+
+def plotEnergy(configs, labels, name="Energy", **kwargs):
+    paths, labels = get_csv_files(
+        configs, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    fig, ax = makePlot(
+        paths,
+        name=f"{name}.pdf",
+        labels=labels,
+        legend=True,
+        **kwargs,
+    )
 
 
 def plotLog(config_groups, labels, **kwargs):
@@ -699,7 +722,7 @@ def plotLog(config_groups, labels, **kwargs):
     print("Plotting...")
     # Iterate over the groups and methods, and plot each one in a separate subplot
     for Y, dropLim in zip(
-        ["Avg energy", "Avg RSS"],
+        ["Avg_energy", "Avg_RSS"],
         [[5e-7, None], [5e-4, None]],
     ):
         kwargs["dropLim"] = dropLim
