@@ -155,48 +155,77 @@ def download_file(name, folders, data_path, remote_folder_name, folder_path, ssh
     return None
 
 
+import os
+import time
+import pandas as pd
+
+
 def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
+    """
+    Searches for CSV files corresponding to given configurations in predefined folders.
+
+    - If `forceUpdate` is True, returns immediately with no files.
+    - Only includes files that are less than 12 hours old unless `useOldFiles` is True.
+    - Ensures all search directories exist.
+    - Files are considered valid if their "Est_time_remaining" column is 0 or missing.
+
+    Returns:
+        paths (list): List of valid file paths.
+        remaining_configs (list): List of configurations still needing files.
+    """
+
+    # If forced update, return no files.
     if forceUpdate:
         return [], configs
 
-    # We also only include files that are less than 24 hours old
-    paths = []
-    remaining_configs = []
-    last_search_folder = False
-    # Folders to search in
-    search_folders = ["/tmp/MTS2D", MACRO_PATH]
-    for folder in search_folders:
-        # Create folder if it does not exist
-        os.makedirs(folder, exist_ok=True)
+    paths, remaining_configs = [], []
+    # If an incomplete file is older than x hours, we update it
+    updateAfterHours = 12
+    search_folders = ["/tmp/MTS2D", MACRO_PATH]  # Directories to search in
 
-        # Flag for last folder
-        if folder == search_folders[-1]:
-            last_search_folder = True
+    for i, folder in enumerate(search_folders):
+        os.makedirs(folder, exist_ok=True)  # Ensure folder exists
+        # Check if it's the last search folder
+        last_search_folder = i == len(search_folders) - 1
 
-        # Get all files in folder (without extension)
-        files = [
+        # Get existing CSV file names (without extensions) for quick lookup
+        existing_files = {
             os.path.splitext(f)[0]
             for f in os.listdir(folder)
             if os.path.isfile(os.path.join(folder, f))
-        ]
+        }
+
         for config in configs:
-            file_path = os.path.join(folder, config.name + ".csv")
-            if config.name in files:
-                # Check if file is less than 24 hours old
-                file_mod_time = os.path.getmtime(file_path)
-                # 3600 seconds = 1 hour
-                estTimeRemaining = pd.read_csv(file_path)["Est time remaining"].iloc[-1]
-                timeInSeconds = duration_to_seconds(estTimeRemaining)
-                if time.time() - file_mod_time < 24 * 3600 or useOldFiles:
-                    paths.append(file_path)
-                # check if the file is done.
-                elif timeInSeconds <= 0:
-                    paths.append(file_path)
+            file_path = os.path.join(folder, f"{config.name}.csv")
+
+            if config.name in existing_files:
+                # Read estimated time remaining from CSV file
+                est_time_remaining = pd.read_csv(file_path)["Est_time_remaining"]
+                time_remaining = (
+                    duration_to_seconds(est_time_remaining.iloc[-1])
+                    if not est_time_remaining.empty
+                    else None
+                )
+
+                if time_remaining is None or time_remaining > 0:
+                    # File might still be processing; check age
+                    file_mod_time = os.path.getmtime(file_path)
+                    if time_remaining is not None and (
+                        time.time() - file_mod_time < updateAfterHours * 3600
+                        or useOldFiles
+                    ):
+                        # Include if recent enough
+                        paths.append(file_path)
+                    else:
+                        # Still needs processing
+                        remaining_configs.append(config)
                 else:
-                    remaining_configs.append(config)
+                    # File is done processing
+                    paths.append(file_path)
             elif last_search_folder:
+                # If no file found, add to remaining configs
                 remaining_configs.append(config)
-    # fix_csv_files(paths)
+
     return paths, remaining_configs
 
 
@@ -758,6 +787,7 @@ if __name__ == "__main__":
     )
     if paths:
         makePlot(paths, "ParamExploration.pdf", show=True, legend=False, ylim=(-100, 2))
+
         # makeTimePlot(paths, "Run time.pdf", show=True, legend=True)
         # makeItterationsPlot(paths, "ParamExploration.pdf", show=True)
         # makePowerLawPlot(paths, "ParamExplorationPowerLaw.pdf", show=True)

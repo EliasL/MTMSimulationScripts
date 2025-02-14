@@ -469,12 +469,10 @@ class JobManager:
                         )
                         continue  # Proceed to the next job_id
 
-                    if not verify_output:
-                        print(f"Successfully canceled job {job_id} on {server}.")
                     else:
-                        print(
-                            f"Failed to cancel job {job_id} on {server}. It may still be running."
-                        )
+                        # Probably successful
+                        print(f"Successfully canceled job {job_id} on {server}.")
+
                 except SSHException as ssh_exc:
                     print(
                         f"SSH error while verifying cancellation for job {job_id} on {server}: {ssh_exc}"

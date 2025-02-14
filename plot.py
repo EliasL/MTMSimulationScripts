@@ -5,11 +5,15 @@ from Management.jobs import (
     propperJob,
     propperJob3,
     avalanches,
+    findMinimizationCriteriaJobs,
 )
 
+
 from Management.simulationManager import findOutputPath
+from Plotting.makePlots import makePlot, makeSettingComparison
 from plotAll import plotAll
 from Plotting.remotePlotting import (
+    get_csv_files,
     plotEnergy,
     stressPlotWithImages,
     energyPlotWithImages,
@@ -19,6 +23,7 @@ from Plotting.remotePlotting import (
     get_folders_from_servers,
     createVideoes,
 )
+from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 
 
@@ -135,6 +140,63 @@ def plotAvalanches():
     plotTime(configs, labels)
 
 
+def plotMaxForce():
+    fig, ax = makePlot(
+        [
+            "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20epsR0.001s0/macroData.csv"
+        ],
+        Y="Max_force",
+        name="maxForce.pdf",
+        labels=["EpsR=0.001"],
+        legend=True,
+        # ylog=True,
+    )
+
+
+def plotMinimizationCriteriaData():
+    nrSeeds = 5
+    configs, labels = findMinimizationCriteriaJobs(nrSeeds=nrSeeds)
+    Ls = [40, 60, 80, 100]
+
+    for L in Ls:
+        confs, labs = zip(
+            *[(conf, lab) for (conf, lab) in zip(configs, labels) if conf.rows == L]
+        )
+        paths, labs = get_csv_files(
+            confs, labels=labs, useOldFiles=False, forceUpdate=False
+        )
+
+        # Common kwargs for makeSettingComparison
+        common_kwargs = {
+            "csv_file_paths": paths,
+            "labels": labs,
+            "property_keys": ("epsR", "loadIncrement"),
+            "loc": "upper right",
+            "yPad": 1.3,
+        }
+
+        fig1, ax1 = makeSettingComparison(**common_kwargs, name=f"L={L}_Energy")
+        fig2, ax2 = makeSettingComparison(
+            **common_kwargs, name=f"L={L}_SubtractEnergy", subtract=True
+        )
+        fig3, ax3 = makeSettingComparison(
+            **common_kwargs, name=f"L={L}_CumSumSubEnergy", cumSumSubtract=True
+        )
+        fig4, ax4 = makeSettingComparison(
+            **common_kwargs,
+            name=f"L={L}_DetatchEnergy",
+            detatchment=True,
+            seedsToShow=range(nrSeeds),
+        )
+
+        # Save as separate PDF pages
+        with PdfPages(f"Plots/combined_L{L}.pdf") as pdf:
+            pdf.savefig(fig1, bbox_inches="tight")
+            pdf.savefig(fig2, bbox_inches="tight")
+            pdf.savefig(fig3, bbox_inches="tight")
+            pdf.savefig(fig4, bbox_inches="tight")
+
+
 if __name__ == "__main__":
     # plotSampleRuns()
     # plotPropperJob3()
@@ -144,4 +206,6 @@ if __name__ == "__main__":
     # configs, labels = allPlasticEventsJob()
     # createVideoes(configs, all_images=True)
 
-    plotAvalanches()
+    # plotAvalanches()
+    # plotMaxForce()
+    plotMinimizationCriteriaData()

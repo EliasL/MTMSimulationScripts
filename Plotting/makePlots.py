@@ -134,8 +134,8 @@ def plotColumns(cvs_files, Y, labels, fig=None, ax=None):
         fig, ax = plt.subplots()
 
     values = []
-    for file in cvs_files:
-        df = pd.read_csv(file)
+    for path in cvs_files:
+        df = pd.read_csv(path)
         last_entry = df[Y].values[-1][0]
         last_entry_seconds = time_to_seconds(last_entry)
         values.append(last_entry_seconds)
@@ -701,14 +701,19 @@ def getPrettyLabel(string):
         s = string.split("minimizer=")[1].split(",")[0]
     if "," not in string:
         s = string
-    if "Eps" in string:
-        stopType = string.split("Eps")[1]
+    if "eps" in string.lower():
+        # Find the position of "eps" (case-insensitive)
+        idx = string.lower().index("eps")
+        # Extract the part after "eps" without changing its case
+        stopType = string[idx + 3 :]
         if stopType == "g":
-            stopType = r"\sigma"
+            stopType = r"$\sigma$"
         if stopType == "x":
-            stopType = r"|\Delta \mathbf{u}|"
-        s = rf"\epsilon_{{{stopType}}}"
-    return s.replace("LBFGS", "L-BFGS")
+            stopType = r"$|\Delta \mathbf{u}|$"
+        s = rf"$\epsilon_{{{stopType}}}$"
+    s = s.replace("LBFGS", "L-BFGS")
+    s = s.replace("loadIncrement", r"$\Delta \gamma$")
+    return s
 
 
 # Example usage can be added as necessary with DataFrames having 'Nr_plastic_deformations' and 'Avg_energy'
@@ -814,6 +819,23 @@ def plotSlidingWindowPowerLaw(
     return fig, ax1, ax2
 
 
+def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True):
+    """
+    Determines appropriate axis labels based on given column names.
+    """
+    if x_name is None:
+        x_name = r"Strain $\gamma$" if X == "Load" else X
+
+    if y_name is None and use_y_axis_name:
+        y_labels = {
+            "Avg_RSS": r"Stress $\langle \sigma \rangle$",
+            "Avg_energy": r"Energy $\langle E \rangle$",
+        }
+        y_name = y_labels.get(Y, Y)
+
+    return x_name, y_name
+
+
 def makePlot(
     csv_file_paths,
     ax=None,
@@ -863,19 +885,8 @@ def makePlot(
     ):
         print("No files provided.")
         return
-    if x_name is None:
-        if X == "Load":
-            x_name = r"Strain $\gamma$"
-        else:
-            x_name = X
 
-    if y_name is None and use_y_axis_name:
-        if Y == "Avg_RSS":
-            y_name = r"Stress $\langle \sigma \rangle$"
-        elif Y == "Avg_energy":
-            y_name = r"Energy $\langle E \rangle$"
-        else:
-            y_name = Y
+    x_name, y_name = get_axis_labels(X, Y, x_name, y_name, use_y_axis_name)
 
     # if we are not given a list, we make it into a list
     if isinstance(csv_file_paths, str):
@@ -934,7 +945,9 @@ def makePlot(
         kwargs = {"fig": fig, "ax": ax, "indicateLastPoint": indicateLastPoint}
 
         if colors:
-            kwargs["color"] = colors[i]
+            if isinstance(colors, list):
+                kwargs["color"] = colors[i]
+
         if linestyles:
             if isinstance(linestyles, bool):
                 kwargs["linestyle"] = LINE_STYLES[line_index]
@@ -943,9 +956,6 @@ def makePlot(
                     line_index = 0
             else:
                 kwargs["linestyle"] = linestyles[i]
-        if len(csv_file_paths) > 10:
-            kwargs["color"] = "gray"
-            kwargs["alpha"] = 0.5
 
         for Y_ in [Y] if isinstance(Y, str) else Y:
             if len(df[Y_]) == 0:
@@ -1648,6 +1658,313 @@ def makeEnergyAvalancheComparison(
         print(f'Plot saved at: "{figPath}"')
         if show:
             plt.show()
+
+
+def sci_format(val):
+    """Format numbers in scientific notation without leading zeros in exponents."""
+    return f"{val:.0e}".replace("e-0", "e-").replace("e+0", "e+")
+
+
+def get_linestyle(pos):
+    """Returns a linestyle that avoids overlap based on `pos`."""
+    pos = np.array(pos)
+    total_length = 13  # Increase total length to allow more variation
+
+    if sum(pos) >= 4:
+        return "-"
+    else:
+        pos += 1
+        dash = pos[0] * 2 + 2  # Ensure a minimum dash length
+        gap = max(2, total_length - dash - pos[1] * 2)  # Keep the gap reasonable
+        return (sum(pos), (pos[1] * 2, gap))
+
+
+def makeSettingComparison(
+    csv_file_paths=None,
+    labels=None,
+    property_keys=None,  # a tuple of two keys, e.g., ("epsR", "epsE")
+    X="Load",
+    Y="Avg_energy",
+    title=None,
+    xlim=None,
+    ylim=None,
+    show=False,
+    save=True,
+    name="setting_comparison",
+    loc="lower right",
+    subtract=False,  # Shows the difference from the most exact simulation
+    cumSumSubtract=False,  # Do a comulutative sum over the difference
+    detatchment=False,  # Shows where simulations detatch from the most accurate simulation
+    detatchmentThreshold=1e-6,
+    yPad=1,
+    seedsToShow=[0],
+    **kwargs,
+):
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+
+    if detatchment:
+        cumSumSubtract = True
+
+    if cumSumSubtract:
+        subtract = True
+
+    # --- Extract and parse the two properties ---
+    prop1_values = []
+    prop2_values = []
+    extra_labels = []
+    for label in labels:
+        parts = label.split(",")
+        p1, p2, extra = None, None, []
+        for part in parts:
+            key, value = map(str.strip, part.split("="))
+            if key == property_keys[0]:
+                p1 = float(value)
+            elif key == property_keys[1]:
+                p2 = float(value)
+            else:
+                extra.append(getPrettyLabel(part))
+        if p1 is None or p2 is None:
+            raise ValueError(
+                f"Label '{label}' missing one of the keys: {property_keys}"
+            )
+        prop1_values.append(p1)
+        prop2_values.append(p2)
+        extra_labels.append(", ".join(extra))
+
+    pretty_keys = [getPrettyLabel(k) for k in property_keys]
+    prop1_values, prop2_values = np.array(prop1_values), np.array(prop2_values)
+
+    # --- Create unique property values for grid ---
+    unique_p1, unique_p2 = np.unique(prop1_values), np.unique(prop2_values)
+
+    # --- Normalize values assuming logarithmic distribution ---
+    log_p1_norm = (np.log10(prop1_values) - np.log10(prop1_values.min())) / (
+        np.log10(prop1_values.max()) - np.log10(prop1_values.min())
+    )
+    log_p2_norm = (np.log10(prop2_values) - np.log10(prop2_values.min())) / (
+        np.log10(prop2_values.max()) - np.log10(prop2_values.min())
+    )
+
+    # --- Generate color matrix ---
+    color_matrix = np.zeros((len(unique_p2), len(unique_p1), 4))
+    index_map = {}
+    for i, (p1, p2, r, b) in enumerate(
+        zip(prop1_values, prop2_values, log_p1_norm, log_p2_norm)
+    ):
+        row, col = np.where(unique_p2 == p2)[0][0], np.where(unique_p1 == p1)[0][0]
+        color_matrix[row, col] = [r, abs(r - b), b, 1]
+        index_map[(row, col)] = i
+
+    # --- Preserve diagonal colors (as in original) ---
+    if subtract:
+        color_matrix[0, 0] = [1, 1, 1, 1]
+    else:
+        color_matrix[0, 0] = [1, 0, 0, 1]
+    # color_matrix[1, 1] = [0, 1, 0, 1]
+    # color_matrix[2, 2] = [0, 0, 1, 1]
+
+    # --- Create the figure and the main plot ---
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    # --- Inset color matrix inside the plot ---
+    if detatchment:
+        # Center right
+        bbox_to_anchor = (0.72, -0.25, 1, 1)
+    else:
+        # Upper left
+        bbox_to_anchor = (0.1, -0.05, 1, 1)
+    inset_ax = inset_axes(
+        ax,
+        width="25%",
+        height="25%",  # Required!
+        loc="upper left",
+        bbox_to_anchor=bbox_to_anchor,
+        bbox_transform=ax.transAxes,
+    )
+
+    cax = inset_ax.matshow(
+        color_matrix.transpose((0, 1, 2)), origin="upper", aspect="auto"
+    )
+
+    # --- Set matrix axis labels ---
+    inset_ax.set_xticks(range(len(unique_p1)))
+    inset_ax.set_yticks(range(len(unique_p2)))
+    inset_ax.set_xticklabels([sci_format(val) for val in unique_p1])
+    inset_ax.set_yticklabels([sci_format(val) for val in unique_p2])
+    inset_ax.set_xlabel(pretty_keys[0], fontsize=10)
+    inset_ax.set_ylabel(pretty_keys[1], fontsize=10)
+    inset_ax.set_title("Parameter color map", fontsize=10)
+    inset_ax.invert_yaxis()
+    inset_ax.xaxis.set_ticks_position("bottom")
+    inset_ax.xaxis.set_label_position("bottom")
+
+    # --- Sort the lines by property values ---
+    sorted_indices = np.argsort(prop1_values + prop2_values)
+
+    # --- Find the best simulation ---
+    # Dictionaries coresponding to the seed
+    best_df = {}
+    best_label = ""  # We'll just use the last one, should be the same anyway
+    for i, csv_file_path in enumerate(csv_file_paths):
+        pos = (
+            np.where(unique_p2 == prop2_values[i])[0][0],
+            np.where(unique_p1 == prop1_values[i])[0][0],
+        )
+        if pos == (0, 0):
+            seed = get_data_from_name(csv_file_path)["seed"]
+            best_df[seed] = pd.read_csv(csv_file_path, usecols=[X, Y])
+            best_label = f"{pretty_keys[0]}={sci_format(prop1_values[i])}, {pretty_keys[1]}={sci_format(prop2_values[i])}"
+
+    # --- Plot lines ---
+    added_labels = []
+    for i, csv_file_path in enumerate(csv_file_paths):
+        seed = get_data_from_name(csv_file_path)["seed"]
+        if seed not in seedsToShow:
+            continue
+
+        pos = (
+            np.where(unique_p2 == prop2_values[i])[0][0],
+            np.where(unique_p1 == prop1_values[i])[0][0],
+        )
+        color = color_matrix[pos]
+
+        try:
+            df = pd.read_csv(csv_file_path, usecols=[X, Y])
+        except Exception as e:
+            print(f"Error reading {csv_file_path}: {e}")
+            continue
+
+        if len(df) == 0:
+            print(f"No data in {csv_file_path}.")
+            continue
+
+        X_data, Y_data = df[X].values, df[Y].values
+        if subtract:
+            if pos == (0, 0):
+                continue
+            else:
+                best_X = best_df[seed][X].values
+                best_Y = best_df[seed][Y].values
+
+                # Find indices in best_X that match X_data
+                matching_indices = np.isin(best_X, X_data)
+
+                # Extract corresponding best_Y values
+                filtered_best_Y = best_Y[matching_indices]
+                filtered_X = best_X[matching_indices]
+
+                # Get indices of matching X values in X_data
+                matching_X_indices = np.isin(X_data, filtered_X)
+
+                # Subtract corresponding values
+                Y_data = abs(Y_data[matching_X_indices] - filtered_best_Y)
+                X_data = filtered_X
+                # Get the area underneath the difference curve
+                if cumSumSubtract:
+                    Y_data = np.cumsum(np.diff(X_data) * (Y_data[:-1] + Y_data[1:]) / 2)
+                    X_data = X_data[1:]
+                if detatchment:
+                    Y_data = np.where(Y_data > detatchmentThreshold, 1, 0)
+                    detatch_index = np.argmax(Y_data == 1)
+                    if detatch_index == 0:
+                        # The curve never reached the threshold
+                        detatch_index = -1
+
+                    Y_data = [Y_data[detatch_index]]
+                    X_data = [X_data[detatch_index]]
+
+        if isinstance(Y_data[0], str):
+            try:
+                Y_data = np.array([duration_to_seconds(y_str) for y_str in Y_data])
+            except Exception as e:
+                print(f"Error converting Y data in {csv_file_path}: {e}")
+
+        if xlim is not None:
+            mask = (X_data >= xlim[0]) & (X_data <= xlim[1])
+            X_data, Y_data = X_data[mask], Y_data[mask]
+        if ylim is not None:
+            mask = (Y_data >= ylim[0]) & (Y_data <= ylim[1])
+            X_data, Y_data = X_data[mask], Y_data[mask]
+
+        # --- Ensure proper layering (smaller values drawn first) ---
+        z_order = len(sorted_indices) - np.where(sorted_indices == i)[0][0]
+        linestyle = get_linestyle(pos)
+        label = f"{pretty_keys[0]}={sci_format(prop1_values[i])}, {pretty_keys[1]}={sci_format(prop2_values[i])}"
+        if label in added_labels:
+            label = None
+        else:
+            added_labels.append(label)
+
+        if detatchment:
+            marker = "o"
+            if detatch_index == -1:
+                marker = "^"
+            ax.scatter(
+                prop1_values[i] + prop2_values[i],
+                X_data,
+                label=label,
+                zorder=z_order,
+                edgecolors=color,
+                facecolors="none",
+                marker=marker,
+                **kwargs,
+            )
+
+        else:
+            if cumSumSubtract:
+                ax.hlines(
+                    [detatchmentThreshold],
+                    min(X_data),
+                    max(X_data),
+                    colors=["black"],
+                    linestyles=[(0, (2, 15))],
+                    linewidth=1,
+                )
+            ax.plot(
+                X_data,
+                Y_data,
+                color=color,
+                label=label,
+                zorder=z_order,
+                linestyle=linestyle,
+                **kwargs,
+            )
+
+    # --- Make space for legend at top ---
+    # Get current y-axis limits
+    y_min, y_max = ax.get_ylim()
+
+    # Adjust the upper y-limit
+    ax.set_ylim(y_min, y_max * yPad)
+
+    # --- Set labels and titles for main plot ---
+    x_name, y_name = get_axis_labels(X, Y)
+    if subtract:
+        y_name = f"{y_name} difference from {best_label}"
+        if cumSumSubtract:
+            y_name = "Area under " + y_name
+    if detatchment:
+        y_name = x_name
+        x_name = f"{pretty_keys[0]} + {pretty_keys[1]}"
+        ax.set_xscale("log")
+    ax.set_xlabel(x_name)
+    ax.set_ylabel(y_name)
+    # ax.set_title(f"{', '.join(set(extra_labels))}")
+    ax.legend(fontsize=8, loc=loc, ncol=2)
+
+    fig.suptitle(title)
+    fig.tight_layout(rect=[0, 0, 1, 0.95])
+
+    if save:
+        fig.savefig(f"Plots/{name}.pdf")
+        print(f"Plot saved to: Plots/{name}.pdf")
+    if show:
+        plt.show()
+
+    return fig, ax
 
 
 def makeItterationsPlot(csv_file_paths, name, **kwargs):

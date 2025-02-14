@@ -2,6 +2,8 @@ import subprocess
 from pathlib import Path
 from Management.clusterStatus import get_all_server_info, display_server_info
 from Management.dataManager import DataManager
+from Management.connectToCluster import Servers
+
 
 # from Management.configGenerator import ConfigGenerator
 from Management.jobManager import JobManager
@@ -87,5 +89,7 @@ if __name__ == "__main__":
                 f"No such task {task}. The options are disp_<data/servers/jobs>"
             )
     else:
+        # dm = DataManager()
+        # dm.clean_projects_on_servers()
         # disp_jobs()
         run_script()

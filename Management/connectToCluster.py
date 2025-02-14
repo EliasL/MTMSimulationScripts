@@ -25,7 +25,7 @@ class Servers:
     # List of server variables for iteration or list-like access
     servers = [
         galois,
-        pascal,
+        # pascal,
         schwartz,
         lagrange,
         # condorcet,
@@ -34,7 +34,7 @@ class Servers:
         fourier,
         descartes,
         # mesopsl,
-        jeanZay,
+        # jeanZay,
     ]
 
     # If we want to search all the servers including the local storage, we can do that
@@ -170,7 +170,8 @@ def run_setup(cluster_address, verbose):
     ssh_command = [
         "ssh",
         f"{user}@{cluster_address}",
-        "cd ~/simulation/SimulationScripts && pip3 install ./Management ./Plotting",
+        # "cd ~/simulation/SimulationScripts && pip3 install ./Management ./Plotting",
+        "export PYTHONPATH=${PYTHONPATH:+${PYTHONPATH}:}$HOME/simulation/SimulationScripts",
     ]
 
     output_options = None if verbose else subprocess.DEVNULL

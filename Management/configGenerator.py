@@ -81,6 +81,9 @@ class SimulationConfig:
                         f"{key} should be given a {type(current_value)} but was given a {type(value)}."
                     )
                 setattr(self, key, value)
+            elif key == "L":
+                self.rows = value
+                self.cols = value
             elif key != "NONAME":
                 raise (Warning(f"Unkown keyword: {key}"))
 
@@ -453,8 +456,15 @@ if __name__ == "__main__":
     import os
     import sys
 
+    L = 3
     config = SimulationConfig(
-        loadIncrement=0.01, minimizer="LBFGS", nrThreads=3, LBFGSEpsg=1e-5, epsR=1e-7
+        rows=L,
+        cols=L,
+        startLoad=0.15,
+        loadIncrement=0.001,
+        minimizer="LBFGS",
+        nrThreads=3,
+        epsR=1e-5,  # LBFGSEpsg=1e-5
     )
     # config = get_custom_configs()
     if len(sys.argv) >= 2:

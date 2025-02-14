@@ -4,6 +4,7 @@ from Management.runOnCluster import build_on_all_servers
 from runSimulations import run_many_locally, run_locally
 from Management.connectToCluster import Servers
 from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
+from Management.dataManager import DataManager
 from Management.jobs import (
     cyclicLoading,
     backwards,
@@ -17,6 +18,7 @@ from Management.jobs import (
     propperJob1,
     propperJob2,
     propperJob3,
+    findMinimizationCriteriaJobs,
 )
 
 
@@ -111,11 +113,13 @@ def startJobs():
     nrSeeds = 40
     print("Building on all servers... ")
 
-    build_on_all_servers(uploadOnly=False)
-    for job in [propperJob3]:
+    build_on_all_servers(uploadOnly=True)
+    for job in [findMinimizationCriteriaJobs]:
         configs, labels = job()
-        servers_confs = distributeConfigs(configs, configs[0].nrThreads)
-        print("Starting jobs...")
+        print("Distributing jobs and searching for already exsisting folders...")
+        servers_confs = distributeConfigs(
+            configs, configs[0].nrThreads, allowWaiting=True
+        )
         for server, configs in servers_confs.items():
             queueJobs(server, configs, job_name="opt")
             pass
@@ -132,15 +136,22 @@ def stopJobs():
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
     # j.cancel_jobs_on_server(Servers.descartes, 80165)
     # j.cancel_jobs_on_server(Servers.schwartz, 466525)
-    j.cancel_jobs_on_server(
-        Servers.poincare,
-        [
-            654061,
-            654070,
-        ],
-    )
-    # j.cancelAllJobs(force=True)
+    # j.cancel_jobs_on_server(
+    #     Servers.poincare,
+    #     [
+    #         654061,
+    #         654070,
+    #     ],
+    # )
+    j.cancelAllJobs(force=True)
     # j.showProcesses()
+
+
+def cleanData():
+    dm = DataManager()
+    dm.findData()
+    configs, labels = findMinimizationCriteriaJobs()
+    dm.delete_data_from_configs(configs)
 
 
 # 150x150 64 threads -> 23 days
@@ -152,8 +163,9 @@ def stopJobs():
 # runOnServer()
 # parameterExploring()
 # stopJobs()
+# cleanData()
 # runOnLocalMachine()
 # startJobs()
 # plotBigJob()
 # threadTest()
-benchmark()
+# benchmark()

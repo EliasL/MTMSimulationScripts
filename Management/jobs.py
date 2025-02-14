@@ -206,8 +206,8 @@ def avalanches(nrThreads, nrSeeds=1, seeds=None, size=100):
         "LBFGSEpsg": LBFGSEpsg,
         "scenario": "simpleShear",
     }
-    configs, labels = [], []
-    # configs, labels = ConfigGenerator.generate(**kwargs)
+    configs, labels = ConfigGenerator.generate(**kwargs)
+    configs, labels = [configs[0]], [labels[0]]
     epsR = [1e-6, 1e-5, 1e-4, 1e-3]
     kwargs = {
         "seed": seeds,
@@ -229,8 +229,8 @@ def avalanches(nrThreads, nrSeeds=1, seeds=None, size=100):
     del kwargs["epsR"]
     kwargs["LBFGSEpsx"] = 1e-6
     configsX, labelsX = ConfigGenerator.generate(**kwargs)
-    configs.append(configsX[0])
-    labels.append("LBFGSEpsx=1e-06")
+    # configs.append(configsX[0])
+    # labels.append("LBFGSEpsx=1e-06")
     return configs, labels, dump
 
 
@@ -268,5 +268,26 @@ def cyclicLoading(nrThreads, nrSeeds=1, seeds=None, LBFGSEpsg=1e-8):
         minimizer="LBFGS",
         LBFGSEpsg=LBFGSEpsg,
         scenario="cyclicSimpleShear",
+    )
+    return configs, labels
+
+
+def findMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
+    L = [30, 40, 60, 80, 100]
+    loadIncrement = [1e-5, 1e-4, 1e-3]
+    epsR = [1e-6, 1e-5, 1e-4, 1e-3]
+    if seeds is None:
+        seeds = range(nrSeeds)
+    configs, labels = ConfigGenerator.generate(
+        seed=seeds,
+        group_by_seeds=False,
+        L=L,
+        startLoad=0.15,
+        maxLoad=1.0,
+        loadIncrement=loadIncrement,
+        nrThreads=4,
+        minimizer="LBFGS",
+        epsR=epsR,
+        scenario="simpleShear",
     )
     return configs, labels

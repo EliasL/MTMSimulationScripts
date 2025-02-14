@@ -2,7 +2,12 @@ from itertools import product
 from collections import OrderedDict
 from .configGenerator import ConfigGenerator, SimulationConfig
 
-from .runOnCluster import queue_remote_job, build_on_all_servers, run_remote_command
+from .runOnCluster import (
+    queue_remote_job,
+    build_on_all_servers,
+    run_remote_command,
+    Servers,
+)
 from .clusterStatus import get_all_server_info, get_server_short_name
 from .jobManager import JobManager
 from .dataManager import DataManager
@@ -26,7 +31,7 @@ def dictToString(dictionary):
     )
 
 
-def distributeConfigs(configs, threads_per_seed=1):
+def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
     """
     We give each seed its own slurm job and we just fill the entire cluster with
     lots of small jobs with a high nice value so that others can get past if they
@@ -55,15 +60,16 @@ def distributeConfigs(configs, threads_per_seed=1):
                     serverConfigDict[server] = []
                 serverConfigDict[server].append(config)
                 configSolved = True
+                print(f"{config.name} found in {server}")
                 break
-            else:
-                print(f"{config.name} not found.")
         if not configSolved:
+            print(f"{config.name} not found.")
             remaining_configs.append(config)
 
     print(
         f"Resuming {sum(len(lst) for lst in serverConfigDict.values())} exsisting jobs."
     )
+
     if len(remaining_configs) > 0:
         print(f"Finding cpu space for {len(remaining_configs)} new jobs.")
     else:
@@ -102,9 +108,18 @@ def distributeConfigs(configs, threads_per_seed=1):
         # If no remaining configurations, return the filled commands
         if not remaining_configs:
             return serverConfigDict
-    raise RuntimeError(
-        f"Not enough cores to run simulations! Need {len(remaining_configs) * threads_per_seed} cores."
-    )
+
+    if allowWaiting:
+        server_index = 0
+        while remaining_configs:
+            server_name = Servers.servers[server_index]
+            serverConfigDict[server_name].append(remaining_configs.pop(0))
+            server_index = (server_index + 1) % len(Servers.servers)
+        return serverConfigDict
+    else:
+        raise RuntimeError(
+            f"Not enough cores to run simulations! Need {len(remaining_configs) * threads_per_seed} cores."
+        )
 
 
 def queueJobs(server, configs, job_name="el", **kwargs):

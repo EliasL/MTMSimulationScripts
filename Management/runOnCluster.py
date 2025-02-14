@@ -119,7 +119,6 @@ class ProgressBarUpdater(Responder):
             else:
                 line = line.strip()
             # Initialize or update the progress bar based on the output
-            print(line)
             if self.total == -1:
                 self.total = int(line)
                 pbars[self.pbar_index] = tqdm(
@@ -142,15 +141,19 @@ def run_remote_script_with_progress(server, script_path, pbar_index, silent):
     """Run a remote script and process its output in real time, updating a tqdm progress bar."""
     updater = ProgressBarUpdater(server, pbar_index, silent)
     user = getServerUserName(server)
-    with Connection(host=server, user=user) as c:
-        # Execute the script with unbuffered Python output and pseudo-terminal
-        command = f"python3 -u {script_path}"
-        c.run(command, watchers=[updater], hide=True)
-        if pbar_index in output:
-            pbars[pbar_index].close()
-            return output[pbar_index]
-        else:
-            return []
+    try:
+        with Connection(host=server, user=user) as c:
+            # Execute the script with unbuffered Python output and pseudo-terminal
+            command = f"python3 -u {script_path}"
+            c.run(command, watchers=[updater], hide=True)
+    except Exception as e:
+        print(f"Error in {server}: {e}")
+
+    # Ensure tqdm bar is closed
+    if pbar_index in output and pbar_index in pbars:
+        pbars[pbar_index].close()
+
+    return output.get(pbar_index, [])
 
 
 def find_outpath_on_server(server_hostname):

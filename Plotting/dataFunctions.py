@@ -112,6 +112,10 @@ def get_data_from_name(nameOrPath):
     # part is the type, ie .N.vtu:
     # resettingSimpleShearPeriodicBoundary,s60x60l0.15,1e-05,10PBCt4s0_load=3.79001_nrM=0_.364001.vtu
 
+    # We can also handle .csv values, in which case the last part will be .csv
+    if parts[0][-4:] == ".csv":
+        parts[0] = parts[0][:-4]
+
     result["name"] = parts[0]
     for part in parts[1:-1]:
         key, value = part.split("=")
@@ -130,6 +134,9 @@ def get_data_from_name(nameOrPath):
     result["dims"] = tuple(
         map(int, result["name"].split(",")[1].split("s")[1].split("l")[0].split("x"))
     )
+
+    # get seed
+    result["seed"] = int(result["name"].split("s")[-1])
 
     # Extract start load, load increment, and max load
     load_parts = result["name"].split(",")[1:]

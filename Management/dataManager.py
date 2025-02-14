@@ -98,15 +98,16 @@ class DataManager:
             print(f"Script error (stderr): {e.stderr}")
             return None
 
-    def findData(self, silent=False, autoUpdate=False):
+    def findData(self, silent=True, autoUpdate=False):
+        print("Collecting data from servers...")
         if autoUpdate:
             # If this is an autoupdate, we don't want to check for new data
             # if it is less than 24 hours since the last time the data was updated.
             if "date" in self.data:
                 last_update_time = datetime.fromisoformat(self.data["date"])
                 time_difference = datetime.now() - last_update_time
-                if time_difference < timedelta(hours=24):
-                    # If the data was updated less than 24 hours ago, return None
+                if time_difference < timedelta(hours=12):
+                    # If the data was updated less than 12 hours ago, return None
                     return None
 
         # Use ThreadPoolExecutor to execute find_data_on_server in
@@ -165,18 +166,24 @@ class DataManager:
         print(table)
 
     def delete_all_found_data(self, dryRun=True):
-        for server, (folders, size) in self.data.items():
+        for server, (folders, sizes, free_space_in_GB) in self.data.items():
             if folders:
                 self.delete_data_on_server(server, folders, dryRun)
 
     def delete_data_from_configs(self, configs, dryRun=True):
         names = {x.name for x in configs}  # Use a set for faster lookup
+        somethingFound = False
         for server, foldersAndSizes in self.data.items():
-            if foldersAndSizes:
-                folders, sizes = foldersAndSizes
+            if foldersAndSizes and not isinstance(foldersAndSizes, str):
+                folders, sizes, free_space_in_GB = foldersAndSizes
                 filteredFolders = [f for f in folders if f.split("/")[-1] in names]
                 if filteredFolders:
+                    somethingFound = True
                     self.delete_data_on_server(server, filteredFolders, dryRun)
+        if not somethingFound:
+            print(
+                "No data found to delete. (Did you remember to update the dataManager? Run findData)"
+            )
 
     def delete_data_on_server(self, server, folders, dryRun=True):
         if server == "Local ssd":  # Check if the server is local
@@ -329,7 +336,7 @@ class DataManager:
 
     def print_grouped_folders(self, folders, sizes=None):
         if sizes is None:
-            sizes = ["0BB/1BB (0.0%)"] * len(folders)
+            sizes = [0] * len(folders)
         groups = self.parse_and_group_seeds((folders, sizes))
         for group in groups:
             print(group[0])
@@ -390,7 +397,7 @@ class DataManager:
 
         return final_grouped_folders
 
-    def clean_projects_on_servers(self):
+    def clean_projects_on_servers(self, specificServers=None):
         """
         Deletes the simulation folder in the home directory on all the servers.
         """
@@ -407,11 +414,14 @@ class DataManager:
             except Exception as e:
                 print(f"Error cleaning simulation folder on {server}: {e}")
 
+        serversToClean = Servers.servers
+        if specificServers:
+            serversToClean = specificServers
         # Use ThreadPoolExecutor to execute clean_folder_on_server in parallel across all servers
-        with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+        with ThreadPoolExecutor(max_workers=len(serversToClean)) as executor:
             future_to_server = {
                 executor.submit(clean_folder_on_server, server): server
-                for server in Servers.servers
+                for server in serversToClean
             }
             for future in as_completed(future_to_server):
                 server = future_to_server[future]
@@ -453,6 +463,7 @@ def get_free_space(ssh, path):
     return free_space
 
 
+# UNUSED
 def get_directory_size(ssh, path, free_space=False):
     # Command to list all items in the directory with details
     list_details_command = f"ls -l {path}"

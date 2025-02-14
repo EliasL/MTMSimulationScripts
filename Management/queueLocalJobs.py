@@ -11,10 +11,12 @@ def get_batch_script(command, job_name, nrThreads, outPath):
     batch_script = textwrap.dedent(f"""
         #!/bin/bash
         #SBATCH --job-name={job_name}
-        #SBATCH --time=0-19:00:00
+        #SBATCH --time=9-19:00:00
         #SBATCH --ntasks={nrThreads}
         #SBATCH --output={output_file}
         #SBATCH --error={error_file}
+        # Set a high nice value to decrease priority
+        # SBATCH --nice=10000
 
         # Load Modules
         module load cmake 
@@ -22,8 +24,6 @@ def get_batch_script(command, job_name, nrThreads, outPath):
         # Command to run
         {command}
     """).strip()
-    # Set a high nice value to decrease priority
-    # SBATCH --nice=10000
     return batch_script
 
 
