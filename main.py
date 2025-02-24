@@ -7,6 +7,7 @@ from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
 from Management.dataManager import DataManager
 from Management.jobs import (
     cyclicLoading,
+    fixedBoundaries,
     backwards,
     largeAvalanche,
     avalanches,
@@ -19,6 +20,8 @@ from Management.jobs import (
     propperJob2,
     propperJob3,
     findMinimizationCriteriaJobs,
+    compareWithOldStoppingCriteria,
+    showMinimizationCriteriaJobs,
 )
 
 
@@ -31,6 +34,8 @@ def benchmark():
 
     # Lots of changes (05.02.25) (still good)
     # 1% RT: 1m 53s  ETR: 2h 30m 21s Load: 0.160470
+
+    # Ghost nodes (24.02.25) (Running together with another system using 6 threads)
 
 
 def parameterExploring():
@@ -98,36 +103,33 @@ def runOnLocalMachine():
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     configs, labels, dump = largeAvalanche(nrThreads=20)
     configs, labels, dump = avalanches(nrThreads=20, size=100)
+    # 12 threads:
+    # [LBFGS] 1% RT: 1h 31m 38s       ETR: 3d 23h 37m 19s     Load: 0.163360
+    configs, labels = fixedBoundaries(nrThreads=6, fixed=False, L=200)
+    configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
+
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=20)
     # run_locally(configs[0], dump=dump)
-    run_many_locally(configs, taskNames=labels, resume=True)  # , dump=dump)
+    run_many_locally(configs, taskNames=labels, resume=False)  # , dump=dump)
 
 
 def startJobs():
-    # j = JobManager()
-    # j.findAndShowSlurmJobs()
-    # j.cancelAllJobs(force=True)
-
     nrThreads = 3
     nrSeeds = 40
     print("Building on all servers... ")
 
-    build_on_all_servers(uploadOnly=True)
-    for job in [findMinimizationCriteriaJobs]:
+    build_on_all_servers()
+    for job in [findMinimizationCriteriaJobs, compareWithOldStoppingCriteria]:
         configs, labels = job()
         print("Distributing jobs and searching for already exsisting folders...")
         servers_confs = distributeConfigs(
             configs, configs[0].nrThreads, allowWaiting=True
         )
         for server, configs in servers_confs.items():
-            queueJobs(server, configs, job_name="opt")
+            if configs:
+                queueJobs(server, configs, job_name="opt", stopExsistingJobs=False)
             pass
-    print("Done!")
-    # sleep(1)
-    # j = JobManager()
-    # j.findAndShowSlurmJobs()
-    # j.showProcesses()
 
 
 def stopJobs():
@@ -150,8 +152,11 @@ def stopJobs():
 def cleanData():
     dm = DataManager()
     dm.findData()
+    dm.clean_projects_on_servers()
     configs, labels = findMinimizationCriteriaJobs()
-    dm.delete_data_from_configs(configs)
+    dm.delete_data_from_configs(configs, dryRun=False)
+    configs, labels = compareWithOldStoppingCriteria()
+    dm.delete_data_from_configs(configs, dryRun=False)
 
 
 # 150x150 64 threads -> 23 days
@@ -162,10 +167,12 @@ def cleanData():
 
 # runOnServer()
 # parameterExploring()
+# runOnLocalMachine()
+
 # stopJobs()
 # cleanData()
-# runOnLocalMachine()
 # startJobs()
+
 # plotBigJob()
 # threadTest()
-# benchmark()
+benchmark()

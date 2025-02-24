@@ -47,9 +47,9 @@ size = 10000
 data = generate_powerlaw_avalanche_data(alpha_true, size, xmin)
 data = np.concatenate([data] * 50)
 data = get_only_drops(data)
-# data = get_true_data(
-#     "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/macroData.csv"
-# )
+data = get_true_data(
+    "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/macroData.csv"
+)
 plt.plot(np.arange(len(data)), data)
 plt.yscale("log")
 plt.show()

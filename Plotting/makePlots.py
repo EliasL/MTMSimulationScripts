@@ -1,5 +1,6 @@
 from matplotlib import pyplot as plt
 import matplotlib as mpl
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 import os
 import matplotlib.pylab
 import matplotlib.lines as mlines
@@ -13,9 +14,13 @@ from simplification.cutil import simplify_coords_vwp
 from tqdm import tqdm
 from pathlib import Path
 from .dataFunctions import get_data_from_name
+from collections import defaultdict
+import warnings
 
 if True:
     import warnings
+
+    warnings.filterwarnings("ignore", message=".*tight_layout.*")
 
     # This line converts all RuntimeWarnings into errors (exceptions).
     warnings.simplefilter("error", RuntimeWarning)
@@ -707,7 +712,7 @@ def getPrettyLabel(string):
         # Extract the part after "eps" without changing its case
         stopType = string[idx + 3 :]
         if stopType == "g":
-            stopType = r"$\sigma$"
+            stopType = r"\sigma"
         if stopType == "x":
             stopType = r"$|\Delta \mathbf{u}|$"
         s = rf"$\epsilon_{{{stopType}}}$"
@@ -1679,6 +1684,107 @@ def get_linestyle(pos):
         return (sum(pos), (pos[1] * 2, gap))
 
 
+def parse_labels(labels, property_keys):
+    """Extract numerical property values and additional labels from provided labels."""
+    prop1_values, prop2_values, extra_labels = [], [], []
+
+    for label in labels:
+        parts = label.split(",")
+        p1, p2, extra = None, None, []
+        for part in parts:
+            key, value = map(str.strip, part.split("="))
+            if key == property_keys[0]:
+                p1 = float(value)
+            elif len(property_keys) > 1 and key == property_keys[1]:
+                p2 = float(value)
+            else:
+                extra.append(getPrettyLabel(part))
+        prop1_values.append(p1)
+        prop2_values.append(p2)
+        extra_labels.append(", ".join(extra))
+
+    return np.array(prop1_values), np.array(prop2_values), extra_labels
+
+
+def safe_log_norm(values):
+    min_val, max_val = np.log10(values.min()), np.log10(values.max())
+    return (
+        np.zeros_like(values)
+        if min_val == max_val
+        else (np.log10(values) - min_val) / (max_val - min_val)
+    )
+
+
+def create_color_matrix(prop1_values, prop2_values):
+    """Generate a color matrix based on the logarithmic normalization of property values."""
+    unique_p1 = np.unique(prop1_values)
+
+    if prop2_values[0] is None:
+        unique_p2 = None
+        log_p1_norm = safe_log_norm(unique_p1)
+        color_matrix = np.zeros((1, len(unique_p1), 4))  # Single row matrix
+        for col, (p1, r) in enumerate(zip(unique_p1, log_p1_norm)):
+            color_matrix[0, col] = [r, 0, 0, 1]  # Only using log_p1_norm
+        return color_matrix, unique_p1, unique_p2
+
+    unique_p2 = np.unique(prop2_values)
+
+    log_p1_norm = safe_log_norm(prop1_values)
+    log_p2_norm = safe_log_norm(prop2_values)
+
+    color_matrix = np.zeros((len(unique_p2), len(unique_p1), 4))
+    index_map = {}
+
+    for i, (p1, p2, r, b) in enumerate(
+        zip(prop1_values, prop2_values, log_p1_norm, log_p2_norm)
+    ):
+        row, col = np.where(unique_p2 == p2)[0][0], np.where(unique_p1 == p1)[0][0]
+        color_matrix[row, col] = [r, abs(r - b), b, 1]
+        index_map[(row, col)] = i
+
+    return color_matrix, unique_p1, unique_p2
+
+
+def plot_color_matrix(ax, color_matrix, unique_p1, unique_p2, property_keys):
+    """Inset a color matrix inside the main plot."""
+
+    bbox_to_anchor = (0.1, -0.05, 1, 1)
+
+    inset_ax = inset_axes(
+        ax,
+        width="25%",
+        height="25%",
+        loc="upper left",
+        bbox_to_anchor=bbox_to_anchor,
+        bbox_transform=ax.transAxes,
+    )
+    inset_ax.matshow(color_matrix.transpose((0, 1, 2)), origin="upper", aspect="auto")
+    inset_ax.set_xticks(range(len(unique_p1)))
+    inset_ax.set_xticklabels([sci_format(val) for val in unique_p1])
+    inset_ax.set_xlabel(getPrettyLabel(property_keys[0]), fontsize=10)
+    if unique_p2 is not None:
+        inset_ax.set_yticks(range(len(unique_p2)))
+        inset_ax.set_yticklabels([sci_format(val) for val in unique_p2])
+        inset_ax.set_ylabel(getPrettyLabel(property_keys[1]), fontsize=10)
+    inset_ax.set_title("Parameter color map", fontsize=10)
+    inset_ax.invert_yaxis()
+    inset_ax.xaxis.set_ticks_position("bottom")
+    return inset_ax
+
+
+def all_files_have_same_starting_point(csv_file_paths):
+    X = "Load"
+    Y = "Avg_energy"
+    energy = defaultdict(list)
+    for csv_file_path in csv_file_paths:
+        seed = get_data_from_name(csv_file_path)["seed"]
+        df = pd.read_csv(csv_file_path, usecols=[X, Y])
+        energy[seed].append(df[Y][0])
+        if len(set(energy[seed])) != 1:
+            print("Files do not start from the same energy!")
+            print(csv_file_path)
+
+
 def makeSettingComparison(
     csv_file_paths=None,
     labels=None,
@@ -1693,70 +1799,27 @@ def makeSettingComparison(
     name="setting_comparison",
     loc="lower right",
     subtract=False,  # Shows the difference from the most exact simulation
-    cumSumSubtract=False,  # Do a comulutative sum over the difference
     detatchment=False,  # Shows where simulations detatch from the most accurate simulation
-    detatchmentThreshold=1e-6,
+    detatchmentThreshold=1e-5,
     yPad=1,
-    seedsToShow=[0],
+    seedsToShow=[0, 1, 2, 3, 4],
     **kwargs,
 ):
-    import numpy as np
-    import pandas as pd
-    import matplotlib.pyplot as plt
-    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    # Check files start from the same energy
+
+    all_files_have_same_starting_point(csv_file_paths)
 
     if detatchment:
-        cumSumSubtract = True
-
-    if cumSumSubtract:
         subtract = True
 
     # --- Extract and parse the two properties ---
-    prop1_values = []
-    prop2_values = []
-    extra_labels = []
-    for label in labels:
-        parts = label.split(",")
-        p1, p2, extra = None, None, []
-        for part in parts:
-            key, value = map(str.strip, part.split("="))
-            if key == property_keys[0]:
-                p1 = float(value)
-            elif key == property_keys[1]:
-                p2 = float(value)
-            else:
-                extra.append(getPrettyLabel(part))
-        if p1 is None or p2 is None:
-            raise ValueError(
-                f"Label '{label}' missing one of the keys: {property_keys}"
-            )
-        prop1_values.append(p1)
-        prop2_values.append(p2)
-        extra_labels.append(", ".join(extra))
+    prop1_values, prop2_values, extra_labels = parse_labels(labels, property_keys)
 
     pretty_keys = [getPrettyLabel(k) for k in property_keys]
     prop1_values, prop2_values = np.array(prop1_values), np.array(prop2_values)
 
     # --- Create unique property values for grid ---
-    unique_p1, unique_p2 = np.unique(prop1_values), np.unique(prop2_values)
-
-    # --- Normalize values assuming logarithmic distribution ---
-    log_p1_norm = (np.log10(prop1_values) - np.log10(prop1_values.min())) / (
-        np.log10(prop1_values.max()) - np.log10(prop1_values.min())
-    )
-    log_p2_norm = (np.log10(prop2_values) - np.log10(prop2_values.min())) / (
-        np.log10(prop2_values.max()) - np.log10(prop2_values.min())
-    )
-
-    # --- Generate color matrix ---
-    color_matrix = np.zeros((len(unique_p2), len(unique_p1), 4))
-    index_map = {}
-    for i, (p1, p2, r, b) in enumerate(
-        zip(prop1_values, prop2_values, log_p1_norm, log_p2_norm)
-    ):
-        row, col = np.where(unique_p2 == p2)[0][0], np.where(unique_p1 == p1)[0][0]
-        color_matrix[row, col] = [r, abs(r - b), b, 1]
-        index_map[(row, col)] = i
+    color_matrix, unique_p1, unique_p2 = create_color_matrix(prop1_values, prop2_values)
 
     # --- Preserve diagonal colors (as in original) ---
     if subtract:
@@ -1769,40 +1832,7 @@ def makeSettingComparison(
     # --- Create the figure and the main plot ---
     fig, ax = plt.subplots(figsize=(6, 6))
 
-    # --- Inset color matrix inside the plot ---
-    if detatchment:
-        # Center right
-        bbox_to_anchor = (0.72, -0.25, 1, 1)
-    else:
-        # Upper left
-        bbox_to_anchor = (0.1, -0.05, 1, 1)
-    inset_ax = inset_axes(
-        ax,
-        width="25%",
-        height="25%",  # Required!
-        loc="upper left",
-        bbox_to_anchor=bbox_to_anchor,
-        bbox_transform=ax.transAxes,
-    )
-
-    cax = inset_ax.matshow(
-        color_matrix.transpose((0, 1, 2)), origin="upper", aspect="auto"
-    )
-
-    # --- Set matrix axis labels ---
-    inset_ax.set_xticks(range(len(unique_p1)))
-    inset_ax.set_yticks(range(len(unique_p2)))
-    inset_ax.set_xticklabels([sci_format(val) for val in unique_p1])
-    inset_ax.set_yticklabels([sci_format(val) for val in unique_p2])
-    inset_ax.set_xlabel(pretty_keys[0], fontsize=10)
-    inset_ax.set_ylabel(pretty_keys[1], fontsize=10)
-    inset_ax.set_title("Parameter color map", fontsize=10)
-    inset_ax.invert_yaxis()
-    inset_ax.xaxis.set_ticks_position("bottom")
-    inset_ax.xaxis.set_label_position("bottom")
-
-    # --- Sort the lines by property values ---
-    sorted_indices = np.argsort(prop1_values + prop2_values)
+    plot_color_matrix(ax, color_matrix, unique_p1, unique_p2, property_keys)
 
     # --- Find the best simulation ---
     # Dictionaries coresponding to the seed
@@ -1810,15 +1840,20 @@ def makeSettingComparison(
     best_label = ""  # We'll just use the last one, should be the same anyway
     for i, csv_file_path in enumerate(csv_file_paths):
         pos = (
-            np.where(unique_p2 == prop2_values[i])[0][0],
+            np.where(unique_p2 == prop2_values[i])[0][0]
+            if unique_p2 is not None
+            else 0,
             np.where(unique_p1 == prop1_values[i])[0][0],
         )
         if pos == (0, 0):
+            print("best setting:", csv_file_path)
             seed = get_data_from_name(csv_file_path)["seed"]
             best_df[seed] = pd.read_csv(csv_file_path, usecols=[X, Y])
-            best_label = f"{pretty_keys[0]}={sci_format(prop1_values[i])}, {pretty_keys[1]}={sci_format(prop2_values[i])}"
+            best_label = f"{pretty_keys[0]}={sci_format(prop1_values[i])}"
+            if unique_p2 is not None:
+                best_label += f", {pretty_keys[1]}={sci_format(prop2_values[i])}"
 
-    # --- Plot lines ---
+    # --- Data manipulation ---
     added_labels = []
     for i, csv_file_path in enumerate(csv_file_paths):
         seed = get_data_from_name(csv_file_path)["seed"]
@@ -1826,7 +1861,9 @@ def makeSettingComparison(
             continue
 
         pos = (
-            np.where(unique_p2 == prop2_values[i])[0][0],
+            np.where(unique_p2 == prop2_values[i])[0][0]
+            if unique_p2 is not None
+            else 0,
             np.where(unique_p1 == prop1_values[i])[0][0],
         )
         color = color_matrix[pos]
@@ -1849,32 +1886,38 @@ def makeSettingComparison(
                 best_X = best_df[seed][X].values
                 best_Y = best_df[seed][Y].values
 
-                # Find indices in best_X that match X_data
-                matching_indices = np.isin(best_X, X_data)
+                if max(best_X) > max(X_data):
+                    print("Best is further!: " + csv_file_path)
+                    continue
 
-                # Extract corresponding best_Y values
-                filtered_best_Y = best_Y[matching_indices]
-                filtered_X = best_X[matching_indices]
+                # Ensure X_data is within range of best_X
+                within_best = X_data < max(best_X)
+                X_data = X_data[within_best]
+                Y_data = Y_data[within_best]
 
-                # Get indices of matching X values in X_data
-                matching_X_indices = np.isin(X_data, filtered_X)
+                # Find indices of X_data in best_X
+                indices = np.searchsorted(best_X, X_data)
 
-                # Subtract corresponding values
-                Y_data = abs(Y_data[matching_X_indices] - filtered_best_Y)
-                X_data = filtered_X
-                # Get the area underneath the difference curve
-                if cumSumSubtract:
-                    Y_data = np.cumsum(np.diff(X_data) * (Y_data[:-1] + Y_data[1:]) / 2)
-                    X_data = X_data[1:]
+                # Ensure indices are valid
+                assert np.all(best_X[indices] == X_data), (
+                    "Mismatch between X_data and best_X"
+                )
+
+                # Get corresponding best_Y values
+                filtered_best_Y = best_Y[indices]
+
+                # Compute absolute differences
+                Y_data = np.abs(Y_data - filtered_best_Y)
+
+                # Find the last point at which the difference is zero
+                detach_Y_data = np.where(Y_data < detatchmentThreshold, 1, 0)
+                if np.any(detach_Y_data):  # Check if there is at least one zero
+                    detach_index = len(Y_data) - 1 - np.argmax(detach_Y_data[::-1])
+                else:
+                    detach_index = 0  # No zeros found
                 if detatchment:
-                    Y_data = np.where(Y_data > detatchmentThreshold, 1, 0)
-                    detatch_index = np.argmax(Y_data == 1)
-                    if detatch_index == 0:
-                        # The curve never reached the threshold
-                        detatch_index = -1
-
-                    Y_data = [Y_data[detatch_index]]
-                    X_data = [X_data[detatch_index]]
+                    Y_data = [Y_data[detach_index]]
+                    X_data = [X_data[detach_index]]
 
         if isinstance(Y_data[0], str):
             try:
@@ -1889,21 +1932,24 @@ def makeSettingComparison(
             mask = (Y_data >= ylim[0]) & (Y_data <= ylim[1])
             X_data, Y_data = X_data[mask], Y_data[mask]
 
+        # PLOTTING
         # --- Ensure proper layering (smaller values drawn first) ---
+        sorted_indices = np.argsort(prop1_values)
         z_order = len(sorted_indices) - np.where(sorted_indices == i)[0][0]
         linestyle = get_linestyle(pos)
-        label = f"{pretty_keys[0]}={sci_format(prop1_values[i])}, {pretty_keys[1]}={sci_format(prop2_values[i])}"
+        label = f"{pretty_keys[0]}={sci_format(prop1_values[i])}"
+        if unique_p2 is not None:
+            label += f", {pretty_keys[1]}={sci_format(prop2_values[i])}"
         if label in added_labels:
             label = None
         else:
             added_labels.append(label)
-
         if detatchment:
             marker = "o"
-            if detatch_index == -1:
+            if detach_index == -1:
                 marker = "^"
             ax.scatter(
-                prop1_values[i] + prop2_values[i],
+                prop1_values[i],
                 X_data,
                 label=label,
                 zorder=z_order,
@@ -1914,15 +1960,6 @@ def makeSettingComparison(
             )
 
         else:
-            if cumSumSubtract:
-                ax.hlines(
-                    [detatchmentThreshold],
-                    min(X_data),
-                    max(X_data),
-                    colors=["black"],
-                    linestyles=[(0, (2, 15))],
-                    linewidth=1,
-                )
             ax.plot(
                 X_data,
                 Y_data,
@@ -1932,6 +1969,21 @@ def makeSettingComparison(
                 linestyle=linestyle,
                 **kwargs,
             )
+            if subtract:
+                if detach_index == -1:
+                    marker = "^"
+                else:
+                    marker = "+"
+                ax.scatter(
+                    X_data[detach_index],
+                    Y_data[detach_index],
+                    zorder=-40 - z_order,
+                    # edgecolors=color,
+                    facecolors=color,
+                    marker=marker,
+                    s=40 + z_order * 2,
+                    **kwargs,
+                )
 
     # --- Make space for legend at top ---
     # Get current y-axis limits
@@ -1944,11 +1996,9 @@ def makeSettingComparison(
     x_name, y_name = get_axis_labels(X, Y)
     if subtract:
         y_name = f"{y_name} difference from {best_label}"
-        if cumSumSubtract:
-            y_name = "Area under " + y_name
     if detatchment:
-        y_name = x_name
-        x_name = f"{pretty_keys[0]} + {pretty_keys[1]}"
+        y_name = "Detatchment " + x_name
+        x_name = f"{pretty_keys[0]}"
         ax.set_xscale("log")
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)

@@ -6,6 +6,8 @@ from Management.jobs import (
     propperJob3,
     avalanches,
     findMinimizationCriteriaJobs,
+    compareWithOldStoppingCriteria,
+    showMinimizationCriteriaJobs,
 )
 
 
@@ -156,6 +158,9 @@ def plotMaxForce():
 def plotMinimizationCriteriaData():
     nrSeeds = 5
     configs, labels = findMinimizationCriteriaJobs(nrSeeds=nrSeeds)
+
+    # configs, labels = compareWithOldStoppingCriteria()
+
     Ls = [40, 60, 80, 100]
 
     for L in Ls:
@@ -165,24 +170,30 @@ def plotMinimizationCriteriaData():
         paths, labs = get_csv_files(
             confs, labels=labs, useOldFiles=False, forceUpdate=False
         )
+        # labs = [l + ", loadIncrement=1e-5" for l in labs]
 
         # Common kwargs for makeSettingComparison
         common_kwargs = {
             "csv_file_paths": paths,
             "labels": labs,
+            # "property_keys": ["LBFGSEpsg"],
             "property_keys": ("epsR", "loadIncrement"),
             "loc": "upper right",
             "yPad": 1.3,
         }
 
-        fig1, ax1 = makeSettingComparison(**common_kwargs, name=f"L={L}_Energy")
+        fig1, ax1 = makeSettingComparison(
+            **common_kwargs,
+            name=f"L={L}_Energy",
+            seedsToShow=[2],
+        )
         fig2, ax2 = makeSettingComparison(
-            **common_kwargs, name=f"L={L}_SubtractEnergy", subtract=True
+            **common_kwargs,
+            name=f"L={L}_SubtractEnergy",
+            subtract=True,
+            seedsToShow=[2],
         )
         fig3, ax3 = makeSettingComparison(
-            **common_kwargs, name=f"L={L}_CumSumSubEnergy", cumSumSubtract=True
-        )
-        fig4, ax4 = makeSettingComparison(
             **common_kwargs,
             name=f"L={L}_DetatchEnergy",
             detatchment=True,
@@ -194,7 +205,12 @@ def plotMinimizationCriteriaData():
             pdf.savefig(fig1, bbox_inches="tight")
             pdf.savefig(fig2, bbox_inches="tight")
             pdf.savefig(fig3, bbox_inches="tight")
-            pdf.savefig(fig4, bbox_inches="tight")
+
+
+def plotShowMinCriteria():
+    configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
+    linestyles = ["-" if "epsR=None" in label else "--" for label in labels]
+    plotTime(configs, labels, linestyles=linestyles)
 
 
 if __name__ == "__main__":
@@ -208,4 +224,5 @@ if __name__ == "__main__":
 
     # plotAvalanches()
     # plotMaxForce()
-    plotMinimizationCriteriaData()
+    # plotMinimizationCriteriaData()
+    plotShowMinCriteria()

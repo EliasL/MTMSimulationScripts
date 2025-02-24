@@ -196,7 +196,7 @@ class JobManager:
         # Filter out empty lines
         stdout_lines = [line for line in stdout_lines if line.strip()]
 
-        def fetch_job(line):
+        def fetch_process(line):
             attempts = 0
             max_attempts = 3
             e = ""
@@ -219,11 +219,11 @@ class JobManager:
 
         # Use ThreadPoolExecutor to process lines in parallel
         with ThreadPoolExecutor(max_workers=7) as executor:
-            future_jobs = [executor.submit(fetch_job, line) for line in stdout_lines]
-            local_jobs = [future.result() for future in future_jobs]
+            future_p = [executor.submit(fetch_process, line) for line in stdout_lines]
+            local_p = [future.result() for future in future_p]
 
         ssh.close()  # Ensure the connection is closed after use
-        return local_jobs
+        return local_p
 
     @staticmethod
     def find_jobs_waiting_in_queue(ssh):
@@ -304,9 +304,14 @@ class JobManager:
                     print(f"{server} generated an exception: {exc}")
         return results
 
-    def showProcesses(self):
+    def findProcesses(self):
+        global nr_processes_found
+        nr_processes_found = 0
         self.processes = self.execute_command_on_servers(self.find_processes_on_server)
         print("")
+
+    def findAndShowProcesses(self):
+        self.findProcesses()
         if not self.processes:
             print("No processes found")
         else:
@@ -355,9 +360,15 @@ class JobManager:
             print(tabulate(table, headers=headers, tablefmt="grid"))
             print(f"Found {len(self.processes)} processes.")
 
-    def findAndShowSlurmJobs(self):
+    def findSlurmJobs(self):
+        global nr_jobs_found
+        nr_jobs_found = 0
         self.slurmJobs = self.execute_command_on_servers(self.find_slurm_jobs_on_server)
         print("")
+
+    def findAndShowSlurmJobs(self):
+        self.findSlurmJobs()
+
         if not self.slurmJobs:
             print("No jobs found")
         else:
@@ -391,6 +402,10 @@ class JobManager:
                 ]
                 table.append(row)
             print(tabulate(table, headers=headers, tablefmt="grid"))
+
+    def getJobData(self):
+        self.findSlurmJobs()
+        self.findProcesses()
 
     def cancel_jobs_on_server(self, server, job_ids):
         """
@@ -529,12 +544,30 @@ class JobManager:
         ssh.exec_command(command)
         print(f"All processes for user on {server} have been terminated.")
 
-    def kill_process(self, server, pid):
+    def kill_processes(self, server, pids, verbal=True):
+        if isinstance(pids, (str, int)):
+            pids = [pids]
         """Kill a specific process by PID on the specified server."""
         ssh = connectToCluster(server, False)
-        command = f"kill {pid}"
-        ssh.exec_command(command)
-        print(f"Process {pid} on {server} has been terminated.")
+        for pid in pids:
+            command = f"kill {pid}"
+            ssh.exec_command(command)
+            if verbal:
+                print(f"Process {pid} on {server} has been terminated.")
+
+    def cancelJobs(self, configsToStop):
+        processesToKill = {}
+        for configToStop in configsToStop:
+            for p in self.processes:
+                if configToStop.name == p.name:
+                    if p.server not in processesToKill.keys():
+                        processesToKill[p.server] = []
+                    processesToKill[p.server].append(p.p_id)
+        for server, pids in processesToKill.items():
+            print(
+                f"Stopping {len(pids)} jobs on {get_server_short_name(server)} that are already running."
+            )
+            self.kill_processes(server, pids, verbal=False)
 
 
 if __name__ == "__main__":

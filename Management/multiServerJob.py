@@ -45,7 +45,9 @@ def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
     dm.findData(autoUpdate=True)
 
     # A dictionary with server names as keys, and all configs that should be run on that server
-    serverConfigDict = OrderedDict()
+    serverConfigDict = {}
+    for s in Servers.servers:
+        serverConfigDict[s] = []
 
     remaining_configs = []
 
@@ -56,11 +58,9 @@ def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
         for server, (folders, sizes, free_space) in data.items():
             folders = map(lambda s: s.split("/")[-1], folders)
             if config.name in folders:
-                if server not in serverConfigDict:
-                    serverConfigDict[server] = []
                 serverConfigDict[server].append(config)
                 configSolved = True
-                print(f"{config.name} found in {server}")
+                # print(f"{config.name} found in {server}")
                 break
         if not configSolved:
             print(f"{config.name} not found.")
@@ -91,10 +91,6 @@ def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
         if si.nrFreeCores < 10:
             continue
 
-        # Initialize command list for the server if not already present
-        if si.sName not in serverConfigDict:
-            serverConfigDict[si.sName] = []
-
         # Calculate the number of available slots (leave one CPU free)
         available_slots = (si.nrFreeCores) // threads_per_seed - len(
             serverConfigDict[si.sName]
@@ -122,7 +118,7 @@ def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
         )
 
 
-def queueJobs(server, configs, job_name="el", **kwargs):
+def queueJobs(server, configs, job_name="el", stopExsistingJobs=True, **kwargs):
     """
     Kwargs:
     resume=True,
@@ -130,6 +126,10 @@ def queueJobs(server, configs, job_name="el", **kwargs):
     plot=False,
     newOutput=False,
     """
+    if stopExsistingJobs:
+        j = JobManager()
+        j.findProcesses()
+        j.cancelJobs(configs)
 
     pre_command = "python3 ~/simulation/SimulationScripts/Management/queueLocalJobs.py"
 
@@ -148,7 +148,9 @@ def queueJobs(server, configs, job_name="el", **kwargs):
             }
         )
     )
+
     run_remote_command(server, full_pre_command)
+
     # result = subprocess.run(full_pre_command, shell=True, text=True)
 
     # for command in commands:

@@ -103,6 +103,8 @@ def get_data_from_name(nameOrPath):
     if not isinstance(nameOrPath, str):
         nameOrPath = str(nameOrPath)
     fileName = nameOrPath.split("/")[-1]
+    if fileName == "macroData.csv":
+        fileName = nameOrPath.split("/")[-2]
     parts = fileName.split("_")
 
     # Initialize an empty dictionary

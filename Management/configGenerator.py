@@ -74,13 +74,17 @@ class SimulationConfig:
         # Update with any provided keyword arguments
         for key, value in kwargs.items():
             if hasattr(self, key):
-                # Check if the given value is the correct type
-                current_value = getattr(self, key)
-                if not isinstance(value, type(current_value)):
-                    raise TypeError(
-                        f"{key} should be given a {type(current_value)} but was given a {type(value)}."
-                    )
-                setattr(self, key, value)
+                if value:
+                    # Check if the given value is the correct type
+                    current_value = getattr(self, key)
+                    if not isinstance(value, type(current_value)):
+                        raise TypeError(
+                            f"{key} should be given a {type(current_value)} but was given a {type(value)}."
+                        )
+                    setattr(self, key, value)
+                else:
+                    # If the value is none, we ignore it
+                    continue
             elif key == "L":
                 self.rows = value
                 self.cols = value
@@ -458,6 +462,8 @@ if __name__ == "__main__":
 
     L = 3
     config = SimulationConfig(
+        usingPBC=1,  # 0=False, 1=True
+        scenario="simpleShear",
         rows=L,
         cols=L,
         startLoad=0.15,

@@ -229,10 +229,17 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
     return paths, remaining_configs
 
 
+# Converts config to a path, but if given paths, it matches the given
+# config with the path is is most likely to corespond to.
+# If a config could match with two paths, the first path found is chosen
 def configToPath(config, paths=None):
     if paths:
         # Search for the coresponding path and config
-        return [path for path in paths if config.name in path][0]
+        matches = [path for path in paths if config.name in path]
+        if matches:
+            return matches[0]
+        else:
+            return None
     else:
         return f"{MACRO_PATH}/{config.name}.csv"
 
@@ -242,22 +249,31 @@ def flatToStructure(config_groups, label_groups, found_paths=None):
     # successfully downloaded, therefore preserving the structure of the groups
     paths = []
     labels = []
-    for group, label_group in zip(config_groups, label_groups):
-        group_paths = []
-        group_labels = []
-        for config, label in zip(group, label_group):
-            path = configToPath(config, found_paths)
-            if os.path.isfile(path):
-                group_paths.append(path)
-                group_labels.append(label)
-            else:
-                # "/Users/eliaslundheim/work/PhD/remoteData/macro/simpleShear,"
-                # "s200x200l0.15,1e-05,1.0PBCt56LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0.csv"
-                print(f"Warning: missing file:\n {path}")
-        if group_paths:
-            paths.append(group_paths)
-            labels.append(group_labels)
+    for config_group, label_group in zip(config_groups, label_groups):
+        matchingPaths, matchingLabels = rematchPathsAndLabels(
+            config_group, label_group, found_paths
+        )
+        if matchingPaths:
+            paths.append(matchingPaths)
+            labels.append(matchingLabels)
     return paths, labels
+
+
+# Given two lists of matched configs and labels and and unstructured list of paths,
+# this function returns the same lists of labels and paths, but such that the
+# order they have correspond to eachother and match the order of the configs.
+def rematchPathsAndLabels(configs, labels, paths):
+    matched_paths = []
+    matched_labels = []
+    assert len(configs) == len(labels)
+    for config, label in zip(configs, labels):
+        path = configToPath(config, paths)
+        if path and os.path.isfile(path):
+            matched_paths.append(path)
+            matched_labels.append(label)
+        else:
+            print(f"Warning: missing file:\n {path}")
+    return matched_paths, matched_labels
 
 
 def flattenConfigList(listOfListsOfConfigs):
@@ -277,31 +293,35 @@ def flattenConfigList(listOfListsOfConfigs):
 # This function searches all the servers for the given config file,
 # downloads the csv file associated with the config file to a temp file,
 # and returns the new local path to the csv
-def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
+def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
     nested = False
-    config_groups = configs
-    if not isinstance(configs[0], SimulationConfig):
+    config_groups = all_configs
+    if not isinstance(all_configs[0], SimulationConfig):
         nested = True
-        configs = [config for sublist in config_groups for config in sublist]
+        all_configs = [config for sublist in config_groups for config in sublist]
 
     global completed_servers, nr_files
 
     completed_servers, nr_files = 0, 0
     # First check if the files have already been downloaded
-    paths, configs = search_for_cvs_files(configs, useOldFiles, forceUpdate)
-    if len(configs) == 0:
+    paths, remaining_configs = search_for_cvs_files(
+        all_configs, useOldFiles, forceUpdate
+    )
+    if len(remaining_configs) == 0:
         print("All files already downloaded.")
         if nested:
             paths, labels = flatToStructure(config_groups, labels, paths)
         return paths, labels
     elif len(paths) != 0:
-        print(f"{len(paths)} files found, searching for the remaining {len(configs)}.")
+        print(
+            f"{len(paths)} files found, searching for the remaining {len(remaining_configs)}."
+        )
     if len(paths) == 0 and useOldFiles:
         raise Exception("No files found!")
 
     # Second check local path to see if we can avoid checking the servers
-    localPaths = get_csv_from_server(Servers.local_path_mac, configs)
-    if len(localPaths) == len(configs):
+    localPaths = get_csv_from_server(Servers.local_path_mac, remaining_configs)
+    if len(localPaths) == len(remaining_configs):
         # We have found all the requested files, so we don't need to search more.
         print(f"{len(localPaths)} files found. Not searching servers.")
         paths = paths + localPaths
@@ -311,17 +331,17 @@ def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
 
     print("Searching servers for files...")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
-    get_csv_from_server(Servers.poincare, configs)
+    # get_csv_from_server(Servers.poincare, configs)
     with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
         future_to_server = {
-            executor.submit(get_csv_from_server, server, configs): server
+            executor.submit(get_csv_from_server, server, remaining_configs): server
             for server in Servers.servers
         }
         for future in as_completed(future_to_server):
             server = future_to_server[future]
             with lock:
                 completed_servers += 1  # Increment completed count
-            update_progress(len(configs))
+            update_progress(len(remaining_configs))
             try:
                 server_paths = future.result()
                 if server_paths:
@@ -335,6 +355,10 @@ def get_csv_files(configs, labels=[], useOldFiles=False, forceUpdate=False):
     print("")  # New line from progress indicator
     if nested:
         paths, labels = flatToStructure(config_groups, labels)
+    else:
+        # The paths are returned in psedu random order, so we need to
+        # match them with their correct label again
+        paths, labels = rematchPathsAndLabels(all_configs, labels, paths)
     return paths, labels
 
 
@@ -717,7 +741,11 @@ def plotTime(config_groups, labels, **kwargs):
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
     print("Plotting...")
-    for Y in ["Minimization_time", "Write_time", "Run_time", "Est_time_remaining"]:
+    for Y in [
+        "Minimization_time",
+        "Nr_LBFGS_iterations",
+        "Nr_LBFGS_func_evals",
+    ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
         fig, ax = makePlot(
             paths,
             Y=Y,

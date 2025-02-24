@@ -126,8 +126,8 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         nrThreads=nrThreads,
         minimizer="LBFGS",
         loadIncrement=1e-5,
-        # eps=1e-8,
-        LBFGSEpsg=1e-8,
+        epsR=1e-5,
+        LBFGSEpsg=1e-5,
         scenario="simpleShear",
     )
     return configs, labels
@@ -276,8 +276,10 @@ def findMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
     L = [30, 40, 60, 80, 100]
     loadIncrement = [1e-5, 1e-4, 1e-3]
     epsR = [1e-6, 1e-5, 1e-4, 1e-3]
+
     if seeds is None:
         seeds = range(nrSeeds)
+
     configs, labels = ConfigGenerator.generate(
         seed=seeds,
         group_by_seeds=False,
@@ -288,6 +290,98 @@ def findMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
         nrThreads=4,
         minimizer="LBFGS",
         epsR=epsR,
-        scenario="simpleShear",
     )
+    return configs, labels
+
+
+def compareWithOldStoppingCriteria(nrSeeds=5, seeds=None):
+    L = [30, 40, 60, 80, 100]
+    loadIncrement = [1e-5]
+    LBFGSEpsg = [1e-8, 1e-7, 1e-6, 1e-5, 1e-4]
+    LBFGSEpsx = [1e-6]
+
+    if seeds is None:
+        seeds = range(nrSeeds)
+
+    configs, labels = ConfigGenerator.generate(
+        LBFGSEpsg=LBFGSEpsg,
+        seed=seeds,
+        group_by_seeds=False,
+        L=L,
+        startLoad=0.15,
+        maxLoad=1.0,
+        loadIncrement=loadIncrement,
+        nrThreads=4,
+        minimizer="LBFGS",
+    )
+
+    configsx, labelsx = ConfigGenerator.generate(
+        LBFGSEpsx=LBFGSEpsx,
+        seed=seeds,
+        group_by_seeds=False,
+        L=L,
+        startLoad=0.15,
+        maxLoad=1.0,
+        loadIncrement=loadIncrement,
+        nrThreads=4,
+        minimizer="LBFGS",
+    )
+
+    configs.extend(configsx)
+    labels.extend(labelsx)
+
+    return configs, labels
+
+
+def fixedBoundaries(nrThreads, nrSeeds=1, seeds=None, L=40, fixed=True):
+    if seeds is None:
+        seeds = range(nrSeeds)
+    scenario = "simpleShearFixedBoundary" if fixed else "simpleShear"
+    usingPBC = 0 if fixed else 1
+    configs, labels = ConfigGenerator.generate(
+        usingPBC=usingPBC,
+        seed=seeds,
+        group_by_seeds=False,
+        rows=L,
+        cols=L,
+        startLoad=0.15,
+        maxLoad=1.0,
+        loadIncrement=1e-5,
+        nrThreads=nrThreads,
+        minimizer="LBFGS",
+        epsR=1e-6,
+        LBFGSEpsx=1e-6,
+        scenario=scenario,
+    )
+    return configs, labels
+
+
+def showMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
+    L = [400, 200, 100]
+    loadIncrement = [1e-5]
+    epsR = [1e-5, None]
+    LBFGSEpsx = [1e-6, None]
+    LBFGSEpsg = [1e-7, None]
+
+    if seeds is None:
+        seeds = range(nrSeeds)
+
+    configs, labels = ConfigGenerator.generate(
+        seed=seeds,
+        group_by_seeds=False,
+        L=L,
+        startLoad=0.15,
+        maxLoad=0.16,
+        loadIncrement=loadIncrement,
+        nrThreads=6,
+        minimizer="LBFGS",
+        LBFGSEpsx=LBFGSEpsx,
+        LBFGSEpsg=LBFGSEpsg,
+        epsR=epsR,
+    )
+    # Filter out configs and labels where labels contain either zero or two instances of None
+    filtered_data = [(c, l) for c, l in zip(configs, labels) if l.count("None") == 1]
+
+    # Unpack filtered configs and labels
+    configs, labels = zip(*filtered_data) if filtered_data else ([], [])
     return configs, labels

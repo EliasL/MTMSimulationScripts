@@ -30,7 +30,7 @@ def disp_servers():
 def disp_jobs():
     j = JobManager()
     j.findAndShowSlurmJobs()
-    j.showProcesses()
+    j.findAndShowProcesses()
 
 
 def run_script():

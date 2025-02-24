@@ -201,7 +201,7 @@ class DataManager:
                 print(f"Error connecting to {server}: {e}")
             print(f"Are you sure you want to delete these folders on {server}?")
             self.print_grouped_folders(folders)
-            if input("yes/no: ") != "yes":
+            if not dryRun and input("yes/no: ") != "yes":
                 return
 
             for folder in folders:
