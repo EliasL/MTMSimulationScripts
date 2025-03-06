@@ -2,6 +2,8 @@ from Management import parameterExploring as pe
 from Management.connectToCluster import uploadProject
 from Management.runOnCluster import build_on_all_servers
 from runSimulations import run_many_locally, run_locally
+from MTMath.contiPotential import ContiEnergy
+from MTMath.plotEnergy import generate_energy_grid
 from Management.connectToCluster import Servers
 from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
 from Management.dataManager import DataManager
@@ -22,12 +24,48 @@ from Management.jobs import (
     findMinimizationCriteriaJobs,
     compareWithOldStoppingCriteria,
     showMinimizationCriteriaJobs,
+    singleDislocationTest,
 )
 
 
 def benchmark():
     configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50)
-    run_locally(configs[0])
+    run_locally(configs[0], resume=False)
+
+    """
+      - Config File: /Users/eliaslundheim/work/PhD/MTS2D/build-release/simpleShear,s50x50l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-08s0.conf
+        - Data Path: /Volumes/data/MTS2D_output/
+        Name: simpleShear,s50x50l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-08s0
+        Rows, Cols: 50, 50
+        Boundary Conditions: PBC
+        Scenario: simpleShear
+        Number of Threads: 3
+        Seed: 0
+        Quenched disorder standard deviation: 0
+        Initial guess noise: 0.05
+        Loading Settings:
+        Start Load: 0.15
+        Load Increment: 1e-05
+        Max Load: 1
+        Minimizer: LBFGS
+        LBFGS Settings:
+            Number of Corrections: 10
+            Scale: 1
+            EpsR: 1e-20
+            EpsG: 1e-08
+            EpsF: 0
+            EpsX: 0
+        Max LBFGS Iterations: 0
+        Plasticity event threshold: 0.05
+        Energy drop threshold: 0.0001
+        Show progress: 1
+        Log during minimization: 0
+
+    Load_step,Load,Avg_energy,Avg_energy_change,Max_energy,Max_force,Avg_RSS,Nr_plastic_deformations,Max_plastic_deformation,Max_positive_plastic_jump,Max_negative_plastic_jump,Nr_LBFGS_iterations,Nr_LBFGS_func_evals,LBFGS_Term_reason,Nr_CG_iterations,Nr_CG_iterations,CG_Term_reason,Nr_FIRE_iterations,Nr_FIRE_func_evals,FIRE_Term_reason,Run_time,Minimization_time,Write_time,Est_time_remaining,maxX,minX,maxY,minY
+    1,0.15,0.0029348038974,0,0.116149747,7.5951451434e-07,-0.027403998156,777,2,2,0,1961,4176,8,0,0,0,0,0,0,1.005s,1.004s,0.000s,0.000s,-inf,inf,-inf,inf
+    2,0.15001,0.002934666803,-1.3709446572e-07,0.11616923863,3.0124384019e-07,-0.027433627681,0,2,2,0,477,1117,1,0,0,0,0,0,0,1.289s,1.266s,0.021s,6h 42m 19s,-inf,inf,-inf,inf
+
+    """
 
     # log (nov. 2024)
     # 1% RT: 1m 57s  ETR: 2h 34m 36s Load: 0.160600
@@ -35,7 +73,14 @@ def benchmark():
     # Lots of changes (05.02.25) (still good)
     # 1% RT: 1m 53s  ETR: 2h 30m 21s Load: 0.160470
 
-    # Ghost nodes (24.02.25) (Running together with another system using 6 threads)
+    # Ghost nodes (27.02.25)
+    # 1% RT: 2m 2s   ETR: 2h 28m 44s Load: 0.160880
+
+    # Without charger (28.02.25)
+    # 0% RT: 2m 1s   ETR: 3h 23m 5s  Load: 0.158330
+
+    # Remeshing! (05.03.25)
+    # 3% RT: 1m 52s	ETR: 1h 50s	Load: 0.175500
 
 
 def parameterExploring():
@@ -98,20 +143,22 @@ def runOnServer():
 
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
-    configs, labels = allPlasticEventsJob()
-    # configs, labels = basicJob(20, 1, size=100)
+    # configs, labels = allPlasticEventsJob()
+    configs, labels = basicJob(6, 1, size=40)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
-    configs, labels, dump = largeAvalanche(nrThreads=20)
-    configs, labels, dump = avalanches(nrThreads=20, size=100)
+    # configs, labels, dump = largeAvalanche(nrThreads=20)
+    # configs, labels, dump = avalanches(nrThreads=20, size=100)
     # 12 threads:
     # [LBFGS] 1% RT: 1h 31m 38s       ETR: 3d 23h 37m 19s     Load: 0.163360
-    configs, labels = fixedBoundaries(nrThreads=6, fixed=False, L=200)
-    configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
+    configs, labels = fixedBoundaries(nrThreads=6, fixed=True, L=100)
+    dump = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s100x100l0.38,1e-05,0.383NPBCt6epsR1e-06LBFGSEpsx1e-06s0/dumps/dump_l0.3814.xml.gz"
+    # configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
 
+    # configs, labels = singleDislocationTest(diagonal="major")
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=20)
     # run_locally(configs[0], dump=dump)
-    run_many_locally(configs, taskNames=labels, resume=False)  # , dump=dump)
+    run_many_locally(configs, taskNames=labels, resume=True, dump=dump)
 
 
 def startJobs():
@@ -159,20 +206,33 @@ def cleanData():
     dm.delete_data_from_configs(configs, dryRun=False)
 
 
-# 150x150 64 threads -> 23 days
-# 150x150 32 threads -> 22 days
-# 150x150 16 threads -> 16 days
-# 150x150 8  threads -> 22 days
+if __name__ == "__main__":
+    test = generate_energy_grid()
+    import numpy as np
 
+    print(test)
+    print(np.max(test))
+    print(np.min(test))
+    phi, divPhi, divDivPhi = ContiEnergy.numeric_conti_potential()
+    ground_state_energy = phi(1, 1, 0, -1 / 4, 4, 1)
+    max_energy = phi(1, 1.2, 0.5, -1 / 4, 4, 1)
+    print(ground_state_energy)
+    print(max_energy)
+    print(max_energy - ground_state_energy)
 
-# runOnServer()
-# parameterExploring()
-# runOnLocalMachine()
+    # 150x150 64 threads -> 23 days
+    # 150x150 32 threads -> 22 days
+    # 150x150 16 threads -> 16 days
+    # 150x150 8  threads -> 22 days
 
-# stopJobs()
-# cleanData()
-# startJobs()
+    # runOnServer()
+    # parameterExploring()
+    # runOnLocalMachine()
 
-# plotBigJob()
-# threadTest()
-benchmark()
+    # stopJobs()
+    # cleanData()
+    # startJobs()
+
+    # plotBigJob()
+    # threadTest()
+    # benchmark()

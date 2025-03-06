@@ -2,9 +2,9 @@ import manim as M
 from manim import WHITE, BLUE, GREEN, YELLOW, DEGREES
 import numpy as np
 
-from contiPotential import numericContiPotential
+from contiPotential import numeric_conti_potential
 
-phi, _, _ = numericContiPotential()
+phi, _, _ = numeric_conti_potential()
 
 
 # Custom Scene to display the surface

@@ -385,6 +385,8 @@ def plot_mesh(
     else:
         shifts = [0]
 
+    edgecolors = "none" if nodes.shape[0] > 300 else "black"
+
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
@@ -396,7 +398,7 @@ def plot_mesh(
                 facecolors=field,
                 norm=norm,
                 cmap=cmap,
-                edgecolors="none",
+                edgecolors=edgecolors,
             )
 
             if mesh_property == "m" and add_m12_marks:

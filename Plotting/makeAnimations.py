@@ -189,10 +189,10 @@ def makeAnimations(
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in [
         # (plot_and_save_nodes, "nodes"),
-        (plot_and_save_in_poincare_disk, "disk"),
         (plot_and_save_mesh, "mesh"),
-        (plot_and_save_plot, "e_drop_plot"),
-        (plot_and_save_plot, "energy_plot"),
+        (plot_and_save_in_poincare_disk, "disk"),
+        # (plot_and_save_plot, "e_drop_plot"),
+        # (plot_and_save_plot, "energy_plot"),
         (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_m_mesh, "m_mesh"),
         # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),

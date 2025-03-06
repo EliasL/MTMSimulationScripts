@@ -32,7 +32,7 @@ if __name__ == "__main__":
         maxLoad=1.0,
         LBFGSEpsg=1e-10,
         QDSD=0.0,
-        usingPBC=0,
+        usingPBC="false",
         minimizer="LBFGS",
         scenario="simpleShearFixedBoundary",
     )

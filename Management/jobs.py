@@ -127,7 +127,7 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         minimizer="LBFGS",
         loadIncrement=1e-5,
         epsR=1e-5,
-        LBFGSEpsg=1e-5,
+        LBFGSEpsg=1e-8,
         scenario="simpleShear",
     )
     return configs, labels
@@ -337,20 +337,20 @@ def fixedBoundaries(nrThreads, nrSeeds=1, seeds=None, L=40, fixed=True):
     if seeds is None:
         seeds = range(nrSeeds)
     scenario = "simpleShearFixedBoundary" if fixed else "simpleShear"
-    usingPBC = 0 if fixed else 1
+    usingPBC = "false" if fixed else "true"
     configs, labels = ConfigGenerator.generate(
         usingPBC=usingPBC,
         seed=seeds,
         group_by_seeds=False,
         rows=L,
         cols=L,
-        startLoad=0.15,
-        maxLoad=1.0,
+        startLoad=0.3814,
+        maxLoad=0.38146,
         loadIncrement=1e-5,
         nrThreads=nrThreads,
         minimizer="LBFGS",
-        epsR=1e-6,
-        LBFGSEpsx=1e-6,
+        epsR=1e-7,
+        # LBFGSEpsx=1e-6,
         scenario=scenario,
     )
     return configs, labels
@@ -384,4 +384,28 @@ def showMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
 
     # Unpack filtered configs and labels
     configs, labels = zip(*filtered_data) if filtered_data else ([], [])
+    return configs, labels
+
+
+def singleDislocationTest(
+    nrThreads=3, nrSeeds=1, seeds=None, L=10, diagonal=["major", "minor"]
+):
+    if seeds is None:
+        seeds = range(nrSeeds)
+    scenario = "singleDislocationTest"
+    configs, labels = ConfigGenerator.generate(
+        usingPBC="false",
+        seed=seeds,
+        group_by_seeds=False,
+        rows=L,
+        cols=L,
+        startLoad=0.0,
+        maxLoad=2.0,
+        loadIncrement=1e-3,
+        nrThreads=nrThreads,
+        minimizer="LBFGS",
+        epsR=1e-6,
+        scenario=scenario,
+        meshDiagonal=diagonal,
+    )
     return configs, labels

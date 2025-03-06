@@ -136,7 +136,7 @@ if __name__ == "__main__":
         ]
 
         configs = [
-            "/Volumes/data/MTS2D_output/simpleShear,s100x100l-0.15,-1e-05,-1.0PBCt20LBFGSEpsg1e-08s0/config.conf"
+            "/Volumes/data/MTS2D_output/singleDislocationTest,s10x10l0.0,0.001,2.0NPBCt3epsR1e-06s0/config.conf"
         ]
 
         for c in configs:

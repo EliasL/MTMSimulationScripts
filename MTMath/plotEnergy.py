@@ -1,5 +1,5 @@
 import numpy as np
-from .contiPotential import numericContiPotential, ground_state_energy
+from .contiPotential import ContiEnergy
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
@@ -11,7 +11,7 @@ from matplotlib.colors import LogNorm
 
 def oneDPotential():
     # Load the potential and its derivatives
-    phi, divPhi, divDivPhi = numericContiPotential()
+    phi, divPhi, divDivPhi = ContiEnergy.numeric_conti_potential()
 
     # Define size and variables
     distance = (-1.7, 1.7)
@@ -48,7 +48,7 @@ def oneDPotential():
 
 def oneDPotentialDissordered():
     # Load the potential and its derivatives
-    phi, divPhi, divDivPhi = numericContiPotential()
+    phi, divPhi, divDivPhi = ContiEnergy.numeric_conti_potential()
 
     # Define size and variables
     distance = (-1.7, 1.7)
@@ -166,7 +166,7 @@ def generate_energy_grid(
     poincareDisk=True,
 ):
     # Load the potential and its derivatives
-    phi, divPhi, divDivPhi = numericContiPotential()
+    phi, divPhi, divDivPhi = ContiEnergy.numeric_conti_potential()
 
     # Poicare disk
     if poincareDisk:
@@ -226,7 +226,7 @@ def generate_energy_grid(
     # Apply the phi function only to the points inside the unit circle
     energy_grid = phi(C11, C22, C12, beta, K, 1)
 
-    energy_grid -= ground_state_energy()
+    energy_grid -= ContiEnergy.ground_state_energy()
 
     if energy_lim is None:
         energy_lim = (np.nanmin(energy_grid), np.nanmax(energy_grid))
@@ -425,9 +425,9 @@ def plotEnergyField(
     cbar.ax.set_title(f"Capped at ${max_energy}$", fontsize=default_font_size)
     nbs = "\u00a0"  # non-breaking-space
     # $P_x$(Length ratio)
-    ax.set_xlabel(f"← Tall {nbs*6} Wide →")
+    ax.set_xlabel(f"← Tall {nbs * 6} Wide →")
     # $P_y$(Length ratio and $\\theta - \\pi/2$)
-    ax.set_ylabel(f"← Large angle {nbs*6} Small angle →")
+    ax.set_ylabel(f"← Large angle {nbs * 6} Small angle →")
     if add_title:
         ax.set_title("Energy field in a Poincaré disk")
 

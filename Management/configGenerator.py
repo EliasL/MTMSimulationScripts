@@ -16,12 +16,13 @@ class SimulationConfig:
         # Simulation Settings
         self.rows = 3
         self.cols = 3
-        self.usingPBC = 1  # 0=False, 1=True
+        self.usingPBC = "true"
         self.scenario = "simpleShear"
         self.nrThreads = 1  # This needs to be 1. Don't change. (see queueLocalJobs)
         self.seed = 0
         self.QDSD = 0.00  # Quenched dissorder standard deviation
         self.initialGuessNoise = 0.05
+        self.meshDiagonal = "major"
 
         # Loading parameters
         self.startLoad = 0.0
@@ -74,7 +75,7 @@ class SimulationConfig:
         # Update with any provided keyword arguments
         for key, value in kwargs.items():
             if hasattr(self, key):
-                if value:
+                if value is not None:
                     # Check if the given value is the correct type
                     current_value = getattr(self, key)
                     if not isinstance(value, type(current_value)):
@@ -91,6 +92,10 @@ class SimulationConfig:
             elif key != "NONAME":
                 raise (Warning(f"Unkown keyword: {key}"))
 
+        assert self.usingPBC.lower() == "true" or self.usingPBC.lower() == "false", (
+            "Only use true or false"
+        )
+
         if "NONAME" not in kwargs.keys():
             self.name = self.generate_name(withExtension=False)
 
@@ -99,7 +104,7 @@ class SimulationConfig:
             self.scenario + ","
             f"s{self.rows}x{self.cols}"
             + f"l{self.startLoad},{self.loadIncrement},{self.maxLoad}"
-            + f"{'PBC' if self.usingPBC == 1 else 'NPBC'}"
+            + f"{'PBC' if self.usingPBC.lower() == 'true' else 'NPBC'}"
             + f"t{self.nrThreads}"
         )
 
@@ -462,7 +467,7 @@ if __name__ == "__main__":
 
     L = 3
     config = SimulationConfig(
-        usingPBC=1,  # 0=False, 1=True
+        usingPBC="true",
         scenario="simpleShear",
         rows=L,
         cols=L,
