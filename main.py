@@ -2,7 +2,7 @@ from Management import parameterExploring as pe
 from Management.connectToCluster import uploadProject
 from Management.runOnCluster import build_on_all_servers
 from runSimulations import run_many_locally, run_locally
-from MTMath.contiPotential import ContiEnergy
+from MTMath.contiPotential import ContiEnergy, numeric_conti_potential
 from MTMath.plotEnergy import generate_energy_grid
 from Management.connectToCluster import Servers
 from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
@@ -213,7 +213,7 @@ if __name__ == "__main__":
     print(test)
     print(np.max(test))
     print(np.min(test))
-    phi, divPhi, divDivPhi = ContiEnergy.numeric_conti_potential()
+    phi, divPhi, divDivPhi = numeric_conti_potential()
     ground_state_energy = phi(1, 1, 0, -1 / 4, 4, 1)
     max_energy = phi(1, 1.2, 0.5, -1 / 4, 4, 1)
     print(ground_state_energy)

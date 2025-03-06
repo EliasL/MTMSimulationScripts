@@ -1,5 +1,5 @@
 import numpy as np
-from .contiPotential import ContiEnergy
+from .contiPotential import ContiEnergy, numeric_conti_potential, ground_state_energy
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
@@ -166,7 +166,7 @@ def generate_energy_grid(
     poincareDisk=True,
 ):
     # Load the potential and its derivatives
-    phi, divPhi, divDivPhi = ContiEnergy.numeric_conti_potential()
+    phi, divPhi, divDivPhi = numeric_conti_potential()
 
     # Poicare disk
     if poincareDisk:
@@ -226,7 +226,7 @@ def generate_energy_grid(
     # Apply the phi function only to the points inside the unit circle
     energy_grid = phi(C11, C22, C12, beta, K, 1)
 
-    energy_grid -= ContiEnergy.ground_state_energy()
+    energy_grid -= ground_state_energy()
 
     if energy_lim is None:
         energy_lim = (np.nanmin(energy_grid), np.nanmax(energy_grid))
