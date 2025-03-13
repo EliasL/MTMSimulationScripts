@@ -18,7 +18,7 @@ from MTMath.plotEnergy import (
 )
 from Management.jobs import propperJob
 
-from MTMath.contiPotential import ground_state_energy
+from MTMath.contiPotential import ContiEnergy
 from .makePlots import makePlot, makeLogPlotComparison
 from .remotePlotting import get_csv_files
 from .dataFunctions import get_data_from_name, VTUData, arrsToMat, get_previous_data
@@ -38,7 +38,7 @@ def get_energy_range(vtu_files, cvs_file):
     energy_field = VTUData(vtu_files[0]).get_energy_field()
     min_energy = energy_field.min()
 
-    g = ground_state_energy()
+    g = ContiEnergy.ground_state_energy()
     return min_energy - g, max_energy - g
 
 
@@ -322,7 +322,7 @@ def plot_mesh(
 
     if mesh_property == "energy":
         # The energy field is normalized to have energy=0 in the ground state
-        g = ground_state_energy()
+        g = ContiEnergy.ground_state_energy()
         field = data.get_energy_field() - g
         if e_lims is None:
             e_lims = (min(field), max(field))

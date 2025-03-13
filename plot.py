@@ -54,15 +54,16 @@ def plotPropperJob3():
 # MDPI Article plot
 def energyField():
     from MTMath.plotEnergy import generate_energy_grid, make3DEnergyField
+    import numpy as np
 
     g, x, y = generate_energy_grid(
         resolution=200,
         return_XY=True,
         zoom=1,
-        energy_lim=[None, 0.37],
         poincareDisk=True,
     )
-
+    # g = generate_energy_grid(9)
+    # print(np.round(g, 2))
     make3DEnergyField(g, x, y, zScale=0.6, add_front_hole=True)
 
 
@@ -217,7 +218,7 @@ if __name__ == "__main__":
     # plotSampleRuns()
     # plotPropperJob3()
     # debugPlotAll()
-    # energyField()
+    energyField()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
     # createVideoes(configs, all_images=True)
@@ -225,4 +226,4 @@ if __name__ == "__main__":
     # plotAvalanches()
     # plotMaxForce()
     # plotMinimizationCriteriaData()
-    plotShowMinCriteria()
+    # plotShowMinCriteria()

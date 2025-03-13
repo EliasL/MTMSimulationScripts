@@ -2,8 +2,6 @@ from Management import parameterExploring as pe
 from Management.connectToCluster import uploadProject
 from Management.runOnCluster import build_on_all_servers
 from runSimulations import run_many_locally, run_locally
-from MTMath.contiPotential import ContiEnergy, numeric_conti_potential
-from MTMath.plotEnergy import generate_energy_grid
 from Management.connectToCluster import Servers
 from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
 from Management.dataManager import DataManager
@@ -150,15 +148,15 @@ def runOnLocalMachine():
     # configs, labels, dump = avalanches(nrThreads=20, size=100)
     # 12 threads:
     # [LBFGS] 1% RT: 1h 31m 38s       ETR: 3d 23h 37m 19s     Load: 0.163360
-    configs, labels = fixedBoundaries(nrThreads=6, fixed=True, L=100)
-    dump = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s100x100l0.38,1e-05,0.383NPBCt6epsR1e-06LBFGSEpsx1e-06s0/dumps/dump_l0.3814.xml.gz"
+    configs, labels = fixedBoundaries(nrThreads=6, fixed=True, L=101)
+    # dump = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s100x100l0.38,1e-05,0.383NPBCt6epsR1e-06LBFGSEpsx1e-06s0/dumps/dump_l0.3814.xml.gz"
     # configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
 
     # configs, labels = singleDislocationTest(diagonal="major")
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=20)
     # run_locally(configs[0], dump=dump)
-    run_many_locally(configs, taskNames=labels, resume=True, dump=dump)
+    run_many_locally(configs, taskNames=labels, resume=True)
 
 
 def startJobs():
@@ -207,19 +205,6 @@ def cleanData():
 
 
 if __name__ == "__main__":
-    test = generate_energy_grid()
-    import numpy as np
-
-    print(test)
-    print(np.max(test))
-    print(np.min(test))
-    phi, divPhi, divDivPhi = numeric_conti_potential()
-    ground_state_energy = phi(1, 1, 0, -1 / 4, 4, 1)
-    max_energy = phi(1, 1.2, 0.5, -1 / 4, 4, 1)
-    print(ground_state_energy)
-    print(max_energy)
-    print(max_energy - ground_state_energy)
-
     # 150x150 64 threads -> 23 days
     # 150x150 32 threads -> 22 days
     # 150x150 16 threads -> 16 days
@@ -227,7 +212,7 @@ if __name__ == "__main__":
 
     # runOnServer()
     # parameterExploring()
-    # runOnLocalMachine()
+    runOnLocalMachine()
 
     # stopJobs()
     # cleanData()

@@ -1,5 +1,5 @@
 import numpy as np
-from .contiPotential import ContiEnergy, numeric_conti_potential, ground_state_energy
+from .contiPotential import ContiEnergy, lagrange_reduction
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
@@ -87,75 +87,6 @@ def oneDPotentialDissordered():
     plt.show()
 
 
-def lagrange_reduction(C11, C22, C12, loops=1000):
-    for i in range(loops):
-        mask1 = C12 < 0
-        # m1 (flip) operation
-        C12[mask1] *= -1
-
-        mask2 = C22 < C11
-        # m2 (swap) operation
-        C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
-
-        mask3 = 2 * C12 > C11
-        # Stop the loop if no changes are made
-        if not np.any(mask1 | mask2 | mask3):
-            break
-        # m3 operation
-        C22[mask3] += C11[mask3] - 2 * C12[mask3]
-        C12[mask3] -= C11[mask3]
-
-        if i + 1 == loops:
-            raise (RuntimeError("Not enough loops"))
-
-    return C11, C22, C12
-
-
-def elastic_reduction(C11, C22, C12, loops=1000):
-    """
-    We transform the reduced C an extra time with m1 or m2 such that the number
-    of m1 and m2 transformations is even. We also make sure to transform first
-    """
-    # We create a mask of false everywhere
-    odd_swaps_C11 = C11 != C11
-    odd_flips_C12 = C12 != C12
-    for i in range(loops):
-        mask1 = C12 < 0
-        C12[mask1] *= -1
-
-        # Stores the last change made to C12
-        odd_flips_C12 = np.logical_xor(odd_flips_C12, mask1)
-
-        mask2 = C22 < C11
-        # Swap operation
-        C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
-
-        # Stores the last change made to C11 and C22
-        odd_swaps_C11 = np.logical_xor(odd_swaps_C11, mask2)
-
-        mask3 = 2 * C12 > C11
-        # Stop the loop if no changes are made
-        if not np.any(mask1 | mask2 | mask3):
-            break
-        else:
-            C22[mask3] += C11[mask3] - 2 * C12[mask3]
-            C12[mask3] -= C11[mask3]
-
-        if i + 1 == loops:
-            raise (RuntimeError("Not enough loops"))
-
-    # Now we want to undo the m1 and m2 transformations (Which is the same as
-    # doing them again)
-
-    C12[odd_flips_C12] *= -1
-    C11[odd_swaps_C11], C22[odd_swaps_C11] = (
-        C22[odd_swaps_C11].copy(),
-        C11[odd_swaps_C11].copy(),
-    )
-
-    return C11, C22, C12
-
-
 def generate_energy_grid(
     resolution=500,
     beta=-0.25,
@@ -164,10 +95,8 @@ def generate_energy_grid(
     return_XY=False,
     zoom=1,
     poincareDisk=True,
+    zeroReference=True,
 ):
-    # Load the potential and its derivatives
-    phi, divPhi, divDivPhi = numeric_conti_potential()
-
     # Poicare disk
     if poincareDisk:
         # Define the range for x and y based on the unit circle
@@ -218,15 +147,9 @@ def generate_energy_grid(
         C11 = X
         C22 = 1 - C11
 
-    C11, C22, C12 = lagrange_reduction(C11, C22, C12)
-
-    # Initialize the energy grid with NaNs for points outside the unit circle
-    energy_grid = np.full_like(X, np.nan)
-
-    # Apply the phi function only to the points inside the unit circle
-    energy_grid = phi(C11, C22, C12, beta, K, 1)
-
-    energy_grid -= ground_state_energy()
+    energy_grid = ContiEnergy.energy_from_C_components_in_place(
+        C11, C22, C12, beta, K, 1, zeroReference
+    )
 
     if energy_lim is None:
         energy_lim = (np.nanmin(energy_grid), np.nanmax(energy_grid))
