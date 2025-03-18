@@ -20,19 +20,27 @@
  ### Energy and Potential Switching  
  - **Press `S`** to switch to the **square potential** visualization.  
  - **Press `T`** to switch to the **triangular potential** visualization.  
+ - **Press `V`** to toggle **volumetric energy visualization**, adjusting energy calculations accordingly.  
+
  
  ### Visualization & Configuration Modes  
  - **Press `F`** to toggle the **Lagrange reduction visualization**.  
  - **Press `P`** to toggle the **configuration space (Poincaré disk)**.  
+ - **Press `V`** to toggle **volumetric energy visualization**, adjusting energy calculations accordingly.  
+ - **Press `A`** to toggle the **angle region visualization**, highlighting angular configurations.  
+  
+
  - **Press `B`** to toggle the **background heatmap**, which highlights regions of Lagrange reduction.  
  
  ### Reset & Initialization  
- - **Press `R`** to reset the vectors to their initial state (**identity transformation**).  
+ - **Press `R`** to reset the vectors to their initial state.  
  
  ### Stress, Energy, and Deformation Analysis  
  - Displays **deformation gradients (`F`)**, **Cauchy-Green strain tensors  (`C`)**, and it's **Lagrange reduced version (`C~`)**. 
  - Visualizes **energy fields** across different configurations, with color maps indicating potential energy distributions.  
  - Highlights **reduced configurations** in the **Poincaré disk representation**.  
+ - Shows **determinant (`det(F)`)** which turns red when not equal to one. The energy landscape in the Poincare disk is only valid for **`det(F)=1`**. 
+
  
  ---
  
