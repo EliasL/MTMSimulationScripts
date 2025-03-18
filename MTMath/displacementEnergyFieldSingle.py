@@ -109,7 +109,7 @@ def draw_F(ax, F, node_zero):
 # element.set_current_state([(0, 0), (1, 0.2), (1, 1)])
 
 element = Element([(0, 0), (1, 0), (0, 1)])
-element.set_displacements([(0, 0), (0, 0), (1, 0)])
+element.set_displacements([(0, 0), (0, 0), (0, 0)])
 
 fig, ax = plt.subplots(figsize=(6, 6))
 plot_triangle(ax, element)

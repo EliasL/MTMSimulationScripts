@@ -87,50 +87,62 @@ def oneDPotentialDissordered():
     plt.show()
 
 
+def generate_poincare_disk(resolution=500, zoom=1, returnMask=False):
+    # Define the range for x and y based on the unit circle
+    radius = 1.0 / zoom
+
+    x_min, x_max = -radius, radius
+    y_min, y_max = -radius, radius
+
+    # Create the meshgrid for the x and y coordinates
+    X, Y = np.meshgrid(
+        np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
+    )
+
+    # Calculate the mask for points inside the unit circle
+    # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
+    mask = (X**2 + Y**2) >= (1 - 1e-9)
+    X[mask] = np.nan
+    Y[mask] = np.nan
+    # Precompute some common terms used in a, b, c12, c22, and c11 calculations
+    denominator = X**2 - 2 * X + Y**2 + 1
+    a = (2 * Y) / denominator
+    b = -(X**2 + Y**2 - 1) / denominator
+
+    # Avoid division by zero or near-zero by masking those values in b
+    safe_b = np.where(b == 0, np.nan, b)
+
+    # Calculate c12, c22, and c11
+    C12 = a / safe_b
+    C22 = 1 / safe_b
+    C11 = (1 + C12**2) / C22
+
+    C = np.stack(
+        [
+            np.stack([C11, C12], axis=-1),  #
+            np.stack([C12, C22], axis=-1),
+        ],
+        axis=-2,
+    )
+    if returnMask:
+        return C, mask
+    return C
+
+
 def generate_energy_grid(
     resolution=500,
+    zoom=1,
     beta=-0.25,
     K=4,
     energy_lim=[None, 0.37],
     return_XY=False,
-    zoom=1,
     poincareDisk=True,
     zeroReference=True,
 ):
     # Poicare disk
     if poincareDisk:
-        # Define the range for x and y based on the unit circle
-        radius = 1.0 / zoom
-
-        x_min, x_max = -radius, radius
-        y_min, y_max = -radius, radius
-
-        # Create the meshgrid for the x and y coordinates
-        X, Y = np.meshgrid(
-            np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
-        )
-
-        # Calculate the mask for points inside the unit circle
-        # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
-        mask = (X**2 + Y**2) >= (1 - 1e-9)
-        X[mask] = np.nan
-        Y[mask] = np.nan
-        # Precompute some common terms used in a, b, c12, c22, and c11 calculations
-        denominator = X**2 - 2 * X + Y**2 + 1
-        a = (2 * Y) / denominator
-        b = -(X**2 + Y**2 - 1) / denominator
-
-        # Avoid division by zero or near-zero by masking those values in b
-        safe_b = np.where(b == 0, np.nan, b)
-
-        # Calculate c12, c22, and c11
-        C12 = a / safe_b
-        C22 = 1 / safe_b
-        C11 = (1 + C12**2) / C22
+        C = generate_poincare_disk(resolution, zoom)
     else:
-        # Define the range for x and y based on the unit circle
-        radius = (0.5) / zoom
-
         x_min, x_max = 0, 1
         y_min, y_max = -0.5, 0.5
 
@@ -138,18 +150,18 @@ def generate_energy_grid(
         X, Y = np.meshgrid(
             np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
         )
-        # Calculate the mask for points inside the unit circle
-        # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
-        mask = ((X - 0.5) ** 2 + Y**2) >= (0.5 - 1e-9) ** 2
-        X[mask] = np.nan
-        Y[mask] = np.nan
         C12 = Y
         C11 = X
         C22 = 1 - C11
+        C = np.stack(
+            [
+                np.stack([C11, C12], axis=-1),  #
+                np.stack([C12, C22], axis=-1),
+            ],
+            axis=-2,
+        )
 
-    energy_grid = ContiEnergy.energy_from_C_components_in_place(
-        C11, C22, C12, beta, K, 1, zeroReference
-    )
+    energy_grid = ContiEnergy.energy_from_C_in_place(C, beta, K, 1, zeroReference)
 
     if energy_lim is None:
         energy_lim = (np.nanmin(energy_grid), np.nanmax(energy_grid))
@@ -167,6 +179,17 @@ def generate_energy_grid(
         return energy_grid, X, Y
     else:
         return energy_grid
+
+
+def generate_angle_region(resolution=500, zoom=1):
+    C, r_mask = generate_poincare_disk(resolution, zoom, returnMask=True)
+    # Create a boolean mask for the region that should be transparent
+    mask = (C[..., 0, 1] > 1) | (C[..., 0, 1] < 0)
+    # Create a float array (e.g., filled with ones) with the same shape as the mask
+    region = np.ones_like(mask, dtype=float)
+    # Set the parts where the mask is True to np.nan
+    region[mask | r_mask] = np.nan
+    return region
 
 
 def C2PoincareDisk(C):

@@ -20,6 +20,13 @@
             "justMyCode": false,
         },
         {
+            "name": "lagrangeReductionVisualization.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "lagrangeReductionVisualization.py",
+            "console": "integratedTerminal",
+        },
+        {
             "name": "plotAll.py",
             "type": "debugpy",
             "request": "launch",

@@ -133,6 +133,24 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
     return configs, labels
 
 
+def longJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        group_by_seeds=group_by_seeds,
+        rows=size,
+        cols=size,
+        startLoad=0.15,
+        maxLoad=2.0,
+        nrThreads=nrThreads,
+        minimizer="LBFGS",
+        loadIncrement=1e-5,
+        epsR=1e-5,
+        LBFGSEpsg=1e-8,
+        scenario="simpleShear",
+    )
+    return configs, labels
+
+
 def smallJob(**kwargs):
     return basicJob(nrThreads=1, nrSeeds=1, **kwargs)
 

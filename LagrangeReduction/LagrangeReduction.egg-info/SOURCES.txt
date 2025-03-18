@@ -1,0 +1,6 @@
+README.md
+setup.py
+LagrangeReduction.egg-info/PKG-INFO
+LagrangeReduction.egg-info/SOURCES.txt
+LagrangeReduction.egg-info/dependency_links.txt
+LagrangeReduction.egg-info/top_level.txt

@@ -226,8 +226,6 @@ def plot_combined(element, F_grid, beta=-1 / 4, referenceNode=0, selectedNodes=[
 
     onlyVolumetricPart = energyGrid - gridWithoutVolumetricPart
 
-    # gridWithoutVolumetricPart -= ContiEnergy.ground_state_energy(K=0)
-    # onlyVolumetricPart -= ContiEnergy.ground_state_energy(K=4)
     matshow_energy_grid(
         axs[0, 0],
         element,
@@ -279,7 +277,7 @@ if __name__ == "__main__":
         [
             [0, 0],
             [0, 0],
-            [0, 0],
+            [-1, 0],
         ]
     )
 
@@ -298,7 +296,7 @@ if __name__ == "__main__":
     displacementGrid = np.stack([x_vals, y_vals], axis=-1)
     element = ElementGrid(nodes, displacements, displacementGrid)
 
-    refNode = 2
+    refNode = 0
     selectedNodes = [refNode, 1]
     # Generate deformation gradients for node 0 over a grid
     F_grid = element.get_deformation_gradient(

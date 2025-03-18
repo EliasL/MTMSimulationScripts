@@ -1,6 +1,7 @@
 ./Management
 ./MTMath
 ./Plotting
+./LagrangeReduction
 
 numpy
 pandas
@@ -17,3 +18,5 @@ vtk
 powerlaw
 simplification
 debugpy
+PyQt5
+pyqtgraph

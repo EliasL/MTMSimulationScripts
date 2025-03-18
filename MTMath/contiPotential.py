@@ -165,16 +165,26 @@ class ContiEnergy:
 
     # Warning: This method modifies C in-place
     @classmethod
-    def energy_from_C_in_place(cls, C, beta=-1 / 4, K=4, noise=1, zeroReference=True):
+    def energy_from_C_in_place(
+        cls, C, beta=-1 / 4, K=4, noise=1, zeroReference=True, loops=1000
+    ):
         # Reduce using Lagrange reduction
-        lagrange_reduction(C)
+        lagrange_reduction(C, loops=loops)
         return cls.energy_from_reduced_C(C, beta, K, noise, zeroReference)
 
     @classmethod
     def energy_from_C_components_in_place(
-        cls, C11, C22, C12, beta=-1 / 4, K=4, noise=1, zeroReference=True
+        cls,
+        C11,
+        C22,
+        C12,
+        beta=-1 / 4,
+        K=4,
+        noise=1,
+        zeroReference=True,
+        loops=1000,
     ):
-        C11, C22, C12 = lagrange_reduction_components(C11, C22, C12)
+        lagrange_reduction_components(C11, C22, C12, loops=loops)
         return cls.energy_from_reduced_C_components(
             C11, C22, C12, beta, K, noise, zeroReference
         )
@@ -183,19 +193,56 @@ class ContiEnergy:
     # For example, it could be a X, Y grid of 2x2 matrixes.
     @classmethod
     def energy_from_F(
-        cls, F, beta=-1 / 4, K=4, noise=1, zeroReference=True, returnReducedC=False
+        cls,
+        F,
+        beta=-1 / 4,
+        K=4,
+        noise=1,
+        zeroReference=True,
+        returnReducedC=False,
+        accuracy=1,
+        loops=None,
     ):
         assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
 
         # C = F^T F
         C = np.einsum("...ji,...jk->...ik", F, F)
-        energy = cls.energy_from_C_in_place(C, beta, K, noise, zeroReference)
+
+        if accuracy < 1:
+            if loops is None:
+                loops = 200
+            # perturbation = 1 - accuracy  # Small shift depending on accuracy
+            # # Extract components
+            # C11, C22, C12 = C[..., 0, 0], C[..., 1, 1], C[..., 0, 1]
+
+            # # Compute cosine similarity between column vectors
+            # cos_theta = np.abs(
+            #     C12 / (np.sqrt(C11 * C22) + 1e-12)
+            # )  # Avoid division by zero
+
+            # # Identify problematic cases where vectors are nearly parallel
+            # parallel_mask = cos_theta > accuracy  # Threshold for near parallelism
+
+            # # Apply a small perturbation to C12 where necessary
+            # C12[parallel_mask] += perturbation * np.random.randn(
+            #     *C12[parallel_mask].shape
+            # )
+
+            # # Ensure symmetry
+            # C[..., 1, 0] = C12
+
+        elif loops is None:
+            loops = 1000
+
+        energy = cls.energy_from_C_in_place(
+            C, beta, K, noise, zeroReference, loops=loops
+        )
         if returnReducedC:
             return energy, C
         return energy
 
 
-def lagrange_reduction_components(C11, C22, C12, loops=10000):
+def lagrange_reduction_components(C11, C22, C12, loops=1000):
     for i in range(loops):
         mask1 = C12 < 0
         # m1 (flip) operation
@@ -213,13 +260,13 @@ def lagrange_reduction_components(C11, C22, C12, loops=10000):
         C22[mask3] += C11[mask3] - 2 * C12[mask3]
         C12[mask3] -= C11[mask3]
 
-        if i + 1 == loops:
+        if i + 1 == loops and loops > 200:
             print("Warning: Not enough loops")
+    # Modifies in place
+    # return C11, C22, C12
 
-    return C11, C22, C12
 
-
-def lagrange_reduction(C, loops=10000):
+def lagrange_reduction(C, loops=1000):
     assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
 
     # Extract views (no copy)

@@ -23,6 +23,7 @@ from Management.jobs import (
     compareWithOldStoppingCriteria,
     showMinimizationCriteriaJobs,
     singleDislocationTest,
+    longJob,
 )
 
 
@@ -142,13 +143,14 @@ def runOnServer():
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
     # configs, labels = allPlasticEventsJob()
-    configs, labels = basicJob(6, 1, size=40)
+    configs, labels = basicJob(6, 1, size=50)
+    configs, labels = longJob(10, 1, size=150)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
     # configs, labels, dump = avalanches(nrThreads=20, size=100)
     # 12 threads:
     # [LBFGS] 1% RT: 1h 31m 38s       ETR: 3d 23h 37m 19s     Load: 0.163360
-    configs, labels = fixedBoundaries(nrThreads=6, fixed=True, L=101)
+    # configs, labels = fixedBoundaries(nrThreads=6, fixed=True, L=101)
     # dump = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s100x100l0.38,1e-05,0.383NPBCt6epsR1e-06LBFGSEpsx1e-06s0/dumps/dump_l0.3814.xml.gz"
     # configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
 
