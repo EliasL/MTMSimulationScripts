@@ -369,7 +369,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Determinant display
         self.energy_label = QtWidgets.QLabel()
         self.energy_label.setAlignment(Qt.AlignLeft)
-        self.det_label.setStyleSheet("weight: bold; font-size: 11pt;")
+        self.det_label.setStyleSheet("font-weight: bold; font-size: 11pt;")
         info_layout.addWidget(self.energy_label)
 
         # Eigenvalues display (m values)
