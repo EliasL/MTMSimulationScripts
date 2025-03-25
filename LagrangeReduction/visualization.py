@@ -62,6 +62,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.markerSize = 15
         self.vectorWidth = 8
 
+        # Default energy parameters
+        self.currentBeta = -0.25
+        self.volumetricEnergy = True
+
         # Basic widget setup
         self.setWindowTitle("Lagrange reduction with Poincaré Disk")
         self.resize(1300, 650)
@@ -362,6 +366,12 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.det_label.setAlignment(Qt.AlignLeft)
         info_layout.addWidget(self.det_label)
 
+        # Determinant display
+        self.energy_label = QtWidgets.QLabel()
+        self.energy_label.setAlignment(Qt.AlignLeft)
+        self.det_label.setStyleSheet("weight: bold; font-size: 11pt;")
+        info_layout.addWidget(self.energy_label)
+
         # Eigenvalues display (m values)
         self.m_label = QtWidgets.QLabel()
         self.m_label.setAlignment(Qt.AlignLeft)
@@ -371,7 +381,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         # Add the info frame to the layout
         layout.addWidget(info_frame)
-
         self.updateInfoDisplay()
 
     # Add a method to update the display
@@ -396,6 +405,14 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 self.det_label.setStyleSheet(
                     "color: red; font-weight: bold; font-size: 11pt;"
                 )
+
+            E = ContiEnergy.energy_from_F(
+                F,
+                self.currentBeta,
+                K=4 if self.volumetricEnergy else 0,
+                zeroReference=True,
+            )
+            self.energy_label.setText(f"E = {E:.3f}")
 
         # Update C matrix display
         if C is not None:
@@ -727,7 +744,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self._scheduleEnergyUpdate(resolution=700, is_highres=True)
 
     def _scheduleEnergyUpdate(self, resolution, is_highres):
-        # Use separate executors for each type of task
         executor = (
             self._energy_executor_highres if is_highres else self._energy_executor_quick
         )
@@ -745,8 +761,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 return
 
         F_grid = self.getFGrid(resolution)
-        currentBeta = self.currentBeta
-        volumetricEnergy = self.volumetricEnergy
         energy_lim = [0, 0.37]
         # We only need high accuracy if the zoom level is high
         x_range, _ = self.GV_plot.viewRange()
@@ -755,8 +769,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         with np.errstate(over="ignore", invalid="ignore"):
             energy_grid = ContiEnergy.energy_from_F(
                 F_grid,
-                currentBeta,
-                K=4 if volumetricEnergy else 0,
+                self.currentBeta,
+                K=4 if self.volumetricEnergy else 0,
                 zeroReference=True,
                 accuracy=1 - r,
             )
@@ -785,7 +799,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
     def drawBackground(self):
         self.drawLagrangeReductionBackground()
         self.drawEnergyBackground()
-        self.volumetricEnergy = True
         self.drawMetricSpaceBackground()
 
     def mouseMove(self, pos):
@@ -929,6 +942,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         if event.key() == Qt.Key_V:
             self.volumetricEnergy = not self.volumetricEnergy
             self.updateFEnergyBackground()
+            self.updateMarkers()
         if event.key() == Qt.Key_B:
             # Check if the ImageItem is currently visible by checking its opacity
             if self.GV_bg1.opacity() > 0:

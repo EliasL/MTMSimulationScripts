@@ -249,12 +249,26 @@ def drawCScatter(
         # We set it to None so that it is not given to the scatter function
         vmax = None
 
+    # Avoid log(0) by setting a small floor
+    density_safe = np.clip(density1, 1e-10, None)
+
+    # Take log and normalize to [0, 1]
+    log_density = np.log(density_safe)
+    log_density_norm = (log_density - np.min(log_density)) / (
+        np.max(log_density) - np.min(log_density) + 1e-12
+    )
+
+    # High density → small size (0.5), low density → large size (3)
+    min_size = 0.5
+    max_size = 3
+    sizes = min_size + (1.0 - log_density_norm) * (max_size - min_size)
+
     # Plot with scatter, adjusting color based on density
     scatter = ax.scatter(
         x * zoom * grid_size / 2 + grid_size / 2,
         y * zoom * grid_size / 2 + grid_size / 2,
         c=density1,
-        s=0.2,
+        s=sizes,
         linewidth=0,
         cmap=cmap,
         norm=norm,

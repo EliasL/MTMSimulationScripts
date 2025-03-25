@@ -14,7 +14,7 @@ from MTMath.plotEnergy import (
     generate_energy_grid,
     drawCScatter,
     lagrange_reduction,
-    elastic_reduction,
+    # elastic_reduction,
 )
 from Management.jobs import propperJob
 
@@ -38,8 +38,7 @@ def get_energy_range(vtu_files, cvs_file):
     energy_field = VTUData(vtu_files[0]).get_energy_field()
     min_energy = energy_field.min()
 
-    g = ContiEnergy.ground_state_energy()
-    return min_energy - g, max_energy - g
+    return min_energy, max_energy
 
 
 # This is a conceptual approach and might need adjustments to fit your specific data structure
@@ -322,8 +321,7 @@ def plot_mesh(
 
     if mesh_property == "energy":
         # The energy field is normalized to have energy=0 in the ground state
-        g = ContiEnergy.ground_state_energy()
-        field = data.get_energy_field() - g
+        field = data.get_energy_field()
         if e_lims is None:
             e_lims = (min(field), max(field))
         norm = mcolors.Normalize(vmin=e_lims[0], vmax=e_lims[1])
@@ -537,12 +535,12 @@ def plot_in_poincare_disk(
     data = VTUData(vtu_file)
 
     C = data.get_C()
-    if do_elastic_reduction:
-        # Do the elastic reduction
-        C = arrsToMat(*elastic_reduction(C[:, 0, 0], C[:, 1, 1], C[:, 0, 1]))
-        zoom = 3
-    else:
-        zoom = 1
+    # if do_elastic_reduction:
+    #     # Do the elastic reduction
+    #     C = arrsToMat(*elastic_reduction(C[:, 0, 0], C[:, 1, 1], C[:, 0, 1]))
+    #     zoom = 3
+    # else:
+    zoom = 1
 
     g = get_energy_grid(zoom=zoom)
     plotEnergyField(

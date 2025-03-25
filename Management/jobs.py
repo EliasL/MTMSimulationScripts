@@ -418,7 +418,7 @@ def singleDislocationTest(
         rows=L,
         cols=L,
         startLoad=0.0,
-        maxLoad=2.0,
+        maxLoad=4.0,
         loadIncrement=1e-3,
         nrThreads=nrThreads,
         minimizer="LBFGS",

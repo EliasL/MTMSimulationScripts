@@ -270,14 +270,14 @@ if __name__ == "__main__":
         [
             [0, 0],
             [1, 0],
-            [0, 1],
+            [2, 1],
         ]
     )
     displacements = np.array(
         [
             [0, 0],
             [0, 0],
-            [-1, 0],
+            [0, 0],
         ]
     )
 
@@ -296,8 +296,8 @@ if __name__ == "__main__":
     displacementGrid = np.stack([x_vals, y_vals], axis=-1)
     element = ElementGrid(nodes, displacements, displacementGrid)
 
-    refNode = 0
-    selectedNodes = [refNode, 1]
+    refNode = 1
+    selectedNodes = [refNode]
     # Generate deformation gradients for node 0 over a grid
     F_grid = element.get_deformation_gradient(
         referenceNode=refNode, selectedNodes=selectedNodes
