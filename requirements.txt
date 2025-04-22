@@ -13,7 +13,7 @@ paramiko
 tabulate
 fabric
 opencv-python
-imageio
+imageio[ffmpeg]
 vtk
 powerlaw
 simplification

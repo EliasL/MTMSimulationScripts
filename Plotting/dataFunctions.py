@@ -10,8 +10,10 @@ class VTUData:
         self.vtu_file_path = vtu_file_path
         self.mesh = self._read_vtu_file()
         result = get_data_from_name(vtu_file_path)
-        self.BC = result["BC"]
-        self.load = float(result["load"])
+        if "BC" in result:
+            self.BC = result["BC"]
+        if "load" in result:
+            self.load = float(result["load"])
 
     def _read_vtu_file(self):
         # Create a reader for the VTU file
@@ -32,7 +34,6 @@ class VTUData:
         return vtk_to_numpy(self.mesh.GetPoints().GetData())
 
     def get_force_field(self):
-        # NB this is "force". Check the C++ code, might not be what you think
         return self.get_point_data("stress_field")
 
     def get_stress_field(self):
@@ -62,8 +63,43 @@ class VTUData:
         [C11, C22, C12] components.
         """
         # Get the C11, C22, and C12 arrays from the VTK object
-        C11, C22, C12 = [self.get_cell_data(C) for C in ["C11", "C22", "C12"]]
-        return arrsToMat(C11, C22, C12)
+        C11, C12, C22 = [self.get_cell_data(C) for C in ["C11", "C12", "C22"]]
+        return CArrsToMat(C11, C12, C22)
+
+    def get_P(self):
+        """
+        Returns a 3D array where each slice (2x2 matrix) corresponds to the
+        [P11,P12, P21, P22] components.
+        """
+        # Get the C11, C22, and C12 arrays from the VTK object
+        P11, P12, P21, P22 = [
+            self.get_cell_data(P) for P in ["P11", "P12", "P21", "P22"]
+        ]
+        return arrsToMat(P11, P12, P21, P22)
+
+    def get_force_contributions(self):
+        """Returns three force vectors for each element in the mesh"""
+        P = self.get_P()
+        assert len(P.shape) == 3, "Should be an array of 2x2 matrices"
+        assert P.shape[-2:] == (2, 2), "Should be an array of 2x2 matrices"
+
+        # dN_dX matrix from C++ code
+        dN_dX = np.array(
+            [
+                [-1, -1],
+                [1, 0],
+                [0, 1],
+            ]
+        )  # shape: (3, 2)
+        # initialArea assumption
+        initArea = 0.5
+
+        # Compute force contributions for each element
+        # Result: (n_elements, 2, 3)
+        # Note we transpose dN_dX
+        eGradientDensity = np.einsum("nij,kj->nik", P, dN_dX)
+        # Force is the negative of the gradient
+        return -eGradientDensity * initArea
 
     def get_connectivity(self):
         # Extract Connectivity
@@ -74,17 +110,22 @@ class VTUData:
         return connectivity
 
 
-def arrsToMat(C11, C22, C12):
-    # Initialize the 3D array to store the 2x2 matrices
-    C = np.zeros((C11.shape[0], 2, 2))
+def arrsToMat(A11, A12, A21, A22):
+    assert A11.shape == A12.shape == A21.shape == A22.shape, (
+        "All components should have the same shape"
+    )
+    A = np.zeros((A11.shape[0], 2, 2))
 
     # Fill the matrix with the corresponding values
-    C[:, 0, 0] = C11  # (1,1) entry
-    C[:, 1, 1] = C22  # (2,2) entry
-    C[:, 0, 1] = C12  # (1,2) entry
-    C[:, 1, 0] = C12  # (2,1) entry, ensuring symmetry
+    A[:, 0, 0] = A11  # (1,1) entry
+    A[:, 0, 1] = A12  # (1,2) entry
+    A[:, 1, 0] = A21  # (2,1) entry
+    A[:, 1, 1] = A22  # (2,2) entry
+    return A
 
-    return C
+
+def CArrsToMat(C11, C12, C22):
+    return arrsToMat(C11, C12, C12, C22)
 
 
 def parse_pvd_file(path, pvd_file):
@@ -93,7 +134,10 @@ def parse_pvd_file(path, pvd_file):
     vtu_files = []
 
     for dataset in root.iter("DataSet"):
-        vtu_files.append(os.path.join(path, dataset.attrib["file"]))
+        if "_." not in dataset.attrib["file"]:
+            print("Skipping file: ", dataset.attrib["file"])
+        else:
+            vtu_files.append(os.path.join(path, dataset.attrib["file"]))
 
     return vtu_files
 
@@ -122,6 +166,15 @@ def get_data_from_name(nameOrPath):
     for part in parts[1:-1]:
         key, value = part.split("=")
         # Add the key-value pair to the dictionary
+
+        # minStep is special. It has the format iterations.func_evals
+        if key == "minStep":
+            result["nr_iterations"], result["nr_func_evals"] = map(
+                int, value.split(".")
+            )
+            result["minStep"] = value
+            continue
+
         try:
             result[key] = int(value)
         except ValueError:
@@ -131,25 +184,49 @@ def get_data_from_name(nameOrPath):
                 result[key] = value
 
     # We can now extract some extra stuff from the name
-    # It will for example have the form:
-    # resettingSimpleShearPeriodicBoundary,s60x60l0.15,1e-05,10PBCt4s0
-    result["dims"] = tuple(
-        map(int, result["name"].split(",")[1].split("s")[1].split("l")[0].split("x"))
-    )
+    try:
+        # It will for example have the form:
+        # resettingSimpleShearPeriodicBoundary,s60x60l0.15,1e-05,10PBCt4s0
+        result["dims"] = tuple(
+            map(
+                int, result["name"].split(",")[1].split("s")[1].split("l")[0].split("x")
+            )
+        )
 
-    # get seed
-    result["seed"] = int(result["name"].split("s")[-1])
+        # get seed
+        result["seed"] = int(result["name"].split("s")[-1])
 
-    # Extract start load, load increment, and max load
-    load_parts = result["name"].split(",")[1:]
-    result["startLoad"] = float(load_parts[0].split("l")[1])
-    result["loadIncrement"] = float(load_parts[1])
-    if "NPBC" in load_parts[2]:
-        result["maxLoad"] = float(load_parts[2].split("NPBC")[0])
-        result["BC"] = "NPBC"
-    else:
-        result["maxLoad"] = float(load_parts[2].split("PBC")[0])
-        result["BC"] = "PBC"
+        # Extract start load, load increment, and max load
+        load_parts = result["name"].split(",")[1:]
+        result["startLoad"] = float(load_parts[0].split("l")[1])
+        result["loadIncrement"] = float(load_parts[1])
+        if "NPBC" in load_parts[2]:
+            result["maxLoad"] = float(load_parts[2].split("NPBC")[0])
+            result["BC"] = "NPBC"
+        else:
+            result["maxLoad"] = float(load_parts[2].split("PBC")[0])
+            result["BC"] = "PBC"
+    except IndexError:
+        # Sometimes we load a vtu file that doesn't have the name format we expect
+        pass
+
+    # There are some values that we want to have even if they are there, but we
+    # give a warning
+    if "load" not in result:
+        print("Warning: load not found in file name")
+        result["load"] = 0.0
+    if "BC" not in result:
+        print("Warning: BC not found in file name")
+        result["BC"] = "Unknown"
+    if "seed" not in result:
+        print("Warning: seed not found in file name")
+        result["seed"] = 0
+    if "loadIncrement" not in result:
+        print("Warning: loadIncrement not found in file name")
+        result["loadIncrement"] = 1e-5
+    if "nrM" not in result:
+        print("Warning: nrM not found in file name")
+        result["nrM"] = 0.0
 
     return result
 
@@ -193,3 +270,20 @@ def get_previous_data(vtu_file):
         return os.path.join(directory, previous_file)
     else:
         return None  # No previous file found
+
+
+if __name__ == "__main__":
+    vtu_file = (
+        "/Users/eliaslundheim/work/PhD/MTS2D/build/defaultName/data/remeshTest.0.vtu"
+    )
+    # get and print force components in a clear manner
+    vtu = VTUData(vtu_file)
+    force_components = vtu.get_force_contributions()
+    # Print the force components
+    print("Force components:")
+    for i, force in enumerate(force_components):
+        print(f"Element {i}:\n {force}")
+    # Print the connectivity
+    connectivity = vtu.get_connectivity()
+    print("Connectivity:")
+    print(connectivity)

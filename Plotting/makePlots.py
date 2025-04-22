@@ -168,18 +168,18 @@ def plotRollingAverage(X, Y, intervalSize=100, fig=None, ax=None, **kwargs):
 
 # Process drops
 def pros_d(df, min_npd, strainLims):
-    e = [key for key in df.columns if key not in ["Load", "Nr_plastic_deformations"]][0]
+    e = [key for key in df.columns if key not in ["load", "nr_plastic_deformations"]][0]
 
-    if e == "Avg_energy" and "Avg_energy_change" in df:
-        diffs = df["Avg_energy_change"]
+    if e == "avg_energy" and "avg_energy_change" in df:
+        diffs = df["avg_energy_change"]
     else:
         diffs = np.diff(df[e])
 
     # Combine all conditions into a single mask using element-wise logical AND
     mask = (
-        (df["Nr_plastic_deformations"] >= min_npd)
-        & (df["Load"] >= strainLims[0])
-        & (df["Load"] <= strainLims[1])
+        (df["nr_plastic_deformations"] >= min_npd)
+        & (df["load"] >= strainLims[0])
+        & (df["load"] <= strainLims[1])
     )
     # Since np.diff reduces the length by 1, adjust the mask accordingly
     # The mask needs to exclude the first entry, so slice the mask by [1:]
@@ -196,7 +196,7 @@ def pros_d(df, min_npd, strainLims):
     # plt.ylabel(r"$-\Delta E$")
     # plt.show()
 
-    # load = df["Load"][:-1][mask][drop_mask]
+    # load = df["load"][:-1][mask][drop_mask]
     # plt.plot(load, drops)
     # plt.yscale("log")
     # plt.xlabel(r"$\gamma$")
@@ -615,7 +615,7 @@ def plotSplitPowerLaw(
 
 
 def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
-    e = "Avg_energy"
+    e = "avg_energy"
     pre_yield_df = [df[0 : np.argmax(df[e]) + 1] for df in dfs]
     post_yield_df = [df[np.argmax(df[e]) + 1 :] for df in dfs]
 
@@ -639,9 +639,9 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
         }  # Dictionary to store data for each group
         for df in split_dfs:
             # Filter out zero and NaN values
-            df = df[df["Nr_plastic_deformations"] > 0]
+            df = df[df["nr_plastic_deformations"] > 0]
 
-            group_index = np.floor(np.log2(df["Nr_plastic_deformations"])).astype(int)
+            group_index = np.floor(np.log2(df["nr_plastic_deformations"])).astype(int)
             group_index = np.clip(
                 group_index, min_group_index, max_group_index
             )  # Clamp the group index
@@ -762,8 +762,8 @@ def plotSlidingWindowPowerLaw(
 
     # Strain window centers
     strainWindowCenter = np.linspace(
-        min(dfs[0]["Load"]) + windowRadius,
-        max(dfs[0]["Load"]) - windowRadius,
+        min(dfs[0]["load"]) + windowRadius,
+        max(dfs[0]["load"]) - windowRadius,
         20,
     )
 
@@ -829,12 +829,12 @@ def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True):
     Determines appropriate axis labels based on given column names.
     """
     if x_name is None:
-        x_name = r"Strain $\gamma$" if X == "Load" else X
+        x_name = r"Strain $\gamma$" if X == "load" else X
 
     if y_name is None and use_y_axis_name:
         y_labels = {
-            "Avg_RSS": r"Stress $\langle \sigma \rangle$",
-            "Avg_energy": r"Energy $\langle E \rangle$",
+            "avg_RSS": r"Stress $\langle \sigma \rangle$",
+            "avg_energy": r"Energy $\langle E \rangle$",
         }
         y_name = y_labels.get(Y, Y)
 
@@ -846,8 +846,8 @@ def makePlot(
     ax=None,
     fig=None,
     name="",
-    Y="Avg_energy",
-    X="Load",
+    Y="avg_energy",
+    X="load",
     x_name=None,
     y_name=None,
     use_y_axis_name=True,
@@ -941,7 +941,13 @@ def makePlot(
                 reverse_x_axis = False
 
         if subtract is not None:
-            sub_df = pd.read_csv(csv_file_paths[subtract], usecols=[Y])
+            if isinstance(subtract, str):
+                sub_df = pd.read_csv(subtract, usecols=[Y])
+            elif isinstance(subtract, int):
+                sub_df = pd.read_csv(csv_file_paths[subtract], usecols=[Y])
+            else:
+                raise ValueError("Invalid type for subtract. Must be path or int.")
+
             df[Y] -= sub_df[Y].reindex(df.index, fill_value=0)
 
         data.append(df[Y].values)
@@ -1244,7 +1250,7 @@ def addImagesToPlot(
 def removeBadData(df, crash_count, csv_file_path):
     # The max energy of an element should be around 4.2-6
     # If the energy of an element is 10, something has probably gone wrong
-    max_e = "Max_energy"
+    max_e = "max_energy"
     max_value = 10
 
     if (df[max_e] > max_value).any():
@@ -1257,7 +1263,7 @@ def removeBadData(df, crash_count, csv_file_path):
 
 def makeAverageComparisonPlot(
     grouped_csv_file_paths,
-    Y="Avg_energy",
+    Y="avg_energy",
     name="",
     show=False,
     use_title=False,
@@ -1274,12 +1280,12 @@ def makeAverageComparisonPlot(
 ):
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
-    X = "Load"
-    if Y == "Avg_energy":
+    X = "load"
+    if Y == "avg_energy":
         y_name = r"Energy $\langle E \rangle$"
         if name == "":
-            name = "Avg_energy"
-    elif Y == "Avg_RSS":
+            name = "avg_energy"
+    elif Y == "avg_RSS":
         y_name = r"Stress $\langle \sigma \rangle$"
         if name == "":
             name = "Avg stress"
@@ -1317,7 +1323,7 @@ def makeAverageComparisonPlot(
         # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             # print(csv_file_path)
-            df = pd.read_csv(csv_file_path, usecols=[X, Y, "Max_energy"])
+            df = pd.read_csv(csv_file_path, usecols=[X, Y, "max_energy"])
             # If Y contains strings, we will assume it is a time, and convert it to
             # seconds
             if isinstance(df[Y][0], str):
@@ -1411,7 +1417,7 @@ def add_power_law_line(ax, slope, x_lim, y_pos=1, c="black", linestyle="--", **k
 
 def makeLogPlotComparison(
     grouped_csv_file_paths,
-    Y="Avg_energy",
+    Y="avg_energy",
     name="",
     show=False,
     slide=False,
@@ -1445,7 +1451,7 @@ def makeLogPlotComparison(
         assert ax is None
         fig, ax = plt.subplots()
 
-    X = "Load"
+    X = "load"
     oLims = (
         ""
         if outerStrainLims == [-np.inf, np.inf]
@@ -1459,10 +1465,10 @@ def makeLogPlotComparison(
     title = f"{name}{oLims},"
 
     if name == "":
-        if Y == "Avg_energy":
+        if Y == "avg_energy":
             name == "Avg energy power law"
             unit = "E"
-        elif Y == "Avg_RSS":
+        elif Y == "avg_RSS":
             name == "Avg stress power law"
             unit = r"\sigma"
 
@@ -1482,9 +1488,9 @@ def makeLogPlotComparison(
         name += " window"
     else:
         title += f" {iLims},"
-        if Y == "Avg_energy":
+        if Y == "avg_energy":
             x_name = "Magnitude of energy drops"
-        elif Y == "Avg_RSS":
+        elif Y == "avg_RSS":
             x_name = "Magnitude of stress drops"
         y_name = rf"$p(\Delta \langle {unit} \rangle)$"
 
@@ -1509,9 +1515,9 @@ def makeLogPlotComparison(
                 usecols=[
                     X,
                     Y,
-                    "Nr_plastic_deformations",
-                    "Max_energy",
-                    # "Avg_energy_change",
+                    "nr_plastic_deformations",
+                    "max_energy",
+                    # "avg_energy_change",
                 ],
             )
             # Truncate data based on xlim
@@ -1619,8 +1625,8 @@ def makeEnergyAvalancheComparison(
 ):
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
-    X = "Load"
-    Y = "Avg_energy"
+    X = "load"
+    Y = "avg_energy"
     x_name = "Magnitude of energy drops"
     y_name = r"$P(>E)$"
     lims = "" if xlim == [-np.inf, np.inf] else f", xlim: {xlim[0]}-{xlim[1]}"
@@ -1633,7 +1639,7 @@ def makeEnergyAvalancheComparison(
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(
-                csv_file_path, usecols=[X, Y, "Nr_plastic_deformations", "Max_energy"]
+                csv_file_path, usecols=[X, Y, "nr_plastic_deformations", "max_energy"]
             )
             # Truncate data based on xlim
             df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
@@ -1773,8 +1779,8 @@ def plot_color_matrix(ax, color_matrix, unique_p1, unique_p2, property_keys):
 
 
 def all_files_have_same_starting_point(csv_file_paths):
-    X = "Load"
-    Y = "Avg_energy"
+    X = "load"
+    Y = "avg_energy"
     energy = defaultdict(list)
     for csv_file_path in csv_file_paths:
         seed = get_data_from_name(csv_file_path)["seed"]
@@ -1789,8 +1795,8 @@ def makeSettingComparison(
     csv_file_paths=None,
     labels=None,
     property_keys=None,  # a tuple of two keys, e.g., ("epsR", "epsE")
-    X="Load",
-    Y="Avg_energy",
+    X="load",
+    Y="avg_energy",
     title=None,
     xlim=None,
     ylim=None,
@@ -2022,7 +2028,7 @@ def makeItterationsPlot(csv_file_paths, name, **kwargs):
         makePlot(
             csv_file_paths,
             name,
-            X="Load",
+            X="load",
             Y=["Nr FIRE iterations", "Nr LBFGS iterations"],
             y_name="Nr itterations",
             title="Nr of Itterations",
@@ -2035,7 +2041,7 @@ def makeItterationsPlot(csv_file_paths, name, **kwargs):
         makePlot(
             csv_file_paths,
             name,
-            X="Load",
+            X="load",
             Y=["Nr FIRE iterations", "Nr LBFGS iterations"],
             y_name="Nr itterations",
             title="Nr of Itterations",
@@ -2064,8 +2070,8 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
     makePlot(
         csv_file_paths,
         name,
-        X="Load",
-        Y="Avg_energy",
+        X="load",
+        Y="avg_energy",
         x_name="Magnitude of energy drops",
         y_name=r"$P(>E)$",
         title="Powerlaw",
@@ -2084,7 +2090,7 @@ if __name__ == "__main__":
             "/Volumes/data/MTS2D_output/simpleShear,s60x60l0.15,0.0002,1.0PBCt1minimizerFIRELBFGSEpsg0.0001eps0.01s0/macroData.csv",
         ],
         name="energy.pdf",
-        Y="Avg_energy",
+        Y="avg_energy",
     )
     # makeItterationsPlot(
     #     [

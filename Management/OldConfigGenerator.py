@@ -79,7 +79,7 @@ class SimulationConfig:
         if self.epsx != 0.0:
             name += f"EpsX{self.epsx}"
         if self.maxIterations != 0:
-            name += f"MaxIter{self.maxIterations}"
+            name += f"maxIter{self.maxIterations}"
         if self.plasticityEventThreshold != 0.1:
             name += f"PET{self.plasticityEventThreshold}"
 

@@ -165,7 +165,7 @@ class Process:
                     for header in header_indices:
                         header_indices[header] -= 1
 
-                # load = last_line_values[header_indices["Load"]]
+                # load = last_line_values[header_indices["load"]]
                 runTime = last_line_values[header_indices["Run_time"]]
                 timeRemaining = last_line_values[header_indices["Est_time_remaining"]]
 

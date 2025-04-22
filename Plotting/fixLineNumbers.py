@@ -28,10 +28,10 @@ def fix_csv_files(paths, use_tqdm=True):
             df.columns = df.columns.str.replace(" ", "_", regex=False)
 
             # Create a Series that tracks the maximum value encountered so far
-            cummax_series = df["Load"].cummax()
+            cummax_series = df["load"].cummax()
 
             # Create a boolean mask where the current value is less than the maximum encountered
-            overlap_mask = df["Load"] < cummax_series
+            overlap_mask = df["load"] < cummax_series
 
             # Drop the rows where overlap_mask is True
             df_cleaned = df[~overlap_mask].reset_index(drop=True)

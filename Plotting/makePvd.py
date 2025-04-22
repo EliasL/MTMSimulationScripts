@@ -11,11 +11,16 @@ def create_collection(
     # Regular expression to match file numbers in the filename
     regex_pattern = r".*\.([0-9]+)\.vtu"
 
+    min_regex_pattern = r".*_minStep=[0-9]+.([0-9]+)_.*"
+
     # Iterate over files in the directory
     for entry in Path(folder_path).iterdir():
         if entry.suffix == extension:
             filename = entry.name
-            match = re.match(regex_pattern, filename)
+            if "minStep" in filename:
+                match = re.match(min_regex_pattern, filename)
+            else:
+                match = re.match(regex_pattern, filename)
             if match and len(match.groups()) == 1:
                 number = int(match.group(1))
                 files_with_numbers.append((number, entry))

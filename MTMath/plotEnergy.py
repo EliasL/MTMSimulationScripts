@@ -11,7 +11,7 @@ from matplotlib.colors import LogNorm
 
 def oneDPotential():
     # Load the potential and its derivatives
-    phi, divPhi, divDivPhi = ContiEnergy.numeric_conti_potential()
+    phi, divPhi, divDivPhi = ContiEnergy.numeric_potential()
 
     # Define size and variables
     distance = (-1.7, 1.7)
@@ -48,7 +48,7 @@ def oneDPotential():
 
 def oneDPotentialDissordered():
     # Load the potential and its derivatives
-    phi, divPhi, divDivPhi = ContiEnergy.numeric_conti_potential()
+    phi, divPhi, divDivPhi = ContiEnergy.numeric_potential()
 
     # Define size and variables
     distance = (-1.7, 1.7)
@@ -193,16 +193,17 @@ def generate_angle_region(resolution=500, zoom=1):
 
 
 def C2PoincareDisk(C):
-    if C.ndim == 2:
-        x_, y_ = (C[0, 1] / C[1, 1], np.sqrt(np.linalg.det(C)) / C[1, 1])
-    else:
-        dets = np.linalg.det(C)
-        x_, y_ = (C[:, 0, 1] / C[:, 1, 1], np.sqrt(dets) / C[:, 1, 1])
+    with np.errstate(divide="warn", invalid="warn"):
+        if C.ndim == 2:
+            x_, y_ = (C[0, 1] / C[1, 1], np.sqrt(np.linalg.det(C)) / C[1, 1])
+        else:
+            dets = np.linalg.det(C)
+            x_, y_ = (C[:, 0, 1] / C[:, 1, 1], np.sqrt(dets) / C[:, 1, 1])
 
-    x = (x_**2 + y_**2 - 1) / (x_**2 + (y_ + 1) ** 2)
-    y = 2 * x_ / (x_**2 + (y_ + 1) ** 2)
+        x = (x_**2 + y_**2 - 1) / (x_**2 + (y_ + 1) ** 2)
+        y = 2 * x_ / (x_**2 + (y_ + 1) ** 2)
 
-    return x, y
+        return x, y
 
 
 def drawC(ax, C, grid_size, zoom=1, c="w", linestyle="--", linewidth=0.6, **kwargs):
@@ -358,10 +359,10 @@ def plotEnergyField(
     fig.gca().add_patch(circle)
 
     # Draw fundamental domain
-    drawFundamentalDomain(ax, grid_size=grid_size, zoom=zoom)
+    # drawFundamentalDomain(ax, grid_size=grid_size, zoom=zoom)
 
     # Draw shear path
-    drawShearPath(ax, grid_size=grid_size, zoom=zoom, linestyle="-")
+    # drawShearPath(ax, grid_size=grid_size, zoom=zoom, linestyle="-")
 
     # Draw elastic domain
     # TODO

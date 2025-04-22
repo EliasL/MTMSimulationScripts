@@ -148,7 +148,7 @@ def plotMaxForce():
         [
             "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20epsR0.001s0/macroData.csv"
         ],
-        Y="Max_force",
+        Y="max_force",
         name="maxForce.pdf",
         labels=["EpsR=0.001"],
         legend=True,

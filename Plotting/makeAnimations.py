@@ -14,6 +14,7 @@ from .pyplotFunctions import (
     plot_and_save_plot,
     plot_and_save_in_poincare_disk,
     plot_and_save_in_e_reduced_poincare_disk,
+    plot_and_save_mesh_with_force,
 )
 from .dataFunctions import parse_pvd_file, get_data_from_name
 from .makePvd import create_collection
@@ -47,11 +48,26 @@ def select_vtu_files(vtu_files, nrSteps, all_images=False):
 
 def framesToMp4(frames, outFile, fps):
     print(f"Creating {outFile}")
+
+    try:
+        writer = imageio.get_writer(outFile, fps=fps, codec="libx264", quality=5)
+        for frame_path in frames:
+            frame = imageio.imread(frame_path)
+            writer.append_data(frame)
+        writer.close()
+    except Exception as e:
+        print(f"Video writing failed: {e}")
+
+
+def oldFramesToMp4(frames, outFile, fps):
+    print(f"Creating {outFile}")
     # Determine the width and height from the first image
     image_path = frames[0]
     frame = cv2.imread(image_path)
     height, width, layers = frame.shape
 
+    if not outFile:
+        raise ValueError("Output file path (outFile) must not be None or empty.")
     # Define the codec and create VideoWriter object
     fourcc = cv2.VideoWriter_fourcc(*"avc1")
     out = cv2.VideoWriter(outFile, fourcc, fps, (width, height))
@@ -153,10 +169,14 @@ def makeAnimations(
     allImages=False,
     minTime=7,
     reuseImages=False,
+    X="load",
 ):
     frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macroData is None:
         macroData = os.path.join(path, settings["MACRODATANAME"] + ".csv")
+        # Check if file exsists
+        if not os.path.isfile(macroData):
+            macroData = None
     if pvdFile is None:
         pvdFile = os.path.join(path, settings["COLLECTIONNAME"] + ".pvd")
 
@@ -171,10 +191,13 @@ def makeAnimations(
     # frames should be drawn, we first check how much load change there is
     first = get_data_from_name(vtu_files[0])
     last = get_data_from_name(vtu_files[-1])
-    loadChange = float(last["load"]) - float(first["load"])
+    if X in first and X in last:
+        xChange = float(last[X]) - float(first[X])
+    else:
+        xChange = 0.3
 
     # Length of video in seconds
-    videoLength = seconds_per_unit_shear * loadChange
+    videoLength = seconds_per_unit_shear * xChange
     nrSteps = videoLength * fps
 
     # we select a reduced number of frames
@@ -190,11 +213,12 @@ def makeAnimations(
     for function, fileName in [
         # (plot_and_save_nodes, "nodes"),
         (plot_and_save_mesh, "mesh"),
-        (plot_and_save_in_poincare_disk, "disk"),
+        # (plot_and_save_mesh_with_force, "mesh_with_forces"),
+        # (plot_and_save_in_poincare_disk, "disk"),
         # (plot_and_save_plot, "e_drop_plot"),
         # (plot_and_save_plot, "energy_plot"),
-        (plot_and_save_m_diff_mesh, "m_diff_mesh"),
-        (plot_and_save_m_mesh, "m_mesh"),
+        # (plot_and_save_m_diff_mesh, "m_diff_mesh"),
+        # (plot_and_save_m_mesh, "m_mesh"),
         # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
     ]:
         images = make_images(
@@ -204,30 +228,17 @@ def makeAnimations(
             frame_path=frame_path,
             transparent=transparent,
             use_tqdm=useTqdm,
+            X=X,
             reuse_images=reuseImages,
             fileName=fileName,
         )
 
         # Path to the output video file
         outPath = os.path.join(path, f"{fileName}_video.mp4")
-
-        # Get the last modification time of the last image in the list
-        last_image_mod_time = os.path.getmtime(images[-1])
-
-        # Get the last modification time of the output video file
-        outPath_mod_time = os.path.getmtime(outPath) if os.path.exists(outPath) else 0
-
-        # Convert modification times to datetime objects
-        last_image_mod_datetime = datetime.fromtimestamp(last_image_mod_time)
-        outPath_mod_datetime = datetime.fromtimestamp(outPath_mod_time)
-
-        # Calculate the time difference
-        time_difference = last_image_mod_datetime - outPath_mod_datetime
-
-        # Check if the time difference is greater than 2 hours
-        if time_difference > timedelta(hours=2):
-            # If is is larger than two hours, the video was probably not generated with these images
-
+        # Check if the last image is newer than the video
+        if not os.path.exists(outPath) or os.path.getmtime(outPath) < os.path.getmtime(
+            images[-1]
+        ):
             framesToMp4(images, outPath, fps)
             if makeGIF:
                 GIFCommand = [

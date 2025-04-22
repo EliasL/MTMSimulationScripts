@@ -24,6 +24,7 @@ from Management.jobs import (
     showMinimizationCriteriaJobs,
     singleDislocationTest,
     longJob,
+    remeshTest,
 )
 
 
@@ -80,6 +81,15 @@ def benchmark():
 
     # Remeshing! (05.03.25)
     # 3% RT: 1m 52s	ETR: 1h 50s	Load: 0.175500
+
+    # Working remeshing (26.03.25) (with another simulation running)
+    #  1% RT: 1m 51s  ETR: 2h 9m 59s  Load: 0.161220
+    # Alone (27.03.25 still has some force problems)
+    #  3% RT: 1m 56s  ETR: 1h 3m 37s  Load: 0.175500
+
+    # Really working remeshing (17.04.25)
+    # Still using acos, room for even faster
+    # 2% RT: 2m 3s   ETR: 1h 3m 53s  Load: 0.174050
 
 
 def parameterExploring():
@@ -144,8 +154,14 @@ def runOnServer():
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
     # configs, labels = allPlasticEventsJob()
-    configs, labels = basicJob(6, 1, size=50)
-    # configs, labels = longJob(10, 1, size=100)
+    dump = "/Volumes/data/MTS2D_output/simpleShear,s30x30l0.15,1e-05,1.0PBCt6epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l0.96.xml.gz"
+    configs, labels = basicJob(8, 1, size=100)
+
+    # configs, labels = remeshTest(diagonal="major")
+    # run_many_locally(configs, taskNames=labels, resume=False)
+    # configs, labels = remeshTest(diagonal="alternate")
+
+    # configs, labels = longJob(6, 1, size=100)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
     # configs, labels, dump = avalanches(nrThreads=20, size=100)
@@ -155,11 +171,11 @@ def runOnLocalMachine():
     # dump = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s100x100l0.38,1e-05,0.383NPBCt6epsR1e-06LBFGSEpsx1e-06s0/dumps/dump_l0.3814.xml.gz"
     # configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
 
-    configs, labels = singleDislocationTest(diagonal="major", L=10)
+    # configs, labels = singleDislocationTest(diagonal="minor", L=10)
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=20)
-    # run_locally(configs[0], dump=dump)
-    run_many_locally(configs, taskNames=labels, resume=False)
+    run_locally(configs[0], resume=False)
+    # run_many_locally(configs, taskNames=labels, resume=False)
 
 
 def startJobs():

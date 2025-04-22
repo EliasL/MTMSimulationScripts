@@ -122,13 +122,17 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         rows=size,
         cols=size,
         startLoad=0.15,
-        maxLoad=1.0,
+        maxLoad=3.0,
         nrThreads=nrThreads,
         minimizer="LBFGS",
         loadIncrement=1e-5,
         epsR=1e-5,
         LBFGSEpsg=1e-8,
         scenario="simpleShear",
+        # remesh=1,
+        # temp
+        # energyDropThreshold=1e-10,
+        # logDuringMinimization=1,
     )
     return configs, labels
 
@@ -425,5 +429,20 @@ def singleDislocationTest(
         epsR=1e-6,
         scenario=scenario,
         meshDiagonal=diagonal,
+    )
+    return configs, labels
+
+
+def remeshTest(diagonal="major"):
+    configs, labels = ConfigGenerator.generate(
+        usingPBC="false",
+        rows=3,
+        cols=3,
+        meshDiagonal=diagonal,
+        startLoad=0.0,
+        maxLoad=1.0,
+        loadIncrement=0.001,
+        minimizer="LBFGS",
+        scenario="remeshTest",
     )
     return configs, labels

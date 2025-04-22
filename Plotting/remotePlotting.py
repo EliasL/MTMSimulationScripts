@@ -528,7 +528,7 @@ def stressPlotWithImages(configs, paths=None):
             [0.6, 0.55],  # upper right
         ],
         image_size=[0.37, 0.4, 0.4],
-        Y="Avg_RSS",
+        Y="avg_RSS",
         metric="stress",
     )
 
@@ -545,7 +545,7 @@ def energyPlotWithImages(configs, paths=None):
             [0.6, 0.1],  # upper right
         ],
         image_size=[0.4, 0.4, 0.4],
-        Y="Avg_energy",
+        Y="avg_energy",
         metric="energy",
     )
 
@@ -553,9 +553,9 @@ def energyPlotWithImages(configs, paths=None):
 def plotWholeRangePowerLaw(paths, Y, **kwargs):
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     # Define limits
-    if Y == "Avg_energy":
+    if Y == "avg_energy":
         ylim = [8e-3, 2e7]
-    elif Y == "Avg_RSS":
+    elif Y == "avg_RSS":
         ylim = [1e-5, 2e5]
     for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
@@ -571,22 +571,22 @@ def plotWholeRangePowerLaw(paths, Y, **kwargs):
             fig=fig,
             legend_loc="lower left",
             show=False,
-            add_fit=Y == "Avg_RSS",
+            add_fit=Y == "avg_RSS",
             mark=mark,
             mark_pos=(0.85, 0.9),
             **kwargs,
         )
-        if Y == "Avg_energy":
+        if Y == "avg_energy":
             add_power_law_line(ax, -0.85, [5e-7, 3e-4], 7e-1)
             add_power_law_line(ax, -2.5, [3e-4, 9e-3], 1e-6, linestyle="-.")
-        if Y == "Avg_RSS":
+        if Y == "avg_RSS":
             add_power_law_line(ax, -2.8, [3e-5, 5e-4], 5e-9, linestyle="-.")
         set_font_size(ax)
 
     synchronize_y_limits(axes)
 
     fig.tight_layout()
-    name = "energy" if Y == "Avg_energy" else "stress"
+    name = "energy" if Y == "avg_energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_full_range.pdf")
 
@@ -635,7 +635,7 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
     synchronize_y_limits(axes[1])
 
     fig.tight_layout()
-    name = "energy" if Y == "Avg_energy" else "stress"
+    name = "energy" if Y == "avg_energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_preYield.pdf")
 
@@ -683,16 +683,16 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
     synchronize_y_limits(axes[0])
     synchronize_y_limits(axes[1])
     fig.tight_layout()
-    name = "energy" if Y == "Avg_energy" else "stress"
+    name = "energy" if Y == "avg_energy" else "stress"
     # Display all plots in a row
     plt.savefig(f"Plots/combined_{name}_powerlaw_postYield.pdf")
 
 
 def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
     # Define limits
-    if Y == "Avg_energy":
+    if Y == "avg_energy":
         ylim = [0.62, 0.83]
-    elif Y == "Avg_RSS":
+    elif Y == "avg_RSS":
         ylim = [0.95, 1.34]
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
@@ -717,7 +717,7 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
         set_font_size(ax)
 
     fig.tight_layout()
-    name = "energy" if Y == "Avg_energy" else "stress"
+    name = "energy" if Y == "avg_energy" else "stress"
     name = name + "_withLambda" if show_lambda else name
     # Display all plots in a row
     plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
@@ -728,9 +728,9 @@ def plotAverage(config_groups, labels, useStress=False, **kwargs):
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
     kwargs["labels"] = labels
-    yColumns = ["Avg_energy"]
+    yColumns = ["avg_energy"]
     if useStress:
-        yColumns.append("Avg_RSS")
+        yColumns.append("avg_RSS")
     print("Plotting...")
     for Y in yColumns:
         makeAverageComparisonPlot(paths, Y=Y, **kwargs)
@@ -743,8 +743,8 @@ def plotTime(config_groups, labels, **kwargs):
     print("Plotting...")
     for Y in [
         "Minimization_time",
-        "Nr_LBFGS_iterations",
-        "Nr_LBFGS_func_evals",
+        "nr_LBFGS_iterations",
+        "nr_LBFGS_func_evals",
     ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
         fig, ax = makePlot(
             paths,
@@ -779,7 +779,7 @@ def plotLog(config_groups, labels, **kwargs):
     print("Plotting...")
     # Iterate over the groups and methods, and plot each one in a separate subplot
     for Y, dropLim in zip(
-        ["Avg_energy", "Avg_RSS"],
+        ["avg_energy", "avg_RSS"],
         [[5e-7, None], [5e-4, None]],
     ):
         kwargs["dropLim"] = dropLim

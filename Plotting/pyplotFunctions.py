@@ -3,8 +3,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
+from matplotlib.cm import ScalarMappable
 from tqdm import tqdm
 import os
+import cv2
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -21,24 +23,28 @@ from Management.jobs import propperJob
 from MTMath.contiPotential import ContiEnergy
 from .makePlots import makePlot, makeLogPlotComparison
 from .remotePlotting import get_csv_files
-from .dataFunctions import get_data_from_name, VTUData, arrsToMat, get_previous_data
+from .dataFunctions import get_data_from_name, VTUData, CArrsToMat, get_previous_data
 
 # matplotlib.use("Agg")  # Use a non-interactive backend
 
+# We get almost all variables dynamically, but we choose to set the force scale
+minForce = 0
+maxForce = 0.3
+
 
 def get_energy_range(vtu_files, cvs_file):
-    df = pd.read_csv(cvs_file, usecols=["Max_energy"])
-    max_energy = df["Max_energy"].max()
+    df = pd.read_csv(cvs_file, usecols=["max_energy"])
+    max_energy = df["max_energy"].max()
     # Sometimes, the energy is too high because of a crash
     if max_energy > 100:
         # Then we take the second last
-        max_energy = df["Max_energy"][:-1].max()
+        max_energy = df["max_energy"][:-1].max()
     # We assume that the minimum energy throughout the whole run is the minimum
     # of the initial state
     energy_field = VTUData(vtu_files[0]).get_energy_field()
     min_energy = energy_field.min()
 
-    return min_energy, max_energy
+    return [min_energy, max_energy]
 
 
 # This is a conceptual approach and might need adjustments to fit your specific data structure
@@ -135,6 +141,10 @@ def base_plot(
         load = metaData["load"]
         load_step = metaData["loadIncrement"]
         nrPlasticEvents = metaData["nrM"]
+        if "nr_func_evals" in metaData:
+            nr_func_evals = metaData["nr_func_evals"]
+        else:
+            nr_func_evals = None
         if previous_frame_vtu_file:
             previous_load = get_data_from_name(previous_frame_vtu_file)["load"]
             steps_since_last_frame = int((load - previous_load) / load_step)
@@ -142,36 +152,24 @@ def base_plot(
             steps_since_last_frame = 0
 
         if delta_title:
-            # If this parameter is set, we want to display the change in all the
-            # relevant properties. Notably, not since the last frame, but the
-            # previous minimization step
-
-            # Data for the table
-            data = [
-                [
-                    rf"$\Delta\gamma$: {delLoad:.1e}",
-                    rf"$\Delta\langle E \rangle$: {delAvgEnergy:.2e}",
-                    rf"$\Delta\langle \sigma \rangle$: {delAvgRSS:.2e}",
-                    # n_p is the number of times m3 was applied during lagrange reduction
-                    # N_p is sum(abs(\Delta n_p)) where sum is over the mesh
-                    rf"$N_p$: {nrPlasticEvents}",
-                    # rf"$\Delta_k$: {steps_since_last_frame}",
-                    f"f: {frame_index}",
-                ],
+            data_row = [
+                rf"$\Delta\gamma$: {delLoad:.1e}",
+                rf"$\Delta\langle E \rangle$: {delAvgEnergy:.2e}",
+                rf"$\Delta\langle \sigma \rangle$: {delAvgRSS:.2e}",
             ]
-
         else:
-            # Data for the table
-            data = [
-                [
-                    rf"$\gamma$: {load:.5f}",
-                    rf"$\langle E \rangle$: {avgEnergy:.3f}",
-                    rf"$\langle \sigma \rangle$: {avgRSS:.3f}",
-                    rf"$N_p$: {nrPlasticEvents}",
-                    # rf"$\Delta_k$: {steps_since_last_frame}",
-                    f"f: {frame_index}",
-                ],
+            data_row = [
+                rf"$\gamma$: {load:.5f}",
+                rf"$\langle E \rangle$: {avgEnergy:.3f}",
+                rf"$\langle \sigma \rangle$: {avgRSS:.3f}",
             ]
+
+        data_row.append(rf"$N_p$: {nrPlasticEvents}")
+        if nr_func_evals is not None:
+            data_row.append(rf"$N_f$: {nr_func_evals}")
+        data_row.append(f"f: {frame_index}")
+
+        data = [data_row]
         # Create the table with invisible borders and gridlines
         table = ax.table(cellText=data, cellLoc="center", loc="top", edges="open")
 
@@ -201,32 +199,39 @@ def draw_rhombus(ax, N, load, BC):
         ax.plot(rhombus_x, rhombus_y, "k--")
 
 
+def round_to_nearest_16(x):
+    return ((x + 8) // 16) * 16
+
+
 # Function to save the figure with transparent background and close it
 def save_and_close_plot(ax, path, transparent=False):
-    # # Set anti-aliasing for lines, text, patches, etc.
-    # for line in ax.get_lines():
-    #     line.set_antialiased(True)  # Anti-alias lines
-
-    # for text in ax.texts:
-    #     text.set_fontproperties(
-    #         text.get_fontproperties()
-    #     )  # Ensure text rendering uses proper anti-aliasing
-
-    # # You can also anti-alias patches or other graphical elements
-    # for patch in ax.patches:
-    #     patch.set_antialiased(True)  # Anti-alias shapes like rectangles, circles
-
-    # Save the plot with transparent background
-    # dpi = 600
+    # Save the figure using matplotlib
     fig = ax.get_figure()
     fig.tight_layout()
     fig.savefig(
         path,
         bbox_inches="tight",
         pad_inches=0,
-        transparent=transparent,  # dpi=dpi
+        transparent=transparent,
     )
     plt.close(fig)
+
+    # Load with OpenCV (preserve alpha if needed)
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+
+    # Check if image has alpha channel
+    has_alpha = img.shape[2] == 4 if len(img.shape) == 3 else False
+
+    # Get new size divisible by 16
+    height, width = img.shape[:2]
+    new_width = round_to_nearest_16(width)
+    new_height = round_to_nearest_16(height)
+
+    # Resize using appropriate interpolation
+    resized = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
+
+    # Save again
+    cv2.imwrite(path, resized)
 
 
 def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kwargs):
@@ -305,31 +310,94 @@ def plot_mesh(
     max_plastic=10,
     max_plastic_change=4,
     min_plastic_change=-2,
+    show_force=False,
     **kwargs,
 ):
-    if ax is None:
-        ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
-    data = VTUData(vtu_file)
+    # Initialize plot and get data
+    ax, data = _initialize_plot(vtu_file, ax, **kwargs)
     nodes = data.get_nodes()
     connectivity = data.get_connectivity()
     x, y = nodes[:, 0], nodes[:, 1]
 
-    cmap = "coolwarm"
+    # Configure property-specific settings
+    field, cmap, norm, boundaries, backgroundColor, state_indices = (
+        _configure_property_settings(
+            data,
+            mesh_property,
+            e_lims,
+            max_plastic,
+            max_plastic_change,
+            min_plastic_change,
+        )
+    )
 
+    # Calculate shifts if needed
+    shifts = _calculate_shifts_if_needed(shift, nodes, data)
+
+    # Main plotting
+    mappable = _plot_mesh_elements(
+        ax,
+        x,
+        y,
+        connectivity,
+        field,
+        norm,
+        cmap,
+        shifts,
+        data,
+        mesh_property,
+        backgroundColor,
+        add_m12_marks,
+        state_indices,
+        show_force,
+    )
+
+    # Add additional elements
+    _add_additional_elements(
+        ax,
+        mappable,
+        mesh_property,
+        add_colorbar,
+        boundaries,
+        add_rombus,
+        nodes,
+        data,
+        show_force,
+    )
+
+    return ax, cmap, norm
+
+
+def _initialize_plot(vtu_file, ax, **kwargs):
+    """Initialize the plot and load VTU data."""
+    if ax is None:
+        ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
+    data = VTUData(vtu_file)
+    return ax, data
+
+
+def _configure_property_settings(
+    data, mesh_property, e_lims, max_plastic, max_plastic_change, min_plastic_change
+):
+    """Configure property-specific settings like colormaps and norms."""
+    cmap = "coolwarm"
     norm = None
     boundaries = None
+    backgroundColor = None
+    state_indices = None
 
     if mesh_property == "energy":
-        # The energy field is normalized to have energy=0 in the ground state
         field = data.get_energy_field()
         if e_lims is None:
             e_lims = (min(field), max(field))
         norm = mcolors.Normalize(vmin=e_lims[0], vmax=e_lims[1])
         backgroundColor = plt.get_cmap(cmap)(0)
+
     elif mesh_property == "stress":
         field = data.get_stress_field()
         norm = mcolors.Normalize(vmin=-1.5, vmax=1.5)
         backgroundColor = plt.get_cmap(cmap)(0.5)
+
     elif mesh_property == "m":
         cmap = "viridis"
         nrm1, nrm2, nrm3 = data.get_m_nr_field()
@@ -343,12 +411,10 @@ def plot_mesh(
         norm = mcolors.BoundaryNorm(boundaries, plt.get_cmap(cmap).N)
         backgroundColor = plt.get_cmap(cmap)(0)
 
-        # Define markers for each state
-        marker_patterns = ["", ".", 11, "d"]
         marker_patterns = ["", "_", "|", "+"]
         colors = ["", (0.7, 0.7, 0.7), (0.8, 0.2, 0.2), (1, 0.5, 0.5)]
-        # Calculate the indices in a fully vectorized way
         state_indices = (nrm1 % 2) + (nrm2 % 2) * 2
+
     elif mesh_property == "m_diff":
         field = data.get_m3_change_field()
         if max(field) > max_plastic_change:
@@ -360,37 +426,58 @@ def plot_mesh(
                 f"Huge negative plastic jump! Extend min_plastic_change to {min(field)}."
             )
 
-            # Create a list of discrete colors
-        color_list = [
-            "blue",  # -2
-            "lightblue",  # -1
-            "white",  # 0 (center)
-            "lightcoral",  # 1
-            "red",  # 2
-            "darkred",  # 3
-        ]
-
-        # Create a ListedColormap from the color list
+        color_list = ["blue", "lightblue", "white", "lightcoral", "red", "darkred"]
         cmap = mcolors.ListedColormap(color_list)
-
-        # Define boundaries to align discrete colors
         boundaries = np.arange(min_plastic_change, max_plastic_change + 1) - 0.5
         norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         backgroundColor = plt.get_cmap(cmap)(0)
 
-    if shift:
-        shifts = calculate_shifts(nodes, data.BC, data.load)
-    else:
-        shifts = [0]
+    # If data does not have a load property, we set it to 0
+    if not hasattr(data, "load"):
+        data.load = 0
 
-    edgecolors = "none" if nodes.shape[0] > 300 else "black"
+    return field, cmap, norm, boundaries, backgroundColor, state_indices
+
+
+def _calculate_shifts_if_needed(shift, nodes, data):
+    """Calculate shifts if shift is True, otherwise return [0]."""
+    # handle Exception has occurred: AttributeError 'VTUData' object has no attribute 'BC'
+    if not hasattr(data, "BC"):
+        return [0]
+    else:
+        return calculate_shifts(nodes, data.BC, data.load) if shift else [0]
+
+
+def _plot_mesh_elements(
+    ax,
+    x,
+    y,
+    connectivity,
+    field,
+    norm,
+    cmap,
+    shifts,
+    data,
+    mesh_property,
+    backgroundColor,
+    add_m12_marks,
+    state_indices,
+    show_force,
+):
+    """Plot the main mesh elements with appropriate coloring."""
+    edgecolors = "none" if len(x) > 2000 else "black"
+    mappable = None
 
     for dx in shifts:
         for dy in shifts:
             sheared_x = x + dx + data.load * dy
             sheared_y = y + dy
             triang = mtri.Triangulation(sheared_x, sheared_y, connectivity)
+
+            # Plot the base mesh
             ax.triplot(triang, color=backgroundColor, lw=0.1)
+
+            # Plot the colored elements
             mappable = ax.tripcolor(
                 triang,
                 facecolors=field,
@@ -399,38 +486,162 @@ def plot_mesh(
                 edgecolors=edgecolors,
             )
 
+            # Add markers if needed
             if mesh_property == "m" and add_m12_marks:
-                # Compute centroids of triangles
-                triangles = triang.triangles  # Indices of vertices for each triangle
-                centroids_x = np.mean(sheared_x[triangles], axis=1)
-                centroids_y = np.mean(sheared_y[triangles], axis=1)
+                _add_markers(ax, connectivity, sheared_x, sheared_y, state_indices)
 
-                # Plot markers at centroids for each state
-                for i in range(4):
-                    if i == 0:
-                        continue  # Skip if no m1 or m2
-                    mask = state_indices == i
-                    ax.scatter(
-                        centroids_x[mask],
-                        centroids_y[mask],
-                        marker=marker_patterns[i],
-                        color=colors[i],  # Customize marker color as needed
-                        s=1,
-                        linewidths=0.15,
-                        zorder=10,  # Ensure markers are plotted above other elements
-                    )
+            # Add force vectors if needed
+            if show_force:
+                _plot_force_vectors(ax, data, connectivity, sheared_x, sheared_y)
 
-    if add_colorbar:
+    return mappable
+
+
+def _add_markers(ax, connectivity, sheared_x, sheared_y, state_indices):
+    """Add markers for m1/m2 states."""
+    centroids_x = np.mean(sheared_x[connectivity], axis=1)
+    centroids_y = np.mean(sheared_y[connectivity], axis=1)
+
+    marker_patterns = ["", "_", "|", "+"]
+    colors = ["", (0.7, 0.7, 0.7), (0.8, 0.2, 0.2), (1, 0.5, 0.5)]
+
+    for i in range(1, 4):  # Skip 0
+        mask = state_indices == i
+        ax.scatter(
+            centroids_x[mask],
+            centroids_y[mask],
+            marker=marker_patterns[i],
+            color=colors[i],
+            s=1,
+            linewidths=0.15,
+            zorder=10,
+        )
+
+
+def _plot_force_vectors(ax, data, connectivity, sheared_x, sheared_y):
+    """Plot force vectors on the mesh, with contributions color-coded by magnitude."""
+    force_contributions = data.get_force_contributions()
+    centroids_x = np.mean(sheared_x[connectivity], axis=1)
+    centroids_y = np.mean(sheared_y[connectivity], axis=1)
+
+    quiver_x, quiver_y, quiver_u, quiver_v, colors = [], [], [], [], []
+
+    # plot force contribution vectors
+    for elem_idx in range(len(connectivity)):
+        node_indices = connectivity[elem_idx]
+        centroid_x = centroids_x[elem_idx]
+        centroid_y = centroids_y[elem_idx]
+
+        for node_index in range(3):
+            node_idx = node_indices[node_index]
+            node_x = sheared_x[node_idx]
+            node_y = sheared_y[node_idx]
+
+            midpoint_x = (centroid_x + node_x) / 2
+            midpoint_y = (centroid_y + node_y) / 2
+
+            force_x = force_contributions[elem_idx, 0, node_index]
+            force_y = force_contributions[elem_idx, 1, node_index]
+
+            # Normalize and scale
+            magnitude = np.linalg.norm([force_x, force_y])
+            scale_factor = max(magnitude, 1e-8)
+            length = 0.15
+            force_x = force_x / scale_factor * length
+            force_y = force_y / scale_factor * length
+
+            quiver_x.append(midpoint_x)
+            quiver_y.append(midpoint_y)
+            quiver_u.append(force_x)
+            quiver_v.append(force_y)
+            colors.append(magnitude)
+
+    # Normalize colors for colormap
+    norm = mcolors.Normalize(vmin=minForce, vmax=maxForce)
+    cmap = plt.cm.coolwarm
+    mapped_colors = cmap(norm(colors))
+
+    width = 0.007
+    headWidth = 3
+    outlineScalse = 1.1
+    # Black outlines (drawn first, slightly thicker)
+    ax.quiver(
+        quiver_x,
+        quiver_y,
+        quiver_u,
+        quiver_v,
+        angles="xy",
+        scale_units="xy",
+        scale=1 / outlineScalse,
+        color="black",
+        width=width * outlineScalse**2,  # thicker for outline
+        headwidth=headWidth * outlineScalse,
+        zorder=9,
+    )
+    quiver = ax.quiver(
+        quiver_x,
+        quiver_y,
+        quiver_u,
+        quiver_v,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color=mapped_colors,
+        width=width,
+        headwidth=headWidth,
+        zorder=10,
+    )
+
+    # plot node force vectors
+    force_at_nodes = data.get_force_field()
+    scale = 0.1 / maxForce
+    ax.quiver(
+        sheared_x,
+        sheared_y,
+        force_at_nodes[:, 0] * scale,
+        force_at_nodes[:, 1] * scale,
+        angles="xy",
+        scale_units="xy",
+        scale=1,
+        color="green",
+        width=0.006,
+        headwidth=4,
+        zorder=11,
+    )
+
+
+def _add_additional_elements(
+    ax,
+    mappable,
+    mesh_property,
+    add_colorbar,
+    boundaries,
+    add_rombus,
+    nodes,
+    data,
+    show_force,
+):
+    """Add colorbar and rhombus if needed."""
+    if add_colorbar and mappable is not None:
         cbar = plt.colorbar(mappable, ax=ax, label=pretty_mesh_property(mesh_property))
-        # Set ticks to the midpoint of each region
         if boundaries is not None:
             ticks = boundaries[:-1] + 0.5
             cbar.set_ticks(ticks)
             cbar.set_ticklabels([str(int(t)) for t in ticks])
+            # Normalize colors for colormap
+        if show_force:
+            norm = mcolors.Normalize(vmin=minForce, vmax=maxForce)
+            cmap = plt.cm.coolwarm
+            # After defining norm and cmap
+            sm = ScalarMappable(norm=norm, cmap=cmap)
+            sm.set_array([])  # Required for ScalarMappable
+
+            # Add the colorbar
+            cbar = plt.colorbar(sm, ax=ax, label=r"$|F_{ei}|$")
 
     if add_rombus:
-        draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
-    return ax, cmap, norm
+        if hasattr(data, "BC"):
+            draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
 
 
 def make_static_plot(fileName, **kwargs):
@@ -442,7 +653,7 @@ def make_static_plot(fileName, **kwargs):
             kwargs["macro_data"],
             ax=ax,
             fig=fig,
-            Y="Avg_energy",
+            Y="avg_energy",
             save=False,
             legend=True,
         )
@@ -458,7 +669,7 @@ def make_static_plot(fileName, **kwargs):
             plot_post_yield=False,
             save=False,
             use_y_axis_name=True,
-            Y="Avg_energy",
+            Y="avg_energy",
             ax=ax,
             fig=fig,
             labels=labels,
@@ -576,6 +787,15 @@ def plot_and_save_mesh(**kwargs):
     )
 
 
+def plot_and_save_mesh_with_force(**kwargs):
+    return plot_and_save(
+        plot_func=plot_mesh,
+        mesh_property="energy",
+        show_force=True,
+        **kwargs,
+    )
+
+
 def plot_and_save_m_mesh(**kwargs):
     return plot_and_save(
         plot_func=plot_mesh,
@@ -654,9 +874,9 @@ def process_frame(kwargs, attemps=0):
             process_frame(kwargs, attemps=attemps + 1)
 
 
-def get_corresponding_energy_and_rss(vtu_files, macro_data):
+def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
     """
-    Extracts the corresponding "Avg_energy" and "Avg_RSS" values for each load in vtu_files,
+    Extracts the corresponding "avg_energy" and "avg_RSS" values for each load in vtu_files,
     along with the line numbers (indices) of the matching rows in the CSV file.
 
     Parameters:
@@ -670,29 +890,29 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data):
     df = pd.read_csv(
         macro_data,
         usecols=[
-            "Load",
-            "Avg_energy",
-            "Avg_RSS",
-            "Avg_energy_change",
-            "Nr_plastic_deformations",
+            X,
+            "avg_energy",
+            "avg_RSS",
+            "avg_energy_change",
+            "nr_plastic_deformations",
         ],
     )
     avg_energy_list = []
     change_avg_energy_list = []
     avg_RSS_list = []
     line_numbers = []
-    load_list = []
+    x_list = []
 
     for vtu_file in vtu_files:
-        load = get_data_from_name(vtu_file)["load"]
-        load_list.append(load)
-        # Filter rows where "Load" matches the value
-        matching_rows = df[abs(df["Load"] - load) < 1e-10]
+        x = get_data_from_name(vtu_file)[X]
+        x_list.append(x)
+        # Filter rows where "load" matches the value
+        matching_rows = df[abs(df[X] - x) < 1e-10]
 
         # Check if there is exactly one matching row
         if len(matching_rows) != 1:
             raise ValueError(
-                f"'Load' value '{load}' is not unique or not found. Found {len(matching_rows)} matches."
+                f"'{X}' value '{x}' is not unique or not found. Found {len(matching_rows)} matches."
             )
 
         # Get the index (line number) of the matching row
@@ -703,24 +923,27 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data):
         matching_row = matching_rows.iloc[0]
 
         # Append the extracted values to the respective lists
-        avg_energy_list.append(matching_row["Avg_energy"])
-        avg_RSS_list.append(matching_row["Avg_RSS"])
-        change_avg_energy_list.append(matching_row["Avg_energy_change"])
+        avg_energy_list.append(matching_row["avg_energy"])
+        avg_RSS_list.append(matching_row["avg_RSS"])
+        change_avg_energy_list.append(matching_row["avg_energy_change"])
         if (
-            matching_row["Avg_energy_change"] < 0
-            and matching_row["Nr_plastic_deformations"] == 0
+            matching_row["avg_energy_change"] < 0
+            and matching_row["nr_plastic_deformations"] == 0
         ):
-            print(f"No deformation energy drop: {matching_row_index}, load={load}")
+            # print(f"No deformation energy drop: {matching_row_index}, load={load}")
+            # This can happen in the beginning in simulations
+            pass
+
         if (
-            matching_row["Avg_energy_change"] < 0
-            and -matching_row["Avg_energy_change"] < 5e-8
+            matching_row["avg_energy_change"] < 0
+            and -matching_row["avg_energy_change"] < 5e-8
         ):
-            print(f"Super small energy drop: {matching_row_index}, load={load}")
+            print(f"Super small energy drop: {matching_row_index}, {X}={x}")
 
     # Find previous data and get change data as well
-    pLoad, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(macro_data, line_numbers)
+    px, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(macro_data, line_numbers, X)
     change_avg_RSS_list = avg_RSS_list - pAvgRSS
-    del_load = load_list - pLoad
+    del_x = x_list - px
 
     # Return the lists of values and line numbers
     return (
@@ -728,45 +951,60 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data):
         avg_RSS_list,
         change_avg_energy_list,
         change_avg_RSS_list,
-        del_load,
+        del_x,
         line_numbers,
     )
 
 
-def get_previous_energy_and_rss(macro_data, current_line):
+def get_previous_energy_and_rss(macro_data, current_line, X="load"):
     # Check if current_line is an integer
     if isinstance(current_line, int):
-        df = pd.read_csv(macro_data, usecols=["Load", "Avg_energy", "Avg_RSS"])
+        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", "avg_RSS"])
         # Select the previous row relative to current_line
         p_row = df.iloc[current_line - 1]
-        return p_row["Load"], p_row["Avg_energy"], p_row["Avg_RSS"]
+        return p_row[X], p_row["avg_energy"], p_row["avg_RSS"]
     else:
         # Handle the case where current_line is an iterable (e.g., list or array)
-        df = pd.read_csv(macro_data, usecols=["Load", "Avg_energy", "Avg_RSS"])
+        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", "avg_RSS"])
         # Create empty lists to store previous values
-        prev_loads, prev_energies, prev_rss = [], [], []
+        prev_x, prev_energies, prev_rss = [], [], []
 
         for line in current_line:
             # Ensure line index is valid (i.e., not the first row)
             line = max(1, line)
             p_row = df.iloc[line - 1]
-            prev_loads.append(p_row["Load"])
-            prev_energies.append(p_row["Avg_energy"])
-            prev_rss.append(p_row["Avg_RSS"])
+            prev_x.append(p_row[X])
+            prev_energies.append(p_row["avg_energy"])
+            prev_rss.append(p_row["avg_RSS"])
 
         # Return lists of previous values
-        return np.array(prev_loads), np.array(prev_energies), np.array(prev_rss)
+        return np.array(prev_x), np.array(prev_energies), np.array(prev_rss)
 
 
-def make_images(vtu_files, num_processes=10, use_tqdm=True, **kwargs):
-    print("Preping video meta data...")
+def make_images(vtu_files, num_processes=10, use_tqdm=True, X="load", **kwargs):
+    print(f"Processing {kwargs['fileName']} video.")
     # Calculate global axis limits and energy range
     macro_data = kwargs["macro_data"]
-    axis_limits = get_axis_limits(macro_data)
-    e_lims = get_energy_range(vtu_files, macro_data)
-    avgEnergy, avgRSS, delAvgEnergy, delAvgRSS, delLoad, macroDataRowIndex = (
-        get_corresponding_energy_and_rss(vtu_files, macro_data)
-    )
+    if macro_data:
+        axis_limits = get_axis_limits(macro_data)
+        e_lims = get_energy_range(vtu_files, macro_data)
+        e_lims[1] = min(e_lims[1], 0.2)
+        avgEnergy, avgRSS, delAvgEnergy, delAvgRSS, delx, macroDataRowIndex = (
+            get_corresponding_energy_and_rss(vtu_files, macro_data, X)
+        )
+    else:
+        # set default values
+        axis_limits = None
+        e_lims = [0, 0.03]
+        avgEnergy = [0] * len(vtu_files)
+        avgRSS = [0] * len(vtu_files)
+        delAvgEnergy = [0] * len(vtu_files)
+        delAvgRSS = [0] * len(vtu_files)
+        delx = [0] * len(vtu_files)
+        macroDataRowIndex = [0] * len(vtu_files)
+        # make default macro data
+        macro_data = {X: 0, "loadIncrement": 0, "nrM": 0}
+        kwargs["macro_data"] = macro_data
 
     # Some ploting functions cannot handle multithreading
     # in particular, if we want to reuse a plot many times
@@ -791,7 +1029,7 @@ def make_images(vtu_files, num_processes=10, use_tqdm=True, **kwargs):
             "avgRSS": avgRSS[i],
             "delAvgEnergy": delAvgEnergy[i],
             "delAvgRSS": delAvgRSS[i],
-            "delLoad": delLoad[i],
+            "delx": delx[i],
             "macroDataRowIndex": macroDataRowIndex[i],
             **kwargs,
         }
@@ -802,7 +1040,6 @@ def make_images(vtu_files, num_processes=10, use_tqdm=True, **kwargs):
     image_paths = process_frame(kwargs_list[0])
 
     if multithread:
-        print("Starting threads...")
         with Pool(processes=num_processes) as pool:
             image_paths = list(
                 tqdm(

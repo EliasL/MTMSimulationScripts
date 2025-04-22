@@ -1,6 +1,6 @@
 import os
 from PyQt5 import QtWidgets
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QImage, QFontDatabase
 import pyqtgraph as pg
 import random
@@ -9,7 +9,6 @@ from PyQt5.QtWidgets import QApplication
 import matplotlib
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
-from threading import Lock
 from .LagrangeReduction import (
     C2PoincareDisk,
     CPos,
@@ -24,7 +23,7 @@ from .LagrangeReduction import (
 )
 from .vectorPair import VectorPair
 from MTMath.plotEnergy import generate_energy_grid, generate_angle_region
-from MTMath.contiPotential import ContiEnergy
+from MTMath.contiPotential import ContiEnergy, SuperSimple
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -45,12 +44,13 @@ VIRIDIS_LUT = (
 
 
 class LagrangeReductionVisualization(QtWidgets.QWidget):
+    energyComputed = pyqtSignal(np.ndarray)
+
     def __init__(self):
         # Create two separate executors for quick and high-resolution updates
         self._energy_executor_quick = ThreadPoolExecutor(max_workers=1)
         self._energy_executor_highres = ThreadPoolExecutor(max_workers=1)
         self._target_version = 0
-        self._GUI_update_lock = Lock()
         super().__init__()
 
         # Colors and line size
@@ -65,6 +65,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Default energy parameters
         self.currentBeta = -0.25
         self.volumetricEnergy = True
+        self.energy_lim = [0, 0.37]
 
         # Basic widget setup
         self.setWindowTitle("Lagrange reduction with Poincaré Disk")
@@ -73,13 +74,13 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # defines MainRow, LeftColumn and TableRow layouts (l_)
         self.initLayout()
 
-        self.setLayout(self.l_MainRow)
+        self.setLayout(self.l_MainCol)
 
         # Set up the views and plots
-        self.setupLRView(self.l_MainRow)  # Lagrange reduction
-        self.setupGVView(self.l_RightColumn)  # Grid visualization
+        self.setupLRView(self.l_WindowRow)  # Lagrange reduction
+        self.setupGVView(self.l_WindowRow)  # Grid visualization
         # self.setupCSView(self.l_MainRow)  # Configuration space
-        self.setupPoincareCSView(self.l_MainRow)
+        self.setupPoincareCSView(self.l_WindowRow)
 
         # Add markers
         self.mkMarkers()
@@ -89,7 +90,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             plot.addItem(self.elastic_reduced_marker)
 
         # Set up table
-        self.setUpTables(self.l_TableRow)
+        self.setUpTables(self.l_MatrixRow)
 
         # Draw background elements
         self.drawBackground()
@@ -108,6 +109,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.w_LR.keyReleaseEvent = self.keyReleaseEvent
         self.timer.timeout.connect(self.moveVector)
         self.timer.start(40)  # Every 20 milliseconds
+        self.energyComputed.connect(self.updateEnergyHeatmap)
+
         # Connect the signal once after setting up the plot
         self.GV_plot.getViewBox().sigRangeChanged.connect(self.onViewRangeChanged)
 
@@ -123,39 +126,45 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     def initLayout(self):
         """
-
-        Approximate layout
-        + ----------------------------------------------------------------------+
-        | +--------------------------++------------------+ +------------------+ |
-        | |                          ||                  | |                  | |
-        | |      Grid visualization  ||                  | |                  | |
-        | |                          ||    Lagrange      | |   Metric         | |
-        | +--------------------------+|    Reduction     | |   Space          | |
-        | |+----++----++----++----+  ||                  | |                  | |
-        | || n1 || t1 || n2 || t2 |  ||                  | |                  | |
-        | |+----++----++----++----+  ||                  | |                  | |
-        | +--------------------------++------------------+ +------------------+ |
-        + ----------------------------------------------------------------------+
+        https://asciiflow.com/#/share/eJzlVEsKwjAQvUqZtSsF0V7Ajd3oNpuhjSVQo8RaqiKIaxdddNHz9STGX4mfGmksUiyBZiZ5L2%2FCy2yA45SCzZdB0IIAV1SADRsCERULNuME7HaLQCz%2F%2FW5XzlanTK8jZyGNQxkQyNNDnu6aORJCeJ7um1lCIpXf9BuWkBjAq2GTi2xF%2F956%2FsoWXucLpvpZB4J5VsQWSwzYGkP5VAr0EH2B3KePrA4NBXOrah1Rb%2Byez7nPj%2BfoUqsqq8EN%2FD1ravDeMgN4NWx2r99E%2FK9GpujXdhxtV%2FrChhcuKfxR6iht%2BJ7VQdlFYgWH3FNpPBapIeOT2QesNWjVOkzr4y9sKNPXRPtfSyKwhe0RUuICCA%3D%3D)        Approximate layout
+        ┌─────────────────────────────────────────────────────────────┐
+        │┌───────────────────────────────────────────────────────────┐│
+        ││┌───────────────────┐┌──────────────────┐┌────────────────┐││
+        │││                   ││                  ││                │││
+        │││                   ││                  ││                │││
+        │││Grid visualization ││  Lagrange        ││  Metric        │││
+        │││                   ││  RedSction       ││  Space         │││
+        │││                   ││                  ││                │││
+        │││                   ││                  ││                │││
+        │││                   ││                  ││                │││
+        │││                   ││                  ││                │││
+        ││└───────────────────┘└──────────────────┘└────────────────┘││
+        │└───────────────────────────────────────────────────────────┘│
+        │┌──────────┐┌─────────┐┌─────────┐┌─────────┐                │
+        ││          ││         ││         ││         │                │
+        ││  Matrix  ││   and   ││   div   ││  info   │                │
+        ││          ││         ││         ││         │                │
+        │└──────────┘└─────────┘└─────────┘└─────────┘                │
+        └─────────────────────────────────────────────────────────────┘
 
         In words:
-        Row of three elements
-            - Grid Visualization
-            - Lagrange Reduction
-            - Column of two elements
-                - Row of four elements
-                    - name1, table1, name2, table 2
+        - Column of two elements:
+            - Row of three element:
+                - Grid Visualization
+                - Lagrange Reduction
                 - Metric Space
-                - Poincare Metric Space
+            - Row of info
+                - Matrixes and table stuff
 
         We now try to create this with the QtWidgets layouts
         """
 
-        self.l_MainRow = QtWidgets.QHBoxLayout()
-        self.l_RightColumn = QtWidgets.QVBoxLayout()
-        self.l_TableRow = QtWidgets.QHBoxLayout()
+        self.l_MainCol = QtWidgets.QVBoxLayout()
+        self.l_WindowRow = QtWidgets.QHBoxLayout()
+        self.l_MatrixRow = QtWidgets.QHBoxLayout()
 
-        self.l_RightColumn.addLayout(self.l_TableRow)
-        self.l_MainRow.addLayout(self.l_RightColumn)
+        self.l_MainCol.addLayout(self.l_WindowRow)
+        self.l_MainCol.addLayout(self.l_MatrixRow)
 
     def setupGVView(self, layout):
         # Grid visualization
@@ -244,28 +253,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Hide by default
         self.w_LR.setVisible(False)
 
-    # Configuration space view
-    def setupCSView(self, layout):
-        # For the second view configuration space (Poincaré Disk)
-        self.w_CS = pg.GraphicsLayoutWidget()
-        layout.addWidget(self.w_CS)
-
-        self.CS_plot = self.w_CS.addPlot()
-        # nbs = "\u00a0"  # non-breaking-space
-        # self.CS_plot.setLabels(
-        #     left=f"← Large angle {nbs * 7} T(Length ratio and θ - π/2) {nbs * 7} Small angle →",
-        #     bottom="T(Length ratio)",
-        # )
-        self.CS_plot.setTitle(
-            "Configuration space", **{"color": "#FFF", "size": "20pt"}
-        )
-        self.CS_plot.setAspectLocked()
-        s = 2
-        self.CS_plot.setRange(xRange=[-s, s], yRange=[-s, s])
-
-        CS_grid = pg.GridItem()
-        self.CS_plot.addItem(CS_grid)
-
     def setupPoincareCSView(self, layout):
         # For the second view configuration space (Poincaré Disk)
         self.w_PCS = pg.GraphicsLayoutWidget()
@@ -328,6 +315,16 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 "var_name": "C_R_display",
                 "tooltip": "Reduced Right Cauchy-Green Tensor",
             },
+            {
+                "name": "M",
+                "var_name": "M_display",
+                "tooltip": "Lagrange reduction matrix",
+            },
+            {
+                "name": "P",
+                "var_name": "P_display",
+                "tooltip": "First Piola-Kirchhoff stress tensor",
+            },
         ]
 
         fixed_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
@@ -385,7 +382,16 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     # Add a method to update the display
     def updateInfoDisplay(
-        self, F=np.eye(2), C=np.eye(2), C_R=np.eye(2), ms=[], m1=0, m2=0, m3=0
+        self,
+        F=np.eye(2),
+        C=np.eye(2),
+        C_R=np.eye(2),
+        M=np.eye(2),
+        P=np.eye(2),
+        ms=[],
+        m1=0,
+        m2=0,
+        m3=0,
     ):
         # Update F matrix display
         if F is not None:
@@ -426,7 +432,18 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 f"{C_R[0, 0]: .2f}  {C_R[0, 1]: .2f}\n{C_R[1, 0]: .2f}  {C_R[1, 1]: .2f}"
             )
 
-        max_numb = 10  # Max number of numbers per line
+        # Update M matrix display
+        if M is not None:
+            self.M_display.setText(
+                f"{M[0, 0]: .2f}  {M[0, 1]: .2f}\n{M[1, 0]: .2f}  {M[1, 1]: .2f}"
+            )
+        # Update P matrix display
+        if P is not None:
+            self.P_display.setText(
+                f"{P[0, 0]: .2f}  {P[0, 1]: .2f}\n{P[1, 0]: .2f}  {P[1, 1]: .2f}"
+            )
+
+        max_numb = 50  # Max number of numbers per line
         joined_ms = "".join(map(str, ms))
         ms_with_newlines = "\n".join(
             [joined_ms[i : i + max_numb] for i in range(0, len(joined_ms), max_numb)]
@@ -622,7 +639,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
     def drawEnergyBackground(self):
         ppu = 2000  # Pixels per unit
         folder = "precomputedEnergyBackgrounds"
-
         self.triangularEnergy = None
         self.squareEnergy = None
         self.angleRegionImage = None
@@ -761,40 +777,41 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 return
 
         F_grid = self.getFGrid(resolution)
-        energy_lim = [0, 0.37]
         # We only need high accuracy if the zoom level is high
         x_range, _ = self.GV_plot.viewRange()
         r = np.diff(x_range)[0]
         r = min(r, 0.03)
         with np.errstate(over="ignore", invalid="ignore"):
-            energy_grid = ContiEnergy.energy_from_F(
+            energy_grid = SuperSimple.energy_from_F(
                 F_grid,
                 self.currentBeta,
                 K=4 if self.volumetricEnergy else 0,
                 zeroReference=True,
                 accuracy=1 - r,
             )
-        energy_grid = np.clip(energy_grid, *energy_lim).transpose()
+        energy_grid = np.clip(energy_grid, *self.energy_lim).transpose()
 
         # Check if this result is outdated (for highres only)
         if version < self._target_version:
             return  # discard outdated results
 
-        with self._GUI_update_lock:
-            image_attr = "CS_Energy"
-            energyImage = pg.ImageItem(energy_grid)
-            energyImage.setLookupTable(COOLWARM_LUT)
+        self.energyComputed.emit(energy_grid)
 
-            if not hasattr(self, image_attr) or getattr(self, image_attr) is None:
-                heatmap = self.drawHeatMap(energyImage, -1, self.GV_plot)
-                setattr(self, image_attr, heatmap)
-            else:
-                heatmap = getattr(self, image_attr)
-                heatmap.setImage(energy_grid)
-                rect = pg.QtCore.QRectF(*self.getPlotRange(self.GV_plot))
-                heatmap.setRect(rect)
+    def updateEnergyHeatmap(self, energy_grid):
+        image_attr = "PCS_Energy"
+        energyImage = pg.ImageItem(energy_grid)
+        energyImage.setLookupTable(COOLWARM_LUT)
 
-            heatmap.setLevels(energy_lim)
+        if not hasattr(self, image_attr) or getattr(self, image_attr) is None:
+            heatmap = self.drawHeatMap(energyImage, -1, self.GV_plot)
+            setattr(self, image_attr, heatmap)
+        else:
+            heatmap = getattr(self, image_attr)
+            heatmap.setImage(energy_grid)
+            rect = pg.QtCore.QRectF(*self.getPlotRange(self.GV_plot))
+            heatmap.setRect(rect)
+
+        heatmap.setLevels(self.energy_lim)
 
     def drawBackground(self):
         self.drawLagrangeReductionBackground()
@@ -852,7 +869,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # in case no vetor pair is defined
         if not hasattr(self, "VP"):
             self.VP = self.LR_VP
-        rePos1, rePos2, C_R, C_E_R, m, m1, m2, m3, ms = lagrange_reduction(
+        rePos1, rePos2, C_R, C_E_R, M, m1, m2, m3, ms = lagrange_reduction(
             self.VP.pos1(), self.VP.pos2()
         )
         # rePos1, rePos2, m1, m2, m3 = old_lagrange_reduction(
@@ -885,8 +902,11 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         elastic_reduced_pos = C2PoincareDisk(C_E_R)
         self.elastic_reduced_marker.setData(pos=np.array([elastic_reduced_pos]))
 
+        # Calculate P
+        P = ContiEnergy.P_from_F(F, M, self.currentBeta, K=4)
+
         # Update table
-        self.updateInfoDisplay(F, C, C_R, ms, m1, m2, m3)
+        self.updateInfoDisplay(F, C, C_R, M, P, ms, m1, m2, m3)
 
     def onViewRangeChanged(self, view, range):
         self.updateFEnergyBackground()
@@ -930,6 +950,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             self.w_LR.setVisible(not self.w_LR.isVisible())
         if event.key() == Qt.Key_P:
             self.w_PCS.setVisible(not self.w_PCS.isVisible())
+        if event.key() == Qt.Key_G:
+            self.w_GV.setVisible(not self.w_GV.isVisible())
         if event.key() == Qt.Key_L:
             self.elastic_reduced_marker.setVisible(
                 not self.elastic_reduced_marker.isVisible()
