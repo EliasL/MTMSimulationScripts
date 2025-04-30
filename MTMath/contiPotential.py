@@ -1,4 +1,4 @@
-from sympy import symbols, diff, sqrt, log, lambdify, ccode, cse, simplify
+from sympy import symbols, diff, sqrt, log, lambdify, ccode, cse, simplify, Rational
 import numpy as np
 
 
@@ -265,7 +265,7 @@ class ContiEnergy(EnergyFunction):
 class SuperSimple(EnergyFunction):
     @classmethod
     def phi(cls, C11, C22, C12, beta, K, noise):
-        return (C11 - 1) ** 2 + (C22 - 1) ** 2 + C12**2
+        return Rational(1, 2) * ((C11 - 1) ** 2 + (C22 - 1) ** 2 + C12**2)
 
 
 def lagrange_reduction_components(C11, C22, C12, loops=1000, returnMs=False):

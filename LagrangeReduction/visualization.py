@@ -66,6 +66,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.currentBeta = -0.25
         self.volumetricEnergy = True
         self.energy_lim = [0, 0.37]
+        self.energyFunc = SuperSimple
 
         # Basic widget setup
         self.setWindowTitle("Lagrange reduction with Poincaré Disk")
@@ -412,7 +413,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                     "color: red; font-weight: bold; font-size: 11pt;"
                 )
 
-            E = ContiEnergy.energy_from_F(
+            E = self.energyFunc.energy_from_F(
                 F,
                 self.currentBeta,
                 K=4 if self.volumetricEnergy else 0,
@@ -782,7 +783,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         r = np.diff(x_range)[0]
         r = min(r, 0.03)
         with np.errstate(over="ignore", invalid="ignore"):
-            energy_grid = SuperSimple.energy_from_F(
+            energy_grid = self.energyFunc.energy_from_F(
                 F_grid,
                 self.currentBeta,
                 K=4 if self.volumetricEnergy else 0,
@@ -903,7 +904,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.elastic_reduced_marker.setData(pos=np.array([elastic_reduced_pos]))
 
         # Calculate P
-        P = ContiEnergy.P_from_F(F, M, self.currentBeta, K=4)
+        P = self.energyFunc.P_from_F(F, M, self.currentBeta, K=4)
 
         # Update table
         self.updateInfoDisplay(F, C, C_R, M, P, ms, m1, m2, m3)

@@ -1,6 +1,6 @@
 import sympy as sp
 import re
-from contiPotential import ContiEnergy
+from contiPotential import ContiEnergy, SuperSimple
 
 
 class SymbolicFEM:
@@ -135,7 +135,7 @@ class SymbolicFEM:
 
         JX = self.derivatives["JX"]
         Jx = self.derivatives["Jx"]
-        self.F = sp.simplify(Jx * JX.inv())
+        self.F = sp.simplify(Jx @ JX.inv())
 
     def factor_common_denominator(self, matrix):
         """Factor out common denominator from a matrix."""
@@ -153,7 +153,7 @@ class SymbolicFEM:
             common_d = sp.gcd(common_d, d)
 
         # Create a new matrix with the common denominator factored out
-        new_matrix = matrix.applyfunc(lambda x: sp.cancel(x * common_d))
+        new_matrix = matrix.applyfunc(lambda x: sp.cancel(x @ common_d))
 
         return common_d, sp.simplify(new_matrix)
 
@@ -163,7 +163,7 @@ class SymbolicFEM:
             self.compute_deformation_gradient()
 
         F = self.F
-        self.C = F.T * F
+        self.C = F.T @ F
 
         # Extract components
         self.C11 = sp.simplify(self.C[0, 0])
@@ -200,7 +200,7 @@ class SymbolicFEM:
             self.substitute_vector_components()
 
         # Get the Conti energy expressions
-        self.phi, self.div_phi, self.div_div_phi = ContiEnergy.symbolic_potential()
+        self.phi, self.div_phi, self.div_div_phi = SuperSimple.symbolic_potential()
 
         # Define assumptions using computed C11, C12, C22 values
 
@@ -333,7 +333,7 @@ class SymbolicFEM:
         )
         eq_dN_dX = self.generate_equation(
             r"\frac{\partial N}{\partial X}",
-            sp.simplify(self.derivatives["dN_dX"] * self.F_d),
+            sp.simplify(self.derivatives["dN_dX"] @ self.F_d),
             r"Derivative of $N$ with respect to $X$",
         )
 
@@ -347,12 +347,12 @@ class SymbolicFEM:
         # Generate equations for Cauchy-Green components
         eq_C12 = self.generate_equation(
             r"C_{12}",
-            self.C12 * self.F_d**2 * -1,
+            self.C12 @ self.F_d**2 * -1,
             r"Off-diagonal component of the Cauchy-Green deformation tensor",
         )
         eq2_C12 = self.generate_equation(
             r"C_{12}",
-            self.C12_clean * self.F_d**2 * -1,
+            self.C12_clean @ self.F_d**2 * -1,
             r"Condensed form of the off-diagonal component",
         )
 
@@ -435,7 +435,7 @@ class SymbolicFEM:
         # We then assume F is {(1,C12),(0, 1)}
         C12 = sp.symbols("C_{12}")
         F = sp.Matrix([[1, C12], [0, 1]])
-        self.P = 2 * F * factored_sigma
+        self.P = 2 * F @ factored_sigma
         self.P = sp.simplify(self.P)
         # Generate LaTeX for P
         P_latex = self.format_latex_expression(self.P, r"P")
@@ -446,7 +446,7 @@ class SymbolicFEM:
         print("substituting C12...")
         d = sp.symbols("d")
         self.full_P = self.P.subs(
-            C12, 1 / (d**2) * sp.simplify(self.C12_clean * self.F_d**2)
+            C12, 1 / (d**2) * sp.simplify(self.C12_clean @ self.F_d**2)
         )
         # self.full_P = self.P.subs(C12, self.C12_clean)
         # print("simplifying...")
@@ -508,7 +508,7 @@ class SymbolicFEM:
         self.substitute_vector_components()
 
         # Conti energy analysis
-        self.evaluate_conti_energy()
+        self.evaluate_conti_renergy()
 
         # Generate LaTeX output
         fem_latex = self.generate_latex_fem_document()

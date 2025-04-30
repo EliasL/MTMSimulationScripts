@@ -115,14 +115,14 @@ def propperJob3(**kwargs):
     return propperJob(56, 2, 200, minimizer=["LBFGS", "CG"], **kwargs)
 
 
-def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
         group_by_seeds=group_by_seeds,
         rows=size,
         cols=size,
         startLoad=0.15,
-        maxLoad=3.0,
+        maxLoad=maxLoad,
         nrThreads=nrThreads,
         minimizer="LBFGS",
         loadIncrement=1e-5,
@@ -409,12 +409,12 @@ def showMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
     return configs, labels
 
 
-def singleDislocationTest(
+def doubleDislocationTest(
     nrThreads=3, nrSeeds=1, seeds=None, L=10, diagonal=["major", "minor"]
 ):
     if seeds is None:
         seeds = range(nrSeeds)
-    scenario = "singleDislocationTest"
+    scenario = "doubleDislocationTest"
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",
         seed=seeds,
@@ -423,6 +423,30 @@ def singleDislocationTest(
         cols=L,
         startLoad=0.0,
         maxLoad=4.0,
+        loadIncrement=1e-3,
+        nrThreads=nrThreads,
+        minimizer="LBFGS",
+        epsR=1e-6,
+        scenario=scenario,
+        meshDiagonal=diagonal,
+    )
+    return configs, labels
+
+
+def singleDislocationTest(
+    nrThreads=3, nrSeeds=1, seeds=None, L=50, diagonal=["major", "minor"]
+):
+    if seeds is None:
+        seeds = range(nrSeeds)
+    scenario = "singleDislocationFixedBoundaryTest"
+    configs, labels = ConfigGenerator.generate(
+        usingPBC="false",
+        seed=seeds,
+        group_by_seeds=False,
+        rows=L,
+        cols=L,
+        startLoad=0.0,
+        maxLoad=1.0,
         loadIncrement=1e-3,
         nrThreads=nrThreads,
         minimizer="LBFGS",
