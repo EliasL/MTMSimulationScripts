@@ -3,6 +3,7 @@ import os
 from vtk import vtkXMLUnstructuredGridReader
 from vtk.util.numpy_support import vtk_to_numpy  # type: ignore
 import numpy as np
+import re
 
 
 class VTUData:
@@ -14,6 +15,22 @@ class VTUData:
             self.BC = result["BC"]
         if "load" in result:
             self.load = float(result["load"])
+        self.size = self.get_size()
+
+    def get_size(self):
+        # Find the size in the file name
+        # We assume the size is in the format s100x100
+        regex = r"s(\d+)x(\d+)"
+        match = re.search(regex, str(self.vtu_file_path))
+        if match:
+            self.size = (int(match.group(1)), int(match.group(2)))
+        else:
+            # We can guess the size by counting the number of elements
+            # The number of nodes is not reliable.
+            nrCells = self.get_cell_data("nrm1").shape[0]
+            # We assume the mesh is square
+            self.size = (int(np.sqrt(nrCells)), int(np.sqrt(nrCells)))
+        return self.size
 
     def _read_vtu_file(self):
         # Create a reader for the VTU file

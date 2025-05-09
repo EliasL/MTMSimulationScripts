@@ -125,30 +125,3 @@ print()
 print("% Deformation gradient F = dx/dX")
 print("F_num =", replace_diff(sp.latex(F_num)))
 print("F = F_num / J")
-
-s = r"""
-\begin{align}
-f^{n_1}&= \left[\begin{matrix}P_{11} \left(\X^{n_2}_2 - \X^{n_3}_2\right) - P_{12} \left(\X^{n_2}_1 - \X^{n_3}_1\right)\\P_{21} \left(\X^{n_2}_2 - \X^{n_3}_2\right) - P_{22} \left(\X^{n_2}_1 - \X^{n_3}_1\right)\end{matrix}\right]
-\label{eq:fn1}\\
-f^{n_2}&= \left[\begin{matrix}- P_{11} \left(\X^{n_1}_2 - \X^{n_3}_2\right) + P_{12} \left(\X^{n_1}_1 - \X^{n_3}_1\right)\\- P_{21} \left(\X^{n_1}_2 - \X^{n_3}_2\right) + P_{22} \left(\X^{n_1}_1 - \X^{n_3}_1\right)\end{matrix}\right]
-\label{eq:fn2}\\
-f^{n_3}&= \left[\begin{matrix}P_{11} \left(\X^{n_1}_2 - \X^{n_2}_2\right) - P_{12} \left(\X^{n_1}_1 - \X^{n_2}_1\right)\\P_{21} \left(\X^{n_1}_2 - \X^{n_2}_2\right) - P_{22} \left(\X^{n_1}_1 - \X^{n_2}_1\right)\end{matrix}\right]
-\label{eq:fn3}
-\end{align}
-
-we can insert for  $f^{A_b}$:
-
-\begin{equation}
-     f^{A_b}=\left[\begin{matrix}- P_{11} \left(\X^{a}_2 - \X^{c}_2\right) + P_{12} \left(\X^{a}_1 - \X^{c}_1\right)\\- P_{21} \left(\X^{a}_2 - \X^{c}_2\right) + P_{22} \left(\X^{a}_1 - \X^{c}_1\right)\end{matrix}\right]
-\end{equation}
-
-and then also for $A'=\{abd\}$ and $B'=\{bcd\}$. Note that in order to get the force on node, we use eq. \ref{eq:fn2} for $A'$, but eq. \ref{eq:fn1} for $B'$. This is how it is unaffected by swapping order! And then energy we can probably understand by looking at the Lagrange reduced metric tensor!
-
-\begin{equation}
-     f^{A'_b}=\left[\begin{matrix}- P_{11} \left(\X^{a}_2 - \X^{d}_2\right) + P_{12} \left(\X^{a}_1 - \X^{d}_1\right)\\- P_{21} \left(\X^{a}_2 - \X^{d}_2\right) + P_{22} \left(\X^{a}_1 - \X^{d}_1\right)\end{matrix}\right]
-\end{equation}
-\begin{equation}
-     f^{B_b}=\left[\begin{matrix}- P_{11} \left(\X^{c}_2 - \X^{d}_2\right) + P_{12} \left(\X^{c}_1 - \X^{d}_1\right)\\- P_{21} \left(\X^{c}_2 - \X^{d}_2\right) + P_{22} \left(\X^{c}_1 - \X^{d}_1\right)\end{matrix}\right]
-\end{equation}"""
-
-print(replace_diff(s))

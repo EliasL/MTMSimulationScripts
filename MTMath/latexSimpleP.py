@@ -2,6 +2,16 @@ from contiPotential import SuperSimple
 import sympy as sp
 import re
 
+SIMPLIFY_COUNT = 0
+
+
+def simplify(expr):
+    global SIMPLIFY_COUNT
+    SIMPLIFY_COUNT += 1
+    print("Simplifying: ", str(expr)[:100])
+    print(f"SIMPLIFY_COUNT: {SIMPLIFY_COUNT}")
+    return sp.simplify(expr)
+
 
 def replace_diff(exp):
     """
@@ -30,7 +40,7 @@ def replace_diff(exp):
 
 def format_latex_expression(expr, eq_label=None):
     # First, simplify then factor so patterns like u^b-u^c appear explicitly
-    fact_expr = sp.factor(sp.simplify(expr))
+    fact_expr = sp.factor(simplify(expr))
     # Convert to LaTeX
     latex_expr = sp.latex(fact_expr)
     # Now replace any A_i^a - A_i^b by A_i^{a-b}
@@ -60,7 +70,7 @@ def factor_common_denominator(matrix):
     # Create a new matrix with the common denominator factored out
     new_matrix = matrix.applyfunc(lambda x: sp.cancel(x * common_d))
 
-    return common_d, sp.simplify(new_matrix)
+    return common_d, simplify(new_matrix)
 
 
 def _condense_entry(expr):
@@ -124,7 +134,7 @@ class FEM:
     N1 = 1 - xi1 - xi2
     N2 = xi1
     N3 = xi2
-    shape_functions = [N1, N2, N3]
+    shape_functions = sp.Matrix([N1, N2, N3])
 
     @classmethod
     def createShapeFunctionApprox(cls, nodes, key):
@@ -142,7 +152,7 @@ class FEM:
         return result
 
     @classmethod
-    def partialDerivative(cls, nodes, numerator, denominator, condense=True):
+    def partialDerivative(cls, nodes, numerator, denominator, condense=False):
         # Compute ∂A_∂B = ∂A_∂xi ∂xi_∂B
 
         if numerator == "N":
@@ -157,9 +167,9 @@ class FEM:
             dA_dxi = condense_matrix(dA_dxi)
             dB_dxi = condense_matrix(dB_dxi)
 
-        xi_dB = sp.simplify(dB_dxi.inv())
+        xi_dB = simplify(dB_dxi.inv())
 
-        return sp.simplify(dA_dxi @ xi_dB)
+        return simplify(dA_dxi @ xi_dB)
 
 
 def computeF(nodes):
@@ -195,7 +205,7 @@ def computeP(F):
 
     # 5) apply it (and your numerical assumptions) and simplify
     common_assumps = {noise: 1, beta: -sp.Rational(1, 4), K: 4}
-    phi = sp.simplify(phi.subs(subs_dict).subs(common_assumps))
+    phi = simplify(phi.subs(subs_dict).subs(common_assumps))
 
     # Replace C with F variables
 
@@ -204,7 +214,7 @@ def computeP(F):
     # Process each derivative
     for eq_label, expr in div_phi.items():
         # Substitute assumptions and simplify
-        div_phi_constrained[eq_label] = sp.simplify(
+        div_phi_constrained[eq_label] = simplify(
             expr.subs(subs_dict).subs(common_assumps)
         )
 
@@ -237,31 +247,13 @@ def computeP(F):
     latex_output.append(Sigma_latex)
 
     P = 2 * F * sigma
-    P = sp.simplify(P)
-    # Generate LaTeX for P
-    P_latex = format_latex_expression(P, r"\Pb")
-    latex_output.append(P_latex)
-
-    # Insert values for F
-    sub = {F[0, 0]: 1, F[0, 1]: 0.2, F[1, 0]: 0, F[1, 1]: 1}
-
-    F = F.subs(sub)
-    # Generate LaTeX for P
-    F_latex = format_latex_expression(F, r"\F")
-    latex_output.append(F_latex)
-
-    P = P.subs(sub)
-    # Generate LaTeX for P
-    P_latex = format_latex_expression(P, r"\Pb")
-    latex_output.append(P_latex)
-
-    return "\n\n".join(latex_output)
+    return simplify(P)
 
 
 def computeForces(nodes):
     F = computeF(nodes)
     P = computeP(F)
-    dN_dX = FEM.partialDerivative(nodes, "N", "X")
+    dN_dX = FEM.partialDerivative(nodes, "N", "X", condense=False)
     forces = P * dN_dX.T
     return forces
 
@@ -277,6 +269,18 @@ def makeNode(name):
     }
 
 
+def constrain(expr, *nodes, key="u", values=0):
+    subs = {}
+
+    if not isinstance(values, list):
+        values = [values] * len(nodes)
+
+    for node in nodes:
+        for sym, value in zip(node[key], values):
+            subs[sym] = value
+    return simplify(expr.subs(subs))
+
+
 if __name__ == "__main__":
     a, b, c, d = [makeNode(n) for n in "abcd"]
 
@@ -285,10 +289,43 @@ if __name__ == "__main__":
     B_ = [b, c, d]
 
     # F - I
-    du_dX = FEM.partialDerivative(A, "u", "X")
-    J, du_dX = factor_common_denominator(du_dX)
+    # du_dX = FEM.partialDerivative(A, "u", "X")
+    # F = sp.eye(2) + du_dX
+    # P = computeP(F)
 
-    print(format_latex_expression(du_dX, "du_dX"))
+    # J, du_dX = factor_common_denominator(du_dX)
 
-    print(format_latex_expression(J, "\\J"))
-    # print(computeP())
+    # print(format_latex_expression(du_dX, "du_dX"))
+
+    # print(format_latex_expression(J, "\\J"))
+
+    # J, P = factor_common_denominator(P)
+    # print(format_latex_expression(P, r"\Pb"))
+
+    forces_A = computeForces(A)
+    forces_A_ = computeForces(A_)
+    forces_B_ = computeForces(B_)
+
+    # When the determinant is 1, we can ignore J
+    J, forces_A = factor_common_denominator(forces_A)
+    J, forces_A_ = factor_common_denominator(forces_A_)
+    J, forces_B_ = factor_common_denominator(forces_B_)
+
+    # Forces on a are stored in the first column of the matrix
+    forcesAb = forces_A[:, 1]
+    forcesA_b = forces_A_[:, 1]
+    forcesB_b = forces_B_[:, 0]
+
+    diff = forcesAb - (forcesA_b + forcesB_b)
+
+    diff = constrain(diff, a, c, d, key="u", values=0)
+    diff = constrain(diff, a, key="X", values=[0, 0])
+    diff = constrain(diff, c, key="X", values=[0, 1])
+    diff = constrain(diff, d, key="X", values=[1, 1])
+    # print(diff)
+    print(format_latex_expression(diff, r"Force on b"))
+    import pickle
+
+    # save them to disk
+    with open("sympyDiff.pkl", "wb") as f:
+        pickle.dump(diff, f)

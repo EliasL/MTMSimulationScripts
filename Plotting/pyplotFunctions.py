@@ -185,16 +185,50 @@ def base_plot(
     return ax, fig
 
 
-def calculate_shifts(nodes, BC, load):
-    N = np.sqrt(len(nodes[:, 0])) - 1
-    if BC == "PBC":
-        return [-N, 0, N]
-    return [0]
+def calculate_shifts(ax, vtuData):
+    """Calculate shifts needed to cover the visible area based on ax limits and mesh periodicity."""
+    if vtuData.BC != "PBC":
+        return [0]  # No shifts needed for non-periodic BC
+
+    # Get axis limits
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+
+    N = vtuData.size[0]  # Assumes square mesh
+    # Calculate required shifts in x direction
+    x_shifts = []
+    if xlim[0] < 0 or xlim[1] > N:
+        # Need multiple shifts in x direction
+        min_x_shift = int(np.floor((xlim[0]) / N)) - 1
+        max_x_shift = int(np.ceil((xlim[1]) / N)) + 1
+        x_shifts = list(range(min_x_shift * N, (max_x_shift + 1) * N, N))
+    else:
+        x_shifts = [0]
+
+    # Calculate required shifts in y direction
+    y_shifts = []
+    if ylim[0] < 0 or ylim[1] > N:
+        # Need multiple shifts in y direction
+        min_y_shift = int(np.floor((ylim[0])) / N) - 1
+        max_y_shift = int(np.ceil((ylim[1]) / N)) + 1
+        y_shifts = list(range(min_y_shift * N, (max_y_shift + 1) * N, N))
+    else:
+        y_shifts = [0]
+
+    # Combine shifts (only need combinations where both are needed)
+    if not x_shifts and not y_shifts:
+        return [(0, 0)]
+
+    # Create all combinations of shifts
+    shifts = [(dx, dy) for dx in x_shifts for dy in y_shifts]
+
+    return shifts
 
 
-def draw_rhombus(ax, N, load, BC):
-    if BC == "PBC":
-        rhombus_x = [0, N, N + load * N, load * N, 0]
+def draw_rhombus(ax, vtuData):
+    N = vtuData.size[0]
+    if vtuData.BC == "PBC":
+        rhombus_x = [0, N, N + vtuData.load * N, vtuData.load * N, 0]
         rhombus_y = [0, 0, N, N, 0]
         ax.plot(rhombus_x, rhombus_y, "k--")
 
@@ -262,26 +296,26 @@ def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kw
     # Grid
     if show_connections:
         connectivity = data.get_connectivity()
-    shifts = calculate_shifts(nodes, data.BC, data.load)
-    for dx in shifts:
-        for dy in shifts:
-            sheared_x = x + dx + data.load * dy
-            if show_connections:
-                # Mesh lines between nodes
-                triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
-                ax.triplot(triang, color="black", linewidth=0.1, alpha=0.3)
+    shifts = calculate_shifts(ax, data)
 
-            ax.scatter(
-                sheared_x,
-                y + dy,
-                s=circle_point_size,
-                c=color,
-                marker="o",
-                alpha=1,
-                linewidth=0,
-            )
+    for dx, dy in shifts:  # Now unpacking dx, dy from tuples
+        sheared_x = x + dx + data.load * dy
+        if show_connections:
+            # Mesh lines between nodes
+            triang = mtri.Triangulation(sheared_x, y + dy, connectivity)
+            ax.triplot(triang, color="black", linewidth=0.1, alpha=0.3)
 
-    draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
+        ax.scatter(
+            sheared_x,
+            y + dy,
+            s=circle_point_size,
+            c=color,
+            marker="o",
+            alpha=1,
+            linewidth=0,
+        )
+
+    draw_rhombus(ax, data)
     return ax
 
 
@@ -330,10 +364,6 @@ def plot_mesh(
             min_plastic_change,
         )
     )
-
-    # Calculate shifts if needed
-    shifts = _calculate_shifts_if_needed(shift, nodes, data)
-
     # Main plotting
     mappable = _plot_mesh_elements(
         ax,
@@ -343,7 +373,6 @@ def plot_mesh(
         field,
         norm,
         cmap,
-        shifts,
         data,
         mesh_property,
         backgroundColor,
@@ -439,15 +468,6 @@ def _configure_property_settings(
     return field, cmap, norm, boundaries, backgroundColor, state_indices
 
 
-def _calculate_shifts_if_needed(shift, nodes, data):
-    """Calculate shifts if shift is True, otherwise return [0]."""
-    # handle Exception has occurred: AttributeError 'VTUData' object has no attribute 'BC'
-    if not hasattr(data, "BC"):
-        return [0]
-    else:
-        return calculate_shifts(nodes, data.BC, data.load) if shift else [0]
-
-
 def _plot_mesh_elements(
     ax,
     x,
@@ -456,7 +476,6 @@ def _plot_mesh_elements(
     field,
     norm,
     cmap,
-    shifts,
     data,
     mesh_property,
     backgroundColor,
@@ -464,35 +483,39 @@ def _plot_mesh_elements(
     state_indices,
     show_force,
 ):
-    """Plot the main mesh elements with appropriate coloring."""
+    """Optimized version of original approach"""
     edgecolors = "none" if len(x) > 2000 else "black"
     mappable = None
 
-    for dx in shifts:
-        for dy in shifts:
-            sheared_x = x + dx + data.load * dy
-            sheared_y = y + dy
-            triang = mtri.Triangulation(sheared_x, sheared_y, connectivity)
+    shifts = calculate_shifts(ax, data)
 
-            # Plot the base mesh
-            ax.triplot(triang, color=backgroundColor, lw=0.1)
+    # Precompute connectivity if used repeatedly
+    tri_args = {"triangles": connectivity} if connectivity is not None else {}
 
-            # Plot the colored elements
-            mappable = ax.tripcolor(
-                triang,
-                facecolors=field,
-                norm=norm,
-                cmap=cmap,
-                edgecolors=edgecolors,
-            )
+    for dx, dy in shifts:
+        sheared_x = x + dx + data.load * dy
+        sheared_y = y + dy
 
-            # Add markers if needed
-            if mesh_property == "m" and add_m12_marks:
-                _add_markers(ax, connectivity, sheared_x, sheared_y, state_indices)
+        # Create triangulation once per shift
+        triang = mtri.Triangulation(sheared_x, sheared_y, **tri_args)
 
-            # Add force vectors if needed
-            if show_force:
-                _plot_force_vectors(ax, data, connectivity, sheared_x, sheared_y)
+        # Plot base mesh
+        ax.triplot(triang, color=backgroundColor, lw=0.1)
+
+        # Plot colored elements and keep last mappable
+        mappable = ax.tripcolor(
+            triang,
+            facecolors=field,
+            norm=norm,
+            cmap=cmap,
+            edgecolors=edgecolors,
+        )
+
+        # Conditional plotting
+        if mesh_property == "m" and add_m12_marks:
+            _add_markers(ax, connectivity, sheared_x, sheared_y, state_indices)
+        if show_force:
+            _plot_force_vectors(ax, data, connectivity, sheared_x, sheared_y)
 
     return mappable
 
@@ -641,7 +664,7 @@ def _add_additional_elements(
 
     if add_rombus:
         if hasattr(data, "BC"):
-            draw_rhombus(ax, np.sqrt(len(nodes[:, 0])) - 1, data.load, data.BC)
+            draw_rhombus(ax, data)
 
 
 def make_static_plot(fileName, **kwargs):

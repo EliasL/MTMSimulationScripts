@@ -88,11 +88,11 @@ def plotYOverX(
         raise ValueError("No data points remain after applying xlim and ylim.")
 
     # Simplify the points after cropping
-    if tolerance is not None:
-        points = np.column_stack((X, Y))
-        simplified_points = simplify_coords_vwp(points, tolerance)
-        X_simplified = simplified_points[:, 0]
-        Y_simplified = simplified_points[:, 1]
+    # if tolerance is not None:
+    #     points = np.column_stack((X, Y))
+    #     simplified_points = simplify_coords_vwp(points, tolerance)
+    #     X_simplified = simplified_points[:, 0]
+    #     Y_simplified = simplified_points[:, 1]
     else:
         X_simplified = X
         Y_simplified = Y
@@ -406,13 +406,21 @@ def pdf(data, xmin=None, xmax=None, linear_bins=False, **kwargs):
 
 
 def plotPowerLaw(
-    drops, ax, fit, label, part_label, dist="truncated_power_law", add_fit=True
+    drops,
+    ax,
+    fit,
+    label,
+    part_label,
+    dist="truncated_power_law",
+    add_fit=True,
+    color=None,
 ):
     # np.savetxt(f"{label}{part_label}.csv", drops, delimiter=",")
     global color_index, index
 
     # Get the current color
-    color = colors[label]
+    if color is None and label in colors:
+        color = colors[label]
 
     fit.plot_pdf(
         original_data=True,
@@ -570,6 +578,8 @@ def plotSplitPowerLaw(
     plot_post_yield=True,
     add_fit=True,
     dist="truncated_power_law",
+    color=None,
+    include_label=True,
     **kwargs,
 ):
     global color_index, index, line_index
@@ -596,6 +606,7 @@ def plotSplitPowerLaw(
             fit,
             label,
             part_label,
+            color=color,
             dist=dist,
             add_fit=add_fit,
         )
@@ -904,6 +915,7 @@ def makePlot(
 
     lines = []
     data = []
+    dfs = []
     xData = []
     if xlim:
         ax.set_xlim(*xlim)
@@ -915,14 +927,8 @@ def makePlot(
         if i == subtract:
             continue
         if X is None:
-            break
-        if isinstance(Y, str):
-            df = pd.read_csv(csv_file_path, usecols=[X, Y])
-        else:
-            df = pd.read_csv(csv_file_path, usecols=[X] + Y)
-            if plot_average:
-                raise Warning("Cannot plot average with multiple Y columns")
-
+            breakpoint
+        df = pd.read_csv(csv_file_path)
         # If it is a string, we assume it is a time that we can convert to seconds
         if isinstance(df[Y][0], str):
             df[Y] = durations_to_seconds(df[Y])
@@ -931,6 +937,8 @@ def makePlot(
         #    df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
         # if ylim:
         #    df = df[(df[Y] >= ylim[0]) & (df[Y] <= ylim[1])]
+
+        dfs.append(df)
 
         if reverse_x_axis is None:
             # Check if we should reverse the x axis
@@ -1034,11 +1042,11 @@ def makePlot(
             "label": "Fit",
             "color": "black",
             "include_label": legend,
-            "plot_pre_yeild": plot_pre_yield,
+            "plot_pre_yield": plot_pre_yield,
             "plot_post_yield": plot_post_yield,
             "dist": dist,
         }
-        fig, ax, line = plotSplitPowerLaw(data, **kwargs)
+        fig, ax, line = plotSplitPowerLaw(dfs, **kwargs)
 
     # cursor.connect(
     #   "add", lambda sel: sel.annotation.set_text(labels[sel.index]))

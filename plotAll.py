@@ -1,5 +1,5 @@
 from Plotting.makeAnimations import makeAnimations
-from Plotting.makePlots import makePlot, makeItterationsPlot  # noqa: F401
+from Plotting.makePlots import makePlot, makeItterationsPlot
 from Plotting.settings import settings
 from Plotting.dataFunctions import parse_pvd_file, get_data_from_name
 from Plotting.makePvd import create_collection
@@ -76,6 +76,21 @@ def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
             Y="avg_RSS",
             # xlim=[0, 1],
         )
+
+        for Y in [
+            "minimization_time",
+            "nr_iterations",
+            "nr_func_evals",
+            "est_time_remaining",
+        ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
+            makePlot(
+                csvPath,
+                Y=Y,
+                name=subfolderName + f"{Y.replace(' ', '_')}.pdf",
+                legend=True,
+                use_title=True,
+            )
+
         if X == "nr_func_evals":
             makePlot(
                 csvPath,
@@ -212,7 +227,7 @@ if __name__ == "__main__":
 
         # SingeDislocation test
         configs = [
-            "/Users/eliaslundheim/work/PhD/MTS2D/build/test_data/defaultName/data/minimizationData/step1/macroData.csv"
+            "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
         ]
 
         for c in configs:
