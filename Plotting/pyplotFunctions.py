@@ -188,7 +188,7 @@ def base_plot(
 def calculate_shifts(ax, vtuData):
     """Calculate shifts needed to cover the visible area based on ax limits and mesh periodicity."""
     if vtuData.BC != "PBC":
-        return [0]  # No shifts needed for non-periodic BC
+        return [(0, 0)]  # No shifts needed for non-periodic BC
 
     # Get axis limits
     xlim = ax.get_xlim()
@@ -935,7 +935,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         # Check if there is exactly one matching row
         if len(matching_rows) != 1:
             raise ValueError(
-                f"'{X}' value '{x}' is not unique or not found. Found {len(matching_rows)} matches."
+                f"Error in file {vtu_file}:\n'{X}' value '{x}' is not unique or not found. Found {len(matching_rows)} matches."
             )
 
         # Get the index (line number) of the matching row

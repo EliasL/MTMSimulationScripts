@@ -193,15 +193,30 @@ def generate_angle_region(resolution=500, zoom=1):
 
 
 def C2PoincareDisk(C):
-    with np.errstate(divide="warn", invalid="warn"):
+    with np.errstate(divide="ignore", invalid="ignore"):
         if C.ndim == 2:
-            x_, y_ = (C[0, 1] / C[1, 1], np.sqrt(np.linalg.det(C)) / C[1, 1])
+            det = np.linalg.det(C)
+            y_ = np.sqrt(det) / C[1, 1] if det >= 0 else np.nan
+            x_ = C[0, 1] / C[1, 1]
+            x = (x_**2 + y_**2 - 1) / (x_**2 + (y_ + 1) ** 2)
+            y = 2 * x_ / (x_**2 + (y_ + 1) ** 2)
+            if np.isnan(y_):
+                x, y = -0.9, -0.9
+
         else:
             dets = np.linalg.det(C)
-            x_, y_ = (C[:, 0, 1] / C[:, 1, 1], np.sqrt(dets) / C[:, 1, 1])
+            valid = dets >= 0
+            y_ = np.full_like(dets, np.nan)
+            y_[valid] = np.sqrt(dets[valid]) / C[valid, 1, 1]
+            x_ = C[:, 0, 1] / C[:, 1, 1]
 
-        x = (x_**2 + y_**2 - 1) / (x_**2 + (y_ + 1) ** 2)
-        y = 2 * x_ / (x_**2 + (y_ + 1) ** 2)
+            denom = x_**2 + (y_ + 1) ** 2
+            x = (x_**2 + y_**2 - 1) / denom
+            y = 2 * x_ / denom
+
+            # Replace (x, y) with (-1, -1) where determinant was invalid
+            x[~valid] = -0.9
+            y[~valid] = -0.9
 
         return x, y
 

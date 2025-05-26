@@ -4,7 +4,11 @@ from pathlib import Path
 
 
 def create_collection(
-    folder_path, destination="..", collection_name="collection", extension=".vtu"
+    folder_path,
+    destination="..",
+    collection_name="collection",
+    extension=".vtu",
+    skipBadStop=True,
 ):
     files_with_numbers = []
 
@@ -15,6 +19,8 @@ def create_collection(
 
     # Iterate over files in the directory
     for entry in Path(folder_path).iterdir():
+        if skipBadStop and "badStop" in str(entry):
+            continue
         if entry.suffix == extension:
             filename = entry.name
             if "minStep" in filename:

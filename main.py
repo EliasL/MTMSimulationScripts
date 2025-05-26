@@ -158,8 +158,9 @@ def runOnServer():
 def runOnLocalMachine():
     # configs, labels = propperJob(3, seeds=[0], size=100, group_by_seeds=False)
     # configs, labels = allPlasticEventsJob()
-    dump = "'/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l0.9.xml.gz'"
-    configs, labels = basicJob(8, 1, size=200, maxLoad=3.0)
+    dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
+    configs, labels = basicJob(8, 1, size=200, maxLoad=6.0)
+    configs, labels = singleDislocationTest(nrThreads=8, nrSeeds=1, L=20)
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
@@ -174,9 +175,6 @@ def runOnLocalMachine():
     # configs, labels = fixedBoundaries(nrThreads=6, fixed=True, L=101)
     # dump = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s100x100l0.38,1e-05,0.383NPBCt6epsR1e-06LBFGSEpsx1e-06s0/dumps/dump_l0.3814.xml.gz"
     # configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
-
-    # configs, labels = singleDislocationTest(diagonal="minor", L=10)
-    # configs, labels = singleDislocationTest(diagonal="minor", L=20)
 
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=20)

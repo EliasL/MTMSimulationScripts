@@ -214,11 +214,17 @@ def plotShowMinCriteria():
     plotTime(configs, labels, linestyles=linestyles)
 
 
+def plotEnergyRegion():
+    csvFile = "/Volumes/data/KeepSafe/longSimulation0.15-4.75/macroData.csv"
+    makePlot(csvFile, show=True, xlim=[2.9, 3.1])
+
+
 if __name__ == "__main__":
+    plotEnergyRegion()
     # plotSampleRuns()
     # plotPropperJob3()
     # debugPlotAll()
-    energyField()
+    # energyField()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
     # createVideoes(configs, all_images=True)

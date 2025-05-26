@@ -151,7 +151,7 @@ def parse_pvd_file(path, pvd_file):
     vtu_files = []
 
     for dataset in root.iter("DataSet"):
-        if "_." not in dataset.attrib["file"]:
+        if "_." not in dataset.attrib["file"] and False:
             print("Skipping file: ", dataset.attrib["file"])
         else:
             vtu_files.append(os.path.join(path, dataset.attrib["file"]))

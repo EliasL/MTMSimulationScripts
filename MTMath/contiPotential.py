@@ -203,6 +203,39 @@ class EnergyFunction:
         P = 2 * F @ M @ sigma @ M.T
         return P
 
+    # Strain is an ND-array of strain values with shape (..., 1)
+    @classmethod
+    def energy_from_simpleShear(
+        cls,
+        strain,
+        beta=-1 / 4,
+        K=4,
+        noise=1,
+        zeroReference=True,
+        returnReducedC=False,
+        accuracy=1,
+        loops=None,
+    ):
+        # Create deformation gradient matrix array with strain values as F12.
+        # The rest is identity
+        # For each element in strain, replace it with a eye matrix, but with the
+        # strain value in the F12 position and pass the rest to the
+        # cls.energy_from_F function
+        strain = np.atleast_1d(strain)
+        F = np.tile(np.eye(2), (*strain.shape, 1, 1)).astype(float)
+        F[..., 0, 1] = strain
+
+        return cls.energy_from_F(
+            F,
+            beta=beta,
+            K=K,
+            noise=noise,
+            zeroReference=zeroReference,
+            returnReducedC=returnReducedC,
+            accuracy=accuracy,
+            loops=loops,
+        )
+
 
 class ContiEnergy(EnergyFunction):
     @staticmethod
@@ -266,6 +299,12 @@ class SuperSimple(EnergyFunction):
     @classmethod
     def phi(cls, C11, C22, C12, beta, K, noise):
         return Rational(1, 2) * ((C11 - 1) ** 2 + (C22 - 1) ** 2 + C12**2)
+
+
+class ZeroEnergy(EnergyFunction):
+    @classmethod
+    def phi(cls, C11, C22, C12, beta, K, noise):
+        return 0
 
 
 def lagrange_reduction_components(C11, C22, C12, loops=1000, returnMs=False):
@@ -496,3 +535,4 @@ if __name__ == "__main__":
     print("\n")
 
     print("Stress function:\n", stress_code)
+    print(ContiEnergy.ground_state_energy())

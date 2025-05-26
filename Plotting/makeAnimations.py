@@ -214,7 +214,7 @@ def makeAnimations(
         # (plot_and_save_nodes, "nodes"),
         (plot_and_save_mesh, "mesh"),
         # (plot_and_save_mesh_with_force, "mesh_with_forces"),
-        # (plot_and_save_in_poincare_disk, "disk"),
+        (plot_and_save_in_poincare_disk, "disk"),
         # (plot_and_save_plot, "e_drop_plot"),
         # (plot_and_save_plot, "energy_plot"),
         # (plot_and_save_m_diff_mesh, "m_diff_mesh"),

@@ -19,6 +19,7 @@ def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
     conf, csvPath, pvdFile = None, None, None
     X = "load"
     ylog = False
+    subfolderName = "unkown_"
 
     if unkownFile is not None:
         if unkownFile.endswith(".conf"):
@@ -50,8 +51,13 @@ def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
     if pvdFile is None:
         # check if there are any vtu files
         vtu_files = list(path.glob("*.vtu"))
+        dataPath = path
+        if len(vtu_files) == 0:
+            # try data folder too
+            vtu_files = list(path.glob(settings["DATAFOLDERPATH"] + "/*.vtu"))
+            dataPath = path / settings["DATAFOLDERPATH"]
         if len(vtu_files) > 0:
-            create_collection(path, path, settings["COLLECTIONNAME"])
+            create_collection(dataPath, path, settings["COLLECTIONNAME"])
             pvdFile = str(path / (settings["COLLECTIONNAME"] + ".pvd"))
             vtu_files = parse_pvd_file(path, pvdFile)
             first = get_data_from_name(vtu_files[0])
@@ -230,16 +236,16 @@ if __name__ == "__main__":
             "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
         ]
 
-        for c in configs:
-            plotAll(
-                c,
-                makeGIF=False,
-                transparent=False,
-                noPlots=False,
-                noVideos=False,
-                combineVideos=True,
-                fps=60,
-                seconds_per_unit_shear=2,
-                allImages=True,
-                reuseImages=True,
-            )
+        # for c in configs:
+        plotAll(
+            "/Volumes/data/KeepSafe/longSimulation0.15-4.75/macroData.csv",
+            makeGIF=False,
+            transparent=False,
+            noPlots=False,
+            noVideos=True,
+            combineVideos=True,
+            fps=60,
+            seconds_per_unit_shear=2,
+            allImages=True,
+            reuseImages=True,
+        )

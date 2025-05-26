@@ -23,7 +23,7 @@ from .LagrangeReduction import (
 )
 from .vectorPair import VectorPair
 from MTMath.plotEnergy import generate_energy_grid, generate_angle_region
-from MTMath.contiPotential import ContiEnergy, SuperSimple
+from MTMath.contiPotential import ZeroEnergy, ContiEnergy, SuperSimple
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -66,7 +66,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.currentBeta = -0.25
         self.volumetricEnergy = True
         self.energy_lim = [0, 0.37]
-        self.energyFunc = SuperSimple
+        self.energyFunc = ContiEnergy  # SuperSimple
 
         # Basic widget setup
         self.setWindowTitle("Lagrange reduction with Poincaré Disk")
