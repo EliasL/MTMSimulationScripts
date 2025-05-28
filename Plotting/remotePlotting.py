@@ -200,7 +200,7 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
 
             if config.name in existing_files:
                 # Read estimated time remaining from CSV file
-                est_time_remaining = pd.read_csv(file_path)["Est_time_remaining"]
+                est_time_remaining = pd.read_csv(file_path)["est_time_remaining"]
                 time_remaining = (
                     duration_to_seconds(est_time_remaining.iloc[-1])
                     if not est_time_remaining.empty

@@ -46,7 +46,7 @@ def plotPropperJob3():
     configs, labels = propperJob3(group_by_seeds=True)
     # xlim = [0.25, 0.55]
     # get_folders_from_servers(configs)
-    createVideoes(configs)
+    # createVideoes(configs)
     # plotLog(configs, labels=labels)
     # plotAverage(configs, labels)
 
@@ -220,9 +220,9 @@ def plotEnergyRegion():
 
 
 if __name__ == "__main__":
-    plotEnergyRegion()
+    # plotEnergyRegion()
     # plotSampleRuns()
-    # plotPropperJob3()
+    plotPropperJob()
     # debugPlotAll()
     # energyField()
     # plotThreadTest()

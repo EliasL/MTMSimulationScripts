@@ -27,6 +27,10 @@ if True:
 
 
 def duration_to_seconds(duration):
+    try:
+        return float(duration)
+    except ValueError:
+        pass
     # Create a mapping from unit to number of seconds
     unit_map = {
         "d": 86400,  # 24 hours * 3600 sec/hour

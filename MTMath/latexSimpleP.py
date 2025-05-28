@@ -167,7 +167,7 @@ class FEM:
             dA_dxi = condense_matrix(dA_dxi)
             dB_dxi = condense_matrix(dB_dxi)
 
-        xi_dB = simplify(dB_dxi.inv())
+        xi_dB = dB_dxi.inv()
 
         return simplify(dA_dxi @ xi_dB)
 
