@@ -231,19 +231,14 @@ if __name__ == "__main__":
             "/Volumes/data/MTS2D_output/remeshTest,s3x3l0.0,0.001,1.0NPBCt1meshDiagonalalternates0/config.conf"
         ]
 
-        # SingeDislocation test
-        configs = [
-            "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-        ]
-
         # for c in configs:
         plotAll(
-            "/Volumes/data/KeepSafe/longSimulation0.15-4.75/macroData.csv",
+            "/Volumes/data/MTS2D_output/cyclicSimpleShear,s100x100l0.15,1e-05,1.0PBCt3epsR1e-06s0/collection.pvd",
             makeGIF=False,
             transparent=False,
-            noPlots=False,
-            noVideos=True,
-            combineVideos=True,
+            noPlots=True,
+            noVideos=False,
+            combineVideos=False,
             fps=60,
             seconds_per_unit_shear=2,
             allImages=True,

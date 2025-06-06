@@ -178,6 +178,9 @@ def get_data_from_name(nameOrPath):
     # We can also handle .csv values, in which case the last part will be .csv
     if parts[0][-4:] == ".csv":
         parts[0] = parts[0][:-4]
+    else:
+        # Extract number of load steps (.N.vtu)
+        result["load_step"] = int(fileName.split(".")[-2])
 
     result["name"] = parts[0]
     for part in parts[1:-1]:

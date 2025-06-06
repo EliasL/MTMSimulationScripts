@@ -182,7 +182,12 @@ class EnergyFunction:
         dPhi_dC22 = cls._DIV_PHI["dPhi_dC22"](C_11, C_22, C_12, beta, K, noise)
         dPhi_dC12 = cls._DIV_PHI["dPhi_dC12"](C_11, C_22, C_12, beta, K, noise)
         # sigma = 1/2 (∂Φ/∂C_R + (∂Φ/∂C_R)^T)
-        sigma = np.array([[dPhi_dC11, dPhi_dC12 / 2], [dPhi_dC12 / 2, dPhi_dC22]])
+        # Preallocate an array of shape (..., 2, 2):
+        sigma = np.empty(C_R.shape, dtype=dPhi_dC11.dtype)
+        sigma[..., 0, 0] = dPhi_dC11
+        sigma[..., 0, 1] = dPhi_dC12 / 2
+        sigma[..., 1, 0] = sigma[..., 0, 1]  # dPhi_dC12 / 2
+        sigma[..., 1, 1] = dPhi_dC22
         return sigma
 
     @classmethod
@@ -198,10 +203,28 @@ class EnergyFunction:
             M = M_
         C_R = C
 
-        sigma = cls.sigma_from_C_R(C_R, beta, K, noise)
+        sigma = cls.sigma_from_C_R(C_R, beta=beta, K=K, noise=noise)
 
-        P = 2 * F @ M @ sigma @ M.T
+        # Swapaxes is equivalent to transpose for 2D matrices, but works for ND-arrays
+        P = 2 * F @ M @ sigma @ M.swapaxes(-1, -2)
         return P
+
+    @classmethod
+    def forces_from_F(cls, F, dN_dX, beta=-1 / 4, K=4, noise=1):
+        """
+        Compute the forces from the first Piola-Kirchhoff stress tensor P.
+        dN_dX is the partial derivative of the shape functions with respect to the reference coordinates.
+        """
+        assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
+        assert dN_dX.shape[-1] == 2, "dN_dX must have shape (..., n_nodes, 2)"
+
+        P = cls.P_from_F(F, beta=beta, K=K, noise=noise)
+        # f = -P * dN_dX^T
+        forces = -np.einsum("...ij,...jk->...ik", P, dN_dX.swapaxes(-1, -2))
+
+        # forces is now an ND-array with shape (..., 2, n_nodes)
+        # so we swap the last two axes to get forces with shape (..., n_nodes, 2)
+        return forces.swapaxes(-1, -2)
 
     # Strain is an ND-array of strain values with shape (..., 1)
     @classmethod
@@ -235,6 +258,17 @@ class EnergyFunction:
             accuracy=accuracy,
             loops=loops,
         )
+
+    @classmethod
+    def forces_from_simpleShear(cls, strain, dN_dX, beta=-1 / 4, K=4, noise=1):
+        """
+        Compute the forces from the first Piola-Kirchhoff stress tensor P for simple shear.
+        """
+        strain = np.atleast_1d(strain)
+        F = np.tile(np.eye(2), (*strain.shape, 1, 1)).astype(float)
+        F[..., 0, 1] = strain
+        forces = cls.forces_from_F(F, dN_dX, beta, K, noise)
+        return forces
 
 
 class ContiEnergy(EnergyFunction):
@@ -434,17 +468,11 @@ def elastic_reduction(C11, C22, C12, loops=1000):
 
 
 def flip(matrix, row, col):
-    matrix[row, col] *= -1
-
-
-def swap(matrix, row1, col1, row2, col2):
-    temp = matrix[row1, col1]
-    matrix[row1, col1] = matrix[row2, col2]
-    matrix[row2, col2] = temp
+    matrix[..., row, col] *= -1
 
 
 def swap_cols(matrix):
-    matrix[:, [0, 1]] = matrix[:, [1, 0]]
+    matrix.swapaxes(-1, -2, out=matrix)
 
 
 def lag_m1(matrix):
@@ -460,9 +488,8 @@ def lag_m2(matrix):
 def lag_m3(matrix, n=1):
     # https://www.wolframalpha.com/input?i=%7B%7B1%2C+-1%7D%2C+%7B0%2C+1%7D%7D%5En
     multiplier_matrix = np.array([[1, -n], [0, 1]])
-
-    new_matrix = matrix @ multiplier_matrix
-    np.copyto(matrix, new_matrix)
+    # Perform matrix multiplication on the last two axes
+    np.einsum("...ij,...jk->...ik", matrix, multiplier_matrix, out=matrix)
 
 
 def generate_cpp_code(expressions_dict):

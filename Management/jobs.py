@@ -121,13 +121,13 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0):
         group_by_seeds=group_by_seeds,
         rows=size,
         cols=size,
-        startLoad=0.15,
+        startLoad=0.0,
         maxLoad=maxLoad,
         nrThreads=nrThreads,
         minimizer="LBFGS",
         loadIncrement=1e-5,
-        epsR=1e-5,
-        LBFGSEpsg=1e-8,
+        epsR=1e-9,
+        # LBFGSEpsg=1e-8,
         scenario="simpleShear",
         # remesh=1,
         # temp
@@ -275,7 +275,7 @@ def backwards(nrThreads, nrSeeds=1, seeds=None, LBFGSEpsg=1e-8):
     return configs, labels
 
 
-def cyclicLoading(nrThreads, nrSeeds=1, seeds=None, LBFGSEpsg=1e-8):
+def cyclicLoading(nrThreads, nrSeeds=1, seeds=None):
     if seeds is None:
         seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(
@@ -288,7 +288,7 @@ def cyclicLoading(nrThreads, nrSeeds=1, seeds=None, LBFGSEpsg=1e-8):
         loadIncrement=1e-5,
         nrThreads=nrThreads,
         minimizer="LBFGS",
-        LBFGSEpsg=LBFGSEpsg,
+        epsR=1e-6,
         scenario="cyclicSimpleShear",
     )
     return configs, labels

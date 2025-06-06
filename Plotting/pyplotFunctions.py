@@ -914,6 +914,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         macro_data,
         usecols=[
             X,
+            "load_step",
             "avg_energy",
             "avg_RSS",
             "avg_energy_change",
@@ -927,15 +928,17 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
     x_list = []
 
     for vtu_file in vtu_files:
-        x = get_data_from_name(vtu_file)[X]
+        metaData = get_data_from_name(vtu_file)
+        x = metaData[X]
         x_list.append(x)
+        n = metaData["load_step"]
         # Filter rows where "load" matches the value
-        matching_rows = df[abs(df[X] - x) < 1e-10]
+        matching_rows = df[df["load_step"] == n]
 
         # Check if there is exactly one matching row
         if len(matching_rows) != 1:
             raise ValueError(
-                f"Error in file {vtu_file}:\n'{X}' value '{x}' is not unique or not found. Found {len(matching_rows)} matches."
+                f"Error in file {vtu_file}:\nload_step value '{n}' is not unique or not found. Found {len(matching_rows)} matches."
             )
 
         # Get the index (line number) of the matching row
