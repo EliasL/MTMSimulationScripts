@@ -153,7 +153,9 @@ class EnergyFunction:
         accuracy=1,
         loops=None,
     ):
-        assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
+        assert F.shape[-2:] == (2, 2), (
+            f"F must have shape (..., 2, 2), but got shape {F.shape}"
+        )
 
         # C = F^T F
         C = np.einsum("...ji,...jk->...ik", F, F)
@@ -216,7 +218,7 @@ class EnergyFunction:
         dN_dX is the partial derivative of the shape functions with respect to the reference coordinates.
         """
         assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
-        assert dN_dX.shape[-1] == 2, "dN_dX must have shape (..., n_nodes, 2)"
+        assert dN_dX.shape[-2:] == (3, 2), "dN_dX must have shape (..., n_nodes(3), 2)"
 
         P = cls.P_from_F(F, beta=beta, K=K, noise=noise)
         # f = -P * dN_dX^T
