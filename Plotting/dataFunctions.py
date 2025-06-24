@@ -248,6 +248,13 @@ def get_data_from_name(nameOrPath):
         print("Warning: nrM not found in file name")
         result["nrM"] = 0.0
 
+    # Extract size information in the form sLxL
+    size_match = re.search(r"s(\d+)x(\d+)", nameOrPath)
+    if size_match:
+        N1, N2 = int(size_match.group(1)), int(size_match.group(2))
+        result["N"] = (N1, N2)
+        if N1 == N2:
+            result["L"] = N1
     return result
 
 

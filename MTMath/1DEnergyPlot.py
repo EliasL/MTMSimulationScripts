@@ -17,7 +17,6 @@ def plot_energy():
     ax.set_ylabel("Energy")
     ax.set_title("Energy in Simple Shear")
     ax.legend()
-    ax.grid()
 
     # Display or save as needed
     fig.tight_layout()
@@ -46,7 +45,6 @@ def plot_forces():
             ax.set_ylabel("Force")
         ax.set_title(f"Node {i + 1}")
         ax.legend()
-        ax.grid()
 
     fig.suptitle("Forces on Nodes in Simple Shear")
     fig.tight_layout()
@@ -55,5 +53,5 @@ def plot_forces():
 
 if __name__ == "__main__":
     plot_energy()
-    plot_forces()
+    # plot_forces()
     plt.show()

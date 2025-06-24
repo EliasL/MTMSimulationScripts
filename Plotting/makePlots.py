@@ -921,10 +921,6 @@ def makePlot(
     data = []
     dfs = []
     xData = []
-    if xlim:
-        ax.set_xlim(*xlim)
-    if ylim:
-        ax.set_ylim(*ylim)
 
     line_index = 0
     for i, csv_file_path in enumerate(csv_file_paths):
@@ -1057,6 +1053,18 @@ def makePlot(
 
     if ylog:
         ax.set_yscale("log")
+
+    if xlim:
+        if len(xlim) == 1:
+            ax.set_xlim(xmin=xlim[0])
+        else:
+            ax.set_xlim(*xlim)
+        # Update y scale
+        ax.relim()  # recompute data bounds based on all artists
+        ax.autoscale_view(scalex=False, scaley=True)  # leave x alone, rescale y
+
+    if ylim:
+        ax.set_ylim(*ylim)
 
     # Create a list of line plots only for the legend
     handles, labels = ax.get_legend_handles_labels()
@@ -1522,6 +1530,7 @@ def makeLogPlotComparison(
         dfs = []
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
+            keys = pd.read_csv(csv_file_path).keys()
             df = pd.read_csv(
                 csv_file_path,
                 usecols=[

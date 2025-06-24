@@ -89,12 +89,17 @@ def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
             "nr_func_evals",
             "est_time_remaining",
         ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
+            if Y == "est_time_remaining":
+                xlim = [0.16]
+            else:
+                xlim = None
             makePlot(
                 csvPath,
                 Y=Y,
                 name=subfolderName + f"{Y.replace(' ', '_')}.pdf",
                 legend=True,
                 use_title=True,
+                xlim=xlim,
             )
 
         if X == "nr_func_evals":
@@ -112,19 +117,19 @@ def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
         #     xlim=[0, 1],
         #     subtract="/Volumes/data/MTS2D_output/singleDislocationTest,s10x10l0.0,0.001,4.0NPBCt3meshDiagonalminorepsR1e-06s0/macroData.csv",
         # )
-        if conf is not None:
-            makePlot(
-                csvPath,
-                name=subfolderName + "_stress+.pdf",
-                Y="avg_RSS",
-                add_images=True,
-                image_pos=[
-                    [0.35, 0.02],  # first image, bottom middle
-                    [0.03, 0.5],  # second image, upper left
-                    [0.6, 0.55],  # upper right
-                ],
-                labels=conf.minimizer,
-            )
+        # if conf is not None:
+        #     makePlot(
+        #         csvPath,
+        #         name=subfolderName + "_stress+.pdf",
+        #         Y="avg_RSS",
+        #         add_images=True,
+        #         image_pos=[
+        #             [0.35, 0.02],  # first image, bottom middle
+        #             [0.03, 0.5],  # second image, upper left
+        #             [0.6, 0.55],  # upper right
+        #         ],
+        #         labels=conf.minimizer,
+        #     )
         # Close all plt plots
         plt.close("all")
 

@@ -6,6 +6,7 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib import cm, colors
 import powerlaw
 from tqdm import tqdm
+from scipy.optimize import curve_fit
 
 from concurrent.futures import ProcessPoolExecutor
 import functools
@@ -14,7 +15,9 @@ import glob
 
 np.random.seed(0)
 # Create directories for saving plots
-os.makedirs("Plots/powerLaw", exist_ok=True)
+PLOTPATH = "Plots/powerLaw/"
+OUTPUTTYPE = ".png"
+os.makedirs(PLOTPATH, exist_ok=True)
 
 
 def get_energy_drops(csvPath, df=None, strainLim=[-np.inf, np.inf], debug=False):
@@ -24,7 +27,13 @@ def get_energy_drops(csvPath, df=None, strainLim=[-np.inf, np.inf], debug=False)
     """
     if df is None:
         df = pd.read_csv(csvPath)
-    diffs = df["avg_energy_change"]
+
+    if "avg_energy_change" not in df:
+        # Add 0 in the beginning
+        diffs = np.insert(np.diff(df["avg_energy"]), 0, 0)
+    else:
+        diffs = df["avg_energy_change"]
+
     strain = df["load"]
     lim_mask = (strain > strainLim[0]) & (strain < strainLim[1])
     drop_mask = diffs < 0
@@ -92,7 +101,7 @@ def get_energy_drops(csvPath, df=None, strainLim=[-np.inf, np.inf], debug=False)
 
         debug_fig.tight_layout()
         # Save debug energy plot
-        filename = f"{plotPath}energy_drops_strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}{outputType}"
+        filename = f"{PLOTPATH}energy_drops_strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}{OUTPUTTYPE}"
         debug_fig.savefig(filename, dpi=300)
         # to save memory, close the figure
         plt.close(debug_fig)
@@ -102,6 +111,7 @@ def get_energy_drops(csvPath, df=None, strainLim=[-np.inf, np.inf], debug=False)
 def plot_data(
     ax, fit=None, data=None, xmin=None, label="Energy drops", edgecolor="black", alpha=1
 ):
+    raise RuntimeError("Don't use this function")
     if data is None and fit is not None:
         data = fit.data_original
     elif fit is None and data is not None:
@@ -124,6 +134,70 @@ def plot_data(
         alpha=alpha,
     )
     return fit
+
+
+def getHist(fit):
+    data = fit.data_original
+    # Find the start of the tail where Poisson noise exceeds threshold
+    data_min = min(data)
+    data_max = data.max()
+
+    # Compute number of bins from x_min to data_max
+    bins_per_decade = 5
+    decades = np.log10(data_max) - np.log10(data_min)
+    n_bins = int(np.ceil(decades * bins_per_decade))
+    # Define bin edges from data_max downward
+    log_edges = np.log10(data_max) - np.arange(n_bins + 1) / bins_per_decade
+    bin_edges = np.power(10, log_edges)[::-1]  # Reverse to make it ascending
+
+    # Compute the histogram for the tail (density=True → area under PDF = 1)
+    hist_vals, edges = np.histogram(data, bins=bin_edges, density=True)
+    bin_centers = np.sqrt(edges[:-1] * edges[1:])
+    return bin_centers, hist_vals
+
+
+def plot_data_pdf(
+    ax,
+    fit=None,
+    data=None,
+    label="Binned PDF of energy drops",
+    edgecolor="black",
+    alpha=1,
+):
+    """
+    Plot the empirical PDF of the data on log–log axes using logarithmic bins.
+    Automatically identifies x_min via find_x_min and uses 0.1-decade bin widths.
+    If `fit` is provided and `data` is None, use `fit.data_original`.
+    """
+    # Determine which to use: fit or raw data
+    if data is None and fit is not None:
+        data = fit.data_original
+    else:
+        raise ValueError("Either data or fit must be provided (but not both).")
+
+    # Choose edgecolor if None
+    if edgecolor is None:
+        edgecolor = ax._get_lines.get_next_color()
+
+    bin_centers, hist_vals = getHist(fit)
+
+    # Plot as points
+    ax.plot(
+        bin_centers,
+        hist_vals,
+        marker="o",
+        linestyle="None",
+        label=label,
+        alpha=alpha,
+    )
+
+    # Set log–log axes
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
+    ax.set_ylabel(r"$p(-\Delta \langle E \rangle)$")
+    ax.legend()
+    return bin_centers, hist_vals
 
 
 def plot_fit(
@@ -213,222 +287,56 @@ def plot_fit(
     ax.legend(loc="lower left")
 
 
-# --- Find x_min function for PDF tail threshold ---
-def find_x_min(data, threshold=0.02, num_micro_bins=1000, verbose=False):
-    """
-    Identify the starting point for logarithmic binning by finding the first bin
-    where the relative Poisson error (1/sqrt(count)) exceeds `threshold`.
-    - data: 1D numpy array of positive values
-    - threshold: fractional error cutoff (e.g., 0.02 for 2% relative uncertainty)
-      This represents the 1-sigma Poisson fractional error: sigma/N = 1/sqrt(N).
-    - num_micro_bins: number of fine-grained log-spaced bins for initial scan
-    - verbose: if True, print information about threshold, x_min, and data proportion dropped
-
-    Returns the geometric center of the first micro-bin where 1/sqrt(count) > threshold.
-    If no bin exceeds the threshold, returns data.min(). In verbose mode, also prints
-    the percentage of data below x_min (not log-binned).
-    """
-    data = np.asarray(data)
-    n_total = data.size
-
-    data_min = data.min()
-    data_max = data.max()
-
-    # Create micro-bins in log-space
-    micro_edges = np.logspace(
-        np.log10(data_min), np.log10(data_max), num=num_micro_bins + 1
-    )
-    counts, edges = np.histogram(data, bins=micro_edges)
-
-    x_min = data_min
-    count_at_xmin = None
-
-    # Scan micro-bins for the first one where 1/sqrt(count) > threshold
-    for i, count in enumerate(counts):
-        if count > 0:
-            rel_err = 1.0 / np.sqrt(count)
-            # rel_err is the 1-sigma fractional (Poisson) error in this micro-bin
-            if rel_err > threshold:
-                x_min = np.sqrt(edges[i] * edges[i + 1])
-                count_at_xmin = count
-                break
-
-    # Verbose reporting
-    if verbose:
-        pct_error = threshold * 100
-        if count_at_xmin is not None:
-            print(
-                f"Chosen relative error threshold: {pct_error:.1f}% (1/sqrt(N) > {threshold:.3f})."
-            )
-            print(
-                f"At x_min = {x_min:.3e}, micro-bin count = {count_at_xmin}, "
-                f"relative error = {1.0 / np.sqrt(count_at_xmin):.3f}."
-            )
-            n_dropped = np.sum(data < x_min)
-            pct_dropped = n_dropped / n_total * 100
-            print(
-                f"Data points below x_min (not log-binned): {n_dropped}/{n_total} = {pct_dropped:.2f}%."
-            )
-        else:
-            print(
-                f"No micro-bin had relative error > {pct_error:.1f}%; "
-                f"defaulting x_min to data.min() = {data_min:.3e}."
-            )
-
-    return x_min
-
-
-def plot_data_pdf(
-    ax,
-    fit=None,
-    data=None,
-    label="Energy drops",
-    edgecolor="black",
-    alpha=1,
-    threshold=0.02,
-):
-    """
-    Plot the empirical PDF of the data on log–log axes using logarithmic bins.
-    Automatically identifies x_min via find_x_min and uses 0.1-decade bin widths.
-    If `fit` is provided and `data` is None, use `fit.data_original`.
-    """
-    # Determine which to use: fit or raw data
-    if data is None and fit is not None:
-        data = fit.data_original
-    else:
-        raise ValueError("Either data or fit must be provided (but not both).")
-
-    # Filter out values ≤ 0 (since log–bins require positive values)
-    data = data[data > 0]
-
-    # Find the start of the tail where Poisson noise exceeds threshold
-    x_min = find_x_min(data, threshold=threshold)
-    # Only keep data ≥ x_min
-    tail_data = data[data >= x_min]
-
-    # If there are no points beyond x_min, do nothing
-    if len(tail_data) == 0:
-        return
-
-    data_max = tail_data.max()
-
-    # Compute number of 0.1-decade bins from x_min to data_max
-    decades = np.log10(data_max) - np.log10(x_min)
-    n_bins = int(np.ceil(decades / 0.1))
-    # Define bin edges in log-space
-    bin_edges = np.logspace(
-        np.log10(x_min),
-        np.log10(x_min) + n_bins * 0.1,
-        num=n_bins + 1,
-    )
-
-    # Compute the histogram for the tail (density=True → area under PDF = 1)
-    hist_vals, edges = np.histogram(tail_data, bins=bin_edges, density=True)
-
-    # Compute the geometric center of each bin for plotting
-    bin_centers = np.sqrt(edges[:-1] * edges[1:])
-
-    # Choose edgecolor if None
-    if edgecolor is None:
-        edgecolor = ax._get_lines.get_next_color()
-
-    # Plot as points
-    ax.plot(
-        bin_centers,
-        hist_vals,
-        marker="o",
-        linestyle="None",
-        label=label,
-        alpha=alpha,
-    )
-
-    # Set log–log axes
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
-    ax.set_ylabel(r"$p(-\Delta \langle E \rangle)$")
-    ax.legend()
-
-
-def plot_fit_pdf(
+def make_and_plot_truncated_fit_pdf(
     ax,
     fit,
-    dist_name="truncated_power_law",
+    bin_centers,
+    hist_values,
     title=None,
     color=None,
-    pre_label=None,
     label=None,
     alpha=1,
     linestyle="-",
-    num_points=200,
+    truncated=True,
+    pre_label=None,
 ):
-    """
-    Overplot the theoretical PDF of the fitted distribution (e.g., truncated_power_law)
-    on log–log axes by approximating the derivative of the CCDF. Uses a log‐spaced
-    grid from `fit.xmin` to `data.max()`. If `label` is None, construct it from
-    distribution parameters.
-    """
-    # Get the original data and xmin from the fit
-    data = fit.data_original
-    xmin_val = fit.xmin
+    mask = (bin_centers > fit.xmin) & (hist_values > 0)
+    xdata = bin_centers[mask]
+    ydata = hist_values[mask]
 
-    # Define a log‐spaced grid starting at xmin up to data.max()
-    x_vals = np.logspace(
-        np.log10(xmin_val),
-        np.log10(data.max()),
-        num=num_points,
-    )
+    log_y = np.log(ydata)
 
-    # Retrieve the fitted distribution object (e.g., fit.truncated_power_law)
-    dist = getattr(fit, dist_name)
+    if truncated:
+        # Truncated power law: log(y) = -alpha * log(x) - Lambda * x + logC
+        def log_model(x, alpha, Lambda, logC):
+            return -alpha * np.log(x) - Lambda * x + logC
 
-    # Compute the CDF on the grid, then CCDF = 1 – CDF
-    CDF = dist._cdf_base_function(x_vals)
-    CCDF = 1.0 - CDF
-
-    # Approximate the PDF as –d(CCDF)/dx using numpy.gradient
-    # Provide x_vals as spacing to gradient
-    dCCDF_dx = np.gradient(CCDF, x_vals)
-    pdf_vals = -dCCDF_dx
-
-    # If no explicit label is given, build one from the dist parameters
-    if label is None:
-        label_parts = []
-        # Some distributions expose parameter1_name, parameter1, etc.
-        params = zip(
-            [dist.parameter1_name, dist.parameter2_name, dist.parameter3_name],
-            [dist.parameter1, dist.parameter2, dist.parameter3],
+        popt, _ = curve_fit(log_model, xdata, log_y, p0=[1.5, 1e-3, 0])
+        alpha_fit, lambda_fit, logC_fit = popt
+        y_fit = np.exp(log_model(bin_centers, *popt))
+        fit_label = (
+            label or rf"Trunc. Fit: $\alpha={alpha_fit:.2f}, \lambda={lambda_fit:.2f}$"
         )
-        for name, val in params:
-            if name is not None:
-                if name == "lambda":
-                    label_parts.append(r"$\lambda$")
-                    label_parts.append(f"= {val:.2e}")
-                else:
-                    # For power_law, alpha is named dist.alpha
-                    label_parts.append(rf"${name}$")
-                    label_parts.append(f"= {val:.3f}")
-        # Special case: pure power_law has dist.alpha
-        if dist_name == "power_law":
-            label_parts = [r"$\alpha$" + f"= {dist.alpha:.3f}"]
-        label_str = ", ".join(label_parts)
-        label = f"{dist_name.replace('_', ' ').title()}: {label_str}".strip()
+    else:
+        # Pure power law: log(y) = -alpha * log(x) + logC
+        def log_model(x, alpha, logC):
+            return -alpha * np.log(x) + logC
 
-    # Prepend a prefix if provided
-    if pre_label:
-        label = pre_label + label
+        popt, _ = curve_fit(log_model, xdata, log_y, p0=[1.5, 0])
+        alpha_fit, logC_fit = popt
+        y_fit = np.exp(log_model(bin_centers, *popt))
+        fit_label = label or rf"Powerlaw Fit: $\alpha={alpha_fit:.2f}$"
 
-    # Plot the PDF curve
+    # Plot
     ax.plot(
-        x_vals,
-        pdf_vals,
-        label=label,
+        bin_centers,
+        y_fit,
+        label=(pre_label or "") + fit_label,
         color=color,
         alpha=alpha,
         linestyle=linestyle,
     )
 
-    # Set log‐log scales
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_xlabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
@@ -521,13 +429,13 @@ def plot_data_and_fit(
         # "stretched_exponential",
         # "lognormal_positive",
     ],
-    pdf=False,
+    pdf=True,
 ):
     if ax is None:
         fig, ax = plt.subplots()
     # plot the data
     if pdf:
-        plot_data_pdf(ax, fit=fit)
+        bin_centers, hist_values = plot_data_pdf(ax, fit=fit)
     else:
         plot_data(ax, fit=fit)
     # plot the fit
@@ -536,10 +444,11 @@ def plot_data_and_fit(
 
     for dist_name, color in zip(dist_names, cmap_colors):
         if pdf:
-            plot_fit_pdf(
+            make_and_plot_truncated_fit_pdf(
                 ax,
                 fit,
-                dist_name=dist_name,
+                bin_centers,
+                hist_values,
                 title=title,
                 color=color,
             )
@@ -603,7 +512,7 @@ def get_window_power_law_exponents(
             debug_fig.tight_layout()
             debug_fig.show()
             # Save debug window power law plot
-            filename = f"{plotPath}window_strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}_xmin_{xmin:.2e}{outputType}"
+            filename = f"{PLOTPATH}window_strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}_xmin_{xmin:.2e}{OUTPUTTYPE}"
             debug_fig.savefig(filename)
             # to save memory, close the figure
             plt.close(debug_fig)
@@ -727,11 +636,11 @@ def plot_power_law_map(
     # Save final power law surface plot
     syntheticTag = "synthetic_" if syntheticData else ""
     filename = (
-        f"{plotPath}{syntheticTag}power_law_surface_"
+        f"{PLOTPATH}{syntheticTag}power_law_surface_"
         f"strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}_"
         f"xmin_{xmins[0]:.2e}_{xmins[-1]:.2e}_"
         f"steps_{window_steps}_width_{window_width:.2f}_"
-        f"{figType}{outputType}"
+        f"{figType}{OUTPUTTYPE}"
     )
     if not debug:
         # No need to save 3x3 map
@@ -743,7 +652,7 @@ def make_debug_plot(xmins, strainLim=None):
     # Create debug plot grids for each xmin
     for xmin in xmins:
         # Find all saved fit plots for this xmin
-        pattern = f"{plotPath}window_strain_*_xmin_{xmin:.2e}{outputType}"
+        pattern = f"{PLOTPATH}window_strain_*_xmin_{xmin:.2e}{OUTPUTTYPE}"
         fit_files = sorted(glob.glob(pattern))
         if not fit_files:
             print(f"No fit debug files found for xmin {xmin:.2e}")
@@ -758,7 +667,7 @@ def make_debug_plot(xmins, strainLim=None):
             strain_range = base[len("window_strain_") : base.find("_xmin")]
 
             # Strain and display the energy drops image
-            energy_file = f"{plotPath}energy_drops_strain_{strain_range}{outputType}"
+            energy_file = f"{PLOTPATH}energy_drops_strain_{strain_range}{OUTPUTTYPE}"
             if os.path.exists(energy_file):
                 img_energy = plt.imread(energy_file)
                 axes[0, i].imshow(img_energy)
@@ -776,7 +685,7 @@ def make_debug_plot(xmins, strainLim=None):
         # fig.suptitle(f"Debug plots for x_{\mathrm{min}}={xmin:.2e}")
         fig.tight_layout()
         # Save the debug plot
-        debug_filename = f"{plotPath}debug_fit_plots_xmin_{xmin:.2e}{outputType}"
+        debug_filename = f"{PLOTPATH}debug_fit_plots_xmin_{xmin:.2e}{OUTPUTTYPE}"
         fig.savefig(debug_filename)
         # plt.show()
 
@@ -831,7 +740,7 @@ def plot_ks_distance(drops, xmin, dist_name="truncated_power_law"):
     ax.legend()
     fig.tight_layout()
     # Save the plot
-    filename = f"{plotPath}ks_distance_xmin_{xmin:.2e}_{dist_name}{outputType}"
+    filename = f"{PLOTPATH}ks_distance_xmin_{xmin:.2e}_{dist_name}{OUTPUTTYPE}"
     fig.savefig(filename, dpi=300)
     # plt.show()
 
@@ -946,7 +855,7 @@ def create_synthetic_data(
         debug_fig.tight_layout()
         debug_fig.show()
         # Save debug window power law plot
-        filename = f"{plotPath}Synthetic_sets_xmin_{xmin:.2e}{outputType}"
+        filename = f"{PLOTPATH}Synthetic_sets_xmin_{xmin:.2e}{OUTPUTTYPE}"
         debug_fig.savefig(filename)
         # to save memory, close the figure
         plt.close(debug_fig)
@@ -1017,25 +926,34 @@ def goodnessOfFit(
 
     if debug:
         fig, ax = plt.subplots()
-        plot_data(ax, fit=fit_orig, label="Real data")
-        plot_fit(ax, fit_orig, dist_name=dist_name)
+
+        bin_centers, hist_values = plot_data_pdf(ax, fit=fit_orig, label="Real data")
+        make_and_plot_truncated_fit_pdf(
+            ax,
+            fit_orig,
+            bin_centers=bin_centers,
+            hist_values=hist_values,
+        )
+
         for i, s_drops in enumerate(synthetic_sets[[0, len(synthetic_sets) // 2, -1]]):
             fit_synth = powerlaw.Fit(s_drops, xmin=xmin)
-            plot_data(
+
+            # synth_bin_centers, synth_hist_values = getHist(fit_synth)
+            synth_bin_centers, synth_hist_values = plot_data_pdf(
                 ax,
                 fit=fit_synth,
                 label=f"Synthetic sample {i}",
-                edgecolor=None,
                 alpha=0.2,
             )
             dist_synth = getattr(fit_orig, dist_name)
             synthD = dist_synth.D
             # plot the fit
 
-            plot_fit(
+            make_and_plot_truncated_fit_pdf(
                 ax,
                 fit_synth,
-                dist_name=dist_name,
+                bin_centers=synth_bin_centers,
+                hist_values=synth_hist_values,
                 pre_label=f"Synth fit {i} D:{synthD:.2f}_",
                 alpha=0.2,
                 linestyle="--",
@@ -1140,11 +1058,12 @@ def make_exponent_map():
 
 
 def make_exponent_fit():
-    csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+    # csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
     csvPath = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+    # csvPath = "/Volumes/data/MTS2D_output/simpleShear,s400x400l0.15,1e-05,1.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
     xmin = 1e-6
-    strainLim = [1, 3]
-    debug = True
+    strainLim = [1.0, 3.0]
+    debug = False
     fig, ax = plt.subplots()
     drops, _, _ = get_drops_in_windows(csvPath, strainLim)
     drops = drops  # we only have one window, so we take the first one
@@ -1158,15 +1077,75 @@ def make_exponent_fit():
     for d in drops:
         fit = powerlaw.Fit(d, xmin=xmin)
         title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
-        plot_data_and_fit(fit, ax, xmin, title)
+        plot_data_and_fit(fit, ax, xmin, title, pdf=True)
         p = evaluate_fit(d, xmin, parallel=True, debug=debug)
         print(p)
-        plot_ks_distance(d, xmin)
+        # plot_ks_distance(d, xmin)
     plt.show()
 
 
-if __name__ == "__main__":
-    plotPath = "Plots/powerLaw/"
-    outputType = ".png"
+def get_minimizer(label):
+    d = {
+        k.strip(): v.strip() for k, v in (item.split("=") for item in label.split(","))
+    }
+    minimizer = d["minimizer"]
+    minimizer = minimizer.replace("LBFGS", "L-BFGS")
+    return minimizer
 
+
+def plot_powerlaw(
+    algorithms_paths,
+    labels=None,
+    strainLim=[0.15, 0.4],
+    xmin=1e-6,
+    debug=False,
+    show=False,
+    evaluate=True,
+    save=True,
+):
+    for paths, labels in zip(algorithms_paths, labels):
+        fig, ax = plt.subplots()
+        all_drops = []
+        for path in paths:
+            drops, _, _ = get_drops_in_windows(path, strainLim)
+            all_drops.extend(drops)  # drops is a list of arrays
+
+        # After the loop
+        all_drops = np.concatenate(all_drops)
+
+        # Remove large drops (something strange happened)
+        all_drops = all_drops[all_drops < 0.05]
+
+        fit = powerlaw.Fit(all_drops, xmin=xmin)
+        title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
+        title = get_minimizer(labels[0]) + title
+        plot_data_and_fit(fit, ax, xmin, title, pdf=True)
+        if evaluate:
+            p = evaluate_fit(all_drops, xmin, parallel=True, debug=debug)
+            rating = ["bad", "poor", "good", "excellent"]
+            scores = [0.05, 0.1, 0.3]
+            for threshold, r in zip(scores, rating):
+                if p < threshold:
+                    break
+            else:
+                r = rating[-1]
+            print(f"P value: {p:.4f} ({r})")
+        # plot_ks_distance(d, xmin)
+        if show:
+            plt.show()
+        if save:
+            # Save the figure as PDF using the title as filename
+            safe_title = (
+                title.replace(" ", "_")
+                .replace("$", "")
+                .replace("\\", "")
+                .replace("{", "")
+                .replace("}", "")
+                .replace(":", "")
+            )
+            filename = f"{PLOTPATH}{safe_title}.pdf"
+            fig.savefig(filename, format="pdf", bbox_inches="tight")
+
+
+if __name__ == "__main__":
     make_exponent_fit()

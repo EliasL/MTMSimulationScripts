@@ -18,6 +18,7 @@ from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
 from Management.connectToCluster import getServerUserName
 from tqdm import tqdm
 import numpy as np
+from MTMath.plotPowerLaw import plot_powerlaw
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
@@ -30,6 +31,101 @@ FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
 MACRO_PATH = os.path.join(FOLDER_PATH, "macro")
 PLOTS_PATH = os.path.join(FOLDER_PATH, "plots")
 RAW_DATA_PATH = os.path.join(FOLDER_PATH, "data")
+
+OLD_TO_NEW_KEYS = {
+    "Line nr": None,  # Probably an index or redundant
+    "Load": "load",
+    "Avg energy": "avg_energy",
+    "Max energy": "max_energy",
+    "Avg RSS": "avg_RSS",
+    "Nr plastic deformations": "nr_plastic_deformations",
+    "Nr FIRE iterations": "nr_iterations",  # Assumed generic for all solvers
+    "Nr LBFGS iterations": "nr_iterations",
+    "Nr CG iterations": "nr_iterations",
+    "Nr FIRE func evals": "nr_func_evals",
+    "Nr LBFGS func evals": "nr_func_evals",
+    "Nr CG func evals": "nr_func_evals",
+    "FIRE Term reason": "FIRE_Term_reason",
+    "LBFGS Term reason": "LBFGS_Term_reason",
+    "CG Term reason": "CG_Term_reason",
+    "Run time": "run_time",
+    "Est time remaining": "est_time_remaining",
+    "maxX": "maxX",
+    "minX": "minX",
+    "maxY": "maxY",
+    "minY": "minY",
+    "dt_start": None,  # No direct equivalent provided
+}
+
+
+def update_headers_in_file(csv_path):
+    df = pd.read_csv(csv_path)
+
+    rename_dict = {
+        old: new
+        for old, new in OLD_TO_NEW_KEYS.items()
+        if new is not None and old in df.columns
+    }
+
+    df.rename(columns=rename_dict, inplace=True)
+
+    df.to_csv(csv_path, index=False)
+
+
+def smart_read_csv(file_path):
+    df = pd.read_csv(file_path)
+
+    # Check if using old keys by checking the header
+    old_keys = set(OLD_TO_NEW_KEYS.keys())
+    new_keys = set(
+        [
+            "load_step",
+            "load",
+            "avg_energy",
+            "avg_energy_change",
+            "max_energy",
+            "max_force",
+            "avg_RSS",
+            "nr_plastic_deformations",
+            "max_plastic_deformation",
+            "max_positive_plastic_jump",
+            "max_negative_plastic_jump",
+            "nr_iterations",
+            "nr_func_evals",
+            "LBFGS_Term_reason",
+            "CG_Term_reason",
+            "FIRE_Term_reason",
+            "run_time",
+            "minimization_time",
+            "write_time",
+            "est_time_remaining",
+            "cmX",
+            "cmY",
+            "maxX",
+            "minX",
+            "maxY",
+            "minY",
+        ]
+    )
+
+    if old_keys & set(df.columns):  # old keys present
+        # Convert old column names to new ones
+        rename_dict = {
+            old: new
+            for old, new in OLD_TO_NEW_KEYS.items()
+            if new is not None and old in df.columns
+        }
+        df = df.rename(columns=rename_dict)
+
+    # Add missing new keys as NaN
+    for key in new_keys:
+        if key not in df.columns:
+            df[key] = pd.NA
+
+    # Reorder columns (optional)
+    df = df[[col for col in new_keys if col in df.columns]]
+
+    return df
 
 
 def handleLocalPath(dataPath, configs, returnCsv=True):
@@ -127,6 +223,9 @@ def get_csv_from_server(server, configs):
     # This fix is needed due to an old bug in the C++ program (fixed now)
     # so when downloading some data from the server, we need a fix
     # fix_csv_files(newPaths, use_tqdm=False)
+    print("Updating headers")
+    for path in tqdm(newPaths):
+        update_headers_in_file(path)
     return newPaths
 
 
@@ -200,6 +299,8 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
 
             if config.name in existing_files:
                 # Read estimated time remaining from CSV file
+
+                keys = pd.read_csv(file_path).keys()
                 est_time_remaining = pd.read_csv(file_path)["est_time_remaining"]
                 time_remaining = (
                     duration_to_seconds(est_time_remaining.iloc[-1])
@@ -793,6 +894,13 @@ def plotLog(config_groups, labels, **kwargs):
     # makeLogPlotComparison(paths, f"{name} - EnergyPowerLawWindow", window=True, **kwargs)
     # makeEnergyAvalancheComparison(paths, f"{name} - Histogram", **kwargs)
     # makeItterationsPlot(paths, f"{name}Itterations.pdf", **kwargs)
+
+
+def plotLog2(config_groups, labels, **kwargs):
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    plot_powerlaw(paths, labels=labels, **kwargs)
 
 
 if __name__ == "__main__":

@@ -1065,6 +1065,9 @@ def make_images(vtu_files, num_processes=10, use_tqdm=True, X="load", **kwargs):
     # Use line below to debug with first item in kwargs_list
     image_paths = process_frame(kwargs_list[0])
 
+    if get_data_from_name(vtu_files[0])["L"] > 200:
+        num_processes = 1  # Limited memory for large systems
+
     if multithread:
         with Pool(processes=num_processes) as pool:
             image_paths = list(

@@ -1,3 +1,4 @@
+from Plotting.remotePlotting import plotLog, plotLog2
 from Management import parameterExploring as pe
 from Management.connectToCluster import uploadProject
 from Management.runOnCluster import build_on_all_servers
@@ -107,12 +108,23 @@ def plotBigJob():
     nrSeeds = 40
     configs, labels = bigJob(nrThreads, nrSeeds, group_by_seeds=True)
     # xlim = [0.25, 0.55]
-    pe.plotLog(
+    strainLim = [0.15, 0.4]
+    plotLog2(
         configs,
-        "200x200, load:0.15-1, PBC, seeds:40",
         labels=labels,
+        strainLim=strainLim,
         # show=True,
-        # xlim=xlim,
+    )
+    strainLim = [0.5, 1.0]
+    # strainLim = [0.6, 1.0]
+    strainLim = [0.7, 1.0]
+    plotLog2(
+        configs,
+        xmin=1e-5,
+        labels=labels,
+        strainLim=strainLim,
+        # show=True,
+        # debug=True,
     )
 
 
@@ -122,9 +134,9 @@ def lotsOThreads():
     size = 150
     configs, labels = propperJob(nrThreads, nrSeeds, size=size, group_by_seeds=True)
     # xlim = [0.25, 0.55]
-    pe.plotLog(
+    plotLog(
         configs,
-        f"{size}x{size}, load:0.15-1, PBC, t{nrThreads}, seeds:{nrSeeds}",
+        # f"{size}x{size}, load:0.15-1, PBC, t{nrThreads}, seeds:{nrSeeds}",
         labels=labels,
         # show=True,
         # xlim=xlim,
@@ -160,8 +172,10 @@ def runOnLocalMachine():
     # configs, labels = allPlasticEventsJob()
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
-    configs, labels = basicJob(8, 1, size=200, maxLoad=0.3)
-    # configs, labels = singleDislocationTest(nrThreads=3, nrSeeds=1, L=200)
+    configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
+    configs, labels = singleDislocationTest(
+        nrThreads=4, nrSeeds=1, L=20, diagonal="minor"
+    )
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
@@ -236,12 +250,12 @@ if __name__ == "__main__":
 
     # runOnServer()
     # parameterExploring()
-    runOnLocalMachine()
+    # runOnLocalMachine()
 
     # stopJobs()
     # cleanData()
     # startJobs()
 
-    # plotBigJob()
+    plotBigJob()
     # threadTest()
     # benchmark()

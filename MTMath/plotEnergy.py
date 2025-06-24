@@ -1,5 +1,9 @@
 import numpy as np
-from .contiPotential import ContiEnergy, lagrange_reduction
+
+try:
+    from .contiPotential import ContiEnergy, lagrange_reduction
+except ModuleNotFoundError:
+    from contiPotential import ContiEnergy, lagrange_reduction
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate

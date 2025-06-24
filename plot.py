@@ -222,14 +222,14 @@ def plotEnergyRegion():
 if __name__ == "__main__":
     # plotEnergyRegion()
     # plotSampleRuns()
-    plotPropperJob()
+    # plotPropperJob()
     # debugPlotAll()
     # energyField()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
     # createVideoes(configs, all_images=True)
 
-    # plotAvalanches()
+    plotAvalanches()
     # plotMaxForce()
     # plotMinimizationCriteriaData()
     # plotShowMinCriteria()
