@@ -912,14 +912,14 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
     """
     df = pd.read_csv(
         macro_data,
-        usecols=[
-            X,
-            "load_step",
-            "avg_energy",
-            "avg_RSS",
-            "avg_energy_change",
-            "nr_plastic_deformations",
-        ],
+        # usecols=[
+        #     X,
+        #     "load_step",
+        #     "avg_energy",
+        #     "avg_RSS",
+        #     "avg_energy_change",
+        #     "nr_plastic_deformations",
+        # ],
     )
     avg_energy_list = []
     change_avg_energy_list = []
@@ -929,17 +929,32 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
 
     for vtu_file in vtu_files:
         metaData = get_data_from_name(vtu_file)
+
+        if "load_step" in df.columns:
+            n = metaData["load_step"]
+            matching_rows = df[df["load_step"] == n]
+            if len(matching_rows) != 1:
+                raise ValueError(
+                    f"Error in file {vtu_file}:\nload_step value '{n}' is not unique or not found. Found {len(matching_rows)} matches."
+                )
+        elif "load" in df.columns:
+            load = metaData["load"]
+            matching_rows = df[df["load"] == load]
+            if len(matching_rows) != 1:
+                pass
+                # raise ValueError(
+                #     f"Error in file {vtu_file}:\nload value '{load}' is not unique or not found. Found {len(matching_rows)} matches."
+                # )
+            if len(matching_rows) == 0:
+                print(f"Warning: load {load} not found!")
+                matching_rows = df.iloc[[0]]
+        else:
+            raise ValueError(
+                "Neither 'load_step' nor 'load' columns found in DataFrame."
+            )
+
         x = metaData[X]
         x_list.append(x)
-        n = metaData["load_step"]
-        # Filter rows where "load" matches the value
-        matching_rows = df[df["load_step"] == n]
-
-        # Check if there is exactly one matching row
-        if len(matching_rows) != 1:
-            raise ValueError(
-                f"Error in file {vtu_file}:\nload_step value '{n}' is not unique or not found. Found {len(matching_rows)} matches."
-            )
 
         # Get the index (line number) of the matching row
         matching_row_index = matching_rows.index[0]
@@ -951,20 +966,30 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         # Append the extracted values to the respective lists
         avg_energy_list.append(matching_row["avg_energy"])
         avg_RSS_list.append(matching_row["avg_RSS"])
-        change_avg_energy_list.append(matching_row["avg_energy_change"])
-        if (
-            matching_row["avg_energy_change"] < 0
-            and matching_row["nr_plastic_deformations"] == 0
-        ):
-            # print(f"No deformation energy drop: {matching_row_index}, load={load}")
-            # This can happen in the beginning in simulations
-            pass
+        if "avg_energy_change" in matching_row:
+            change_avg_energy_list.append(matching_row["avg_energy_change"])
+            if (
+                matching_row["avg_energy_change"] < 0
+                and matching_row["nr_plastic_deformations"] == 0
+            ):
+                # print(f"No deformation energy drop: {matching_row_index}, load={load}")
+                # This can happen in the beginning in simulations
+                pass
 
-        if (
-            matching_row["avg_energy_change"] < 0
-            and -matching_row["avg_energy_change"] < 5e-8
-        ):
-            print(f"Super small energy drop: {matching_row_index}, {X}={x}")
+            if (
+                matching_row["avg_energy_change"] < 0
+                and -matching_row["avg_energy_change"] < 5e-8
+            ):
+                print(f"Super small energy drop: {matching_row_index}, {X}={x}")
+        else:
+            if matching_row_index == 0:
+                diff = 0
+            else:
+                diff = (
+                    df["avg_energy"][matching_row_index - 1]
+                    - df["avg_energy"][matching_row_index]
+                )
+            change_avg_energy_list.append(diff)
 
     # Find previous data and get change data as well
     px, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(macro_data, line_numbers, X)
@@ -1014,7 +1039,7 @@ def make_images(vtu_files, num_processes=10, use_tqdm=True, X="load", **kwargs):
     if macro_data:
         axis_limits = get_axis_limits(macro_data)
         e_lims = get_energy_range(vtu_files, macro_data)
-        e_lims[1] = min(e_lims[1], 0.2)
+        # e_lims[1] = min(e_lims[1], 0.2)
         avgEnergy, avgRSS, delAvgEnergy, delAvgRSS, delx, macroDataRowIndex = (
             get_corresponding_energy_and_rss(vtu_files, macro_data, X)
         )

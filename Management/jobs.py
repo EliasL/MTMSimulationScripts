@@ -78,6 +78,28 @@ def allPlasticEventsJob():
     return configs, labels
 
 
+def initalInstability():
+    configs, labels = ConfigGenerator.generate(
+        seed=[0],
+        group_by_seeds=False,
+        rows=200,
+        cols=200,
+        startLoad=0.12,
+        loadIncrement=1e-5,
+        maxLoad=0.2,
+        # initialGuessNoise=0.000001,
+        nrThreads=8,
+        minimizer=["LBFGS"],
+        # LBFGSEpsg=1e-6,
+        # CGEpsg=1e-5,
+        LBFGSEpsx=1e-6,
+        # eps=1e-8,
+        usingPBC="false",
+        scenario="simpleShearFixedBoundary",
+    )
+    return configs, labels
+
+
 def propperJob(
     nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None, minimizer=None
 ):

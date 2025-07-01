@@ -966,6 +966,8 @@ def makePlot(
         if colors:
             if isinstance(colors, list):
                 kwargs["color"] = colors[i]
+            else:
+                kwargs["color"] = colors
 
         if linestyles:
             if isinstance(linestyles, bool):

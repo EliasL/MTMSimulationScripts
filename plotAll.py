@@ -68,6 +68,9 @@ def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
 
     print(f"Plotting at {path}")
     if not noPlots and csvPath is not None:
+        from Plotting.remotePlotting import update_headers_in_file
+
+        update_headers_in_file(csvPath)
         makePlot(
             csvPath,
             name=subfolderName + "_energy.pdf",
@@ -89,18 +92,21 @@ def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
             "nr_func_evals",
             "est_time_remaining",
         ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
-            if Y == "est_time_remaining":
-                xlim = [0.16]
-            else:
-                xlim = None
-            makePlot(
-                csvPath,
-                Y=Y,
-                name=subfolderName + f"{Y.replace(' ', '_')}.pdf",
-                legend=True,
-                use_title=True,
-                xlim=xlim,
-            )
+            try:
+                if Y == "est_time_remaining":
+                    xlim = [0.16]
+                else:
+                    xlim = None
+                makePlot(
+                    csvPath,
+                    Y=Y,
+                    name=subfolderName + f"{Y.replace(' ', '_')}.pdf",
+                    legend=True,
+                    use_title=True,
+                    xlim=xlim,
+                )
+            except KeyError as e:
+                print(f"{e}")
 
         if X == "nr_func_evals":
             makePlot(
@@ -235,10 +241,14 @@ if __name__ == "__main__":
         configs = [
             "/Volumes/data/MTS2D_output/remeshTest,s3x3l0.0,0.001,1.0NPBCt1meshDiagonalalternates0/config.conf"
         ]
+        # from Plotting.remotePlotting import update_headers_in_file
 
+        # update_headers_in_file(
+        #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s2/macroData.csv",
+        # )
         # for c in configs:
         plotAll(
-            "/Volumes/data/MTS2D_output/cyclicSimpleShear,s100x100l0.15,1e-05,1.0PBCt3epsR1e-06s0/collection.pvd",
+            "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s2/macroData.csv",
             makeGIF=False,
             transparent=False,
             noPlots=True,

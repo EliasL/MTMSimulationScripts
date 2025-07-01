@@ -1,4 +1,4 @@
-from Plotting.remotePlotting import plotLog, plotLog2
+from Plotting.remotePlotting import plotLog, plotLog2, plotEnergy
 from Management import parameterExploring as pe
 from Management.connectToCluster import uploadProject
 from Management.runOnCluster import build_on_all_servers
@@ -27,6 +27,7 @@ from Management.jobs import (
     singleDislocationTest,
     longJob,
     remeshTest,
+    initalInstability,
 )
 
 
@@ -107,6 +108,9 @@ def plotBigJob():
     nrThreads = 3
     nrSeeds = 40
     configs, labels = bigJob(nrThreads, nrSeeds, group_by_seeds=True)
+    # Energy
+
+    # Powerlaw
     # xlim = [0.25, 0.55]
     strainLim = [0.15, 0.4]
     plotLog2(
@@ -114,8 +118,43 @@ def plotBigJob():
         labels=labels,
         strainLim=strainLim,
         # show=True,
+        debug=True,
     )
     strainLim = [0.5, 1.0]
+    # strainLim = [0.6, 1.0]
+    # strainLim = [0.7, 1.0]
+    plotLog2(
+        configs,
+        xmin=1e-5,
+        labels=labels,
+        strainLim=strainLim,
+        # show=True,
+        debug=True,
+    )
+
+
+def plotPropperJob():
+    nrThreads = 3
+    nrSeeds = 40
+    configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
+    # Energy
+    mini = ["L-BFGS", "CG", "FIRE"]
+    for c, lab, m in zip(configs, labels, mini):
+        plotEnergy(c, lab, f"{m}-Energy", plot_average=True)
+    # Powerlaw
+    # xlim = [0.25, 0.55]
+    strainLim = [0.15, 0.5]
+    plotLog2(
+        configs,
+        labels=labels,
+        # xmin=None,
+        strainLim=strainLim,
+        # xmin=1e-5,
+        # show=True,
+        # debug=True,
+        # addFit=False,
+    )
+    # strainLim = [0.5, 1.0]
     # strainLim = [0.6, 1.0]
     strainLim = [0.7, 1.0]
     plotLog2(
@@ -125,6 +164,7 @@ def plotBigJob():
         strainLim=strainLim,
         # show=True,
         # debug=True,
+        # addFit=False,
     )
 
 
@@ -173,9 +213,10 @@ def runOnLocalMachine():
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
     configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
-    configs, labels = singleDislocationTest(
-        nrThreads=4, nrSeeds=1, L=20, diagonal="minor"
-    )
+    configs, labels = initalInstability()
+    # configs, labels = singleDislocationTest(
+    #     nrThreads=4, nrSeeds=1, L=20, diagonal="minor"
+    # )
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
@@ -256,6 +297,7 @@ if __name__ == "__main__":
     # cleanData()
     # startJobs()
 
-    plotBigJob()
+    plotPropperJob()
+    # plotBigJob()
     # threadTest()
     # benchmark()

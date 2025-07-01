@@ -14,6 +14,7 @@ from .makePlots import (
     duration_to_seconds,
 )
 import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgba
 from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
 from Management.connectToCluster import getServerUserName
 from tqdm import tqdm
@@ -223,8 +224,8 @@ def get_csv_from_server(server, configs):
     # This fix is needed due to an old bug in the C++ program (fixed now)
     # so when downloading some data from the server, we need a fix
     # fix_csv_files(newPaths, use_tqdm=False)
-    print("Updating headers")
-    for path in tqdm(newPaths):
+    # print("Updating headers")
+    for path in newPaths:
         update_headers_in_file(path)
     return newPaths
 
@@ -300,13 +301,17 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
             if config.name in existing_files:
                 # Read estimated time remaining from CSV file
 
-                keys = pd.read_csv(file_path).keys()
-                est_time_remaining = pd.read_csv(file_path)["est_time_remaining"]
-                time_remaining = (
-                    duration_to_seconds(est_time_remaining.iloc[-1])
-                    if not est_time_remaining.empty
-                    else None
-                )
+                df = pd.read_csv(file_path)
+                keys = df.keys()
+                if "est_time_remaining" in keys:
+                    est_time_remaining = df["est_time_remaining"]
+                    time_remaining = (
+                        duration_to_seconds(est_time_remaining.iloc[-1])
+                        if not est_time_remaining.empty
+                        else None
+                    )
+                else:
+                    time_remaining = -1
 
                 if time_remaining is None or time_remaining > 0:
                     # File might still be processing; check age
@@ -862,11 +867,16 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
     paths, labels = get_csv_files(
         configs, labels=labels, useOldFiles=False, forceUpdate=False
     )
+
+    base_colors = {"LBFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
+    color = to_rgba(base_colors[configs[0].minimizer], alpha=0.2)
     fig, ax = makePlot(
         paths,
         name=f"{name}.pdf",
         labels=labels,
-        legend=True,
+        # legend=True,
+        colors=color,
+        legend=name,
         **kwargs,
     )
 
@@ -900,7 +910,9 @@ def plotLog2(config_groups, labels, **kwargs):
     paths, labels = get_csv_files(
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
-    plot_powerlaw(paths, labels=labels, **kwargs)
+
+    # print(np.array(paths).size)
+    plot_powerlaw(paths, labels, **kwargs)
 
 
 if __name__ == "__main__":

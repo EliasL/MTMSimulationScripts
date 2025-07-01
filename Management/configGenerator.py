@@ -92,9 +92,8 @@ class SimulationConfig:
             elif key != "NONAME":
                 raise (Warning(f"Unkown keyword: {key}"))
 
-        assert self.usingPBC.lower() == "true" or self.usingPBC.lower() == "false", (
-            "Only use true or false"
-        )
+        if not (self.usingPBC.lower() == "true" or self.usingPBC.lower() == "false"):
+            print(f"Warning! Only use true or false, not {self.usingPBC.lower()}.")
 
         if "NONAME" not in kwargs.keys():
             self.name = self.generate_name(withExtension=False)
