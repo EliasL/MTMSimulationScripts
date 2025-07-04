@@ -52,6 +52,56 @@ def simpleShearSystem(L=2, shearValues=np.linspace(0, 3, 100)):
     return pos, elements, F_values, dN_dX_values
 
 
+# New function using the updated FEM.Element abstraction
+def simpleShearSystem2(L=2, shearValues=np.linspace(0, 3, 100)):
+    """
+    Make a LxL system of nodes connected in a triangular mesh.
+    Apply shear and calculate F using new FEM.Element abstraction.
+    """
+    N = L**2
+    FEM.make_N_nodes(N)
+
+    # Explicit triangular elements using node indices
+    element_indices = [
+        [0, 1, 2],
+        [1, 2, 3],
+        [2, 3, 0],
+        [3, 0, 1],
+    ]
+    elements = [FEM.Element(ids) for ids in element_indices]
+
+    F = sp.Array([FEM.F(e) for e in elements])
+    dN_dX = sp.Array([FEM.dN_dX(e) for e in elements])
+
+    shear = sp.symbols("shear")
+
+    # Apply shear to interpolated x field for each node, gather into matrix
+    sheared_positions = sp.Matrix(
+        [FEM.apply_shear(node["x"], shear) for node in FEM.nodes]
+    )
+
+    # Lambdify evaluation functions
+    ref_positions = np.array([[i % L, i // L] for i in range(N)])
+    F_func = sp.lambdify([FEM.X, FEM.u, shear], F, "numpy")
+    zero_u = np.zeros_like(ref_positions)
+    dN_dX_func = sp.lambdify(FEM.X, dN_dX, "numpy")
+    pos_func = sp.lambdify([FEM.X, FEM.u, shear], sheared_positions, "numpy")
+
+    dN_dX_values = dN_dX_func(ref_positions)
+    raw_pos = np.array([pos_func(ref_positions, zero_u, s) for s in shearValues])
+    # Ensure pos shape is (n_shear, n_nodes, 2)
+    pos = raw_pos.reshape(len(shearValues), -1, 2)
+    F_values = np.array([F_func(ref_positions, zero_u, s) for s in shearValues])
+
+    # Reshape
+    n_shear = shearValues.shape[0]
+    n_elements = len(elements)
+    F_values = F_values.reshape(n_shear, n_elements, 2, 2)
+    dN_dX_values = dN_dX_values.reshape(n_elements, 3, 2)
+
+    return pos, elements, F_values, dN_dX_values
+
+
 def calculateForcesAndEnergy(F_values, dN_dX):
     energies = ContiEnergy.energy_from_F(F_values)
     # Strain steps are in F_values, so we should tile dN_dX to match
@@ -128,16 +178,35 @@ def makeVideo(pos, forces):
         ax.set_ylabel("Y Position")
         ax.set_aspect("equal")
         ax.grid()
-        ax.set_xlim(-1, 1)
-        ax.set_ylim(-1, 1)
+        # Plot node positions for the current shear step
+        ax.scatter(pos[frame][:, 0], pos[frame][:, 1], color="blue")
+
+        # Draw force vectors as arrows on top of node positions
+        # Optional: scale forces for better visualization
+        arrow_scale = 0.00001  # Increase for shorter arrows, decrease for longer arrows
+        for e_idx in range(n_elements):
+            for n_idx in range(n_nodes):
+                node_pos = pos[frame][n_idx]
+                fx, fy = forces[frame][e_idx][n_idx]
+                ax.quiver(
+                    node_pos[0],
+                    node_pos[1],
+                    fx,
+                    fy,
+                    angles="xy",
+                    scale_units="xy",
+                    scale=arrow_scale,
+                    color="red",
+                    width=0.01,
+                )
 
     ani = animation.FuncAnimation(fig, update, frames=n_shear, repeat=True)
     plt.show()
 
 
 if __name__ == "__main__":
-    shear = np.linspace(0, 3, 100)
-    pos, elements, F, dN_dX = simpleShearSystem(L=2, shearValues=shear)
+    shear = np.linspace(0, 1, 30)
+    pos, elements, F, dN_dX = simpleShearSystem2(L=2, shearValues=shear)
     energies, forces = calculateForcesAndEnergy(F, dN_dX)
     # plotEnergyAndForces(shear, energies, forces)
     # plotFValues(F)

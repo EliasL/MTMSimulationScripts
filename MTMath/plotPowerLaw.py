@@ -291,7 +291,7 @@ def get_energy_drops(
 
         debug_fig.tight_layout()
         # Save debug energy plot
-        minimizer = get_minimizer(label)
+        minimizer = get_attribute(label)
         filename = f"{PLOTPATH}debug/{minimizer}_{csvPath.split('/')[-1]}_energy_drops_strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}{OUTPUTTYPE}"
         debug_fig.savefig(filename, dpi=300)
         # to save memory, close the figure
@@ -1322,11 +1322,22 @@ def evaluate_fit(
     # with the name "p_{mean}_{xmin}.json"
     import os
     import json
+    from pathlib import Path
 
     nr_sets = 2500
     if debug:
         nr_sets = 3
-    p_file = f"bootstrapData/p_{drop_sum}_{xmin}_{nr_sets}.json"
+    # directory where *this* script lives (…/SimulationScripts/MTMath)
+    script_dir = Path(__file__).resolve().parent
+
+    # parent of that directory (…/SimulationScripts)
+    repo_root = script_dir.parent
+
+    # bootstrapData inside the parent folder
+    bootstrap_dir = repo_root / "bootstrapData"
+
+    # specific JSON file
+    p_file = bootstrap_dir / f"p_{drop_sum}_{xmin}_{nr_sets}.json"
     if os.path.exists(p_file) and not debug:
         with open(p_file, "r") as f:
             result = json.load(f)
@@ -1424,13 +1435,18 @@ def make_exponent_fit():
     fig.savefig(filename, format="pdf", bbox_inches="tight")
 
 
-def get_minimizer(label):
+def get_attribute(label):
     d = {
         k.strip(): v.strip() for k, v in (item.split("=") for item in label.split(","))
     }
-    minimizer = d["minimizer"]
-    minimizer = minimizer.replace("LBFGS", "L-BFGS")
-    return minimizer
+    if "minimizer" in d:
+        attribute = d["minimizer"]
+        attribute = attribute.replace("LBFGS", "L-BFGS")
+    if "L" in d:
+        attribute = "L=" + d["L"]
+    else:
+        attribute = "Unknown"
+    return attribute
 
 
 def plot_powerlaw(
@@ -1458,13 +1474,18 @@ def plot_powerlaw(
 
         # Remove large drops (something strange happened)
         all_drops = all_drops[all_drops < 0.05]
-
+        if len(all_drops) == 0:
+            print(f"No valid drops found for {label} in strain range {strainLim}.")
+            continue
         fit = powerlaw.Fit(all_drops, xmin=xmin)
         xmin = fit.xmin
         title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
-        minimizer = get_minimizer(labels[0])
-        title = minimizer + " " + title
-        color = MINIMIZER_COLORS[minimizer]
+        attribute = get_attribute(labels[0])
+        title = attribute + " " + title
+        if attribute in MINIMIZER_COLORS:
+            color = MINIMIZER_COLORS[attribute]
+        else:
+            color = "black"
 
         if evaluate:
             # p = evaluate_fit(all_drops, xmin, parallel=True, debug=debug)
@@ -1485,9 +1506,9 @@ def plot_powerlaw(
             else:
                 r = rating[-1]
             print(
-                f"{minimizer}: P value: {p:.2f} ({r}), mean: {mean_exp}, std: {std_exp}"
+                f"{attribute}: P value: {p:.2f} ({r}), mean: {mean_exp}, std: {std_exp}"
             )
-            print(f"{minimizer}: Synthetic mean: {mean_s_exp}, std: {std_s_exp}")
+            print(f"{attribute}: Synthetic mean: {mean_s_exp}, std: {std_s_exp}")
             ax = plot_data_and_fit(
                 fit,
                 ax,
@@ -1525,6 +1546,8 @@ def plot_powerlaw(
                 safe_title += "_noFit"
             filename = f"{PLOTPATH}{safe_title}.pdf"
             fig.savefig(filename, format="pdf", bbox_inches="tight")
+
+        plt.close(fig)
 
 
 if __name__ == "__main__":

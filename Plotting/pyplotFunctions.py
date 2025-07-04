@@ -617,7 +617,7 @@ def _plot_force_vectors(ax, data, connectivity, sheared_x, sheared_y):
 
     # plot node force vectors
     force_at_nodes = data.get_force_field()
-    scale = 0.1 / maxForce
+    scale = 0.01 / maxForce
     ax.quiver(
         sheared_x,
         sheared_y,

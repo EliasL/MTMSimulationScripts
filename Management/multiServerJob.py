@@ -56,6 +56,8 @@ def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
         configSolved = False
         data = {k: v for k, v in dm.data.items() if k != "date"}
         for server, (folders, sizes, free_space) in data.items():
+            if server not in serverConfigDict:
+                continue
             folders = map(lambda s: s.split("/")[-1], folders)
             if config.name in folders:
                 serverConfigDict[server].append(config)

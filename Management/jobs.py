@@ -490,6 +490,53 @@ def remeshTest(diagonal="major"):
         maxLoad=1.0,
         loadIncrement=0.001,
         minimizer="LBFGS",
-        scenario="remeshTest",
+        scenario="reconnectTest",
     )
     return configs, labels
+
+
+def reconnectionJob(L=200):
+    configs, labels = ConfigGenerator.generate(
+        usingPBC="true",
+        rows=L,
+        cols=L,
+        meshDiagonal="major",
+        reconnectingEnabled="true",
+        epsR=1e-5,
+        startLoad=0.15,
+        maxLoad=1.0,
+        nrThreads=6,
+        loadIncrement=1e-5,
+        minimizer="LBFGS",
+        scenario="simpleShear",
+    )
+    return configs, labels
+
+
+def size_scaling_job():
+    """
+    Generates a job for size scaling tests.
+    """
+    sizes = [50, 75, 100, 150, 200, 300, 400]
+    nr_samples = [50, 40, 30, 20, 10, 10, 10]
+    nr_threads = [1, 2, 3, 4, 5, 6, 7]
+    all_configs = []
+    all_labels = []
+    for size, samples, threads in zip(sizes, nr_samples, nr_threads):
+        configs, labels = ConfigGenerator.generate(
+            seed=range(samples),
+            rows=size,
+            cols=size,
+            startLoad=0.15,
+            maxLoad=1.0,
+            loadIncrement=1e-5,
+            nrThreads=threads,
+            minimizer="LBFGS",
+            epsR=1e-6,
+            scenario="simpleShear",
+        )
+        # Append the generated configs and labels to the main lists
+        all_configs.append(configs)
+        all_labels.append(list(map(lambda x: f"L={size}, " + x, labels)))
+
+    return all_configs, all_labels

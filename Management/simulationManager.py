@@ -32,6 +32,8 @@ class SimulationManager:
         self.parent_folder = str(Path(__file__).resolve().parent.parent.parent)
         self.project_path = os.path.join(self.parent_folder, "MTS2D")
         self.script_path = os.path.join(self.parent_folder, "SimulationScripts")
+        # Store the original working directory so we can restore it later
+        self._original_cwd = os.getcwd()
         # Change the working directory
         os.chdir(self.project_path)
 
@@ -245,6 +247,19 @@ class SimulationManager:
             command = "module load cmake llvm/15.0.6 && "
             print("Loading modules: cmake")
             return command
+
+    def __del__(self):
+        """
+        Destructor: restore the working directory to what it was when the
+        SimulationManager was created.  We silence any errors because the
+        interpreter may be shutting down or the directory might no longer
+        exist at destruction time.
+        """
+        try:
+            os.chdir(self._original_cwd)
+        except Exception:
+            # Avoid raising exceptions in a destructor
+            pass
 
 
 # The reason why this is so complicated is that if we simply use .readline(), it

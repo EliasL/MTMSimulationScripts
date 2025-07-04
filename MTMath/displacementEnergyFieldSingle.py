@@ -127,10 +127,11 @@ def create_simple_triangle_F_animation(
     def update(frame):
         ax.clear()
         t = frame / (n_frames - 1)
-        displacements = [(0, 0), (0, 0), (t, 0)]
+        displacements = [(-t, t**2), (t - 2, np.exp(t)), (t, 0)]
         element.set_displacements(displacements)
         plot_triangle(ax, element)
-        F = element.get_deformation_gradient()
+        F = element.get_deformation_gradient(0)
+        print(F)
         draw_F(ax, F, element.curr_nodes)
         ax.legend()
 
@@ -182,11 +183,11 @@ def create_strange_triangle_F_animation(
 
 if __name__ == "__main__":
     # Example usage of the animation function
-    create_strange_triangle_F_animation(
-        output_path="Plots/strange_triangle_F_animation.mp4",
-        n_frames_pr_move=60,
-        fps=30,
-    )
+    # create_strange_triangle_F_animation(
+    #     output_path="Plots/strange_triangle_F_animation.mp4",
+    #     n_frames_pr_move=60,
+    #     fps=30,
+    # )
     create_simple_triangle_F_animation(
         output_path="Plots/triangle_F_animation.mp4",
         n_frames=60,

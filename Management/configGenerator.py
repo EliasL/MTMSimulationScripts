@@ -17,6 +17,7 @@ class SimulationConfig:
         self.rows = 3
         self.cols = 3
         self.usingPBC = "true"
+        self.reconnectingEnabled = "false"
         self.scenario = "simpleShear"
         self.nrThreads = 1  # This needs to be 1. Don't change. (see queueLocalJobs)
         self.seed = 0
@@ -104,6 +105,7 @@ class SimulationConfig:
             f"s{self.rows}x{self.cols}"
             + f"l{self.startLoad},{self.loadIncrement},{self.maxLoad}"
             + f"{'PBC' if self.usingPBC.lower() == 'true' else 'NPBC'}"
+            + f"{'' if self.reconnectingEnabled == 'false' else 'ReCON'}"
             + f"t{self.nrThreads}"
         )
 
@@ -120,6 +122,7 @@ class SimulationConfig:
                 "usingPBC",
                 "nrThreads",
                 "seed",
+                "reconnectingEnabled",
             ]:
                 if defaultValues.get(attr) != value:
                     name += f"{attr}{value}"

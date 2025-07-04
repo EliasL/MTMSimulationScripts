@@ -165,9 +165,26 @@ class Process:
                     for header in header_indices:
                         header_indices[header] -= 1
 
-                # load = last_line_values[header_indices["load"]]
-                runTime = last_line_values[header_indices["Run_time"]]
-                timeRemaining = last_line_values[header_indices["Est_time_remaining"]]
+                try:
+                    # load = last_line_values[header_indices["load"]]
+                    runTime = last_line_values[header_indices["run_time"]]
+                    timeRemaining = last_line_values[
+                        header_indices["est_time_remaining"]
+                    ]
+                except KeyError:
+                    try:
+                        # Try old header names
+                        runTime = last_line_values[header_indices["Run_time"]]
+                        timeRemaining = last_line_values[
+                            header_indices["Est_time_remaining"]
+                        ]
+                    except KeyError as e:
+                        print(
+                            f"Error parsing progress data for process {self.p_id} on {self.server}: {e}"
+                        )
+                        self.timeEstimation = "N/A"
+                        self.progress = "N/A"
+                        return
 
                 # Log the results
                 self.timeEstimation = f"RT: {runTime}, ETR: {timeRemaining}"

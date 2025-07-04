@@ -868,6 +868,9 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
         configs, labels=labels, useOldFiles=False, forceUpdate=False
     )
 
+    if len(paths) == 0:
+        print("No files found for plotting energy.")
+        return
     base_colors = {"LBFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
     color = to_rgba(base_colors[configs[0].minimizer], alpha=0.2)
     fig, ax = makePlot(
@@ -879,6 +882,7 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
         legend=name,
         **kwargs,
     )
+    plt.close(fig)
 
 
 def plotLog(config_groups, labels, **kwargs):

@@ -26,6 +26,8 @@ from Management.jobs import (
     doubleDislocationTest,
     singleDislocationTest,
     longJob,
+    size_scaling_job,
+    reconnectionJob,
     remeshTest,
     initalInstability,
 )
@@ -168,6 +170,36 @@ def plotPropperJob():
     )
 
 
+def plotSizeJob():
+    configs, labels = size_scaling_job()
+    # Energy
+    # for c, lab in zip(configs, labels):
+    #     plotEnergy(c, lab, f"{lab[0]}-Energy", plot_average=True)
+    # Powerlaw
+    strainLim = [0.15, 0.5]
+    plotLog2(
+        configs,
+        labels=labels,
+        # xmin=None,
+        strainLim=strainLim,
+        # xmin=1e-5,
+        # show=True,
+        # debug=True,
+        # addFit=False,
+    )
+    strainLim = [0.7, 1.0]
+    plotLog2(
+        configs,
+        labels=labels,
+        # xmin=None,
+        strainLim=strainLim,
+        # xmin=1e-5,
+        # show=True,
+        # debug=True,
+        # addFit=False,
+    )
+
+
 def lotsOThreads():
     nrThreads = 64
     nrSeeds = 3
@@ -213,14 +245,17 @@ def runOnLocalMachine():
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
     configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
-    configs, labels = initalInstability()
+    configs, lables = reconnectionJob()
     # configs, labels = singleDislocationTest(
     #     nrThreads=4, nrSeeds=1, L=20, diagonal="minor"
     # )
 
-    # configs, labels = remeshTest(diagonal="major")
-    # run_many_locally(configs, taskNames=labels, resume=False)
-    # configs, labels = remeshTest(diagonal="alternate")
+    configs, labels = remeshTest(diagonal="major")
+    run_many_locally(configs, taskNames=labels, resume=False)
+    configs, labels = remeshTest(diagonal="alternate")
+    run_many_locally(configs, taskNames=labels, resume=False)
+    configs, labels = remeshTest(diagonal="minor")
+    run_many_locally(configs, taskNames=labels, resume=False)
 
     # configs, labels = longJob(6, 1, size=100)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
@@ -234,7 +269,7 @@ def runOnLocalMachine():
 
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=3)
-    run_locally(configs[0], resume=False)  # , dump=dump)
+    # run_locally(configs[0], resume=False)  # , dump=dump)
     # run_many_locally(configs, taskNames=labels, resume=False)
 
 
@@ -243,8 +278,8 @@ def startJobs():
     nrSeeds = 40
     print("Building on all servers... ")
 
-    build_on_all_servers()
-    for job in [findMinimizationCriteriaJobs, compareWithOldStoppingCriteria]:
+    # build_on_all_servers()
+    for job in [size_scaling_job]:
         configs, labels = job()
         print("Distributing jobs and searching for already exsisting folders...")
         servers_confs = distributeConfigs(
@@ -252,6 +287,7 @@ def startJobs():
         )
         for server, configs in servers_confs.items():
             if configs:
+                pass
                 queueJobs(server, configs, job_name="opt", stopExsistingJobs=False)
             pass
 
@@ -262,6 +298,7 @@ def stopJobs():
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
     # j.cancel_jobs_on_server(Servers.descartes, 80165)
     # j.cancel_jobs_on_server(Servers.schwartz, 466525)
+    j.cancel_jobs_on_server(Servers.galois, 559077)
     # j.cancel_jobs_on_server(
     #     Servers.poincare,
     #     [
@@ -269,7 +306,7 @@ def stopJobs():
     #         654070,
     #     ],
     # )
-    j.cancelAllJobs(force=True)
+    # j.cancelAllJobs(force=False)
     # j.showProcesses()
 
 
@@ -292,12 +329,13 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runOnLocalMachine()
+    plotSizeJob()
 
     # stopJobs()
     # cleanData()
     # startJobs()
 
-    plotPropperJob()
+    # plotPropperJob()
     # plotBigJob()
     # threadTest()
     # benchmark()
