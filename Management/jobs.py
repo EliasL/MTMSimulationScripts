@@ -133,8 +133,26 @@ def propperJob2(**kwargs):
     return propperJob(6, 20, 100, **kwargs)
 
 
-def propperJob3(**kwargs):
-    return propperJob(56, 2, 200, minimizer=["LBFGS", "CG"], **kwargs)
+def propperJobCGANDLBFGS(**kwargs):
+    return propperJob(3, nrSeeds=10, size=200, minimizer=["LBFGS", "CG"], **kwargs)
+
+
+def largerPropperJobCGANDLBFGS(**kwargs):
+    return propperJob(8, nrSeeds=10, size=300, minimizer=["LBFGS", "CG"], **kwargs)
+
+
+def largePropperJob(**kwargs):
+    return propperJob(
+        16,
+        nrSeeds=2,
+        size=400,
+        minimizer=["LBFGS", "CG", "FIRE"],
+        **kwargs,
+    )
+
+
+def propperJobFIRE():
+    return propperJob(3, nrSeeds=10, size=200, group_by_seeds=False, minimizer=["FIRE"])
 
 
 def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0):
