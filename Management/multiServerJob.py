@@ -108,11 +108,21 @@ def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
             return serverConfigDict
 
     if allowWaiting:
-        server_index = 0
+        # Sort servers by number of jobs waiting in queue (ascending)
+        sorted_servers = sorted(
+            (si for si in serverInfo.values() if si.sName in serverConfigDict),
+            key=lambda si: si.nrJobsWaitingInQueue,
+        )
+
+        # Greedily assign each config to the server with currently fewest queued jobs
         while remaining_configs:
-            server_name = Servers.servers[server_index]
-            serverConfigDict[server_name].append(remaining_configs.pop(0))
-            server_index = (server_index + 1) % len(Servers.servers)
+            # Re-sort based on updated length of each server's config list + existing queued jobs
+            sorted_servers.sort(
+                key=lambda si: si.nrJobsWaitingInQueue + len(serverConfigDict[si.sName])
+            )
+            server = sorted_servers[0]
+            serverConfigDict[server.sName].append(remaining_configs.pop(0))
+
         return serverConfigDict
     else:
         raise RuntimeError(

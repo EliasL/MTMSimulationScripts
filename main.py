@@ -1,6 +1,6 @@
 from Plotting.remotePlotting import plotLog, plotLog2, plotEnergy
 from Management import parameterExploring as pe
-from Management.connectToCluster import uploadProject
+from Management.connectToCluster import uploadProject, get_server_short_name
 from Management.runOnCluster import build_on_all_servers
 from runSimulations import run_many_locally, run_locally
 from Management.connectToCluster import Servers
@@ -19,7 +19,9 @@ from Management.jobs import (
     propperJob,
     propperJob1,
     propperJob2,
-    propperJob3,
+    propperJobCGANDLBFGS,
+    largePropperJob,
+    largerPropperJobCGANDLBFGS,
     findMinimizationCriteriaJobs,
     compareWithOldStoppingCriteria,
     showMinimizationCriteriaJobs,
@@ -274,18 +276,17 @@ def runOnLocalMachine():
 
 
 def startJobs():
-    nrThreads = 3
-    nrSeeds = 40
     print("Building on all servers... ")
 
-    # build_on_all_servers()
-    for job in [size_scaling_job]:
+    build_on_all_servers()
+    for job in [largePropperJob]:
         configs, labels = job()
         print("Distributing jobs and searching for already exsisting folders...")
         servers_confs = distributeConfigs(
             configs, configs[0].nrThreads, allowWaiting=True
         )
         for server, configs in servers_confs.items():
+            print(f"Server: {get_server_short_name(server)}, jobs: {len(configs)}")
             if configs:
                 pass
                 queueJobs(server, configs, job_name="opt", stopExsistingJobs=False)
@@ -329,11 +330,11 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runOnLocalMachine()
-    plotSizeJob()
+    # plotSizeJob()
 
     # stopJobs()
     # cleanData()
-    # startJobs()
+    startJobs()
 
     # plotPropperJob()
     # plotBigJob()

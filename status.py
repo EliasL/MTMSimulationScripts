@@ -41,7 +41,7 @@ def run_script():
     current_dir = Path(__file__).resolve().parent
 
     # Path to the virtual environment Python
-    venv_python_path = current_dir / "venv" / "bin" / "python"
+    venv_python_path = current_dir / ".venv" / "bin" / "python"
 
     # Read the AppleScript file
     with open(script_path, "r") as file:
@@ -91,5 +91,5 @@ if __name__ == "__main__":
     else:
         # dm = DataManager()
         # dm.clean_projects_on_servers()
-        disp_jobs()
-        # run_script()
+        # disp_jobs()
+        run_script()

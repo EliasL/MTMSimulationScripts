@@ -3,7 +3,7 @@ from Management.jobs import (
     basicJob,
     allPlasticEventsJob,
     propperJob,
-    propperJob3,
+    largePropperJob,
     avalanches,
     findMinimizationCriteriaJobs,
     compareWithOldStoppingCriteria,
@@ -33,22 +33,15 @@ def plotPropperJob():
     nrThreads = 3
     nrSeeds = 40
     configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
+    configs, labels = largePropperJob()
     # xlim = [0.25, 0.55]
+    plotEnergy(configs, labels=labels)
     plotLog(
         configs,
         labels=labels,
         # show=True,
         # xlim=xlim,
     )
-
-
-def plotPropperJob3():
-    configs, labels = propperJob3(group_by_seeds=True)
-    # xlim = [0.25, 0.55]
-    # get_folders_from_servers(configs)
-    # createVideoes(configs)
-    # plotLog(configs, labels=labels)
-    # plotAverage(configs, labels)
 
 
 # MDPI Article plot
@@ -222,14 +215,14 @@ def plotEnergyRegion():
 if __name__ == "__main__":
     # plotEnergyRegion()
     # plotSampleRuns()
-    # plotPropperJob()
+    plotPropperJob()
     # debugPlotAll()
     # energyField()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
     # createVideoes(configs, all_images=True)
 
-    plotAvalanches()
+    # plotAvalanches()
     # plotMaxForce()
     # plotMinimizationCriteriaData()
     # plotShowMinCriteria()

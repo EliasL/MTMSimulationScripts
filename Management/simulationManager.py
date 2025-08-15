@@ -248,19 +248,6 @@ class SimulationManager:
             print("Loading modules: cmake")
             return command
 
-    def __del__(self):
-        """
-        Destructor: restore the working directory to what it was when the
-        SimulationManager was created.  We silence any errors because the
-        interpreter may be shutting down or the directory might no longer
-        exist at destruction time.
-        """
-        try:
-            os.chdir(self._original_cwd)
-        except Exception:
-            # Avoid raising exceptions in a destructor
-            pass
-
 
 # The reason why this is so complicated is that if we simply use .readline(), it
 # will not flush properly for lines that should be overwritten using \r.
