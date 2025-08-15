@@ -104,7 +104,7 @@ def propperJob(
     nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None, minimizer=None
 ):
     if minimizer is None:
-        minimizer = ["LBFGS", "CG", "FIRE"]
+        minimizer = ["FIRE"]  # ["LBFGS", "CG", "FIRE"]
     if seeds is None:
         seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(
@@ -518,8 +518,11 @@ def size_scaling_job():
     Generates a job for size scaling tests.
     """
     sizes = [50, 75, 100, 150, 200, 300, 400]
-    nr_samples = [50, 40, 30, 20, 10, 10, 10]
-    nr_threads = [1, 2, 3, 4, 5, 6, 7]
+    nr_samples = [100, 60, 40, 30, 20, 10, 10]
+    nr_threads = [1, 2, 3, 4, 5, 6, 8]
+    sizes.reverse()
+    nr_samples.reverse()
+    nr_threads.reverse()
     all_configs = []
     all_labels = []
     for size, samples, threads in zip(sizes, nr_samples, nr_threads):
