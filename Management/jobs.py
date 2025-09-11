@@ -104,7 +104,7 @@ def propperJob(
     nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None, minimizer=None
 ):
     if minimizer is None:
-        minimizer = ["FIRE"]  # ["LBFGS", "CG", "FIRE"]
+        minimizer = ["LBFGS", "CG", "FIRE"]
     if seeds is None:
         seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(
@@ -141,12 +141,12 @@ def largerPropperJobCGANDLBFGS(**kwargs):
     return propperJob(8, nrSeeds=10, size=300, minimizer=["LBFGS", "CG"], **kwargs)
 
 
-def largePropperJob(**kwargs):
+def largePropperJob(FIREOnly=False, **kwargs):
     return propperJob(
-        16,
-        nrSeeds=2,
-        size=400,
-        minimizer=["LBFGS", "CG", "FIRE"],
+        3,
+        nrSeeds=10,
+        size=200,
+        minimizer=["FIRE"] if FIREOnly else ["LBFGS", "CG", "FIRE"],
         **kwargs,
     )
 

@@ -13,6 +13,7 @@ from Management.jobs import (
 
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
+from MTMath.plotPowerLaw import plot_powerlaw
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     get_csv_files,
@@ -33,14 +34,26 @@ def plotPropperJob():
     nrThreads = 3
     nrSeeds = 40
     configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
-    configs, labels = largePropperJob()
+    configs, labels = largePropperJob(group_by_seeds=True, FIREOnly=True)
     # xlim = [0.25, 0.55]
-    plotEnergy(configs, labels=labels)
-    plotLog(
-        configs,
-        labels=labels,
-        # show=True,
-        # xlim=xlim,
+    # for confs, labs in zip(configs, labels):
+    #     plotEnergy(confs, labels=labs)
+    # plotLog(
+    #     configs,
+    #     labels=labels,
+    #     # show=True,
+    #     # xlim=xlim,
+    # )
+
+    paths, labs = get_csv_files(configs, labels=labels)
+
+    plot_powerlaw(
+        paths,
+        alg_labels=labs,
+        show=True,
+        strainLim=[0.7, 1.0],
+        evaluate=True,
+        # debug=True,
     )
 
 

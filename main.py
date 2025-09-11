@@ -139,12 +139,49 @@ def plotBigJob():
 
 def plotPropperJob():
     nrThreads = 3
-    nrSeeds = 40
-    configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
+    nrSeeds = 10
+    size = 200
+    configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True, size=size)
+
     # Energy
     mini = ["L-BFGS", "CG", "FIRE"]
     for c, lab, m in zip(configs, labels, mini):
         plotEnergy(c, lab, f"{m}-Energy", plot_average=True)
+    # Powerlaw
+    # xlim = [0.25, 0.55]
+    strainLim = [0.15, 0.5]
+    plotLog2(
+        configs,
+        labels=labels,
+        # xmin=None,
+        strainLim=strainLim,
+        # xmin=1e-5,
+        # show=True,
+        # debug=True,
+        # addFit=False,
+    )
+    # strainLim = [0.5, 1.0]
+    # strainLim = [0.6, 1.0]
+    strainLim = [0.7, 1.0]
+    plotLog2(
+        configs,
+        xmin=1e-5,
+        labels=labels,
+        strainLim=strainLim,
+        # show=True,
+        # debug=True,
+        # addFit=False,
+    )
+
+
+def plotSizeScaling():
+    configs, labels = size_scaling_job()
+
+    for (
+        c,
+        lab,
+    ) in zip(configs, labels):
+        plotEnergy(c, lab, f"{lab[0].split(', ')[0]}-Energy", plot_average=True)
     # Powerlaw
     # xlim = [0.25, 0.55]
     strainLim = [0.15, 0.5]
@@ -278,19 +315,26 @@ def runOnLocalMachine():
 def startJobs():
     print("Building on all servers... ")
 
-    build_on_all_servers()
-    for job in [largePropperJob]:
+    # build_on_all_servers()
+    for job in [size_scaling_job]:  # largePropperJob]:
         configs, labels = job()
-        print("Distributing jobs and searching for already exsisting folders...")
-        servers_confs = distributeConfigs(
-            configs, configs[0].nrThreads, allowWaiting=True
-        )
-        for server, configs in servers_confs.items():
-            print(f"Server: {get_server_short_name(server)}, jobs: {len(configs)}")
-            if configs:
-                pass
-                queueJobs(server, configs, job_name="opt", stopExsistingJobs=False)
-            pass
+
+        # Normalize to batches so we handle both a single list of configs
+        # and a list of lists of configs uniformly.
+        if configs and isinstance(configs[0], list):
+            batches = zip(configs, labels)
+        else:
+            batches = [(configs, labels)]
+
+        for c, l in batches:
+            print("Distributing jobs and searching for already existing folders...")
+            servers_confs = distributeConfigs(c, c[0].nrThreads, allowWaiting=True)
+            for server, confs in servers_confs.items():
+                print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
+                if confs:
+                    # Queue jobs (uncomment to actually submit)
+                    # queueJobs(server, confs, job_name="opt", stopExsistingJobs=False)
+                    pass
 
 
 def stopJobs():
@@ -315,10 +359,10 @@ def cleanData():
     dm = DataManager()
     dm.findData()
     dm.clean_projects_on_servers()
-    configs, labels = findMinimizationCriteriaJobs()
-    dm.delete_data_from_configs(configs, dryRun=False)
-    configs, labels = compareWithOldStoppingCriteria()
-    dm.delete_data_from_configs(configs, dryRun=False)
+    # configs, labels = findMinimizationCriteriaJobs()
+    # dm.delete_data_from_configs(configs, dryRun=False)
+    # configs, labels = compareWithOldStoppingCriteria()
+    # dm.delete_data_from_configs(configs, dryRun=False)
 
 
 if __name__ == "__main__":
@@ -337,6 +381,7 @@ if __name__ == "__main__":
     startJobs()
 
     # plotPropperJob()
+    # plotSizeScaling()
     # plotBigJob()
     # threadTest()
     # benchmark()

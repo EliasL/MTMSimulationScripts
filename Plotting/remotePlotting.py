@@ -27,8 +27,8 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 from Management.connectToCluster import connectToCluster, Servers, download_folders
 from Management.configGenerator import ConfigGenerator, SimulationConfig
 
-FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
 FOLDER_PATH = "/Users/elias/Work/PhD/Code/remoteData"
+FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
 MACRO_PATH = os.path.join(FOLDER_PATH, "macro")
 PLOTS_PATH = os.path.join(FOLDER_PATH, "plots")
 RAW_DATA_PATH = os.path.join(FOLDER_PATH, "data")

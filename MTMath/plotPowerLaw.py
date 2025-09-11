@@ -221,6 +221,7 @@ def get_energy_drops(
     drop_mask = diffs < 0
     mask = drop_mask & lim_mask
     drops = -diffs[mask]
+
     if debug:
         # Only debug first seed when using labels
         if label is not None and "seed=0" not in label:
@@ -240,7 +241,11 @@ def get_energy_drops(
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines + lines2, labels + labels2)
-        ax2.set_ylim(0, drops.max() * 1.5)
+        # handle drops.max() = NaN case
+        if np.isnan(drops.max()):
+            ax2.set_ylim(0, 1)
+        else:
+            ax2.set_ylim(0, drops.max() * 1.5)
 
         # ——— Compute 0.1%‐wide central slice ———
         mid = 0.5 * (strainLim[0] + strainLim[1])
@@ -278,6 +283,8 @@ def get_energy_drops(
         )
         # plot energy in inset
         axins.plot(strain[zoom_mask], e[zoom_mask], lw=0.8)
+        if np.isnan(x1) or np.isnan(x2):
+            x1, x2 = 0, 1
         axins.set_xlim(x1, x2)
         axins.set_title("Zoom", fontsize=8)
 
@@ -287,7 +294,10 @@ def get_energy_drops(
         zoom_strain_mask &= strain_limited <= x2
         drops_zoom = plotDrops[zoom_strain_mask]
         axins2.plot(strain_limited[zoom_strain_mask], drops_zoom)
-        axins2.set_ylim(0, drops_zoom.max() * 1.5)
+        if np.isnan(drops_zoom.max()):
+            axins2.set_ylim(0, 1)
+        else:
+            axins2.set_ylim(0, drops_zoom.max() * 1.5)
 
         debug_fig.tight_layout()
         # Save debug energy plot
@@ -789,13 +799,13 @@ def get_window_power_law_exponents(
                 drops,
                 xmin=xmin,
                 nrSets=1,
-                dist=dist,
+                dist_name=dist,
                 params={"alpha": syntheticExponent},
             )[0]
         # fit the data
         fit = powerlaw.Fit(drops, xmin=xmin)
         fits.append(fit)
-        p, exp, std = evaluate_fit(
+        p, alpha, std = evaluate_fit(
             drops,
             xmin=xmin,
             dist_name=dist,
@@ -1038,26 +1048,72 @@ def scipy_truncated_powerlaw(xmin, alpha, Lambda, size, rng):
 
 def truncatedPowerlawGenerator(xmin, alpha, Lambda, size, rng):
     """
-    Generate `size` samples from the PDF
-        f(x) ∝ x**(-alpha) * exp(-Lambda*x),  x >= xmin
-    using vectorized rejection sampling with an exponential proposal.
+    Unbiased batched rejection sampler for
+        f(x) ∝ x^(-alpha) * exp(-Lambda * x), x >= xmin.
+
+    Strategy
+    --------
+    - If alpha < 1: use the exact inverse-CDF sampler (same as before).
+    - Else: propose in batches from xmin + Exp(scale=1/Lambda), accept with
+      a(x) = (xmin / x)^alpha. We *adaptively* size each batch using an
+      online estimate of the acceptance rate, and finally take the first
+      size accepted samples in (proposal) arrival order.
+
+    Notes
+    -----
+    - Taking the *first N accepted* is distribution-preserving (no bias),
+      because acceptance decisions are i.i.d. Bernoulli given the proposals,
+      and selection is independent of sample values.
+    - Do **not** sort or otherwise pick accepted samples by value.
     """
-    result = np.empty(size, dtype=float)
-    n_done = 0
+    if xmin <= 0 or Lambda <= 0:
+        raise ValueError("xmin and Lambda must be positive.")
+
+    # Heavy tail ⇒ inverse-CDF path is faster/numerically stable.
     if alpha < 1:
         return scipy_truncated_powerlaw(xmin, alpha, Lambda, size, rng)
-    else:
-        while n_done < size:
-            n_remain = size - n_done
-            proposals = xmin + rng.exponential(scale=1.0 / Lambda, size=n_remain)
-            accept_probs = (xmin / proposals) ** alpha
-            u = rng.random(n_remain)
-            mask = u < accept_probs
-            n_accept = mask.sum()
-            if n_accept:
-                result[n_done : n_done + n_accept] = proposals[mask]
-                n_done += n_accept
-        return result
+
+    accepted = []
+    need = size
+
+    # Start with a conservative acceptance-rate guess to avoid too-small batches.
+    # We'll update this estimate on the fly.
+    # Heuristic: acceptance ≈ (xmin*Lambda) / (xmin*Lambda + alpha), clipped.
+    r_est = min(0.8, max(0.05, (xmin * Lambda) / (xmin * Lambda + alpha)))
+
+    while need > 0:
+        # Over-propose by 1/r_est with a small safety factor.
+        overshoot = 1.15
+        n_prop = max(32, int(np.ceil(overshoot * need / r_est)))
+
+        # Proposals from the exponential tail anchored at xmin
+        prop = xmin + rng.exponential(scale=1.0 / Lambda, size=n_prop)
+
+        # Accept with probability (xmin / x)^alpha
+        # Using log-space for numerical stability
+        log_u = np.log(rng.random(n_prop))
+        mask = log_u < alpha * (np.log(xmin) - np.log(prop))
+
+        # Append in *arrival order* to preserve unbiasedness
+        if mask.any():
+            accepted.extend(prop[mask])
+
+        # Update remaining count
+        got = min(len(accepted), size)  # guard against overflow
+        need = size - got
+
+        # Update acceptance rate estimate (EMA to stabilize)
+        # instantaneous rate:
+        inst_rate = mask.mean()
+        # avoid divide-by-zero; keep r_est within sensible bounds
+        if inst_rate > 0:
+            r_est = 0.7 * r_est + 0.3 * float(inst_rate)
+            r_est = min(0.95, max(0.02, r_est))
+
+    # Take the first N accepted in arrival order (clip any extra)
+    if len(accepted) > size:
+        accepted = accepted[:size]
+    return np.asarray(accepted, dtype=float)
 
 
 def create_synthetic_data(
@@ -1069,18 +1125,42 @@ def create_synthetic_data(
     debug=False,
 ):
     """
-    Create synthetic data for testing the power law fitting.
-    If not all parameters are given, it will use the fitted parameters from the
-    original data.
+    Create synthetic data sets for testing the power law fitting.
+
+    Parameters
+    ----------
+    drops : array-like
+        Original dataset of energy drops.
+    xmin : float
+        Lower cutoff for the power-law tail.
+    nrSets : int
+        Number of synthetic datasets to generate.
+    dist_name : str
+        Which distribution to use (default: truncated_power_law).
+    params : dict
+        Optional dictionary to override fitted distribution parameters.
+    debug : bool
+        If True, make diagnostic plots.
+
+    Returns
+    -------
+    syntheticSets : ndarray, shape (nrSets, len(drops))
+        Synthetic datasets, each with the same size as `drops`.
     """
+    # 1. Fit the chosen distribution (default: truncated power law) to the real data.
     fit_orig = powerlaw.Fit(drops, xmin=xmin)
     dist = getattr(fit_orig, dist_name)
 
+    # 2. Split the data into "tail" (>= xmin, assumed to follow the model)
+    #    and "non-tail" (< xmin, arbitrary background).
     tailDrops = drops[drops >= xmin]
     nonTailDrops = drops[drops < xmin]
-    # Create a local RNG for reproducibility, seed based on xmin
+
+    # 3. Create a reproducible RNG, seeded deterministically by xmin.
     rng = np.random.default_rng(int((np.log10(xmin) * 1e6) % (2**32)))
 
+    # 4. Special case: if there are no non-tail values,
+    #    just sample *everything* from the truncated power law.
     if len(nonTailDrops) == 0:
         total_samples = nrSets * len(drops)
         samples = truncatedPowerlawGenerator(
@@ -1092,16 +1172,24 @@ def create_synthetic_data(
         )
         return samples.reshape((nrSets, len(drops)))
 
+    # 5. Otherwise, compute the fraction of tail observations in the real data.
     nrTailObservations = len(tailDrops)
     nrObservations = len(drops)
     p_tail = nrTailObservations / nrObservations
+
+    # 6. For each synthetic dataset, randomly decide how many points
+    #    should come from the tail (binomial draw with prob = p_tail).
     tail_counts = rng.binomial(nrObservations, p_tail, size=nrSets)
 
+    # 7. Allow parameter overrides (alpha, Lambda, etc.) if passed in `params`.
     for key, value in params.items():
         if hasattr(dist, key) and value is not None:
             setattr(dist, key, value)
 
+    # 8. Generate the non-tail part by bootstrap resampling from the original non-tail data.
     non_tail = rng.choice(nonTailDrops, size=(nrSets, nrObservations), replace=True)
+
+    # 9. Generate all required tail samples in bulk from the truncated power law.
     total_tails = tail_counts.sum()
     all_tails = truncatedPowerlawGenerator(
         xmin=dist.xmin,
@@ -1110,7 +1198,13 @@ def create_synthetic_data(
         size=total_tails,
         rng=rng,
     )
+
+    # 10. Split the tail samples into slices of the right size for each dataset.
     offsets = np.concatenate([[0], np.cumsum(tail_counts)])
+
+    # 11. Construct the synthetic datasets:
+    #     start with resampled non-tail values, then overwrite the first k entries
+    #     with tail values for each dataset.
     syntheticSets = non_tail.copy()
     for i in range(nrSets):
         k = tail_counts[i]
@@ -1118,6 +1212,7 @@ def create_synthetic_data(
             start = offsets[i]
             end = offsets[i + 1]
             syntheticSets[i, :k] = all_tails[start:end]
+
     if debug:
         # plot three sample sets
         debug_fig, debug_axes = plt.subplots(1, 4, figsize=(18, 6))
@@ -1228,7 +1323,7 @@ def goodnessOfFit(
                 label=f"Synthetic sample {i}",
                 alpha=0.2,
             )
-            dist_synth = getattr(fit_orig, dist_name)
+            dist_synth = getattr(fit_synth, dist_name)
             synthD = dist_synth.D
             # plot the fit
 
@@ -1252,56 +1347,7 @@ def goodnessOfFit(
     return p_value, mean_alpha, std_alpha
 
 
-def _compute_exponent(args):
-    sample, xmin, dist_name = args
-    sample = np.ravel(sample)  # Ensure 1D
-    fit = powerlaw.Fit(sample, xmin=xmin)
-    return getattr(fit, dist_name).alpha
-
-
-def exponentUncertainty(
-    drops,
-    xmin=-np.inf,
-    dist_name="truncated_power_law",
-    parallel=False,
-    debug=False,
-):
-    import json
-    import os
-
-    drop_sum = np.sum(drops)
-    nr_sets = 2500 if not debug else 3
-    filename = f"bootstrapData/uncertainty_{drop_sum}_{xmin}_{nr_sets}.json"
-
-    if os.path.exists(filename) and not debug:
-        with open(filename, "r") as f:
-            result = json.load(f)
-        return result["mean"], result["std"]
-
-    rng = np.random.default_rng(0)
-    synthetic_sets = rng.choice(drops, size=(nr_sets, len(drops)), replace=True)
-
-    if parallel:
-        with ProcessPoolExecutor() as executor:
-            args = [(s, xmin, dist_name) for s in synthetic_sets]
-            exponents = list(
-                tqdm(executor.map(_compute_exponent, args), total=len(args))
-            )
-    else:
-        exponents = [
-            _compute_exponent((s, xmin, dist_name)) for s in tqdm(synthetic_sets)
-        ]
-
-    mean_exp = float(np.mean(exponents))
-    std_exp = float(np.std(exponents))
-
-    os.makedirs("bootstrapData", exist_ok=True)
-    with open(filename, "w") as f:
-        json.dump({"mean": mean_exp, "std": std_exp}, f)
-
-    return mean_exp, std_exp
-
-
+# --- Combined fit statistics function ---
 def evaluate_fit(
     drops,
     xmin,
@@ -1310,45 +1356,49 @@ def evaluate_fit(
     verbose=False,
     debug=False,
 ):
-    if verbose:
-        print("nr of drops:", len(drops))
-    if len(drops) < 200:
-        print("Warning: this is not a lot of data, the p-value might not be reliable.")
-    drop_sum = np.sum(drops)
+    """
+    Compute (a) KS p-value using parametric synthetic sets *and* (b) exponent
+    uncertainty. This consolidates work so synthetic sets are generated once
+    and reused for both metrics.
 
-    # Check if p has already been calculated for these drops
-    # by assuming that the mean is unique enough
-    # The files should be stored in the bootstrapData folder and saved as a json file
-    # with the name "p_{mean}_{xmin}.json"
+    Returns
+    """
     import os
     import json
     from pathlib import Path
 
-    nr_sets = 2500
-    if debug:
-        nr_sets = 3
-    # directory where *this* script lives (…/SimulationScripts/MTMath)
+    if verbose:
+        print("nr of drops:", len(drops))
+    if len(drops) < 200:
+        print("Warning: this is not a lot of data, the p-value might not be reliable.")
+
+    nr_sets = 2500 if not debug else 3
+
+    # paths
     script_dir = Path(__file__).resolve().parent
-
-    # parent of that directory (…/SimulationScripts)
     repo_root = script_dir.parent
-
-    # bootstrapData inside the parent folder
     bootstrap_dir = repo_root / "bootstrapData"
+    os.makedirs(bootstrap_dir, exist_ok=True)
 
-    # specific JSON file
+    drop_sum = float(np.sum(drops))
     p_file = bootstrap_dir / f"p_{drop_sum}_{xmin}_{nr_sets}.json"
-    if os.path.exists(p_file) and not debug:
+
+    p = None
+    mean_exponent = None
+    exponent_std = None
+
+    # --- (A) KS p-value + parametric exponent uncertainty via synthetic sets ---
+    if p_file.exists() and not debug:
         with open(p_file, "r") as f:
             result = json.load(f)
         p = result["p"]
-        mean_s_exp = result["mean"]
-        std_s_exp = result["std"]
+        mean_exponent = result.get("mean")
+        exponent_std = result.get("std")
         if verbose:
-            print(f"Strained p-value from {p_file}")
+            print(f"Loaded p-value + synthetic exponent stats from {p_file}")
     else:
         if verbose:
-            print("Generating synthetic data...")
+            print("Generating synthetic data for KS test and parametric uncertainty…")
         sets = create_synthetic_data(
             drops,
             xmin=xmin,
@@ -1356,20 +1406,20 @@ def evaluate_fit(
             dist_name=dist_name,
             debug=debug,
         )
-        p, mean_s_exp, std_s_exp = goodnessOfFit(
-            drops, sets, xmin, dist_name=dist_name, parallel=parallel, debug=debug
+
+        p, mean_exponent, exponent_std = goodnessOfFit(
+            drops,
+            sets,
+            xmin,
+            dist_name=dist_name,
+            parallel=parallel,
+            debug=debug,
         )
-        # Save the p-value to a file
+
         with open(p_file, "w") as f:
-            json.dump({"p": p, "mean": mean_s_exp, "std": std_s_exp}, f)
-    # if verbose:
-    #     print(
-    #         f"p-value for fit: {p:.3f}, ie. {p * 100:.1f}% of synthetic sets had a worse fit"
-    #     )
-    #     print(
-    #         "If p > 0.1, the fit is likely a good fit. (This also depends on the number of drops.)"
-    #     )
-    return p, mean_s_exp, std_s_exp
+            json.dump({"p": p, "mean": mean_exponent, "std": exponent_std}, f)
+
+    return p, mean_exponent, exponent_std
 
 
 def make_exponent_map():
@@ -1433,6 +1483,7 @@ def make_exponent_fit():
 
     filename = f"{PLOTPATH}simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0.pdf"
     fig.savefig(filename, format="pdf", bbox_inches="tight")
+    print(f"Saved figure to {filename}")
 
 
 def get_attribute(label):
@@ -1442,7 +1493,7 @@ def get_attribute(label):
     if "minimizer" in d:
         attribute = d["minimizer"]
         attribute = attribute.replace("LBFGS", "L-BFGS")
-    if "L" in d:
+    elif "L" in d:
         attribute = "L=" + d["L"]
     else:
         attribute = "Unknown"
@@ -1453,7 +1504,7 @@ def plot_powerlaw(
     algorithms_paths,
     alg_labels=None,
     strainLim=[0.15, 0.4],
-    xmin=1e-6,
+    xmin=1e-5,
     debug=False,
     show=False,
     evaluate=True,
@@ -1488,13 +1539,7 @@ def plot_powerlaw(
             color = "black"
 
         if evaluate:
-            # p = evaluate_fit(all_drops, xmin, parallel=True, debug=debug)
-
-            p, mean_s_exp, std_s_exp = evaluate_fit(
-                all_drops, xmin, parallel=True, debug=debug
-            )
-
-            mean_exp, std_exp = exponentUncertainty(
+            p, mean_exp, exp_std = evaluate_fit(
                 all_drops, xmin, parallel=True, debug=debug
             )
 
@@ -1505,10 +1550,10 @@ def plot_powerlaw(
                     break
             else:
                 r = rating[-1]
+            print(f"Number of drops: {len(all_drops)}")
             print(
-                f"{attribute}: P value: {p:.2f} ({r}), mean: {mean_exp}, std: {std_exp}"
+                f"{attribute}: P value: {p:.2f} ({r}), mean: {mean_exp}, std: {exp_std}"
             )
-            print(f"{attribute}: Synthetic mean: {mean_s_exp}, std: {std_s_exp}")
             ax = plot_data_and_fit(
                 fit,
                 ax,
@@ -1516,7 +1561,7 @@ def plot_powerlaw(
                 title,
                 pdf=True,
                 p_val=p,
-                alpha_std=std_s_exp,
+                alpha_std=exp_std,
                 color=color,
                 addFit=addFit,
             )
@@ -1546,7 +1591,7 @@ def plot_powerlaw(
                 safe_title += "_noFit"
             filename = f"{PLOTPATH}{safe_title}.pdf"
             fig.savefig(filename, format="pdf", bbox_inches="tight")
-
+            print(f"Saved figure to {filename}")
         plt.close(fig)
 
 

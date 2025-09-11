@@ -303,7 +303,7 @@ def getPowerLawFit(
     else:
         combined_fits = []
         for drops in combined_drops:
-            if drops is None:
+            if drops is None or len(drops) == 0:
                 combined_fits.append(None)
                 continue
 
@@ -422,10 +422,11 @@ def plotPowerLaw(
     # np.savetxt(f"{label}{part_label}.csv", drops, delimiter=",")
     global color_index, index
 
+    if fit is None:
+        return ax
     # Get the current color
     if color is None and label in colors:
         color = colors[label]
-
     fit.plot_pdf(
         original_data=True,
         ax=ax,
@@ -490,8 +491,10 @@ def renormalizeMostRecentPlot(ax, fit, dist):
     scatter_y_data_region = y_data[scatter_region_indices]
 
     # Integrate the y data over x for both fit and scatter data in the region of the fit
-    area_fit = np.trapz(fit_y_data, fit_x_data)  # Numerical integration for fit data
-    area_scatter = np.trapz(scatter_y_data_region, scatter_x_data_region)
+    area_fit = np.trapezoid(
+        fit_y_data, fit_x_data
+    )  # Numerical integration for fit data
+    area_scatter = np.trapezoid(scatter_y_data_region, scatter_x_data_region)
 
     # Compute the scaling factor to adjust the fit data to match the scatter data area
     scaling_factor = area_scatter / area_fit
@@ -1531,6 +1534,8 @@ def makeLogPlotComparison(
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
         dfs = []
         # for each seed using this config
+        if type(csv_file_paths) is str:
+            csv_file_paths = [csv_file_paths]
         for j, csv_file_path in enumerate(csv_file_paths):
             keys = pd.read_csv(csv_file_path).keys()
             df = pd.read_csv(

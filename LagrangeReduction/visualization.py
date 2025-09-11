@@ -377,6 +377,13 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.m_label.setFont(fixed_font)
         info_layout.addWidget(self.m_label)
 
+        # Eigenvalues display (m values)
+        self.angle_label = QtWidgets.QLabel()
+        self.angle_label.setAlignment(Qt.AlignLeft)
+        self.angle_label.setStyleSheet("font-size: 11pt;")
+        self.angle_label.setFont(fixed_font)
+        info_layout.addWidget(self.angle_label)
+
         # Add the info frame to the layout
         layout.addWidget(info_frame)
         self.updateInfoDisplay()
@@ -450,6 +457,13 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             [joined_ms[i : i + max_numb] for i in range(0, len(joined_ms), max_numb)]
         )
         self.m_label.setText(f"m₁: {m1}  m₂: {m2}  m₃: {m3} \ns:{ms_with_newlines}")
+
+        # Calculate and display angle
+        # The diagonal of C gives the dot product of the basis vectors
+        if C is not None:
+            angle = np.arccos(C[0, 1] / (np.sqrt(C[0, 0]) * np.sqrt(C[1, 1])))
+            degrees = np.degrees(angle)
+            self.angle_label.setText(f"Angle (θ): {degrees:.2f}°")
 
     def drawMetricSpaceBackground(self):
         # Draw lines

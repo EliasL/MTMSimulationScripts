@@ -811,6 +811,11 @@ def plot_and_save_mesh(**kwargs):
 
 
 def plot_and_save_mesh_with_force(**kwargs):
+    systemSize = get_data_from_name(kwargs["vtu_file"])["L"]
+    if systemSize > 50:
+        print(
+            f"Warning: System size is {systemSize}, plotting forces might be very slow!"
+        )
     return plot_and_save(
         plot_func=plot_mesh,
         mesh_property="energy",
