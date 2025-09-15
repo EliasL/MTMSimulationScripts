@@ -1,0 +1,526 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import FancyArrowPatch, Polygon
+from matplotlib.colors import ListedColormap
+from .plotEnergy import plotPoincareDisk, C2PoincareDisk
+from matplotlib.colors import BoundaryNorm
+
+
+class DraggableTriangulation:
+    def triangle_basis_indices(self, tri, diag_pair):
+        """Given a triangle (i,j,k) and the diagonal pair (d0,d1),
+        return (o, u, v) where o is the vertex NOT on the diagonal, and
+        vectors are taken as a = p[u]-p[o], b = p[v]-p[o]."""
+        i, j, k = tri
+        d0, d1 = diag_pair
+        if i != d0 and i != d1:
+            return i, j, k
+        if j != d0 and j != d1:
+            return j, i, k
+        return k, i, j
+
+    def __init__(self, ax, points, ax_g=None):
+        assert points.shape == (4, 2), "Provide exactly four 2D points"
+        self.ax = ax
+        self.points = points
+        self.ax_g = ax_g  # optional axes for (G11,G22) scatter
+        self.g_scatter = None
+
+        # Initial triangulation uses diagonal (0, 2): triangles (0,1,2) and (0,2,3)
+        self.diagonal_02 = True
+        self.edges = [
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),  # outer quad edges
+            (0, 2),  # initial diagonal
+        ]
+
+        # Heatmap (prediction matrix) showing how many elements would violate if the selected point moved
+        self.heatmap_im = None
+        self.grid_size = 200  # pixels per axis
+
+        # Debug toggles/handles
+        self.debug = False
+        self.debug_text = None
+        self._last_cur = None
+        self._last_rec = None
+        self._last_idx = None
+        self._grid_xs = None
+        self._grid_ys = None
+
+        # Heatmap showing count of violated elements across current (2) and after reconnect (2)
+        # Index mapping (by count):
+        #   0 -> white  (0/4 violated)
+        #   1 -> green  (1/4 violated)
+        #   2 -> yellow (2/4 violated)
+        #   3 -> orange (3/4 violated)
+        #   4 -> red    (4/4 violated)
+        alpha = 0.2
+        self.heatmap_cmap = ListedColormap(
+            [
+                (1.0, 1.0, 1.0, alpha),  # 0: white
+                (0.0, 1.0, 0.0, alpha),  # 1: green
+                (1.0, 1.0, 0.0, alpha),  # 2: yellow
+                (1.0, 0.65, 0.0, alpha),  # 3: orange
+                (1.0, 0.0, 0.0, alpha),  # 4: red
+            ]
+        )
+        # NaN handling for imshow: fully transparent so they don't look like valid white bins
+        self.heatmap_cmap.set_bad((1.0, 1.0, 1.0, 0.0))
+
+        # Discrete norm for 5 bins (0..4)
+        self.heatmap_norm = BoundaryNorm(
+            boundaries=np.arange(-0.5, 5.5, 1),
+            ncolors=self.heatmap_cmap.N,
+            clip=True,
+        )
+        # Draw points and edges
+        self.point_artist = ax.plot(
+            points[:, 0], points[:, 1], "o", color="red", picker=5
+        )[0]
+        self.line_artists = []
+        for i, j in self.edges:
+            (ln,) = ax.plot(
+                [self.points[i, 0], self.points[j, 0]],
+                [self.points[i, 1], self.points[j, 1]],
+                "-",
+                color="blue",
+            )
+            self.line_artists.append(ln)
+
+        self.dragging_index = None
+
+        # Keep track of the last selected point (persists after mouse release)
+        self.selected_index = None
+
+        # Triangle face patches (for coloring by Gram-matrix criterion)
+        self.face_patches = []
+        self.update_faces()
+
+        # Storage for element vectors (arrows) and Gram matrix labels
+        self.vector_artists = []  # list[FancyArrowPatch]
+        self.G_texts = []  # list[Text]
+
+        # Initial draw for element vectors and Gram matrices
+        self.update_element_vectors_and_grams()
+
+        # Optional scatter plot: one dot per element in Poincaré disk
+        if self.ax_g is not None:
+            self.ax_g.set_title("Elements in Poincaré disk")
+            self.ax_g.set_xlabel("x")
+            self.ax_g.set_ylabel("y")
+            self.ax_g.set_aspect("equal", adjustable="box")
+            # Initialize with current values
+            g_points = self.compute_poincare_points()
+            self.g_scatter = self.ax_g.scatter(g_points[:, 0], g_points[:, 1], zorder=3)
+            self.ax_g.set_xlim(-1, 1)
+            self.ax_g.set_ylim(-1, 1)
+
+        # Connect events
+        self.cid_press = self.point_artist.figure.canvas.mpl_connect(
+            "button_press_event", self.on_press
+        )
+        self.cid_release = self.point_artist.figure.canvas.mpl_connect(
+            "button_release_event", self.on_release
+        )
+        self.cid_motion = self.point_artist.figure.canvas.mpl_connect(
+            "motion_notify_event", self.on_motion
+        )
+        self.cid_key = self.point_artist.figure.canvas.mpl_connect(
+            "key_press_event", self.on_key
+        )
+
+    def nearest_point_index(self, x, y) -> int:
+        """Return index of closest vertex to (x,y)."""
+        diffs = self.points - np.array([x, y])
+        return int(np.argmin(np.sum(diffs * diffs, axis=1)))
+
+    # ---------- Interaction handlers ----------
+    def on_press(self, event):
+        if event.inaxes != self.ax:
+            return
+        contains, _ = self.point_artist.contains(event)
+        if not contains:
+            return
+        # find nearest point
+        self.dragging_index = self.nearest_point_index(event.xdata, event.ydata)
+        self.selected_index = self.dragging_index
+        self.update_heatmap(self.selected_index)
+
+    def on_release(self, event):
+        # To clear the heatmap on release, uncomment:
+        # if self.heatmap_im is not None:
+        #     self.heatmap_im.remove()
+        #     self.heatmap_im = None
+        self.dragging_index = None
+
+    def on_motion(self, event):
+        if self.dragging_index is None:
+            return
+        if event.inaxes != self.ax:
+            return
+        # update point position
+        self.points[self.dragging_index] = [event.xdata, event.ydata]
+        self.update()
+        # Update debug readout under cursor
+        if (
+            self.debug
+            and self._last_cur is not None
+            and event.xdata is not None
+            and event.ydata is not None
+            and self._grid_xs is not None
+            and self._grid_ys is not None
+        ):
+            # Map mouse position to nearest grid cell
+            ix = int(
+                np.clip(
+                    np.searchsorted(self._grid_xs, event.xdata),
+                    0,
+                    len(self._grid_xs) - 1,
+                )
+            )
+            iy = int(
+                np.clip(
+                    np.searchsorted(self._grid_ys, event.ydata),
+                    0,
+                    len(self._grid_ys) - 1,
+                )
+            )
+            cur_v = int(self._last_cur[iy, ix])
+            rec_v = int(self._last_rec[iy, ix])
+            idx_v = int(self._last_idx[iy, ix])
+            if self.debug_text is not None:
+                self.debug_text.set_text(f"cur={cur_v} rec={rec_v} idx={idx_v}")
+        self.update_heatmap(self.selected_index)
+
+    def on_key(self, event):
+        if event.key == "d":
+            self.debug = not self.debug
+            # Create debug text lazily
+            if self.debug and self.debug_text is None:
+                self.debug_text = self.ax.text(
+                    0.02, 0.90, "", transform=self.ax.transAxes, va="top"
+                )
+        if event.key == "r":
+            self.reconnect()
+
+    def compute_diagonal_indices(self):
+        """Return the tuple of point indices forming the current diagonal."""
+        return (0, 2) if self.diagonal_02 else (1, 3)
+
+    def compute_diagonal_length(self):
+        """Compute the Euclidean length of the current diagonal."""
+        i, j = self.compute_diagonal_indices()
+        dx = self.points[i, 0] - self.points[j, 0]
+        dy = self.points[i, 1] - self.points[j, 1]
+        return float(np.hypot(dx, dy))
+
+    def triangles(self, flipped: bool = False):
+        """Return the two triangles as tuples of vertex indices.
+        If flipped=True, returns the configuration after flipping the diagonal."""
+        d02 = self.diagonal_02 ^ bool(flipped)
+        return [(0, 1, 2), (0, 2, 3)] if d02 else [(1, 2, 3), (1, 3, 0)]
+
+    def element_vectors(self):
+        """For each triangle, return (i,j,k, origin_point, a, b, centroid) with a,b avoiding the diagonal edge."""
+        tris = self.triangles(False)
+        dpair = self.compute_diagonal_indices()
+        out = []
+        for tri in tris:
+            o, u, v = self.triangle_basis_indices(tri, dpair)
+            po = self.points[o]
+            a = self.points[u] - po
+            b = self.points[v] - po
+            i, j, k = tri
+            centroid = (self.points[i] + self.points[j] + self.points[k]) / 3.0
+            out.append((i, j, k, po.copy(), a, b, centroid))
+        return out
+
+    def gram_matrix(self, a, b):
+        """Return 2x2 Gram matrix of vectors a and b."""
+        aa = float(np.dot(a, a))
+        ab = float(np.dot(a, b))
+        bb = float(np.dot(b, b))
+        return np.array([[aa, ab], [ab, bb]], dtype=float)
+
+    def compute_poincare_points(self):
+        """Return an (2,2) array with rows [x, y] for the two current triangles,
+        where (x,y) are the Poincaré disk coordinates mapped from the element Gram matrix G via C2PoincareDisk."""
+        tris = self.triangles(False)
+        dpair = self.compute_diagonal_indices()
+        pts = []
+        for tri in tris:
+            o, u, v = self.triangle_basis_indices(tri, dpair)
+            po = self.points[o]
+            a = self.points[u] - po
+            b = self.points[v] - po
+            G = self.gram_matrix(a, b)
+            x, y = C2PoincareDisk(G)
+            zoom = 1
+            x = x * zoom * self.grid_size / 2 + self.grid_size / 2
+            y = y * zoom * self.grid_size / 2 + self.grid_size / 2
+            pts.append([float(x), float(y)])
+        return np.asarray(pts, dtype=float)
+
+    def update_g_scatter(self):
+        """Update the scatter plot of Poincaré disk coordinates for current triangles."""
+        if self.ax_g is None or self.g_scatter is None:
+            return
+        g_points = self.compute_poincare_points()
+        self.g_scatter.set_offsets(g_points)
+
+    def violates(self, G):
+        """Return True if G[0,1] < 0 or G[0,1] > min(G[0,0], G[1,1])."""
+        ab = float(G[0, 1])
+        aa = float(G[0, 0])
+        bb = float(G[1, 1])
+        return (ab < 0.0) or (ab > min(aa, bb))
+
+    def update_faces(self):
+        """Recreate triangle face patches and color them based on the Gram-matrix criterion."""
+        # Remove old patches
+        for p in getattr(self, "face_patches", []):
+            p.remove()
+        self.face_patches = []
+
+        # Build new patches for current triangulation
+        for i, j, k, origin, a, b, centroid in self.element_vectors():
+            G = self.gram_matrix(a, b)
+            bad = self.violates(G)
+            facecolor = (
+                (1.0, 0.0, 0.0, 0.3) if bad else (0.0, 0.0, 0.0, 0.0)
+            )  # red with alpha if bad, transparent otherwise
+            poly = Polygon(
+                self.points[[i, j, k]],
+                closed=True,
+                facecolor=facecolor,
+                edgecolor="none",
+            )
+            self.ax.add_patch(poly)
+            self.face_patches.append(poly)
+
+    def update_heatmap(self, selected_index):
+        """Compute and display a 5-level heatmap by counting violations across four elements (two now + two after reconnect)."""
+        xmin, xmax = self.ax.get_xlim()
+        ymin, ymax = self.ax.get_ylim()
+        if xmax < xmin:
+            xmin, xmax = xmax, xmin
+        if ymax < ymin:
+            ymin, ymax = ymax, ymin
+
+        H = W = int(self.grid_size)
+        xs = np.linspace(xmin, xmax, W)
+        ys = np.linspace(ymin, ymax, H)
+        X, Y = np.meshgrid(xs, ys)
+        self._grid_xs = xs
+        self._grid_ys = ys
+
+        def tri_violation_map(tri, diag_pair):
+            o, u, v = self.triangle_basis_indices(tri, diag_pair)
+
+            def comp(idx):
+                if idx == selected_index:
+                    return X, Y
+                else:
+                    return self.points[idx, 0], self.points[idx, 1]
+
+            pox, poy = comp(o)
+            pux, puy = comp(u)
+            pvx, pvy = comp(v)
+            axx = pux - pox
+            axy = puy - poy
+            bxx = pvx - pox
+            bxy = pvy - poy
+            aa = axx * axx + axy * axy
+            bb = bxx * bxx + bxy * bxy
+            ab = axx * bxx + axy * bxy
+            m = (ab < 0.0) | (ab > np.minimum(aa, bb))
+            if np.isscalar(m):
+                m = np.full((H, W), bool(m))
+            return m
+
+        # Current triangulation
+        tris_cur = self.triangles(False)
+        dpair_cur = self.compute_diagonal_indices()
+        m0c = tri_violation_map(tris_cur[0], dpair_cur)
+        m1c = tri_violation_map(tris_cur[1], dpair_cur)
+        cur = m0c.astype(np.uint8) + m1c.astype(np.uint8)
+
+        # After reconnect (flip diagonal)
+        tris_rec = self.triangles(True)
+        # diagonal pair after flip is the opposite
+        dpair_rec = (1, 3) if dpair_cur == (0, 2) else (0, 2)
+        m0r = tri_violation_map(tris_rec[0], dpair_rec)
+        m1r = tri_violation_map(tris_rec[1], dpair_rec)
+        rec = m0r.astype(np.uint8) + m1r.astype(np.uint8)
+
+        # Count-of-violations index: total violated elements across both states (0..4)
+        idx = np.clip(cur + rec, 0, 4).astype(np.uint8)  # 0..4
+        self._last_cur = cur
+        self._last_rec = rec
+        self._last_idx = idx
+
+        if self.heatmap_im is None:
+            self.heatmap_im = self.ax.imshow(
+                idx,
+                extent=(xmin, xmax, ymin, ymax),
+                origin="lower",
+                cmap=self.heatmap_cmap,
+                norm=self.heatmap_norm,  # <— key
+                interpolation="nearest",
+                zorder=0.05,
+            )
+        else:
+            self.heatmap_im.set_data(idx)
+            self.heatmap_im.set_extent((xmin, xmax, ymin, ymax))
+        self.ax.figure.canvas.draw_idle()
+
+    # ---------- Geometry ops ----------
+    def reconnect(self):
+        """Flip the internal diagonal: (0,2) <-> (1,3)."""
+        if self.diagonal_02:
+            # replace (0,2) with (1,3)
+            self._replace_edge((0, 2), (1, 3))
+        else:
+            # replace (1,3) with (0,2)
+            self._replace_edge((1, 3), (0, 2))
+        self.diagonal_02 = not self.diagonal_02
+
+        # Update only what is not covered by `update()`
+        self.update_edges()
+
+        # Heatmap depends on the selected index and prospective positions; keep it explicit here
+        if self.selected_index is not None:
+            self.update_heatmap(self.selected_index)
+
+        # Do the rest (faces, vectors/grams, labels, scatter) once via the centralized updater
+        self.update()
+
+    def _replace_edge(self, old_edge, new_edge):
+        # normalize order (i<j) for robust equality
+        old_edge = tuple(sorted(old_edge))
+        new_edge = tuple(sorted(new_edge))
+        self.edges = [tuple(sorted(e)) for e in self.edges]
+        # swap in list
+        self.edges = [e for e in self.edges if e != old_edge]
+        self.edges.append(new_edge)
+
+    def update_element_vectors_and_grams(self):
+        """Redraw the element vectors (as arrows) and update/create Gram matrix labels near triangle centroids."""
+        # Remove old arrows
+        for art in self.vector_artists:
+            art.remove()
+        self.vector_artists = []
+
+        elems = self.element_vectors()
+        # Ensure we have exactly two text labels (one per triangle)
+        # Create if missing
+        while len(self.G_texts) < len(elems):
+            self.G_texts.append(
+                self.ax.text(0, 0, "", va="top", ha="left", transform=self.ax.transAxes)
+            )
+        # Trim if too many
+        while len(self.G_texts) > len(elems):
+            txt = self.G_texts.pop()
+            txt.remove()
+
+        for idx, (i, j, k, origin, a, b, centroid) in enumerate(elems):
+            # Draw two arrows from the origin to the endpoints of vectors a and b
+            arr1 = FancyArrowPatch(
+                posA=(origin[0], origin[1]),
+                posB=(origin[0] + a[0], origin[1] + a[1]),
+                arrowstyle="->",
+                mutation_scale=12,
+                color="green",
+                lw=1.5,
+            )
+            arr2 = FancyArrowPatch(
+                posA=(origin[0], origin[1]),
+                posB=(origin[0] + b[0], origin[1] + b[1]),
+                arrowstyle="->",
+                mutation_scale=12,
+                color="green",
+                lw=1.5,
+            )
+            self.ax.add_patch(arr1)
+            self.ax.add_patch(arr2)
+            self.vector_artists.extend([arr1, arr2])
+
+            # Compute Gram matrix and place/update text label at top of axes, stacked vertically
+            G = self.gram_matrix(a, b)
+            label = f"{G[0, 0]:.1f}, {G[0, 1]:.1f}\n {G[1, 0]:.1f}, {G[1, 1]:.1f}"
+            # Place G-matrix labels at the top of the axes, stacked vertically
+            self.G_texts[idx].set_transform(self.ax.transAxes)
+            self.G_texts[idx].set_ha("left")
+            self.G_texts[idx].set_va("top")
+            # Compute a y position near the top, with spacing between labels
+            base_y = 0.98
+            spacing = 0.10
+            pos = (0.02, base_y - idx * spacing)
+            self.G_texts[idx].set_position(pos)
+            self.G_texts[idx].set_text(label)
+            self.G_texts[idx].set_bbox(
+                dict(boxstyle="round,pad=0.2", fc="w", ec="0.5", alpha=0.8)
+            )
+
+        # Update (G11,G22) scatter if present
+        self.update_g_scatter()
+
+    # ---------- Rendering updates ----------
+    def update_edges(self):
+        # Ensure number of artists matches number of edges
+        if len(self.line_artists) != len(self.edges):
+            # Recreate artists from scratch
+            for ln in self.line_artists:
+                ln.remove()
+            self.line_artists = []
+            for i, j in self.edges:
+                (ln,) = self.ax.plot(
+                    [self.points[i, 0], self.points[j, 0]],
+                    [self.points[i, 1], self.points[j, 1]],
+                    "-",
+                    color="blue",
+                )
+                self.line_artists.append(ln)
+
+    def update(self):
+        # update point scatter
+        self.point_artist.set_data(self.points[:, 0], self.points[:, 1])
+        # update each edge
+        for ln, (i, j) in zip(self.line_artists, self.edges):
+            ln.set_data(
+                [self.points[i, 0], self.points[j, 0]],
+                [self.points[i, 1], self.points[j, 1]],
+            )
+        self.update_faces()
+        self.update_element_vectors_and_grams()
+        self.ax.figure.canvas.draw_idle()
+
+
+def run_reconnection_demo():
+    # Square-like layout for clarity
+    points = np.array(
+        [
+            [0.0, 0.0],  # 0
+            [1.0, 0.0],  # 1
+            [1.0, 1.0],  # 2
+            [0.0, 1.0],  # 3
+        ]
+    )
+
+    fig, (ax, ax_g) = plt.subplots(1, 2, figsize=(10, 5))
+    ax.set_xlim(-2, 3)
+    ax.set_ylim(-2, 3)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title("Triangulation")
+
+    dt = DraggableTriangulation(ax, points, ax_g=ax_g)
+    # Draw disk first so it's firmly in the background
+    plotPoincareDisk(ax=ax_g, fig=fig, grid_size=dt.grid_size)
+
+    plt.show()
+
+
+if __name__ == "__main__":
+    run_reconnection_demo()
