@@ -805,7 +805,7 @@ def get_window_power_law_exponents(
         # fit the data
         fit = powerlaw.Fit(drops, xmin=xmin)
         fits.append(fit)
-        p, alpha, std = evaluate_fit(
+        p, alpha, mean, std = evaluate_fit(
             drops,
             xmin=xmin,
             dist_name=dist,
@@ -1347,7 +1347,6 @@ def goodnessOfFit(
     return p_value, mean_alpha, std_alpha
 
 
-# --- Combined fit statistics function ---
 def evaluate_fit(
     drops,
     xmin,
@@ -1355,6 +1354,7 @@ def evaluate_fit(
     parallel=True,
     verbose=False,
     debug=False,
+    nr_sets=2500,
 ):
     """
     Compute (a) KS p-value using parametric synthetic sets *and* (b) exponent
@@ -1372,7 +1372,7 @@ def evaluate_fit(
     if len(drops) < 200:
         print("Warning: this is not a lot of data, the p-value might not be reliable.")
 
-    nr_sets = 2500 if not debug else 3
+    nr_sets = nr_sets if not debug else 3
 
     # paths
     script_dir = Path(__file__).resolve().parent
@@ -1387,6 +1387,11 @@ def evaluate_fit(
     mean_exponent = None
     exponent_std = None
 
+    # Fit once on the original data to obtain the *original* exponent
+    fit_orig_for_alpha = powerlaw.Fit(drops, xmin=xmin)
+    dist_orig_for_alpha = getattr(fit_orig_for_alpha, dist_name)
+    exponent = float(getattr(dist_orig_for_alpha, "alpha", np.nan))
+
     # --- (A) KS p-value + parametric exponent uncertainty via synthetic sets ---
     if p_file.exists() and not debug:
         with open(p_file, "r") as f:
@@ -1394,6 +1399,7 @@ def evaluate_fit(
         p = result["p"]
         mean_exponent = result.get("mean")
         exponent_std = result.get("std")
+        exponent = float(result.get("exp", exponent))
         if verbose:
             print(f"Loaded p-value + synthetic exponent stats from {p_file}")
     else:
@@ -1417,9 +1423,162 @@ def evaluate_fit(
         )
 
         with open(p_file, "w") as f:
-            json.dump({"p": p, "mean": mean_exponent, "std": exponent_std}, f)
+            json.dump(
+                {"p": p, "exp": exponent, "mean": mean_exponent, "std": exponent_std}, f
+            )
 
-    return p, mean_exponent, exponent_std
+    return p, exponent, mean_exponent, exponent_std
+
+
+def find_best_xmin(
+    drops,
+    debug=False,
+    start_xmin=1e-7,
+    max_xmin=1e-4,
+    nr_sets_start=250,
+    nr_sets_final=2500,
+):
+    """
+    Heuristically choose the smallest x_min whose truncated power‑law fit
+    passes the KS goodness‑of‑fit at p >= 0.1.
+
+    Strategy
+    --------
+    1) Build a log-spaced grid of candidate x_min values between
+       start_xmin and max_xmin.
+    2) Perform a binary search over that grid to find the *minimum* index
+       where p >= 0.1. To reduce variance, increase the number of synthetic
+       sets (nr_sets) as we move to larger x_min (closer to acceptance).
+    3) If no candidate reaches p >= 0.1, return the x_min with the largest
+       p observed.
+
+    Returns
+    -------
+    best_xmin : float
+        Selected x_min.
+    best_stats : dict
+        Dictionary with 'p', 'alpha', 'mean_alpha', 'std_alpha', 'nr_sets' for the best_xmin.
+    history : list of dict
+        One entry per evaluated candidate in ascending x_min order, each with:
+        {'xmin', 'p', 'alpha', 'mean_alpha', 'std_alpha', 'nr_sets'}.
+    """
+    # Candidates and corresponding synthetic-set budgets
+    xmins = np.logspace(np.log10(start_xmin), np.log10(max_xmin), num=20)
+    # Prepare a per-iteration schedule for the number of synthetic sets.
+    # We use the *maximum* number of iterations a binary search may take,
+    # then increase the budget monotonically along the search path.
+    max_iters = int(np.ceil(np.log2(len(xmins)))) + 1
+    nr_sets_schedule = np.logspace(
+        np.log10(nr_sets_start), np.log10(nr_sets_final), num=max_iters
+    ).astype(int)
+
+    p_threshold = 0.10
+
+    # Cache: idx -> {'p','alpha', 'mean_alpha','std_alpha','nr_sets'}
+    evaluated = {}
+    history = []
+
+    def eval_idx(idx, nr_sets_min):
+        """
+        Evaluate candidate 'idx' using at least 'nr_sets_min' synthetic sets.
+        If we've already evaluated this idx with fewer sets, re-evaluate with the larger budget.
+        """
+        xmin = float(xmins[idx])
+        nr_sets = int(nr_sets_min)
+
+        prev = evaluated.get(idx)
+        if prev is not None and prev["nr_sets"] >= nr_sets:
+            # Already have an evaluation with >= this budget
+            return (
+                prev["p"],
+                prev["alpha"],
+                prev["mean_alpha"],
+                prev["std_alpha"],
+                prev["nr_sets"],
+            )
+
+        p, alpha, mean_alpha, std_alpha = evaluate_fit(
+            drops,
+            xmin,
+            parallel=True,
+            debug=debug,
+            nr_sets=nr_sets,
+        )
+        rec = {
+            "p": float(p),
+            "alpha": float(alpha),
+            "mean_alpha": None if mean_alpha is None else float(mean_alpha),
+            "std_alpha": None if std_alpha is None else float(std_alpha),
+            "nr_sets": int(nr_sets),
+        }
+        evaluated[idx] = rec
+
+        history.append(
+            {
+                "xmin": xmin,
+                **rec,
+            }
+        )
+        if debug:
+            print(
+                f"[find_best_xmin] xmin={xmin:.3e} -> p={rec['p']:.3f}, "
+                f"alpha={rec['alpha']:.3f}, "
+                f"mean_alpha={rec['mean_alpha']}, std_alpha={rec['std_alpha']}, "
+                f"nr_sets={rec['nr_sets']}"
+            )
+        return (
+            rec["p"],
+            rec["alpha"],
+            rec["mean_alpha"],
+            rec["std_alpha"],
+            rec["nr_sets"],
+        )
+
+    # Binary search on indices [lo, hi] with increasing evaluation budgets
+    lo, hi = 0, len(xmins) - 1
+    candidate_idx = None
+    iter_idx = 0  # how many evaluations we've attempted (upper-bounded by max_iters)
+
+    while lo <= hi and iter_idx < max_iters:
+        mid = (lo + hi) // 2
+        nr_sets_now = nr_sets_schedule[min(iter_idx, max_iters - 1)]
+        p_mid, _, _, _, _ = eval_idx(mid, nr_sets_now)
+
+        if p_mid >= p_threshold:
+            candidate_idx = mid
+            hi = mid - 1  # try smaller xmin
+        else:
+            lo = mid + 1  # need larger xmin
+
+        iter_idx += 1
+
+    if candidate_idx is None:
+        # No candidate reached threshold — choose the max-p option evaluated.
+        # Ensure all were evaluated so we can pick the true max p over the grid.
+        for i in range(len(xmins)):
+            eval_idx(i, nr_sets_schedule[-1])
+        # Find the index with the highest p (tie-breaker: smaller xmin)
+        best_i = min(
+            range(len(xmins)),
+            key=lambda i: (-evaluated[i]["p"], xmins[i]),
+        )
+    else:
+        best_i = candidate_idx
+
+    rec = evaluated[best_i]
+    best_xmin = float(xmins[best_i])
+    best_stats = {
+        "p": rec["p"],
+        "alpha": rec["alpha"],
+        "mean_alpha": rec["mean_alpha"],
+        "std_alpha": rec["std_alpha"],
+        "nr_sets": rec["nr_sets"],
+    }
+
+    # Sort history by xmin for readability
+    history.sort(key=lambda d: d["xmin"])
+
+    return best_xmin, best_stats, history
 
 
 def make_exponent_map():
@@ -1454,10 +1613,80 @@ def make_exponent_map():
         make_debug_plot(xmins, strainLim=strainLim)
 
 
+def plot_history(history, savePath):
+    """
+    Plot KS p-value and exponent (with std error bars) versus xmin.
+
+    Parameters
+    ----------
+    history : list of dicts
+        Each dict should contain keys: 'xmin', 'p', 'alpha', and optionally 'std_alpha'.
+    savePath : str or Path
+        Where to save the figure. If falsy/None, the figure is just shown.
+    """
+    # Sort history by xmin for consistent plotting
+    if history is None or len(history) == 0:
+        return
+
+    hist_sorted = sorted(history, key=lambda d: d["xmin"])
+
+    x = np.array([h["xmin"] for h in hist_sorted], dtype=float)
+    pvals = np.array([h.get("p", np.nan) for h in hist_sorted], dtype=float)
+    alphas = np.array([h.get("alpha", np.nan) for h in hist_sorted], dtype=float)
+    stds = np.array([h.get("std_alpha", np.nan) for h in hist_sorted], dtype=float)
+
+    # Create a new figure (use returned fig reference rather than implicit plt state)
+    fig, ax1 = plt.subplots()
+
+    # X axis in log scale (xmin grid is log-spaced)
+    ax1.set_xscale("log")
+
+    # Plot p-values on the left axis
+    (p_line,) = ax1.plot(x, pvals, marker="o", linestyle="-", label="KS p-value")
+    ax1.axhline(0.10, linestyle="--", linewidth=1.0, label="p = 0.10 threshold")
+    ax1.set_xlabel(r"$E_{\mathrm{min}}$")
+    ax1.set_ylabel("KS p-value")
+    ax1.set_ylim(0, 1)
+
+    # Plot alpha with error bars on the right axis
+    ax2 = ax1.twinx()
+    # Only provide yerr if we actually have non-NaN values
+    yerr = None if np.all(np.isnan(stds)) else stds
+    alpha_line = ax2.errorbar(
+        x,
+        alphas,
+        yerr=yerr,
+        marker="s",
+        linestyle="-",
+        label=r"$\alpha$",
+    )
+    ax2.set_ylabel(r"Exponent $\alpha$")
+
+    # Build a combined legend
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    # errorbar returns a container; grab the Line2D handle for legend if present
+    if hasattr(alpha_line, "lines") and len(alpha_line.lines) > 0:
+        alpha_handle = alpha_line.lines[0]
+    else:
+        alpha_handle = alpha_line
+    lines = lines1 + [alpha_handle]
+    labels = labels1 + [r"$\alpha$"]
+    ax1.legend(lines, labels, loc="best")
+
+    fig.tight_layout()
+
+    # Save or show
+    if savePath:
+        fig.savefig(savePath, bbox_inches="tight")
+    else:
+        fig.show()
+
+
 def make_exponent_fit():
     # csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
     csvPath = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
     # csvPath = "/Volumes/data/MTS2D_output/simpleShear,s400x400l0.15,1e-05,1.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+    name = "simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0"
     xmin = 1e-6
     strainLim = [1.0, 3.0]
     debug = False
@@ -1472,16 +1701,33 @@ def make_exponent_fit():
     #     params={"alpha": 1},
     # )
     for d in drops:
+        # find best xmin
+        xmin, stats, history = find_best_xmin(d, debug=debug)
+        p = stats["p"]
+        alpha = stats["alpha"]
+        std = stats["std_alpha"]
         fit = powerlaw.Fit(d, xmin=xmin)
         title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
-        p, alpha, std = evaluate_fit(d, xmin, parallel=True, debug=debug)
-        print("averageExponent:", alpha)
         plot_data_and_fit(fit, ax, xmin, title, pdf=True, alpha_std=std, p_val=p)
-        print("P value:", p)
+        print(f"E_min: {xmin:.2e}")
+        print(f"P value: {p:.2f}")
+        print(f"Exponent: {alpha:.3f} +/- {std:.3f}")
+        # Print p value for surrounding xmins
+        print("History:")
+        for rec in history:
+            print(
+                f"  xmin={rec['xmin']:.2e} -> p={rec['p']:.3f}, "
+                f"alpha={rec['alpha']:.3f}, "
+                f"std_alpha={rec['std_alpha']:.3f}, "
+                f"nr_sets={rec['nr_sets']}"
+            )
+        plot_history(history, savePath=PLOTPATH + f"searchHistory_{name}.pdf")
+        print(f"Saved history plot to {PLOTPATH}searchHistory_{name}.pdf")
+
         # plot_ks_distance(d, xmin)
     plt.show()
 
-    filename = f"{PLOTPATH}simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0.pdf"
+    filename = f"{PLOTPATH}{name}.pdf"
     fig.savefig(filename, format="pdf", bbox_inches="tight")
     print(f"Saved figure to {filename}")
 
@@ -1539,7 +1785,7 @@ def plot_powerlaw(
             color = "black"
 
         if evaluate:
-            p, mean_exp, exp_std = evaluate_fit(
+            p, exp, mean_exp, exp_std = evaluate_fit(
                 all_drops, xmin, parallel=True, debug=debug
             )
 
@@ -1551,9 +1797,7 @@ def plot_powerlaw(
             else:
                 r = rating[-1]
             print(f"Number of drops: {len(all_drops)}")
-            print(
-                f"{attribute}: P value: {p:.2f} ({r}), mean: {mean_exp}, std: {exp_std}"
-            )
+            print(f"{attribute}: P value: {p:.2f} ({r}), exp: {exp}, std: {exp_std}")
             ax = plot_data_and_fit(
                 fit,
                 ax,

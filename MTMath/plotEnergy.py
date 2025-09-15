@@ -1,5 +1,6 @@
 import numpy as np
 
+
 try:
     from .contiPotential import ContiEnergy, lagrange_reduction
 except ModuleNotFoundError:
@@ -91,7 +92,9 @@ def oneDPotentialDissordered():
     plt.show()
 
 
-def generate_poincare_disk(resolution=500, zoom=1, returnMask=False):
+def generate_poincare_disk(
+    resolution=500, zoom=1, returnMask=False, transformation=None
+):
     # Define the range for x and y based on the unit circle
     radius = 1.0 / zoom
 
@@ -128,6 +131,9 @@ def generate_poincare_disk(resolution=500, zoom=1, returnMask=False):
         ],
         axis=-2,
     )
+
+    C = transformC(C, transformation)
+
     if returnMask:
         return C, mask
     return C
@@ -143,13 +149,12 @@ def generate_energy_grid(
     poincareDisk=True,
     zeroReference=True,
 ):
+    x_min, x_max = 0, 1
+    y_min, y_max = -0.5, 0.5
     # Poicare disk
     if poincareDisk:
         C = generate_poincare_disk(resolution, zoom)
     else:
-        x_min, x_max = 0, 1
-        y_min, y_max = -0.5, 0.5
-
         # Create the meshgrid for the x and y coordinates
         X, Y = np.meshgrid(
             np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
@@ -196,7 +201,22 @@ def generate_angle_region(resolution=500, zoom=1):
     return region
 
 
-def C2PoincareDisk(C):
+def C2PoincareDisk(C, transformation=None):
+    """Map a metric C to Poincaré disk coordinates (x, y).
+
+    By default, the identity metric maps to the center. To center another
+    target metric C0 at the origin, first apply a congruence transform that
+    sends C0 to the identity: choose M = inv(cholesky(C0)) and map
+    C -> M^T C M before computing (x, y).
+
+    Supported values for `transformation`:
+      - "triangular": centers the triangular metric [[1, 1/2], [1/2, 1]].
+      - np.ndarray (2x2 matrix): this matrix M is used directly as a
+        congruence transform C -> M^T C M.
+    """
+
+    C = transformC(C, transformation)
+
     with np.errstate(divide="ignore", invalid="ignore"):
         if C.ndim == 2:
             det = np.linalg.det(C)
@@ -204,8 +224,8 @@ def C2PoincareDisk(C):
             x_ = C[0, 1] / C[1, 1]
             x = (x_**2 + y_**2 - 1) / (x_**2 + (y_ + 1) ** 2)
             y = 2 * x_ / (x_**2 + (y_ + 1) ** 2)
-            if np.isnan(y_):
-                x, y = -0.9, -0.9
+            if not np.isfinite(y_):
+                x, y = np.nan, np.nan
 
         else:
             dets = np.linalg.det(C)
@@ -218,15 +238,45 @@ def C2PoincareDisk(C):
             x = (x_**2 + y_**2 - 1) / denom
             y = 2 * x_ / denom
 
-            # Replace (x, y) with (-1, -1) where determinant was invalid
-            x[~valid] = -0.9
-            y[~valid] = -0.9
+            # Leave invalid points as NaN so plotting functions can ignore them
+            x[~valid] = np.nan
+            y[~valid] = np.nan
 
         return x, y
 
 
-def drawC(ax, C, grid_size, zoom=1, c="w", linestyle="--", linewidth=0.6, **kwargs):
-    x, y = C2PoincareDisk(C)
+def transformC(C, transformation):
+    if transformation is not None:
+        if isinstance(transformation, np.ndarray):
+            # Use the provided matrix directly as a congruence transform
+            # (broadcasts over C if C has a leading dimension)
+            C = conTrans(C, transformation)
+        elif transformation == "triangular":
+            M = np.array([[-1.0, 0.0], [0.5, -np.sqrt(3) / 2]])
+            C = conTrans(C, M)
+        else:
+            raise ValueError(f"Unknown transformation: {transformation}")
+    return C
+
+
+def drawC(
+    ax,
+    C,
+    grid_size,
+    zoom=1,
+    c="black",
+    linestyle="-",
+    linewidth=0.6,
+    transformation=None,
+    **kwargs,
+):
+    x, y = C2PoincareDisk(C, transformation=transformation)
+    # Mask invalid points; matplotlib will break lines at NaNs
+    if np.ndim(x) == 0:
+        return
+    valid = np.isfinite(x) & np.isfinite(y)
+    if not np.any(valid):
+        return
     ax.plot(
         x * zoom * grid_size / 2 + grid_size / 2,
         y * zoom * grid_size / 2 + grid_size / 2,
@@ -237,16 +287,61 @@ def drawC(ax, C, grid_size, zoom=1, c="w", linestyle="--", linewidth=0.6, **kwar
     )
 
 
+def drawRegion(ax, region, grid_size, zoom=1, cmap=None, **kwargs):
+    # Doesn't work with transformations
+
+    # Mask invalid values (NaNs) so they become transparent
+    data = np.ma.masked_invalid(region)
+
+    # Use a copy of the colormap so we can set NaNs to be transparent
+    if cmap is None:
+        cmap = kwargs.pop("cmap", cm.get_cmap("Greens").copy())
+
+    # Keep the same pixel coordinate system as the other plots
+    extent = [
+        (grid_size / 2) * (1 - 1 / zoom),
+        (grid_size / 2) * (1 + 1 / zoom),
+        (grid_size / 2) * (1 - 1 / zoom),
+        (grid_size / 2) * (1 + 1 / zoom),
+    ]
+
+    img = ax.imshow(
+        data,
+        origin="lower",
+        extent=extent,
+        interpolation="nearest",
+        cmap=cmap,
+        **kwargs,
+    )
+    return img
+
+
 def drawCScatter(
-    ax, C, grid_size, remove_max_color=True, vmax=None, log_scale=True, zoom=1
+    ax,
+    C,
+    grid_size,
+    remove_max_color=True,
+    vmax=None,
+    log_scale=True,
+    zoom=1,
+    transformation=None,
 ):
-    x, y = C2PoincareDisk(C)
+    x, y = C2PoincareDisk(C, transformation)
+    # Filter out invalid points
+    mask = np.isfinite(x) & np.isfinite(y)
+    x = x[mask]
+    y = y[mask]
+    if x.size == 0:
+        return
+
     # Create a density estimate
     xy = np.vstack([x, y])
 
     # Scott rule
     bandwidth = len(x) ** (-1 / 6)
     try:
+        if x.size < 2:
+            raise np.linalg.LinAlgError("insufficient points for KDE")
         kde = gaussian_kde(xy, bw_method=bandwidth)
         density1 = kde(xy)
     except np.linalg.LinAlgError:
@@ -324,11 +419,246 @@ def drawFundamentalDomain(ax, **kwargs):
     drawC(ax, C, **kwargs)
 
 
+def drawPoincareGrid(ax, grid_size, zoom=1, depth=6, **kwargs):
+    nr = 1000
+    zero = np.array([0] * nr)
+    # VERTICAL LINE
+    t = np.sinh(np.linspace(np.arcsinh(1), np.arcsinh(2 / np.sqrt(3)), nr))
+    # Values from -1<t<1 give complex solutions
+    # det=1, C12=C21, C11=C22
+
+    # Vertical Positive
+    C = np.array([[t, np.sqrt(t**2 - 1)], [np.sqrt(t**2 - 1), t]]).transpose(2, 0, 1)
+    drawAllVariations(ax, C, grid_size, depth=depth, zoom=zoom, **kwargs)
+
+    # Vertical Negative
+    C = np.array([[t, -np.sqrt(t**2 - 1)], [-np.sqrt(t**2 - 1), t]]).transpose(2, 0, 1)
+    drawAllVariations(ax, C, grid_size, depth=depth, zoom=zoom, **kwargs)
+
+    # HORIZONTAL LINE
+    # Values from -1<t<1 are outside of the circle
+    t = np.sinh(np.linspace(np.arcsinh(0.0000001), np.arcsinh(1), nr))
+    # det=1, C12=C21, C12=0
+    C = np.array([[t, zero], [zero, 1 / t]]).transpose(2, 0, 1)
+    drawAllVariations(
+        ax, C, grid_size, depth=depth, zoom=zoom, **kwargs, linestyle="--"
+    )
+
+    # FUNDAMENTAL DOMAIN (0.01 to avoid div by 0)
+    # https://www.wolframalpha.com/input?i=0%3Ca%3Cd%2C+b%3Da%2F2%2C+++a*d-b*c%3D1%2C+b%3Dc
+    t = np.sinh(np.linspace(np.arcsinh(0.0000001), np.arcsinh(2 / np.sqrt(3)), nr))
+    # Negative values are outside of the circle
+    # det=1, C12=C21,
+    C = np.array([[t, t / 2], [t / 2, (t**2 + 4) / (4 * t)]]).transpose(2, 0, 1)
+
+    drawAllVariations(ax, C, grid_size, depth=depth, zoom=zoom, **kwargs)
+
+
+def conTrans(C, M):
+    """Apply a congruence transform: return M^T @ C @ M.
+
+    Works for C with shape (2, 2) or (N, 2, 2).
+    M can be (2, 2) for a single transform broadcast over all slices, or (N, 2, 2)
+    to use a different matrix per slice (matching the leading dimension of C).
+    """
+    C_arr = np.asarray(C)
+    M_arr = np.asarray(M, dtype=C_arr.dtype)
+
+    if M_arr.ndim == 2:
+        # Broadcast a single 2x2 over all slices of C
+        return M_arr.T @ C_arr @ M_arr
+    if M_arr.ndim == 3:
+        # Per-slice transform; relies on batch matmul broadcasting
+        return np.swapaxes(M_arr, -1, -2) @ C_arr @ M_arr
+
+    raise ValueError("M must have shape (2,2) or (N,2,2)")
+
+
+def _m3_const(dtype_str):
+    dt = np.dtype(dtype_str)
+    # Shear matrix [[1, -1], [0, 1]] used in up/right moves
+    return np.array([[1, -1], [0, 1]], dtype=dt)
+
+
+def _m3_for(C):
+    """Return the canonical m3 with the proper dtype for C."""
+    return _m3_const(np.asarray(C).dtype.str)
+
+
+def up(C):
+    M = _m3_for(C)  # shape (2,2), broadcasts over slices of C
+    return conTrans(C, M)
+
+
+def down(C):
+    M = np.linalg.inv(_m3_for(C))
+    return conTrans(C, M)
+
+
+def right(C):
+    M = _m3_for(C).T
+    return conTrans(C, M)
+
+
+def left(C):
+    M = np.linalg.inv(_m3_for(C).T)
+    return conTrans(C, M)
+
+
+def upInv(C):
+    return np.linalg.inv(up(C))
+
+
+def rightInv(C):
+    return np.linalg.inv(right(C))
+
+
+def drawSquareElasticDomain(ax, **kwargs):
+    nr = 1000
+
+    t = np.sinh(np.linspace(np.arcsinh(0.0000001), np.arcsinh(2 / np.sqrt(3)), nr))
+    # Negative values are outside of the circle
+    # det=1, C12=C21,
+    C = np.array([[t, t / 2], [t / 2, (t**2 + 4) / (4 * t)]]).transpose(2, 0, 1)
+
+    drawC(ax, C, **kwargs)
+    drawC(ax, upInv(C), **kwargs)
+    drawC(ax, up(C), **kwargs)
+    drawC(ax, right(upInv(C)), **kwargs)
+
+
+def drawTriangularElasticDomain(ax, shade=False, **kwargs):
+    nr = 1000
+
+    zero = np.array([0] * nr)
+
+    # HORIZONTAL LINE
+    # Values from -1<t<1 are outside of the circle
+    t = np.sinh(np.linspace(np.arcsinh(0.0000001), np.arcsinh(1), nr))
+    # det=1, C12=C21, C12=0
+    C = np.array([[t, zero], [zero, 1 / t]]).transpose(2, 0, 1)
+
+    drawC(ax, C, **kwargs)
+    drawC(ax, down(C), **kwargs)
+    drawC(ax, left(C), **kwargs)
+    drawC(ax, left(up(C)), **kwargs)
+    drawC(ax, left(up(left(C))), **kwargs)
+    drawC(ax, left(left(up(left(C)))), **kwargs)
+
+    # drawC(ax, C, **kwargs)
+    # drawC(ax, right(upInv(C)), **kwargs)
+    # drawC(ax, upInv(C), **kwargs)
+    # drawC(ax, rightInv(C), **kwargs)
+    # drawC(ax, upInv(up(rightInv(C))), **kwargs)
+    # drawC(ax, rightInv(up(rightInv(C))), **kwargs)
+
+    # Shade the region defined by 0 <= C12 <= min(C11, C22)
+    # Shading does not work with transformations
+    transformation = kwargs.get("transformation", None)
+    if shade and transformation is None:
+        grid_size = kwargs.get("grid_size", 200)
+        zoom_val = kwargs.get("zoom", 1)
+
+        # C has shape (grid, grid, 2, 2); r_mask is True on/outside the rim
+        C, r_mask = generate_poincare_disk(
+            grid_size, zoom_val, returnMask=True, transformation=transformation
+        )
+
+        C11 = C[..., 0, 0]
+        C12 = C[..., 0, 1]
+        C22 = C[..., 1, 1]
+
+        # Region: 0 <= C12 <= min(C11, C22)
+        region_mask = (C12 >= 0) & (C12 <= np.minimum(C11, C22))
+        drawRegion(
+            ax,
+            region=region_mask.astype(float),
+            grid_size=grid_size,
+            zoom=zoom_val,
+            alpha=0.3,
+        )
+
+
+def drawAllVariations(
+    ax,
+    C,
+    grid_size,
+    depth=0,
+    zoom=1,
+    transformation=None,
+    drawn=None,
+    **kwargs,
+):
+    # Initialize the dedup set once at the top-level call
+    if drawn is None:
+        drawn = set()
+
+    def _hash_metric(M):
+        """Make a stable hashable key for a metric or batch of metrics.
+        We round to 12 decimals to avoid tiny numeric noise duplications."""
+        A = np.asarray(M)
+        return tuple(np.round(A.reshape(-1), 12))
+
+    def _maybe_draw(MC):
+        key = _hash_metric(MC)
+        if key in drawn:
+            return False
+        drawn.add(key)
+        drawC(
+            ax,
+            MC,
+            grid_size=grid_size,
+            zoom=zoom,
+            transformation=transformation,
+            **kwargs,
+        )
+        return True
+
+    # Ensure dtype consistency for symmetry generators
+    dt = np.asarray(C).dtype
+    m1 = np.array([[1, 0], [0, -1]], dtype=dt)
+    m2 = np.array([[0, 1], [1, 0]], dtype=dt)
+
+    # Draw the base and a few simple symmetries
+    _maybe_draw(C)
+    _maybe_draw(conTrans(C, m1))
+    _maybe_draw(conTrans(C, m2))
+    _maybe_draw(conTrans(conTrans(C, m1), m2))
+
+    # Recurse via generators corresponding to up/right moves
+    if depth > 0:
+        drawAllVariations(
+            ax,
+            up(C),
+            grid_size,
+            depth=depth - 1,
+            zoom=zoom,
+            transformation=transformation,
+            drawn=drawn,
+            **kwargs,
+        )
+        drawAllVariations(
+            ax,
+            right(C),
+            grid_size,
+            depth=depth - 1,
+            zoom=zoom,
+            transformation=transformation,
+            drawn=drawn,
+            **kwargs,
+        )
+    return drawn
+
+
 def drawShearPath(ax, **kwargs):
     nr = 1000
     one = np.array([1] * nr)
 
     t = np.sinh(np.linspace(np.arcsinh(0.001), np.arcsinh(300), nr))
+
+    C = np.array([[one, -t], [-t, one + t**2]]).transpose(2, 0, 1)
+    drawC(ax, C, linestyle="--", **kwargs)
+
     C = np.array([[one, t], [t, one + t**2]]).transpose(2, 0, 1)
     drawC(ax, C, **kwargs)
 
@@ -419,6 +749,91 @@ def plotEnergyField(
             dpi=600,
             bbox_inches="tight",
         )
+
+
+def plotPoincareDisk():
+    # Make plot of fundamental domain
+    fig, ax = plt.subplots(figsize=(6, 6))
+    grid_size = 500
+    zoom = 1
+    transformation = None  # "triangular"
+
+    drawPoincareGrid(
+        ax,
+        grid_size=grid_size,
+        zoom=zoom,
+        depth=8,
+        c="gray",
+        transformation=transformation,
+    )
+
+    drawSquareElasticDomain(
+        ax=ax,
+        grid_size=grid_size,
+        zoom=zoom,
+        c="red",
+        transformation=transformation,
+        linewidth=1,
+    )
+    drawTriangularElasticDomain(
+        ax=ax,
+        grid_size=grid_size,
+        zoom=zoom,
+        c="green",
+        transformation=transformation,
+        linewidth=1.5,
+        shade=True,
+    )
+
+    drawFundamentalDomain(
+        ax,
+        grid_size=grid_size,
+        zoom=zoom,
+        linewidth=1.5,
+        c="black",
+        # More spacing between dashes
+        linestyle=(0, (3, 6)),
+        transformation=transformation,
+    )
+
+    drawShearPath(
+        ax,
+        grid_size=grid_size,
+        zoom=zoom,
+        linewidth=1.5,
+        c="blue",
+        transformation=transformation,
+    )
+
+    # Add a thin black circle
+    circleSize = (grid_size / 2) * zoom
+    circle_center_x = grid_size / 2
+    circle_center_y = grid_size / 2
+    circle = Circle(
+        (circle_center_x, circle_center_y),
+        circleSize,
+        color="black",
+        fill=False,
+        linewidth=1,
+    )
+    fig.gca().add_patch(circle)
+
+    ax.set_xlim(0, grid_size)
+    ax.set_ylim(0, grid_size)
+    ax.set_xticks(
+        np.linspace(0, grid_size, 5),
+        np.linspace(-1, 1, 5).round(2),
+    )
+    ax.set_yticks(
+        np.linspace(0, grid_size, 5),
+        np.linspace(-1, 1, 5).round(2),
+    )
+    ax.set_xlabel(r"$x_p$")
+    ax.set_ylabel(r"$y_p$")
+    plt.tight_layout()
+    plt.savefig("Plots/poincareDisk.pdf", dpi=500)
+    print("Saved plot to Plots/poincareDisk.pdf")
+    plt.show()
 
 
 def add_arrow_3d(xdata, ydata, zdata, ax, start_ind, end_ind, size=15, color="red"):

@@ -322,6 +322,17 @@ def bootstrap_pvalues_ks_ad(
     n = int(x.size)
     local_rng = rng if rng is not None else default_rng()
 
+    # Try cache first for both stats
+    cached_ks = _bootstrap_cache_lookup(x, xmin, xmax, ks_statistic, B, alpha_level)
+    cached_ad = _bootstrap_cache_lookup(x, xmin, xmax, ad_statistic, B, alpha_level)
+    if (cached_ks is not None) and (cached_ad is not None):
+        return (
+            float(cached_ks["pval"]),
+            float(cached_ad["pval"]),
+            float(cached_ks["T_obs"]),
+            float(cached_ad["T_obs"]),
+        )
+
     # Fit on observed data
     alpha_hat = fit_alpha_mle(x, xmin, xmax, bounds=(0.1, 6.0))
 
@@ -359,6 +370,39 @@ def bootstrap_pvalues_ks_ad(
     # p-values (upper-tail)
     p_ks = (1 + np.sum(ts_ks >= T_obs_ks)) / (int(B) + 1)
     p_ad = (1 + np.sum(ts_ad >= T_obs_ad)) / (int(B) + 1)
+
+    # Save results to cache for reuse
+    key_ks = _bootstrap_cache_key(x, xmin, xmax, ks_statistic, B, alpha_level)
+    _bootstrap_cache_store(
+        x,
+        xmin,
+        xmax,
+        ks_statistic,
+        B,
+        alpha_level,
+        {
+            "key": key_ks,
+            "pval": float(p_ks),
+            "T_obs": float(T_obs_ks),
+            "alpha_hat": float(alpha_hat),
+        },
+    )
+    key_ad = _bootstrap_cache_key(x, xmin, xmax, ad_statistic, B, alpha_level)
+    _bootstrap_cache_store(
+        x,
+        xmin,
+        xmax,
+        ad_statistic,
+        B,
+        alpha_level,
+        {
+            "key": key_ad,
+            "pval": float(p_ad),
+            "T_obs": float(T_obs_ad),
+            "alpha_hat": float(alpha_hat),
+        },
+    )
+
     return p_ks, p_ad, T_obs_ks, T_obs_ad
 
 
@@ -475,7 +519,7 @@ def power_study(
 
 if __name__ == "__main__":
     # Parameter grids
-    n_list = [500, 1000, 5000, 10000, 15000]
+    n_list = [1000, 5000, 10000, 15000]
     n_rep_list = [500]
     B_list = [2500]
 

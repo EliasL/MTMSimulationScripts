@@ -573,7 +573,31 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             CLineAngles[x + conjugations, y + conjugations, :] = CToAngle(C_)
         return CLineAngles
 
-    def drawAllVariations(self, C, depth=0, **kwards):
+    def drawAllVariations(self, C, depth=0, drawn=None, **kwards):
+        # Initialize/set carry-over dedup set
+        if drawn is None:
+            drawn = set()
+
+        # Build stable hash for an individual or batched metric
+        def _hash_metric(M):
+            A = np.asarray(M)
+            return tuple(np.round(A.reshape(-1), 12))
+
+        # Attempt a draw if we haven't seen this metric yet
+        def _maybe_draw(MC):
+            key = _hash_metric(MC)
+            if key in drawn:
+                return False
+            drawn.add(key)
+            self.drawC(MC, **kwards)
+            return True
+
+        # Support both single (2,2) and batched (N,2,2) C
+        # The original code assumed batched along axis 0 for generator matrices
+        # We keep the previous vectorized path.
+        if C.ndim == 2:
+            C = C[None, ...]
+
         nr = len(C)
         one = np.array([1] * nr)
         zero = np.array([0] * nr)
@@ -581,23 +605,23 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         m1 = np.array([[one, zero], [zero, -one]]).transpose(2, 0, 1)
         m2 = np.array([[zero, one], [one, zero]]).transpose(2, 0, 1)
         m3 = np.array([[one, -one], [zero, one]]).transpose(2, 0, 1)
-        # m3Inv = np.linalg.inv(m3)
 
-        def up(C):
-            return conTrans(C, m3)
+        def up(M):
+            return conTrans(M, m3)
 
-        def right(C):
-            return conTrans(C, m3.transpose(0, 2, 1))
+        def right(M):
+            return conTrans(M, m3.transpose(0, 2, 1))
 
-        # kwards['color']=(random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-        # kwards['width']=(1+depth)*10
-        self.drawC(C, **kwards)
-        self.drawC(conTrans(C, m1), **kwards)
-        self.drawC(conTrans(C, m2), **kwards)
-        self.drawC(conTrans(conTrans(C, m1), m2), **kwards)
+        # Draw the base and a few simple symmetries (deduped)
+        _maybe_draw(C)
+        _maybe_draw(conTrans(C, m1))
+        _maybe_draw(conTrans(C, m2))
+        _maybe_draw(conTrans(conTrans(C, m1), m2))
+
+        # Recurse via generators corresponding to up/right moves
         if depth > 0:
-            self.drawAllVariations(up(C), depth - 1, **kwards)
-            self.drawAllVariations(right(C), depth - 1, **kwards)
+            self.drawAllVariations(up(C), depth - 1, drawn=drawn, **kwards)
+            self.drawAllVariations(right(C), depth - 1, drawn=drawn, **kwards)
 
     def drawLagrangeReductionBackground(self):
         # We want to visualize where the lagrange reduction occurs when moving either vector

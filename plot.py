@@ -73,6 +73,12 @@ def energyField():
     make3DEnergyField(g, x, y, zScale=0.6, add_front_hole=True)
 
 
+def showPoincareDisk():
+    from MTMath.plotEnergy import plotPoincareDisk
+
+    plotPoincareDisk()
+
+
 def oneDPlot():
     from MTMath.plotEnergy import oneDPotential, oneDPotentialDissordered
 
@@ -228,9 +234,10 @@ def plotEnergyRegion():
 if __name__ == "__main__":
     # plotEnergyRegion()
     # plotSampleRuns()
-    plotPropperJob()
+    # plotPropperJob()
     # debugPlotAll()
     # energyField()
+    showPoincareDisk()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
     # createVideoes(configs, all_images=True)
