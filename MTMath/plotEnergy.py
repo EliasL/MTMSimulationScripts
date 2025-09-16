@@ -751,10 +751,10 @@ def plotEnergyField(
         )
 
 
-def plotPoincareDisk():
+def plotPoincareDisk(ax=None, fig=None, save=True, grid_size=200, depth=5):
     # Make plot of fundamental domain
-    fig, ax = plt.subplots(figsize=(6, 6))
-    grid_size = 500
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 6))
     zoom = 1
     transformation = None  # "triangular"
 
@@ -762,7 +762,7 @@ def plotPoincareDisk():
         ax,
         grid_size=grid_size,
         zoom=zoom,
-        depth=8,
+        depth=depth,
         c="gray",
         transformation=transformation,
     )
@@ -830,10 +830,16 @@ def plotPoincareDisk():
     )
     ax.set_xlabel(r"$x_p$")
     ax.set_ylabel(r"$y_p$")
+
     plt.tight_layout()
-    plt.savefig("Plots/poincareDisk.pdf", dpi=500)
-    print("Saved plot to Plots/poincareDisk.pdf")
-    plt.show()
+    if save:
+        import os
+
+        if not os.path.exists("Plots"):
+            os.makedirs("Plots")
+        plt.savefig("Plots/poincareDisk.pdf", dpi=500)
+        print("Saved plot to Plots/poincareDisk.pdf")
+        plt.show()
 
 
 def add_arrow_3d(xdata, ydata, zdata, ax, start_ind, end_ind, size=15, color="red"):

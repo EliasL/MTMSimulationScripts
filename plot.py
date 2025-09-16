@@ -14,6 +14,7 @@ from Management.jobs import (
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
 from MTMath.plotPowerLaw import plot_powerlaw
+from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     get_csv_files,
@@ -232,12 +233,13 @@ def plotEnergyRegion():
 
 
 if __name__ == "__main__":
+    run_reconnection_demo()
     # plotEnergyRegion()
     # plotSampleRuns()
     # plotPropperJob()
     # debugPlotAll()
     # energyField()
-    showPoincareDisk()
+    # showPoincareDisk()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
     # createVideoes(configs, all_images=True)
