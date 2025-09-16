@@ -527,6 +527,7 @@ def reconnectionJob(L=200):
         loadIncrement=1e-5,
         minimizer="LBFGS",
         scenario="simpleShear",
+        logDuringMinimization=1,
     )
     return configs, labels
 
