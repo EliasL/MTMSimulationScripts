@@ -65,20 +65,19 @@ def plotYOverX(
     fig=None,
     ax=None,
     indicateLastPoint=False,
-    tolerance=1e-12,
     xlim=None,
     ylim=None,
+    auto_scale="break",  # 'off' | 'log' | 'break'
+    break_gap=None,  # (low_end, high_start) for the gap to skip
+    sigma_thresh=40.0,
     **kwargs,
 ):
-    # Ensure X and Y are NumPy arrays
     X = np.asarray(X)
     Y = np.asarray(Y)
-
-    # Input validation
     if X.shape != Y.shape:
         raise ValueError("X and Y must have the same shape.")
 
-    # Apply xlim and ylim to crop the data
+    # crop
     mask = np.ones_like(X, dtype=bool)
     if xlim is not None:
         mask &= (X >= xlim[0]) & (X <= xlim[1])
@@ -86,41 +85,126 @@ def plotYOverX(
         mask &= (Y >= ylim[0]) & (Y <= ylim[1])
     X = X[mask]
     Y = Y[mask]
+    if X.size == 0:
+        raise ValueError("No data after applying xlim/ylim.")
 
-    # Handle empty data after cropping
-    if X.size == 0 or Y.size == 0:
-        raise ValueError("No data points remain after applying xlim and ylim.")
+    Xs, Ys = X, Y  # (keep your simplification hook if you want)
 
-    # Simplify the points after cropping
-    # if tolerance is not None:
-    #     points = np.column_stack((X, Y))
-    #     simplified_points = simplify_coords_vwp(points, tolerance)
-    #     X_simplified = simplified_points[:, 0]
-    #     Y_simplified = simplified_points[:, 1]
-    else:
-        X_simplified = X
-        Y_simplified = Y
+    # --- auto detection of "spikes" (robust 6-sigma using MAD) ---
+    def has_spikes(y, k=sigma_thresh):
+        med = np.median(y)
+        mad = np.median(np.abs(y - med)) or 1e-12
+        # For normal dist, std ≈ 1.4826 * MAD
+        z = np.abs(y - med) / (1.4826 * mad)
+        return np.nanmax(z) > k
 
-    # If no axis is provided, create
-    # a new figure and axis
+    if auto_scale == "break" and ax is not None and ax.get_yscale() == "log":
+        # Already on log scale → skip broken axis
+        auto_scale = "off"
+
+    if auto_scale in ("log", "break") and has_spikes(Ys):
+        if auto_scale == "log":
+            # fall back to broken-axis if nonpositive values exist
+            if np.any(Ys <= 0):
+                auto_scale = "break"
+            else:
+                # single-axes, log scale
+                if ax is None:
+                    fig, ax = plt.subplots()
+                (line,) = ax.plot(Xs, Ys, **kwargs)
+                ax.set_yscale("log")
+                if xlim:
+                    ax.set_xlim(*xlim)
+                if ylim:
+                    ax.set_ylim(*ylim)
+                point = None
+                if indicateLastPoint and Xs.size > 0:
+                    kw = {k: v for k, v in kwargs.items() if k != "label"}
+                    if "alpha" in kw:
+                        kw["alpha"] = min(kw["alpha"] * 1.5, 1.0)
+                    point = ax.scatter(Xs[-1], Ys[-1], **kw)
+                return fig, ax, line, point
+
+        # --- broken y-axis ---
+        # decide gap automatically if not provided
+        if break_gap is None:
+            y_lo = np.quantile(Ys, 0.95)  # upper end of the “normal” band
+            y_hi = np.quantile(Ys, 0.995)  # start of “spikes”
+            if y_hi <= y_lo:  # fallback
+                y_lo = np.max(Ys[np.abs(Ys - np.median(Ys)) < 3 * np.std(Ys)])
+                y_hi = np.min(Ys[np.abs(Ys - np.median(Ys)) >= 3 * np.std(Ys)])
+            break_gap = (y_lo, y_hi)
+
+        if fig is None or ax is not None:
+            fig = plt.figure()
+        hRatio = 3
+        gs = fig.add_gridspec(2, 1, height_ratios=[1, hRatio], hspace=0.05)
+        ax_top = fig.add_subplot(gs[0])
+        ax_bot = fig.add_subplot(gs[1], sharex=ax_top)
+
+        (line_bot,) = ax_bot.plot(Xs, Ys, **kwargs)
+        (line_top,) = ax_top.plot(Xs, Ys, **kwargs)
+
+        ymin, ymax = np.min(Ys), np.max(Ys)
+        gap_low, gap_high = break_gap
+
+        ax_bot.set_ylim(ymin, gap_low)
+        ax_top.set_ylim(gap_high, ymax)
+
+        if xlim:
+            ax_top.set_xlim(*xlim)
+        # hide spines between
+        ax_top.spines.bottom.set_visible(False)
+        ax_bot.spines.top.set_visible(False)
+        ax_top.tick_params(labelbottom=False)  # no x-labels on top
+
+        # after creating ax_top, ax_bot and setting GridSpec heights:
+        fig.canvas.draw()  # ensure positions are finalized
+
+        # same x offset for both; scale y offset for the shorter/taller axis
+        dx = 0.015
+        h_top = ax_top.get_position().height
+        h_bot = ax_bot.get_position().height
+        dy_top = 0.015
+        dy_bot = dy_top * (h_top / h_bot)
+
+        # draw diagonals (axes coordinates)
+        kw_top = dict(transform=ax_top.transAxes, clip_on=False, color="k", lw=0.5)
+        kw_bot = dict(transform=ax_bot.transAxes, clip_on=False, color="k", lw=0.5)
+
+        # top axis (at its bottom edge)
+        ax_top.plot((-dx, +dx), (-dy_top, +dy_top), **kw_top)
+        ax_top.plot((1 - dx, 1 + dx), (-dy_top, +dy_top), **kw_top)
+
+        # bottom axis (at its top edge) – note dy_bot
+        ax_bot.plot((-dx, +dx), (1 - dy_bot, 1 + dy_bot), **kw_bot)
+        ax_bot.plot((1 - dx, 1 + dx), (1 - dy_bot, 1 + dy_bot), **kw_bot)
+
+        point = None
+        if indicateLastPoint and Xs.size > 0:
+            kw = {k: v for k, v in kwargs.items() if k != "label"}
+            if "alpha" in kw:
+                kw["alpha"] = min(kw["alpha"] * 1.5, 1.0)
+            ax_top.scatter(Xs[-1], Ys[-1], **kw)
+            ax_bot.scatter(Xs[-1], Ys[-1], **kw)
+
+        # return the bottom axis for compatibility; you can also return both
+        return fig, ax_bot, line_bot, point
+
+    # --- regular single-axes plot (no special scaling) ---
     if ax is None:
         fig, ax = plt.subplots()
-
-    # Plot on the provided axis
-    (line,) = ax.plot(X_simplified, Y_simplified, **kwargs)
-
-    # Optionally highlight the last point
+    (line,) = ax.plot(Xs, Ys, **kwargs)
+    if xlim:
+        ax.set_xlim(*xlim)
+    if ylim:
+        ax.set_ylim(*ylim)
     point = None
-    if indicateLastPoint and X_simplified.size > 0:
-        # Add a scatter point at the last point
-        kwargs_without_label = {k: v for k, v in kwargs.items() if k != "label"}
-        if "alpha" in kwargs_without_label:
-            kwargs_without_label["alpha"] = min(
-                kwargs_without_label["alpha"] * 1.5, 1.0
-            )
-        point = ax.scatter(X_simplified[-1], Y_simplified[-1], **kwargs_without_label)
-
-    # Return the axis object for further use
+    if indicateLastPoint and Xs.size > 0:
+        kw = {k: v for k, v in kwargs.items() if k != "label"}
+        if "alpha" in kw:
+            kw["alpha"] = min(kw["alpha"] * 1.5, 1.0)
+        point = ax.scatter(Xs[-1], Ys[-1], **kw)
     return fig, ax, line, point
 
 
@@ -1136,6 +1220,8 @@ def makePlot(
         add_mark(ax, f"({mark})", *mark_pos, fontsize=mark_fontsize)
 
     if save:
+        fig.tight_layout()
+
         figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
         fig.savefig(figPath)
         print(f'Plot saved at: "{figPath}"')
