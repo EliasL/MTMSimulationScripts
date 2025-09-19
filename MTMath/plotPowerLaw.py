@@ -553,12 +553,20 @@ def make_and_plot_truncated_fit_pdf(
     add_ks_marker=False,
     alpha_std=None,
 ):
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
+    ax.set_ylabel(r"$p(-\Delta \langle E \rangle)$")
+    ax.set_title(title)
+
     mask = (bin_centers > fit.xmin) & (hist_values > 0)
     xdata = bin_centers[mask]
     ydata = hist_values[mask]
 
     log_y = np.log(ydata)
-
+    if len(xdata) < 3:
+        print("Not enough data points above xmin for fitting.")
+        return ax
     if truncated:
         # Truncated power law: log(y) = -alpha * log(x) - Lambda * x + logC
         def log_model(x, alpha, Lambda, logC):
@@ -621,13 +629,8 @@ def make_and_plot_truncated_fit_pdf(
         assert np.isclose(ks_distance, dist.D, rtol=1e-9, atol=1e-12), (
             f"KS distance mismatch: computed {ks_distance:.6g}, powerlaw {dist.D:.6g}"
         )
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
-    ax.set_ylabel(r"$p(-\Delta \langle E \rangle)$")
-    ax.set_title(title)
-    ax.legend()
 
+    ax.legend()
     return ax
 
 
@@ -1392,6 +1395,8 @@ def evaluate_fit(
     dist_orig_for_alpha = getattr(fit_orig_for_alpha, dist_name)
     exponent = float(getattr(dist_orig_for_alpha, "alpha", np.nan))
 
+    # Compare alternative way to fit exponent
+
     # --- (A) KS p-value + parametric exponent uncertainty via synthetic sets ---
     if p_file.exists() and not debug:
         with open(p_file, "r") as f:
@@ -1463,7 +1468,7 @@ def find_best_xmin(
         {'xmin', 'p', 'alpha', 'mean_alpha', 'std_alpha', 'nr_sets'}.
     """
     # Candidates and corresponding synthetic-set budgets
-    xmins = np.logspace(np.log10(start_xmin), np.log10(max_xmin), num=20)
+    xmins = np.logspace(np.log10(start_xmin), np.log10(max_xmin), num=100)
     # Prepare a per-iteration schedule for the number of synthetic sets.
     # We use the *maximum* number of iterations a binary search may take,
     # then increase the budget monotonically along the search path.
@@ -1616,97 +1621,102 @@ def make_exponent_map():
 def plot_history(history, savePath):
     """
     Plot KS p-value and exponent (with std error bars) versus xmin.
-
-    Parameters
-    ----------
-    history : list of dicts
-        Each dict should contain keys: 'xmin', 'p', 'alpha', and optionally 'std_alpha'.
-    savePath : str or Path
-        Where to save the figure. If falsy/None, the figure is just shown.
     """
-    # Sort history by xmin for consistent plotting
-    if history is None or len(history) == 0:
+    if not history:
         return
 
     hist_sorted = sorted(history, key=lambda d: d["xmin"])
-
     x = np.array([h["xmin"] for h in hist_sorted], dtype=float)
     pvals = np.array([h.get("p", np.nan) for h in hist_sorted], dtype=float)
     alphas = np.array([h.get("alpha", np.nan) for h in hist_sorted], dtype=float)
     stds = np.array([h.get("std_alpha", np.nan) for h in hist_sorted], dtype=float)
 
-    # Create a new figure (use returned fig reference rather than implicit plt state)
-    fig, ax1 = plt.subplots()
+    # Colors assigned per axis (consistent with Matplotlib defaults)
+    c_p = "tab:blue"  # left axis (p-values)
+    c_a = "tab:orange"  # right axis (alpha)
 
-    # X axis in log scale (xmin grid is log-spaced)
+    fig, ax1 = plt.subplots()
     ax1.set_xscale("log")
 
-    # Plot p-values on the left axis
-    (p_line,) = ax1.plot(x, pvals, marker="o", linestyle="-", label="KS p-value")
-    ax1.axhline(0.10, linestyle="--", linewidth=1.0, label="p = 0.10 threshold")
+    # --- Left axis: p-values ---
+    (p_line,) = ax1.plot(
+        x,
+        pvals,
+        marker="o",
+        linestyle="-",
+        linewidth=1.8,
+        markersize=5,
+        label="KS p-value",
+        color=c_p,
+        zorder=3,
+    )
+    thr_line = ax1.axhline(
+        0.10,
+        linestyle="--",
+        linewidth=1.0,
+        color=c_p,
+        alpha=0.5,
+        label="p = 0.10 threshold",
+        zorder=2,
+    )
     ax1.set_xlabel(r"$E_{\mathrm{min}}$")
-    ax1.set_ylabel("KS p-value")
+    ax1.set_ylabel("KS p-value", color=c_p)
+    ax1.tick_params(axis="y", colors=c_p)
+    ax1.spines["left"].set_color(c_p)
     ax1.set_ylim(0, 1)
+    ax1.grid(True, which="both", axis="both", alpha=0.25)
 
-    # Plot alpha with error bars on the right axis
+    # --- Right axis: alpha (+ error bars) ---
     ax2 = ax1.twinx()
-    # Only provide yerr if we actually have non-NaN values
     yerr = None if np.all(np.isnan(stds)) else stds
-    alpha_line = ax2.errorbar(
+    alpha_err = ax2.errorbar(
         x,
         alphas,
         yerr=yerr,
         marker="s",
         linestyle="-",
-        label=r"$\alpha$",
+        linewidth=1.8,
+        markersize=5,
+        label=r"Exponent $\alpha$",
+        color=c_a,
+        ecolor=c_a,
+        elinewidth=1.0,
+        capsize=3,
+        capthick=1.0,
+        zorder=4,
     )
-    ax2.set_ylabel(r"Exponent $\alpha$")
-
-    # Build a combined legend
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    # errorbar returns a container; grab the Line2D handle for legend if present
-    if hasattr(alpha_line, "lines") and len(alpha_line.lines) > 0:
-        alpha_handle = alpha_line.lines[0]
-    else:
-        alpha_handle = alpha_line
-    lines = lines1 + [alpha_handle]
-    labels = labels1 + [r"$\alpha$"]
-    ax1.legend(lines, labels, loc="best")
+    ax2.set_ylabel(r"Exponent $\alpha$", color=c_a)
+    ax2.tick_params(axis="y", colors=c_a)
+    ax2.spines["right"].set_color(c_a)
+    ax1.legend(handles=[p_line, thr_line, alpha_err], loc="upper left")
+    # ax2.legend()
 
     fig.tight_layout()
 
-    # Save or show
     if savePath:
         fig.savefig(savePath, bbox_inches="tight")
     else:
         fig.show()
 
 
-def make_exponent_fit():
-    # csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-    csvPath = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-    # csvPath = "/Volumes/data/MTS2D_output/simpleShear,s400x400l0.15,1e-05,1.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-    name = "simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0"
-    xmin = 1e-6
-    strainLim = [1.0, 3.0]
-    debug = False
+def make_exponent_fit(csvPath, strainLim=[0.15, 1.0], debug=False):
+    # get name from path
+    name = os.path.basename(os.path.dirname(csvPath))
     fig, ax = plt.subplots()
-    drops, _, _ = get_drops_in_windows(csvPath, strainLim)
-    drops = drops  # we only have one window, so we take the first one
-    # drops = np.tile(drops, 10)
+    dropWindows, _, _ = get_drops_in_windows(csvPath, strainLim)
     # drops = create_synthetic_data(
     #     drops,
     #     xmin=xmin,
     #     nrSets=10,
     #     params={"alpha": 1},
     # )
-    for d in drops:
+    for drops in dropWindows:
         # find best xmin
-        xmin, stats, history = find_best_xmin(d, debug=debug)
+        xmin, stats, history = find_best_xmin(drops, debug=debug)
         p = stats["p"]
         alpha = stats["alpha"]
         std = stats["std_alpha"]
-        fit = powerlaw.Fit(d, xmin=xmin)
+        fit = powerlaw.Fit(drops, xmin=xmin)
         title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
         plot_data_and_fit(fit, ax, xmin, title, pdf=True, alpha_std=std, p_val=p)
         print(f"E_min: {xmin:.2e}")
@@ -1750,7 +1760,7 @@ def plot_powerlaw(
     algorithms_paths,
     alg_labels=None,
     strainLim=[0.15, 0.4],
-    xmin=1e-5,
+    xmin=1e-4,
     debug=False,
     show=False,
     evaluate=True,
@@ -1840,4 +1850,9 @@ def plot_powerlaw(
 
 
 if __name__ == "__main__":
-    make_exponent_fit()
+    # csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+    csvPath = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+    strainLim = [1.0, 3.0]
+    # csvPath = "/Volumes/data/MTS2D_output/simpleShear,s400x400l0.15,1e-05,1.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+
+    make_exponent_fit(csvPath=csvPath, strainLim=strainLim)

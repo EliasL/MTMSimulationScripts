@@ -141,12 +141,20 @@ def largerPropperJobCGANDLBFGS(**kwargs):
     return propperJob(8, nrSeeds=10, size=300, minimizer=["LBFGS", "CG"], **kwargs)
 
 
-def largePropperJob(FIREOnly=False, **kwargs):
+def largePropperJob(FIREOnly=False, notFIRE=False, **kwargs):
+    # set minimizer
+    assert not (FIREOnly and notFIRE), "Cannot be both FIREOnly and notFIRE"
+    if notFIRE:
+        minimizer = ["LBFGS", "CG"]
+    elif FIREOnly:
+        minimizer = ["FIRE"]
+    else:
+        minimizer = ["LBFGS", "CG", "FIRE"]
     return propperJob(
         3,
         nrSeeds=10,
         size=200,
-        minimizer=["FIRE"] if FIREOnly else ["LBFGS", "CG", "FIRE"],
+        minimizer=minimizer,
         **kwargs,
     )
 

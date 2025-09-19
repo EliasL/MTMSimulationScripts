@@ -273,7 +273,7 @@ class DraggableTriangulation:
         ab = float(G[0, 1])
         aa = float(G[0, 0])
         bb = float(G[1, 1])
-        return (ab < 0.0) or (ab > min(aa, bb))
+        return abs(ab) > min(aa, bb)
 
     def update_faces(self):
         """Recreate triangle face patches and color them based on the Gram-matrix criterion."""
@@ -333,7 +333,7 @@ class DraggableTriangulation:
             aa = axx * axx + axy * axy
             bb = bxx * bxx + bxy * bxy
             ab = axx * bxx + axy * bxy
-            m = (ab < 0.0) | (ab > np.minimum(aa, bb))
+            m = np.abs(ab) > np.minimum(aa, bb)
             if np.isscalar(m):
                 m = np.full((H, W), bool(m))
             return m
