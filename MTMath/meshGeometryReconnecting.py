@@ -103,7 +103,9 @@ class DraggableTriangulation:
         self.G_texts = []  # list[Text]
 
         # Initial draw for element vectors and Gram matrices
-        self.update_element_vectors_and_grams()
+        self.update_element_arrows()
+        self.update_gram_labels()
+        self.update_g_scatter()
 
         # Optional scatter plot: one dot per element in Poincaré disk
         if self.ax_g is not None:
@@ -149,11 +151,8 @@ class DraggableTriangulation:
         self.update_heatmap(self.selected_index)
 
     def on_release(self, event):
-        # To clear the heatmap on release, uncomment:
-        # if self.heatmap_im is not None:
-        #     self.heatmap_im.remove()
-        #     self.heatmap_im = None
         self.dragging_index = None
+        # self.update_gram_labels()
 
     def on_motion(self, event):
         if self.dragging_index is None:
@@ -192,7 +191,6 @@ class DraggableTriangulation:
             idx_v = int(self._last_idx[iy, ix])
             if self.debug_text is not None:
                 self.debug_text.set_text(f"cur={cur_v} rec={rec_v} idx={idx_v}")
-        self.update_heatmap(self.selected_index)
 
     def on_key(self, event):
         if event.key == "d":
@@ -275,7 +273,7 @@ class DraggableTriangulation:
         ab = float(G[0, 1])
         aa = float(G[0, 0])
         bb = float(G[1, 1])
-        return (ab < 0.0) or (ab > min(aa, bb))
+        return abs(ab) > min(aa, bb)
 
     def update_faces(self):
         """Recreate triangle face patches and color them based on the Gram-matrix criterion."""
@@ -335,7 +333,7 @@ class DraggableTriangulation:
             aa = axx * axx + axy * axy
             bb = bxx * bxx + bxy * bxy
             ab = axx * bxx + axy * bxy
-            m = (ab < 0.0) | (ab > np.minimum(aa, bb))
+            m = np.abs(ab) > np.minimum(aa, bb)
             if np.isscalar(m):
                 m = np.full((H, W), bool(m))
             return m
@@ -406,55 +404,68 @@ class DraggableTriangulation:
         self.edges = [e for e in self.edges if e != old_edge]
         self.edges.append(new_edge)
 
-    def update_element_vectors_and_grams(self):
-        """Redraw the element vectors (as arrows) and update/create Gram matrix labels near triangle centroids."""
-        # Remove old arrows
-        for art in self.vector_artists:
-            art.remove()
-        self.vector_artists = []
-
+    def update_element_arrows(self):
+        """Update (not recreate) the element vectors (arrows) only."""
         elems = self.element_vectors()
-        # Ensure we have exactly two text labels (one per triangle)
-        # Create if missing
+
+        # Ensure we have exactly two arrow artists per element
+        needed = 2 * len(elems)
+        while len(self.vector_artists) < needed:
+            arr = FancyArrowPatch(
+                posA=(0.0, 0.0),
+                posB=(0.0, 0.0),
+                arrowstyle="->",
+                mutation_scale=12,
+                color="green",
+                lw=1.5,
+            )
+            self.ax.add_patch(arr)
+            self.vector_artists.append(arr)
+        while len(self.vector_artists) > needed:
+            art = self.vector_artists.pop()
+            art.remove()
+
+        # Update arrows (two per triangle: a then b)
+        for idx, (i, j, k, origin, a, b, centroid) in enumerate(elems):
+            arr1 = self.vector_artists[2 * idx]
+            arr2 = self.vector_artists[2 * idx + 1]
+            arr1.set_positions(
+                (origin[0], origin[1]), (origin[0] + a[0], origin[1] + a[1])
+            )
+            arr2.set_positions(
+                (origin[0], origin[1]), (origin[0] + b[0], origin[1] + b[1])
+            )
+
+    def update_gram_labels(self):
+        """Update Gram-matrix text labels and the optional (G11,G22) scatter."""
+        elems = self.element_vectors()
+
+        # Ensure exactly one text label per element
         while len(self.G_texts) < len(elems):
             self.G_texts.append(
-                self.ax.text(0, 0, "", va="top", ha="left", transform=self.ax.transAxes)
+                self.ax.text(
+                    0,
+                    0,
+                    "",
+                    va="top",
+                    ha="left",
+                    transform=self.ax.transAxes,
+                    fontfamily="monospace",  # fast native font
+                    usetex=False,  # make sure not to trigger LaTeX
+                )
             )
-        # Trim if too many
         while len(self.G_texts) > len(elems):
             txt = self.G_texts.pop()
             txt.remove()
 
+        # Update labels
         for idx, (i, j, k, origin, a, b, centroid) in enumerate(elems):
-            # Draw two arrows from the origin to the endpoints of vectors a and b
-            arr1 = FancyArrowPatch(
-                posA=(origin[0], origin[1]),
-                posB=(origin[0] + a[0], origin[1] + a[1]),
-                arrowstyle="->",
-                mutation_scale=12,
-                color="green",
-                lw=1.5,
-            )
-            arr2 = FancyArrowPatch(
-                posA=(origin[0], origin[1]),
-                posB=(origin[0] + b[0], origin[1] + b[1]),
-                arrowstyle="->",
-                mutation_scale=12,
-                color="green",
-                lw=1.5,
-            )
-            self.ax.add_patch(arr1)
-            self.ax.add_patch(arr2)
-            self.vector_artists.extend([arr1, arr2])
-
-            # Compute Gram matrix and place/update text label at top of axes, stacked vertically
             G = self.gram_matrix(a, b)
-            label = f"{G[0, 0]:.1f}, {G[0, 1]:.1f}\n {G[1, 0]:.1f}, {G[1, 1]:.1f}"
-            # Place G-matrix labels at the top of the axes, stacked vertically
+            label = f"{G[0, 0]:4.1f}, {G[0, 1]:4.1f}\n{G[1, 0]:4.1f}, {G[1, 1]:4.1f}"
             self.G_texts[idx].set_transform(self.ax.transAxes)
             self.G_texts[idx].set_ha("left")
             self.G_texts[idx].set_va("top")
-            # Compute a y position near the top, with spacing between labels
+
             base_y = 0.98
             spacing = 0.10
             pos = (0.02, base_y - idx * spacing)
@@ -463,9 +474,6 @@ class DraggableTriangulation:
             self.G_texts[idx].set_bbox(
                 dict(boxstyle="round,pad=0.2", fc="w", ec="0.5", alpha=0.8)
             )
-
-        # Update (G11,G22) scatter if present
-        self.update_g_scatter()
 
     # ---------- Rendering updates ----------
     def update_edges(self):
@@ -494,7 +502,9 @@ class DraggableTriangulation:
                 [self.points[i, 1], self.points[j, 1]],
             )
         self.update_faces()
-        self.update_element_vectors_and_grams()
+        self.update_element_arrows()
+        self.update_gram_labels()
+        self.update_g_scatter()
         self.ax.figure.canvas.draw_idle()
 
 
@@ -517,7 +527,7 @@ def run_reconnection_demo():
 
     dt = DraggableTriangulation(ax, points, ax_g=ax_g)
     # Draw disk first so it's firmly in the background
-    plotPoincareDisk(ax=ax_g, fig=fig, grid_size=dt.grid_size)
+    plotPoincareDisk(ax=ax_g, fig=fig, grid_size=dt.grid_size, depth=4)
 
     plt.show()
 

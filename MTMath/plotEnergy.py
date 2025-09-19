@@ -569,7 +569,7 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
         C22 = C[..., 1, 1]
 
         # Region: 0 <= C12 <= min(C11, C22)
-        region_mask = (C12 >= 0) & (C12 <= np.minimum(C11, C22))
+        region_mask = abs(C12) <= np.minimum(C11, C22)
         drawRegion(
             ax,
             region=region_mask.astype(float),

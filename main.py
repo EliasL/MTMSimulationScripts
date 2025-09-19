@@ -284,7 +284,7 @@ def runOnLocalMachine():
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
     # configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
-    configs, labels = reconnectionJob()
+    configs, labels = reconnectionJob(L=100)
     # configs, labels = singleDislocationTest(
     #     nrThreads=4, nrSeeds=1, L=20, diagonal="minor"
     # )
@@ -316,7 +316,11 @@ def startJobs():
     print("Building on all servers... ")
 
     # build_on_all_servers()
-    for job in [size_scaling_job]:  # largePropperJob]:
+    # Make largeProperJob with notFIRE=True to exclude FIRE
+    def notFIRE_largePropperJob(**kwargs):
+        return largePropperJob(notFIRE=True, **kwargs)
+
+    for job in [size_scaling_job, notFIRE_largePropperJob]:
         configs, labels = job()
 
         # Normalize to batches so we handle both a single list of configs
@@ -333,7 +337,7 @@ def startJobs():
                 print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
                 if confs:
                     # Queue jobs (uncomment to actually submit)
-                    # queueJobs(server, confs, job_name="opt", stopExsistingJobs=False)
+                    queueJobs(server, confs, job_name="opt", stopExsistingJobs=False)
                     pass
 
 
@@ -373,14 +377,14 @@ if __name__ == "__main__":
 
     # runOnServer()
     # parameterExploring()
-    runOnLocalMachine()
+    # runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
     # startJobs()
 
-    # plotPropperJob()
+    plotPropperJob()
     # plotSizeScaling()
     # plotBigJob()
     # threadTest()
