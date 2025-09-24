@@ -22,9 +22,11 @@ class DraggableTriangulation:
     def __init__(self, ax, points, ax_g=None):
         assert points.shape == (4, 2), "Provide exactly four 2D points"
         self.ax = ax
+        self.initial_points = np.copy(points)
         self.points = points
         self.ax_g = ax_g  # optional axes for (G11,G22) scatter
         self.g_scatter = None
+        self.g_colors = ["tab:green", "tab:orange"]
 
         # Initial triangulation uses diagonal (0, 2): triangles (0,1,2) and (0,2,3)
         self.diagonal_02 = True
@@ -38,7 +40,9 @@ class DraggableTriangulation:
 
         # Heatmap (prediction matrix) showing how many elements would violate if the selected point moved
         self.heatmap_im = None
-        self.grid_size = 200  # pixels per axis
+        self.heatmap_visible = True
+        self.grid_size = 500  # pixels per axis
+        self.shear_step = 0.05  # shear increment per arrow key press
 
         # Debug toggles/handles
         self.debug = False
@@ -92,11 +96,22 @@ class DraggableTriangulation:
         self.dragging_index = None
 
         # Keep track of the last selected point (persists after mouse release)
-        self.selected_index = None
+        self.selected_index = points.shape[0] - 2  # default to second last point
+
+        # Selected point backdrop (slightly larger dot behind selected point)
+        self.selected_back_artist = self.ax.plot(
+            [self.points[self.selected_index, 0]],
+            [self.points[self.selected_index, 1]],
+            "o",
+            color="black",
+            alpha=0.3,
+            markersize=12,  # slightly larger than the main marker
+            zorder=self.point_artist.get_zorder() - 1,  # draw behind main dots
+        )[0]
 
         # Triangle face patches (for coloring by Gram-matrix criterion)
         self.face_patches = []
-        self.update_faces()
+        self.update_element_color()
 
         # Storage for element vectors (arrows) and Gram matrix labels
         self.vector_artists = []  # list[FancyArrowPatch]
@@ -115,9 +130,9 @@ class DraggableTriangulation:
             self.ax_g.set_aspect("equal", adjustable="box")
             # Initialize with current values
             g_points = self.compute_poincare_points()
-            self.g_scatter = self.ax_g.scatter(g_points[:, 0], g_points[:, 1], zorder=3)
-            self.ax_g.set_xlim(-1, 1)
-            self.ax_g.set_ylim(-1, 1)
+            self.g_scatter = self.ax_g.scatter(
+                g_points[:, 0], g_points[:, 1], c=self.g_colors, zorder=3
+            )
 
         # Connect events
         self.cid_press = self.point_artist.figure.canvas.mpl_connect(
@@ -133,10 +148,30 @@ class DraggableTriangulation:
             "key_press_event", self.on_key
         )
 
+        self.update_selected_marker()
+        self.update_heatmap()
+
     def nearest_point_index(self, x, y) -> int:
         """Return index of closest vertex to (x,y)."""
         diffs = self.points - np.array([x, y])
         return int(np.argmin(np.sum(diffs * diffs, axis=1)))
+
+    def update_selected_marker(self):
+        """Position/visibility of the backdrop circle for the selected point."""
+        if getattr(self, "selected_back_artist", None) is None:
+            return
+
+        # If we don't show the heatmap, we don't show the selected node
+        self.selected_back_artist.set_visible(self.heatmap_visible)
+
+        p = self.points[self.selected_index]
+        self.selected_back_artist.set_data([p[0]], [p[1]])
+        # Keep it slightly larger than the main points
+        try:
+            base_ms = self.point_artist.get_markersize()
+            self.selected_back_artist.set_markersize(base_ms * 1.6)
+        except Exception:
+            pass
 
     # ---------- Interaction handlers ----------
     def on_press(self, event):
@@ -148,7 +183,8 @@ class DraggableTriangulation:
         # find nearest point
         self.dragging_index = self.nearest_point_index(event.xdata, event.ydata)
         self.selected_index = self.dragging_index
-        self.update_heatmap(self.selected_index)
+        self.update_selected_marker()
+        self.update_heatmap()
 
     def on_release(self, event):
         self.dragging_index = None
@@ -195,13 +231,36 @@ class DraggableTriangulation:
     def on_key(self, event):
         if event.key == "d":
             self.debug = not self.debug
-            # Create debug text lazily
             if self.debug and self.debug_text is None:
                 self.debug_text = self.ax.text(
                     0.02, 0.90, "", transform=self.ax.transAxes, va="top"
                 )
-        if event.key == "r":
+        elif event.key == "r":
             self.reconnect()
+        elif event.key == "t":
+            self.reset()
+        elif event.key == "down":
+            # Negative shear in x with respect to y
+            self.apply_shear(kx=-self.shear_step)
+        elif event.key == "up":
+            # Positive shear in x with respect to y
+            self.apply_shear(kx=+self.shear_step)
+        elif event.key == "left":
+            # Negative shear in y with respect to x
+            self.apply_shear(ky=-self.shear_step)
+        elif event.key == "right":
+            # Positive shear in y with respect to x
+            self.apply_shear(ky=+self.shear_step)
+        elif event.key == "b":
+            # Toggle heatmap visibility
+            self.heatmap_visible = not self.heatmap_visible
+            if self.heatmap_im is not None:
+                self.update_heatmap()
+                self.heatmap_im.set_visible(self.heatmap_visible)
+            # No geometry change, just redraw
+            self.ax.figure.canvas.draw_idle()
+            return
+        self.update()
 
     def compute_diagonal_indices(self):
         """Return the tuple of point indices forming the current diagonal."""
@@ -242,6 +301,16 @@ class DraggableTriangulation:
         bb = float(np.dot(b, b))
         return np.array([[aa, ab], [ab, bb]], dtype=float)
 
+    def apply_shear(self, kx=0.0, ky=0.0):
+        """Apply a simple shear transform to all points.
+        kx: shear factor for x with respect to y (x' = x + kx*y)
+        ky: shear factor for y with respect to x (y' = y + ky*x)
+        """
+        M = np.array([[1.0, kx], [ky, 1.0]], dtype=float)
+        self.points = self.points @ M
+        self.update_heatmap()
+        self.update()
+
     def compute_poincare_points(self):
         """Return an (2,2) array with rows [x, y] for the two current triangles,
         where (x,y) are the Poincaré disk coordinates mapped from the element Gram matrix G via C2PoincareDisk."""
@@ -267,15 +336,16 @@ class DraggableTriangulation:
             return
         g_points = self.compute_poincare_points()
         self.g_scatter.set_offsets(g_points)
+        self.g_scatter.set_color(self.g_colors)
 
     def violates(self, G):
         """Return True if G[0,1] < 0 or G[0,1] > min(G[0,0], G[1,1])."""
         ab = float(G[0, 1])
         aa = float(G[0, 0])
         bb = float(G[1, 1])
-        return abs(ab) > min(aa, bb)
+        return ab < 0 or ab > min(aa, bb)
 
-    def update_faces(self):
+    def update_element_color(self):
         """Recreate triangle face patches and color them based on the Gram-matrix criterion."""
         # Remove old patches
         for p in getattr(self, "face_patches", []):
@@ -298,8 +368,12 @@ class DraggableTriangulation:
             self.ax.add_patch(poly)
             self.face_patches.append(poly)
 
-    def update_heatmap(self, selected_index):
+    def update_heatmap(self):
         """Compute and display a 5-level heatmap by counting violations across four elements (two now + two after reconnect)."""
+        if not self.heatmap_visible:
+            # No need to update when not visible
+            return
+
         xmin, xmax = self.ax.get_xlim()
         ymin, ymax = self.ax.get_ylim()
         if xmax < xmin:
@@ -318,7 +392,7 @@ class DraggableTriangulation:
             o, u, v = self.triangle_basis_indices(tri, diag_pair)
 
             def comp(idx):
-                if idx == selected_index:
+                if idx == self.selected_index:
                     return X, Y
                 else:
                     return self.points[idx, 0], self.points[idx, 1]
@@ -333,7 +407,7 @@ class DraggableTriangulation:
             aa = axx * axx + axy * axy
             bb = bxx * bxx + bxy * bxy
             ab = axx * bxx + axy * bxy
-            m = np.abs(ab) > np.minimum(aa, bb)
+            m = np.logical_or(ab < 0, ab > np.minimum(aa, bb))
             if np.isscalar(m):
                 m = np.full((H, W), bool(m))
             return m
@@ -372,6 +446,7 @@ class DraggableTriangulation:
         else:
             self.heatmap_im.set_data(idx)
             self.heatmap_im.set_extent((xmin, xmax, ymin, ymax))
+        self.heatmap_im.set_visible(self.heatmap_visible)
         self.ax.figure.canvas.draw_idle()
 
     # ---------- Geometry ops ----------
@@ -386,11 +461,7 @@ class DraggableTriangulation:
         self.diagonal_02 = not self.diagonal_02
 
         # Update only what is not covered by `update()`
-        self.update_edges()
-
-        # Heatmap depends on the selected index and prospective positions; keep it explicit here
-        if self.selected_index is not None:
-            self.update_heatmap(self.selected_index)
+        self.update_edges_and_nodes()
 
         # Do the rest (faces, vectors/grams, labels, scatter) once via the centralized updater
         self.update()
@@ -417,7 +488,8 @@ class DraggableTriangulation:
                 arrowstyle="->",
                 mutation_scale=12,
                 color="green",
-                lw=1.5,
+                lw=2,
+                zorder=5,
             )
             self.ax.add_patch(arr)
             self.vector_artists.append(arr)
@@ -429,12 +501,19 @@ class DraggableTriangulation:
         for idx, (i, j, k, origin, a, b, centroid) in enumerate(elems):
             arr1 = self.vector_artists[2 * idx]
             arr2 = self.vector_artists[2 * idx + 1]
+            arr1.set_zorder(5)
+            arr2.set_zorder(5)
             arr1.set_positions(
                 (origin[0], origin[1]), (origin[0] + a[0], origin[1] + a[1])
             )
             arr2.set_positions(
                 (origin[0], origin[1]), (origin[0] + b[0], origin[1] + b[1])
             )
+            # Color the vectors to match the Gram-matrix/legend color for this element
+            if hasattr(self, "g_colors") and len(self.g_colors) > 0:
+                vec_color = self.g_colors[idx % len(self.g_colors)]
+                arr1.set_color(vec_color)
+                arr2.set_color(vec_color)
 
     def update_gram_labels(self):
         """Update Gram-matrix text labels and the optional (G11,G22) scatter."""
@@ -472,11 +551,18 @@ class DraggableTriangulation:
             self.G_texts[idx].set_position(pos)
             self.G_texts[idx].set_text(label)
             self.G_texts[idx].set_bbox(
-                dict(boxstyle="round,pad=0.2", fc="w", ec="0.5", alpha=0.8)
+                dict(
+                    boxstyle="round,pad=0.2",
+                    fc=self.g_colors[idx % len(self.g_colors)]
+                    if hasattr(self, "g_colors")
+                    else "w",
+                    ec="0.5",
+                    alpha=0.3,
+                )
             )
 
     # ---------- Rendering updates ----------
-    def update_edges(self):
+    def update_edges_and_nodes(self):
         # Ensure number of artists matches number of edges
         if len(self.line_artists) != len(self.edges):
             # Recreate artists from scratch
@@ -501,11 +587,17 @@ class DraggableTriangulation:
                 [self.points[i, 0], self.points[j, 0]],
                 [self.points[i, 1], self.points[j, 1]],
             )
-        self.update_faces()
+        self.update_selected_marker()
+        self.update_element_color()
         self.update_element_arrows()
         self.update_gram_labels()
         self.update_g_scatter()
         self.ax.figure.canvas.draw_idle()
+
+    def reset(self):
+        self.points = np.copy(self.initial_points)
+        self.update_heatmap()
+        self.update()
 
 
 def run_reconnection_demo():
@@ -520,8 +612,8 @@ def run_reconnection_demo():
     )
 
     fig, (ax, ax_g) = plt.subplots(1, 2, figsize=(10, 5))
-    ax.set_xlim(-2, 3)
-    ax.set_ylim(-2, 3)
+    ax.set_xlim(-1, 2)
+    ax.set_ylim(-1, 2)
     ax.set_aspect("equal", adjustable="box")
     ax.set_title("Triangulation")
 

@@ -309,7 +309,7 @@ def get_energy_drops(
     return drops
 
 
-def plot_data(
+def plot_data_ccdf(
     ax, fit=None, data=None, xmin=None, label="Energy drops", edgecolor="black", alpha=1
 ):
     raise RuntimeError("Don't use this function")
@@ -739,7 +739,7 @@ def plot_data_and_fit(
     if pdf:
         bin_centers, hist_values = plot_data_pdf(ax, fit=fit, color=color)
     else:
-        plot_data(ax, fit=fit)
+        plot_data_ccdf(ax, fit=fit)
 
     cmap_colors = ["green", "red", "yellow", "orange", "blue", "cyan"]
     # plot the fit

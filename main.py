@@ -284,7 +284,7 @@ def runOnLocalMachine():
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
     # configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
-    configs, labels = reconnectionJob(L=100)
+    # configs, labels = reconnectionJob(L=100)
     # configs, labels = singleDislocationTest(
     #     nrThreads=4, nrSeeds=1, L=20, diagonal="minor"
     # )
@@ -306,7 +306,7 @@ def runOnLocalMachine():
     # dump = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s100x100l0.38,1e-05,0.383NPBCt6epsR1e-06LBFGSEpsx1e-06s0/dumps/dump_l0.3814.xml.gz"
     # configs, labels = showMinimizationCriteriaJobs(nrSeeds=1)
 
-    # configs, labels = backwards(nrThreads=20)
+    configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=3)
     # run_locally(configs[0], resume=False)  # , dump=dump)
     run_many_locally(configs, taskNames=labels)
@@ -377,14 +377,14 @@ if __name__ == "__main__":
 
     # runOnServer()
     # parameterExploring()
-    # runOnLocalMachine()
+    runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
     # startJobs()
 
-    plotPropperJob()
+    # plotPropperJob()
     # plotSizeScaling()
     # plotBigJob()
     # threadTest()
