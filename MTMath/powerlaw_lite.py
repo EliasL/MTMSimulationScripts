@@ -72,11 +72,11 @@ class Distribution(object):
 
     def __init__(
         self,
+        data=None,
         xmin=1,
         xmax=None,
         discrete=False,
         fit_method="Likelihood",
-        data=None,
         parameters=None,
         parameter_range=None,
         initial_parameters=None,
@@ -105,13 +105,20 @@ class Distribution(object):
         if initial_parameters:
             self._given_initial_parameters(initial_parameters)
 
-    def fit(self, data=None, suppress_output=False):
+        if data is None:
+            raise ValueError("Data must be provided.")
+        self.fit(data)
+
+    def trim_to_range(self, data):
+        return trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+
+    def fit(self, data, suppress_output=False):
         """
         Fits the parameters of the distribution to the data. Uses options set
         at initialization.
         """
+        data = self.trim_to_range(data)
 
-        data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
         if self.fit_method == "Likelihood":
 
             def fit_function(params):
@@ -121,7 +128,7 @@ class Distribution(object):
 
             def fit_function(params):
                 self.parameters(params)
-                self.KS(data)
+                self.KS()
                 return self.D
 
         from scipy.optimize import fmin
@@ -148,7 +155,7 @@ class Distribution(object):
         self.loglikelihood = -negative_loglikelihood
         self.KS(data)
 
-    def KS(self, data=None):
+    def KS(self, data):
         """
         Returns the Kolmogorov-Smirnov distance D between the distribution and
         the data. Also sets the properties D+, D-, V (the Kuiper testing
@@ -161,7 +168,6 @@ class Distribution(object):
             If not provided, attempts to use the data from the Fit object in
             which the Distribution object is contained.
         """
-        data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
         if len(data) < 2:
             print("Not enough data. Returning nan", file=sys.stderr)
             from numpy import nan
@@ -182,16 +188,169 @@ class Distribution(object):
 
         self.D_plus = CDF_diff.max()
         self.D_minus = -1.0 * CDF_diff.min()
-        from numpy import mean
+
+        from numpy import mean, argmax, argmin
+
+        # Indices of maxima/minima
+        self.D_plus_index = int(argmax(CDF_diff))
+        self.D_minus_index = int(argmin(CDF_diff))
+
+        # Overall D is whichever is larger, so pick matching index
+        if self.D_plus >= self.D_minus:
+            self.D = self.D_plus
+            self.D_index = self.D_plus_index
+            self.D_x = data[self.D_index]
+        else:
+            self.D = self.D_minus
+            self.D_index = self.D_minus_index
+            self.D_x = data[self.D_index]
 
         self.Kappa = 1 + mean(CDF_diff)
 
         self.V = self.D_plus + self.D_minus
-        self.D = max(self.D_plus, self.D_minus)
         self.Asquare = sum(
             ((CDF_diff**2) / (Theoretical_CDF * (1 - Theoretical_CDF) + 1e-12))[1:]
         )
         return self.D
+
+    def _get_cache_path(self, cache_dir, data, nr_sets):
+        import os
+        import hashlib
+        from numpy import asarray
+
+        # build a stable cache key from the *pre-fit* state + confidence
+        # include a hash of the data to invalidate if data changes
+        data_bytes = asarray(data).tobytes()
+        h = hashlib.sha1()
+        h.update(data_bytes)
+        data_sig = h.hexdigest()
+
+        cache_key = (
+            f"{self.__class__.__name__}"
+            f"_len={len(data)}_data={data_sig}"
+            f"_nr_sets={nr_sets}_xmin={self.xmin}_xmax={self.xmax}"
+            f"_discrete={self.discrete}_fit_method={self.fit_method}"
+        )
+        cache_name = hashlib.sha1(cache_key.encode("utf-8")).hexdigest() + ".joblib"
+
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_path = os.path.join(cache_dir, cache_name)
+        return cache_path
+
+    @staticmethod
+    def _fit_on_sample(sample, cls, xmin, xmax, discrete, fit_method):
+        m = cls(
+            data=sample, xmin=xmin, xmax=xmax, discrete=discrete, fit_method=fit_method
+        )
+        return m.D, getattr(m, m.parameter1_name)
+
+    def evaluate_fit(
+        self,
+        data,
+        confidence: float = 0.01,
+        parallel: bool = False,
+        use_cache: bool = True,
+        cache_dir: str = ".joblib_cache",
+        n_jobs: int = -1,
+    ):
+        """
+        Evaluate fit, optionally parallel, and persist *self* on disk via joblib.
+
+        Notes
+        -----
+        - If `use_cache` is True and a cache hit occurs, this loads the saved object
+        and updates `self` in-place (self.__dict__.update(...)).
+        - The cache key depends on class name, key params, and a SHA-1 hash of data.
+        """
+        # --- minimal imports used in both paths
+        from numpy import array_split, mean, std, asarray
+        from functools import partial
+
+        data = self.trim_to_range(data)
+
+        # --- compute number of synthetic sets
+        nr_sets = max(1, int(1 / (4 * confidence**2)))  # At least one set
+
+        # --- try cache
+        cache_path = None
+        if use_cache:
+            import os
+
+            cache_path = self._get_cache_path(cache_dir, data, nr_sets)
+            if os.path.exists(cache_path):
+                import joblib
+
+                try:
+                    cached_self = joblib.load(cache_path)
+                    # update our current instance to the cached state
+                    self.__dict__.update(cached_self.__dict__)
+                    # return cached outputs (assumes these attributes were set previously)
+                    return self.p, self.alpha_mean, self.alpha_std
+                except Exception:
+                    # fall through to recompute if loading fails
+                    pass
+
+        # --- no (usable) cache: compute
+        synthetic_data = self.generate_random(len(data) * nr_sets)
+        synthetic_sets = array_split(synthetic_data, nr_sets)
+
+        worker = partial(
+            self._fit_on_sample,
+            cls=self.__class__,
+            xmin=self.xmin,
+            xmax=self.xmax,
+            discrete=self.discrete,
+            fit_method=self.fit_method,
+        )
+
+        if parallel:
+            # Some users might not have access to joblib
+            from concurrent.futures import ProcessPoolExecutor
+
+            try:
+                from tqdm import tqdm
+            except ImportError:
+
+                def tqdm(doNothing, total=None):
+                    return doNothing
+
+            with ProcessPoolExecutor() as ex:
+                results = list(
+                    tqdm(ex.map(worker, synthetic_sets), total=len(synthetic_sets))
+                )
+
+        else:
+            results = []
+            total = len(synthetic_sets)
+            for i, s in enumerate(synthetic_sets, 1):
+                results.append(worker(s))
+                print(f"{i}/{total}", end="\r")
+            print("         ", end="\r")
+
+        # --- aggregate results
+        D_vals, alpha_vals = zip(*results)
+        # ensure vectorized compare
+
+        self.p = mean(asarray(D_vals) >= self.D)
+
+        # keep both mean and std; fix the original overwrite bug
+        self.alpha_mean = mean(alpha_vals)
+        self.alpha_std = std(alpha_vals)
+        # a conservative bound for p-uncertainty (optional; keep if you use it elsewhere)
+        self.p_std = confidence
+
+        # --- persist *self* if requested
+        if use_cache and cache_path is not None:
+            try:
+                import joblib
+
+                joblib.dump(self, cache_path)
+            except Exception as e:
+                # don't fail the computation if persistence fails
+                print(e)
+                pass
+
+        return self.p, self.alpha_mean, self.alpha_std
 
     def ccdf(self, data=None, survival=True):
         """
@@ -239,7 +398,7 @@ class Distribution(object):
         probabilities : array
             The portion of the data that is less than or equal to X.
         """
-        data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+        data = self.trim_to_range(data)
         n = len(data)
         from sys import float_info
 
@@ -306,7 +465,6 @@ class Distribution(object):
         probabilities : array
         """
 
-        data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
         n = len(data)
         from sys import float_info
 
@@ -496,7 +654,7 @@ class Distribution(object):
 
         from numpy import unique
 
-        bins = unique(trim_to_range(data, xmin=self.xmin, xmax=self.xmax))
+        bins = unique(self.trim_to_range(data))
         CDF = self.cdf(bins, survival=survival)
         if not ax:
             import matplotlib.pyplot as plt
@@ -507,7 +665,7 @@ class Distribution(object):
         ax.set_yscale("log")
         return ax
 
-    def plot_pdf(self, data=None, ax=None, **kwargs):
+    def plot_pdf(self, data=None, ax=None, trim_data=True, **kwargs):
         """
         Plots the probability density function (PDF) of the
         theoretical distribution for the values given in data within xmin and
@@ -529,7 +687,10 @@ class Distribution(object):
 
         from numpy import unique
 
-        bins = unique(trim_to_range(data, xmin=self.xmin, xmax=self.xmax))
+        if trim_data:
+            bins = unique(self.trim_to_range(data))
+        else:
+            bins = unique(data)
         PDF = self.pdf(bins)
         from numpy import nan
 
@@ -545,7 +706,7 @@ class Distribution(object):
         ax.set_yscale("log")
         return ax
 
-    def generate_random(self, n=1, estimate_discrete=None):
+    def generate_random(self, n=1, estimate_discrete=None, rng=None, seed=0):
         """
         Generates random numbers from the theoretical probability distribution.
         If xmax is present, it is currently ignored.
@@ -566,10 +727,16 @@ class Distribution(object):
         r : array
             Random numbers drawn from the distribution
         """
-        from numpy.random import rand
         from numpy import array
 
-        r = rand(n)
+        if rng is not None:
+            self.rng = rng
+        elif not hasattr(self, "rng"):
+            from numpy.random import default_rng
+
+            self.rng = default_rng(seed)
+
+        r = self.rng.uniform(0, 1, n)
         if not self.discrete:
             x = self._generate_random_continuous(r)
         else:
@@ -632,7 +799,7 @@ class Power_Law(Distribution):
         return self.alpha > 0
 
     def fit(self, data=None):
-        data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+        data = self.trim_to_range(data)
         self.n = len(data)
         from numpy import log, sum
 
@@ -648,6 +815,9 @@ class Power_Law(Distribution):
             self.KS(data)
         else:
             Distribution.fit(self, data, suppress_output=True)
+
+        # parameters is not run unless we use the Distribution.fit function
+        self.parameters([self.alpha])
 
         if not self.in_range():
             self.noise_flag = True
@@ -744,7 +914,7 @@ class Exponential(Distribution):
 
     def pdf(self, data=None):
         if not self.discrete and self.in_range() and not self.xmax:
-            data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+            data = self.trim_to_range(data)
             from numpy import exp
 
             #        likelihoods = exp(-Lambda*data)*\
@@ -760,7 +930,7 @@ class Exponential(Distribution):
 
     def loglikelihoods(self, data=None):
         if not self.discrete and self.in_range() and not self.xmax:
-            data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+            data = self.trim_to_range(data)
             from numpy import log
 
             #        likelihoods = exp(-Lambda*data)*\
@@ -827,7 +997,7 @@ class Stretched_Exponential(Distribution):
 
     def pdf(self, data=None):
         if not self.discrete and self.in_range() and not self.xmax:
-            data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+            data = self.trim_to_range(data)
             from numpy import exp
 
             likelihoods = (
@@ -849,7 +1019,7 @@ class Stretched_Exponential(Distribution):
 
     def loglikelihoods(self, data=None):
         if not self.discrete and self.in_range() and not self.xmax:
-            data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+            data = self.trim_to_range(data)
             from numpy import log
 
             loglikelihoods = (
@@ -947,7 +1117,7 @@ class Truncated_Power_Law(Distribution):
 
     def pdf(self, data=None):
         if not self.discrete and self.in_range() and False:
-            data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+            data = self.trim_to_range(data)
             from numpy import exp
             from mpmath import gammainc
 
@@ -967,7 +1137,7 @@ class Truncated_Power_Law(Distribution):
             likelihoods = Distribution.pdf(self, data)
         return likelihoods
 
-    def _generate_random_continuous(self, r):
+    def _old_generate_random_continuous(self, r):
         def helper(r):
             from numpy import log
             from numpy.random import rand
@@ -982,6 +1152,90 @@ class Truncated_Power_Law(Distribution):
         from numpy import array
 
         return array([helper(r_) for r_ in r])
+
+    def _generate_random_continuous(self, r):
+        """
+        Unbiased batched rejection sampler for
+            f(x) ∝ x^(-alpha) * exp(-Lambda * x), x >= xmin.
+
+        Strategy
+        --------
+        - If alpha < 1: use the exact inverse-CDF sampler (same as before).
+        - Else: propose in batches from xmin + Exp(scale=1/Lambda), accept with
+        a(x) = (xmin / x)^alpha. We *adaptively* size each batch using an
+        online estimate of the acceptance rate, and finally take the first
+        size accepted samples in (proposal) arrival order.
+
+        Notes
+        -----
+        - Taking the *first N accepted* is distribution-preserving (no bias),
+        because acceptance decisions are i.i.d. Bernoulli given the proposals,
+        and selection is independent of sample values.
+        - Do **not** sort or otherwise pick accepted samples by value.
+        """
+        # Heavy tail ⇒ inverse-CDF path is faster/numerically stable.
+        if self.alpha < 1:
+            from scipy.special import gammainc, gammaincinv
+
+            k = 1.0 - self.alpha
+            theta = 1.0 / self.Lambda
+
+            Fmin = gammainc(k, self.xmin / theta)
+            u = Fmin + (1.0 - Fmin) * r
+            y = gammaincinv(k, u)
+            x = theta * y
+            return x
+
+        accepted = []
+        size = len(r)
+        need = size
+
+        # Start with a conservative acceptance-rate guess to avoid too-small batches.
+        # We'll update this estimate on the fly.
+        # Heuristic: acceptance ≈ (xmin*Lambda) / (xmin*Lambda + alpha), clipped.
+        r_est = min(
+            0.8,
+            max(
+                0.05, (self.xmin * self.Lambda) / (self.xmin * self.Lambda + self.alpha)
+            ),
+        )
+        from numpy import ceil, log, asarray
+
+        while need > 0:
+            # Over-propose by 1/r_est with a small safety factor.
+            overshoot = 1.15
+            n_prop = max(32, int(ceil(overshoot * need / r_est)))
+
+            # Proposals from the exponential tail anchored at xmin
+            prop = self.xmin + self.rng.exponential(
+                scale=1.0 / self.Lambda, size=n_prop
+            )
+
+            # Accept with probability (xmin / x)^alpha
+            # Using log-space for numerical stability
+            log_u = log(self.rng.random(n_prop))
+            mask = log_u < self.alpha * (log(self.xmin) - log(prop))
+
+            # Append in *arrival order* to preserve unbiasedness
+            if mask.any():
+                accepted.extend(prop[mask])
+
+            # Update remaining count
+            got = min(len(accepted), size)  # guard against overflow
+            need = size - got
+
+            # Update acceptance rate estimate (EMA to stabilize)
+            # instantaneous rate:
+            inst_rate = mask.mean()
+            # avoid divide-by-zero; keep r_est within sensible bounds
+            if inst_rate > 0:
+                r_est = 0.7 * r_est + 0.3 * float(inst_rate)
+                r_est = min(0.95, max(0.02, r_est))
+
+        # Take the first N accepted in arrival order (clip any extra)
+        if len(accepted) > size:
+            accepted = accepted[:size]
+        return asarray(accepted, dtype=float)
 
 
 class Lognormal(Distribution):
@@ -1015,7 +1269,7 @@ class Lognormal(Distribution):
         probabilities : array
         """
 
-        data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+        data = self.trim_to_range(data)
         n = len(data)
         from sys import float_info
         from numpy import tile
@@ -1121,7 +1375,7 @@ class Lognormal(Distribution):
         from numpy import log, sqrt
         import scipy.special as ss
 
-        data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+        data = self.trim_to_range(data)
         n = len(data)
         from sys import float_info
 
