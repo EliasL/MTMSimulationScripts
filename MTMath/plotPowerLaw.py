@@ -438,7 +438,7 @@ def make_path_name(data_info):
     if data_info is None:
         return "unkown"
     strainLim = data_info["strainLim"]
-    path_name = f"{data_info['minimizer']}_s:{strainLim[0]:.2f}-{strainLim[1]:.2f}_samples:{data_info['nrSimulations']}"
+    path_name = f"{data_info['minimizer']}_s{strainLim[0]:.2f}-{strainLim[1]:.2f}_samples{data_info['nrSimulations']}"
     return path_name
 
 
