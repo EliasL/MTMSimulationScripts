@@ -251,7 +251,6 @@ class Distribution(object):
         parallel: bool = False,
         use_cache: bool = True,
         cache_dir: str = ".joblib_cache",
-        n_jobs: int = -1,
     ):
         """
         Evaluate fit, optionally parallel, and persist *self* on disk via joblib.
@@ -292,6 +291,15 @@ class Distribution(object):
 
         # --- no (usable) cache: compute
         synthetic_data = self.generate_random(len(data) * nr_sets)
+        if synthetic_data is None:
+            print("Fit not evaluated.")
+            self.p = -0.01
+            self.p_std = 0
+            # keep both mean and std; fix the original overwrite bug
+            self.alpha_mean = 0
+            self.alpha_std = 0
+            return self.p, self.alpha_mean, self.alpha_std
+
         synthetic_sets = array_split(synthetic_data, nr_sets)
 
         worker = partial(
@@ -304,7 +312,6 @@ class Distribution(object):
         )
 
         if parallel:
-            # Some users might not have access to joblib
             from concurrent.futures import ProcessPoolExecutor
 
             try:
@@ -339,7 +346,7 @@ class Distribution(object):
         # a conservative bound for p-uncertainty (optional; keep if you use it elsewhere)
         self.p_std = confidence
 
-        # --- persist *self* if requested
+        # --- save *self* if requested
         if use_cache and cache_path is not None:
             try:
                 import joblib
@@ -1153,7 +1160,7 @@ class Truncated_Power_Law(Distribution):
 
         return array([helper(r_) for r_ in r])
 
-    def _generate_random_continuous(self, r):
+    def _generate_random_continuous(self, r, max_size=1e8):
         """
         Unbiased batched rejection sampler for
             f(x) ∝ x^(-alpha) * exp(-Lambda * x), x >= xmin.
@@ -1192,19 +1199,20 @@ class Truncated_Power_Law(Distribution):
 
         # Start with a conservative acceptance-rate guess to avoid too-small batches.
         # We'll update this estimate on the fly.
-        # Heuristic: acceptance ≈ (xmin*Lambda) / (xmin*Lambda + alpha), clipped.
-        r_est = min(
-            0.8,
-            max(
-                0.05, (self.xmin * self.Lambda) / (self.xmin * self.Lambda + self.alpha)
-            ),
-        )
+        # Heuristic: acceptance ≈ (xmin*Lambda) / (xmin*Lambda + alpha)
+        r_est = (self.xmin * self.Lambda) / (self.xmin * self.Lambda + self.alpha)
         from numpy import ceil, log, asarray
 
         while need > 0:
-            # Over-propose by 1/r_est with a small safety factor.
-            overshoot = 1.15
+            # Over-propose by 1/r_est with a overshoot factor
+            overshoot = 1.5
             n_prop = max(32, int(ceil(overshoot * need / r_est)))
+            if n_prop / max_size > 10000:
+                # If n_prop is much larger than the largest size we can
+                # work with, we give up.
+                print("Warning! Cannot generate distribution!")
+                return None
+            n_prop = min(n_prop, int(max_size))
 
             # Proposals from the exponential tail anchored at xmin
             prop = self.xmin + self.rng.exponential(
@@ -1214,23 +1222,16 @@ class Truncated_Power_Law(Distribution):
             # Accept with probability (xmin / x)^alpha
             # Using log-space for numerical stability
             log_u = log(self.rng.random(n_prop))
-            mask = log_u < self.alpha * (log(self.xmin) - log(prop))
+            log_prop = self.alpha * (log(self.xmin) - log(prop))
+            mask = log_u < log_prop
 
             # Append in *arrival order* to preserve unbiasedness
             if mask.any():
                 accepted.extend(prop[mask])
 
             # Update remaining count
-            got = min(len(accepted), size)  # guard against overflow
+            got = len(accepted)
             need = size - got
-
-            # Update acceptance rate estimate (EMA to stabilize)
-            # instantaneous rate:
-            inst_rate = mask.mean()
-            # avoid divide-by-zero; keep r_est within sensible bounds
-            if inst_rate > 0:
-                r_est = 0.7 * r_est + 0.3 * float(inst_rate)
-                r_est = min(0.95, max(0.02, r_est))
 
         # Take the first N accepted in arrival order (clip any extra)
         if len(accepted) > size:

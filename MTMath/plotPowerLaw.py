@@ -7,7 +7,7 @@ from matplotlib import cm, colors
 import powerlaw
 from tqdm import tqdm
 from scipy.optimize import curve_fit
-from powerlaw_lite import Truncated_Power_Law, Power_Law, Distribution
+from .powerlaw_lite import Truncated_Power_Law, Power_Law, Distribution
 from concurrent.futures import ProcessPoolExecutor
 import functools
 import os
@@ -22,6 +22,48 @@ os.makedirs(PLOTPATH + "debug/", exist_ok=True)
 MINIMIZER_COLORS = {"L-BFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
 
 
+def get_minimizer(df):
+    # We can find out what minimizer we have by looking at the third line in the
+    # csv file, and seeing which of
+    # LBFGS_Term_reason,CG_Term_reason,FIRE_Term_reason is non-zero
+    LBFGS = df["LBFGS_Term_reason"][2]
+    CG = df["CG_Term_reason"][2]
+    FIRE = df["FIRE_Term_reason"][2]
+    assert sum([LBFGS == 0, CG == 0, FIRE == 0]) == 2, (
+        "There is not exactly one non-zero term reason!"
+    )
+    if LBFGS != 0:
+        return "L-BFGS"
+    elif CG != 0:
+        return "CG"
+    elif FIRE != 0:
+        return "FIRE"
+    else:
+        raise RuntimeError("Minimizer not found")
+
+
+def get_system_size(csvPaths):
+    import re
+
+    sizes = set()
+    for path in csvPaths:
+        match = re.search(r"s(\d+)x(\d+)l", path)
+        if match:
+            n1, n2 = match.groups()
+            if n1 != n2:
+                return -1
+            else:
+                sizes.add(int(n1))
+        else:
+            print("Not able to find system size")
+            re
+    if len(sizes) > 1:
+        print("More than one size!")
+        return -1
+    else:
+        return sizes.pop()
+
+
 def get_energy_drops(
     csvPaths, df=None, strainLim=[-np.inf, np.inf], debug=False, label=None
 ):
@@ -33,7 +75,6 @@ def get_energy_drops(
         csvPaths = [csvPaths]
 
     drops = []
-
     for singlePath in csvPaths:
         if df is None:
             df = pd.read_csv(singlePath)
@@ -51,6 +92,12 @@ def get_energy_drops(
         drops.extend(-diffs[mask])
 
     drops = np.array(drops)
+
+    data_info = {}
+    data_info["minimizer"] = get_minimizer(df)
+    data_info["nrSimulations"] = len(csvPaths)
+    data_info["strainLim"] = strainLim
+    data_info["L"] = get_system_size(csvPaths)
 
     if debug:
         # Only debug first seed when using labels
@@ -129,16 +176,14 @@ def get_energy_drops(
         else:
             axins2.set_ylim(0, drops_zoom.max() * 1.5)
 
-        if label is not None:
-            minimizer = get_attribute(label)
-        else:
-            minimizer = "unknown"
-        name = get_name_from_paths(csvPaths)
-        filename = f"{PLOTPATH}debug/{minimizer}_{name}_energy_drops_strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}{OUTPUTTYPE}"
+        name = make_path_name(data_info)
+        filename = f"{PLOTPATH}debug/{name}_energy_drops_strain{OUTPUTTYPE}"
         debug_fig.savefig(filename, dpi=300)
+        print(f"Saved figure to {filename}")
         # to save memory, close the figure
         plt.close(debug_fig)
-    return drops
+
+    return drops, data_info
 
 
 def getHist(data):
@@ -225,21 +270,6 @@ def plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf, color="red"):
 
 # --- Helper for annotating KS distance on PDF plot ---
 def annotate_ks_distance_pdf(ax, x_D, D_val, color="red"):
-    """
-    Mark the KS distance location on a PDF plot.
-
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Axis on which to draw.
-    x_D : float
-        Data value where the maximum KS distance occurs.
-    D_val : float
-        The KS distance (D statistic).
-    color : str, optional
-        Color for the marker and line.
-    """
-    # Vertical dashed line at x_D
     ax.axvline(
         x_D,
         color=color,
@@ -260,7 +290,7 @@ def plot_dist_pdf(
     alpha=1,
     linestyle="-",
     pre_label=None,
-    add_ks_marker=True,
+    add_ks_marker=False,
 ):
     # Plot
 
@@ -271,7 +301,7 @@ def plot_dist_pdf(
     ax.plot(
         bins_for_model,
         pdf_model,
-        label=(pre_label or "") + dist.name,
+        label=(pre_label or "") + pretty_text(dist.name),
         color=color,
         alpha=alpha,
         linestyle=linestyle,
@@ -288,21 +318,33 @@ def plot_dist_pdf(
     return ax
 
 
-def pretty_label(label):
+def pretty_text(text, addEquation=True):
     r"""
-    Make the lable nicer.
+    Make the text nicer.
     truncated_power_law: alpha=1.02, lambda=0.5
     ->
     Truncated Power Law: \alpha=1.02, \lambda=0.5
     """
-    label = label.replace("_", " ")
-    label = label.replace("alpha", r"$\alpha$")
-    label = label.replace("lambda", r"$\lambda$")
-    label = label.replace("mu", r"$\mu$")
-    label = label.replace("sigma", r"$\sigma$")
+    if addEquation:
+        if "truncated_power_law" in text:
+            text = text.replace(
+                "truncated_power_law",
+                "truncated_power_law " + r"$p(x) = x^{-\alpha} e^{-\lambda x}$)",
+            )
+        elif "power_law" in text:
+            text = text.replace(
+                "power_law",
+                "power_law " + r"$p(x) = x^{-\alpha}$)",
+            )
+
+    text = text.replace("_", " ")
+    text = text.replace(" alpha", r" $\alpha$")
+    text = text.replace(" lambda", r" $\lambda$")
+    text = text.replace(" mu", r" $\mu$")
+    text = text.replace(" sigma", r" $\sigma$")
     # Captialize first letter of the first word
-    label = label.capitalize()
-    return label
+    text = text.capitalize()
+    return text
 
 
 def get_drops_in_windows(
@@ -344,7 +386,7 @@ def get_drops_in_windows(
         min_strain = center - window_width / 2
         max_strain = center + window_width / 2
         # get the data in the window
-        drops = get_energy_drops(
+        drops, data_info = get_energy_drops(
             csvPath,
             df=df,
             strainLim=[min_strain, max_strain],
@@ -354,6 +396,50 @@ def get_drops_in_windows(
         windows.append((min_strain, max_strain))
         drops_in_windows.append(drops)
     return drops_in_windows, windows, centers
+
+
+def make_title_from_dist(dist: Distribution):
+    title = rf"$E_{{\mathrm{{min}}}}$={dist.xmin:.2e}"
+
+    # add first parameter (assume greek variable name)
+    title += rf" $\{dist.parameter1_name}={dist.parameter1:.2f}$"
+
+    try:
+        title += rf"$\pm{getattr(dist, dist.parameter1_name + '_std'):.2f}$"
+    except AttributeError:
+        pass
+
+    if dist.p is not None:
+        title += f" p: {dist.p:.2f}"
+    return title
+
+
+def make_title_from_data_info(data_info):
+    strainLim = data_info["strainLim"]
+    L = data_info["L"]
+    n = data_info["nrSimulations"]
+    samples_string = f"{n} sample{'s' if n != 1 else ''}"
+    title = rf"{data_info['minimizer']} {L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f}"
+    return title
+
+
+def make_title(data_info=None, dist=None):
+    title = ""
+    if data_info:
+        title += make_title_from_data_info(data_info)
+    if dist:
+        if data_info:
+            title += " "
+        title += make_title_from_dist(dist)
+    return title
+
+
+def make_path_name(data_info):
+    if data_info is None:
+        return "unkown"
+    strainLim = data_info["strainLim"]
+    path_name = f"{data_info['minimizer']}_s:{strainLim[0]:.2f}-{strainLim[1]:.2f}_samples:{data_info['nrSimulations']}"
+    return path_name
 
 
 def plot_data_and_dist(
@@ -371,7 +457,7 @@ def plot_data_and_dist(
 
     # plot the fit
     if addFit:
-        plot_dist_pdf(ax, data, dist, title=title, color=color)
+        plot_dist_pdf(ax, data, dist, color=color)
 
         # Add shaded fit region with formula in label
         if dist.xmax is None:
@@ -383,12 +469,11 @@ def plot_data_and_dist(
             xmax,
             color="gray",
             alpha=0.2,
-            label=r"Fit region ($x \geq E_\mathrm{min}$, $p(x) \propto x^{-\alpha} e^{-\lambda x}$)",
+            label="Fit region",
         )
+
     ax.legend()
     ax.set_title(title)
-    if dist.p is not None:
-        ax.set_title(ax.get_title() + f" p: {dist.p:.2f}")
     return ax
 
 
@@ -635,9 +720,10 @@ def explore_xmin(
     min_xmin=None,
     max_xmin=None,
     nr_evaluation=10,
-    accuracy=0.1,
+    confidence=0.1,
     DistType=Truncated_Power_Law,
     debug=False,
+    xmax=None,
 ):
     if min_xmin is None:
         min_xmin = min(drops)
@@ -653,8 +739,8 @@ def explore_xmin(
     test_dists = []
     for i, trial_xmin in enumerate(xmin_values):
         print(f"xmin:{trial_xmin:.2e}: {i + 1}/{len(xmin_values)}")
-        dist = DistType(data=drops, xmin=trial_xmin)  # , xmax=1e-4)
-        dist.evaluate_fit(drops, confidence=accuracy, parallel=not debug)
+        dist = DistType(data=drops, xmin=trial_xmin, xmax=xmax)
+        dist.evaluate_fit(drops, confidence=confidence, parallel=not debug)
         test_dists.append(dist)
     return test_dists
 
@@ -664,11 +750,13 @@ def find_best_xmin(
     debug=False,
     min_xmin=None,
     max_xmin=None,
+    xmax=None,
     min_p=0.1,
-    nr_evaluation=10,
+    nr_evaluation=20,
     start_accuracy=0.1,
     max_accuracy=0.01,
     DistType: Distribution = Truncated_Power_Law,
+    data_info=None,
 ):
     """
     We scan many possible xmin values. We try to identify a plateau region
@@ -676,18 +764,69 @@ def find_best_xmin(
     p-value is close to the min_p limit, we need to increaes the accuracy.
     """
     test_dists = explore_xmin(
-        drops, min_xmin, max_xmin, nr_evaluation, start_accuracy, DistType, debug
+        drops,
+        min_xmin,
+        max_xmin,
+        int(nr_evaluation / 2),
+        start_accuracy,
+        DistType,
+        debug,
+        xmax=xmax,
     )
+
+    # We now have a rough sample on possible xmin values
+    exponents = [d.alpha for d in test_dists]
+    p_values = [d.p for d in test_dists]
+    xmins = [d.xmin for d in test_dists]
+
+    first_p_criteria = min_p / 2
+
+    # Vectorize for robust indexing and easy neighborhood expansion
+    x = np.array(xmins, dtype=float)
+    p = np.array(p_values, dtype=float)
+
+    if not np.isfinite(p).any() or p.max() < first_p_criteria:
+        print("No pure power law found.")
+        best_dist = test_dists[0]
+    else:
+        # Identify contiguous region where p > threshold
+        valid_idx = np.flatnonzero(p > first_p_criteria)
+        i_min, i_max = valid_idx[0], valid_idx[-1]
+
+        # Expand the search window by one neighbor on each side when available
+        i0 = max(0, i_min - 1)
+        i1 = min(len(x) - 1, i_max + 1)
+        new_min_xmin = x[i0]
+        new_max_xmin = x[i1]
+
+        # remove dists that we are about to replace
+        test_dists = [
+            d for d in test_dists if d.xmin < new_min_xmin or d.xmin > new_max_xmin
+        ]
+
+        new_dists = explore_xmin(
+            drops,
+            new_min_xmin,
+            new_max_xmin,
+            int(nr_evaluation / 2),
+            start_accuracy / 2,
+            DistType,
+            debug,
+            xmax,
+        )
+        idx = int(np.argmax([d.p for d in new_dists]))
+        best_dist = new_dists[idx]
+
+        test_dists.extend(new_dists)
 
     # Plot p and exponent
+    path_name = make_path_name(data_info)
+    title = make_title(data_info)
     plot_dists_over_xmin(
-        test_dists, PLOTPATH + f"searchHistory_{test_dists[0].name}.pdf"
+        test_dists, best_dist, PLOTPATH + f"{path_name}_xMins.pdf", title=title
     )
 
-    exponents = [dist.alpha for dist in test_dists]
-    p_values = [dist.p for dist in test_dists]
-
-    return test_dists[6]
+    return best_dist
 
 
 def make_exponent_map():
@@ -722,10 +861,11 @@ def make_exponent_map():
         make_debug_plot(xmins, strainLim=strainLim)
 
 
-def plot_dists_over_xmin(dists, savePath=None):
+def plot_dists_over_xmin(dists, best_dist=None, savePath=None, title=None):
     """
     Plot KS p-value and exponent (with std error bars) versus xmin.
     """
+    dists.sort(key=lambda d: d.xmin)
     x = np.array([d.xmin for d in dists], dtype=float)
     pvals = np.array([d.p for d in dists], dtype=float)
     p_stds = np.array([d.p_std for d in dists], dtype=float)
@@ -791,22 +931,25 @@ def plot_dists_over_xmin(dists, savePath=None):
     ax2.set_ylabel(r"Exponent $\alpha$", color=c_a)
     ax2.tick_params(axis="y", colors=c_a)
     ax2.spines["right"].set_color(c_a)
-    ax1.legend(handles=[p_line, thr_line, alpha_err], loc="upper left")
-    # ax2.legend()
 
+    if best_dist:
+        best_line = ax1.axvline(
+            best_dist.xmin,
+            color="red",
+            linestyle="--",
+            linewidth=1.2,
+            label=f"Best xmin: {best_dist.xmin:.2e}",
+            zorder=-1,
+            alpha=0.5,
+        )
+
+    ax1.legend(handles=[p_line, thr_line, alpha_err, best_line], loc="upper left")
     fig.tight_layout()
+    ax1.set_title(title)
 
     if savePath:
         fig.savefig(savePath, format="pdf", bbox_inches="tight")
         print(f"Saved figure to {savePath}")
-
-
-def get_name_from_paths(paths):
-    if isinstance(paths, str):
-        name = os.path.basename(os.path.dirname(paths))
-    else:
-        name = os.path.basename(os.path.dirname(paths[0]))
-    return name
 
 
 def make_exponent_fit(
@@ -814,21 +957,25 @@ def make_exponent_fit(
     strainLim=[0.15, 1.0],
     debug=False,
     DistType: Distribution = Truncated_Power_Law,
+    xmax=None,
+    show=True,
 ):
-    name = get_name_from_paths(csvPaths)
     fig, ax = plt.subplots()
-    drops = get_energy_drops(csvPaths, strainLim=strainLim, debug=debug)
+    drops, data_info = get_energy_drops(csvPaths, strainLim=strainLim, debug=debug)
 
     # find best xmin
-    dist = find_best_xmin(drops, DistType=DistType, debug=debug)
+    dist = find_best_xmin(
+        drops, DistType=DistType, debug=debug, xmax=xmax, data_info=data_info
+    )
+    title = make_title(data_info, dist)
+    pathName = make_path_name(data_info)
+    plot_data_and_dist(drops, dist, ax, title=title)
 
-    plot_data_and_dist(drops, dist, ax)
-
-    plt.show()
-
-    filename = f"{PLOTPATH}{name}.pdf"
+    filename = f"{PLOTPATH}{pathName}.pdf"
     fig.savefig(filename, format="pdf", bbox_inches="tight")
     print(f"Saved figure to {filename}")
+    if show:
+        plt.show()
 
 
 def get_attribute(label):
@@ -942,15 +1089,19 @@ if __name__ == "__main__":
     import powerlaw
 
     # csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-    strainLim = [0, 1.0]
+    strainLim = [0.65, 1.0]
     paths = [
         f"/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s{i}/macroData.csv"
         for i in range(10)
     ]
-    paths = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-    strainLim = [1, 3]
+    # paths = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+    # strainLim = [1, 3]
     # csvPath = "/Volumes/data/MTS2D_output/simpleShear,s400x400l0.15,1e-05,1.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
 
     make_exponent_fit(
-        csvPaths=paths, strainLim=strainLim, debug=True, DistType=Truncated_Power_Law
+        csvPaths=paths,
+        strainLim=strainLim,
+        debug=True,
+        DistType=Truncated_Power_Law,
+        # xmax=1e-4,
     )

@@ -13,7 +13,7 @@ from Management.jobs import (
 
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
-from MTMath.plotPowerLaw import plot_powerlaw
+from MTMath.plotPowerLaw import plot_powerlaw, make_exponent_fit
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from plotAll import plotAll
 from Plotting.remotePlotting import (
@@ -35,7 +35,7 @@ def plotPropperJob():
     nrThreads = 3
     nrSeeds = 40
     configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
-    configs, labels = largePropperJob(group_by_seeds=True)  # , FIREOnly=True)
+    # configs, labels = largePropperJob(group_by_seeds=True)  # , FIREOnly=True)
     # xlim = [0.25, 0.55]
     # for confs, labs in zip(configs, labels):
     #     plotEnergy(confs, labels=labs)
@@ -46,15 +46,49 @@ def plotPropperJob():
     #     # xlim=xlim,
     # )
 
-    paths, labs = get_csv_files(configs, labels=labels)
+    paths_minimizers, labs = get_csv_files(configs, labels=labels)
+    for paths in paths_minimizers:
+        make_exponent_fit(
+            csvPaths=paths,
+            strainLim=[0.7, 1.0],
+            # debug=True,
+            # xmax=1e-4,
+            show=False,
+        )
+        make_exponent_fit(
+            csvPaths=paths,
+            strainLim=[0.15, 0.4],
+            # debug=True,
+            # xmax=1e-4,
+            show=False,
+        )
+        make_exponent_fit(
+            csvPaths=paths,
+            strainLim=[0.15, 1.0],
+            # debug=True,
+            show=False,
+            # xmax=1e-4,
+        )
 
-    plot_powerlaw(
-        paths,
-        alg_labels=labs,
-        show=True,
-        strainLim=[0.7, 1.0],
-        evaluate=True,
-        # debug=True,
+    # plot_powerlaw(
+    #     paths,
+    #     alg_labels=labs,
+    #     show=True,
+    #     strainLim=[0.7, 1.0],
+    #     evaluate=True,
+    #     # debug=True,
+    # )
+
+
+def plotLongJob():
+    path = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+    strainLim = [1, 3]
+
+    make_exponent_fit(
+        csvPaths=path,
+        strainLim=strainLim,
+        debug=False,
+        # xmax=1e-4,
     )
 
 
@@ -233,10 +267,11 @@ def plotEnergyRegion():
 
 
 if __name__ == "__main__":
-    run_reconnection_demo()
+    # run_reconnection_demo()
     # plotEnergyRegion()
     # plotSampleRuns()
-    # plotPropperJob()
+    # plotLongJob()
+    plotPropperJob()
     # debugPlotAll()
     # energyField()
     # showPoincareDisk()
