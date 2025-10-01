@@ -35,7 +35,7 @@ def plotPropperJob():
     nrThreads = 3
     nrSeeds = 40
     configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
-    configs, labels = largePropperJob(group_by_seeds=True, FIREOnly=True)
+    # configs, labels = largePropperJob(group_by_seeds=True, FIREOnly=True)
     # xlim = [0.25, 0.55]
     # for confs, labs in zip(configs, labels):
     #     plotEnergy(confs, labels=labs)
@@ -267,11 +267,11 @@ def plotEnergyRegion():
 
 
 if __name__ == "__main__":
-    # run_reconnection_demo()
+    run_reconnection_demo()
     # plotEnergyRegion()
     # plotSampleRuns()
     # plotLongJob()
-    plotPropperJob()
+    # plotPropperJob()
     # debugPlotAll()
     # energyField()
     # showPoincareDisk()

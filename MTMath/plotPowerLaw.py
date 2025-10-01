@@ -730,11 +730,12 @@ def explore_xmin(
     if max_xmin is None:
         max_xmin = max(drops)
     # The last xmin usually have too few datapoints to be interesting,
-    # so we remove the two last xmin, but make sure to still have
+    # so we remove the few last xmin, but make sure to still have
     # the correct number of evaluations
+    remove_nr = int(nr_evaluation * 0.2)
     xmin_values = np.logspace(
-        np.log10(min_xmin), np.log10(max_xmin), nr_evaluation + 2
-    )[:-2]
+        np.log10(min_xmin), np.log10(max_xmin), nr_evaluation + remove_nr
+    )[:-remove_nr]
 
     test_dists = []
     for i, trial_xmin in enumerate(xmin_values):
@@ -753,7 +754,7 @@ def find_best_xmin(
     xmax=None,
     min_p=0.1,
     nr_evaluation=20,
-    start_accuracy=0.1,
+    start_accuracy=0.05,
     max_accuracy=0.01,
     DistType: Distribution = Truncated_Power_Law,
     data_info=None,
@@ -767,7 +768,7 @@ def find_best_xmin(
         drops,
         min_xmin,
         max_xmin,
-        int(nr_evaluation / 2),
+        nr_evaluation,
         start_accuracy,
         DistType,
         debug,
@@ -789,8 +790,8 @@ def find_best_xmin(
         print("No pure power law found.")
         best_dist = test_dists[0]
     else:
-        # Identify contiguous region where p > threshold
-        valid_idx = np.flatnonzero(p > first_p_criteria)
+        # Identify contiguous region where p > threshold-start_accuracy
+        valid_idx = np.flatnonzero(p > first_p_criteria - start_accuracy)
         i_min, i_max = valid_idx[0], valid_idx[-1]
 
         # Expand the search window by one neighbor on each side when available
@@ -808,7 +809,7 @@ def find_best_xmin(
             drops,
             new_min_xmin,
             new_max_xmin,
-            int(nr_evaluation / 2),
+            nr_evaluation,
             start_accuracy / 2,
             DistType,
             debug,

@@ -338,12 +338,12 @@ class DraggableTriangulation:
         self.g_scatter.set_offsets(g_points)
         self.g_scatter.set_color(self.g_colors)
 
-    def violates(self, G):
+    def violates(self, G, eps=1e-18):
         """Return True if G[0,1] < 0 or G[0,1] > min(G[0,0], G[1,1])."""
         ab = float(G[0, 1])
         aa = float(G[0, 0])
         bb = float(G[1, 1])
-        return ab < 0 or ab > min(aa, bb)
+        return ab < 0 - eps or ab - eps > min(aa, bb)
 
     def update_element_color(self):
         """Recreate triangle face patches and color them based on the Gram-matrix criterion."""
@@ -355,7 +355,7 @@ class DraggableTriangulation:
         # Build new patches for current triangulation
         for i, j, k, origin, a, b, centroid in self.element_vectors():
             G = self.gram_matrix(a, b)
-            bad = self.violates(G)
+            bad = self.violates(G, eps=1e-10)
             facecolor = (
                 (1.0, 0.0, 0.0, 0.3) if bad else (0.0, 0.0, 0.0, 0.0)
             )  # red with alpha if bad, transparent otherwise
