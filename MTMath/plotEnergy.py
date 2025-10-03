@@ -105,34 +105,13 @@ def generate_poincare_disk(
     X, Y = np.meshgrid(
         np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
     )
-
     # Calculate the mask for points inside the unit circle
     # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
     mask = (X**2 + Y**2) >= (1 - 1e-9)
     X[mask] = np.nan
     Y[mask] = np.nan
-    # Precompute some common terms used in a, b, c12, c22, and c11 calculations
-    denominator = X**2 - 2 * X + Y**2 + 1
-    a = (2 * Y) / denominator
-    b = -(X**2 + Y**2 - 1) / denominator
 
-    # Avoid division by zero or near-zero by masking those values in b
-    safe_b = np.where(b == 0, np.nan, b)
-
-    # Calculate c12, c22, and c11
-    C12 = a / safe_b
-    C22 = 1 / safe_b
-    C11 = (1 + C12**2) / C22
-
-    C = np.stack(
-        [
-            np.stack([C11, C12], axis=-1),  #
-            np.stack([C12, C22], axis=-1),
-        ],
-        axis=-2,
-    )
-
-    C = transformC(C, transformation)
+    C = poincareDisk2C(X, Y, transformation=transformation)
 
     if returnMask:
         return C, mask
@@ -201,7 +180,44 @@ def generate_angle_region(resolution=500, zoom=1):
     return region
 
 
+def C_to_xy(C, eps=1e-12):
+    """
+    Map a symmetric 2x2 matrix C to (x, y) on the Poincaré disk by:
+      (i)  normalizing C so det(C)=1 (if det>0),
+      (ii) projecting the normalized matrix to (x,y).
+
+    Supports a single 2x2 or a batch of shape (..., 2, 2).
+    Returns x, y, and the normalized matrix C_hat (det=1 where valid, else NaNs).
+    """
+    C = np.asarray(C, dtype=float)
+
+    a = C[..., 0, 0]
+    b = C[..., 0, 1]
+    c = C[..., 1, 1]
+    # Determinant and validity
+    # Dont use np.linalg.det. It is less numerically stable
+    det = a * c - b * b
+    valid = det > eps
+
+    # Scale to det=1: C_hat = S / sqrt(det)
+    scale = np.where(valid, np.sqrt(det), np.nan)
+    C_hat = C / scale[..., None, None]  # det(C_hat) = 1 where valid
+
+    # Projection to (x,y) from the det=1 surface (stereographic-style inverse)
+    c11 = C_hat[..., 0, 0]
+    c12 = C_hat[..., 0, 1]
+    c22 = C_hat[..., 1, 1]
+
+    t = 2.0 / (2.0 + c11 + c22)
+    x = t * (c11 - c22) * 0.5
+    y = t * c12
+
+    return x, y
+
+
 def C2PoincareDisk(C, transformation=None):
+    return C_to_xy(C)
+
     """Map a metric C to Poincaré disk coordinates (x, y).
 
     By default, the identity metric maps to the center. To center another
@@ -219,6 +235,11 @@ def C2PoincareDisk(C, transformation=None):
 
     with np.errstate(divide="ignore", invalid="ignore"):
         if C.ndim == 2:
+            # t = 2.0 / (2.0 + C[0, 0] + C[1, 1])
+            # x = t * (C[0, 0] - C[1, 1]) / 2.0
+            # y = t * C[0, 1]
+            # return x, y
+
             det = np.linalg.det(C)
             y_ = np.sqrt(det) / C[1, 1] if det >= 0 else np.nan
             x_ = C[0, 1] / C[1, 1]
@@ -228,6 +249,11 @@ def C2PoincareDisk(C, transformation=None):
                 x, y = np.nan, np.nan
 
         else:
+            # t = 2.0 / (2.0 + C[:, 0, 0] + C[:, 1, 1])
+
+            # x = t * (C[:, 0, 0] - C[:, 1, 1]) / 2.0
+            # y = t * C[:, 0, 1]
+            # return x, y
             dets = np.linalg.det(C)
             valid = dets >= 0
             y_ = np.full_like(dets, np.nan)
@@ -243,6 +269,41 @@ def C2PoincareDisk(C, transformation=None):
             y[~valid] = np.nan
 
         return x, y
+
+
+def poincareDisk2C(X, Y, transformation=None):
+    if True:
+        r = 1.0 - X**2 - Y**2
+        safe_r = np.where(r == 0, np.nan, r)
+        t = 2.0 / safe_r
+        C11 = t * (1.0 + X) - 1.0
+        C22 = t * (1.0 - X) - 1.0
+        C12 = t * Y
+    else:
+        # Old code. Should be equivalent
+        # Precompute some common terms used in a, b, c12, c22, and c11 calculations
+        denominator = X**2 - 2 * X + Y**2 + 1
+        a = (2 * Y) / denominator
+        b = -(X**2 + Y**2 - 1) / denominator
+
+        # Avoid division by zero or near-zero by masking those values in b
+        safe_b = np.where(b == 0, np.nan, b)
+
+        # Calculate c12, c22, and c11
+        C12 = a / safe_b
+        C22 = 1 / safe_b
+        C11 = (1 + C12**2) / C22
+
+    C = np.stack(
+        [
+            np.stack([C11, C12], axis=-1),  #
+            np.stack([C12, C22], axis=-1),
+        ],
+        axis=-2,
+    )
+
+    C = transformC(C, transformation)
+    return C
 
 
 def transformC(C, transformation):
@@ -569,7 +630,7 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
         C22 = C[..., 1, 1]
 
         # Region: 0 <= C12 <= min(C11, C22)
-        region_mask = abs(C12) <= np.minimum(C11, C22)
+        region_mask = np.logical_and(0 <= C12, C12 <= np.minimum(C11, C22))
         drawRegion(
             ax,
             region=region_mask.astype(float),

@@ -4,9 +4,10 @@ from matplotlib import pyplot as plt
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib import cm, colors
+import powerlaw
 from tqdm import tqdm
 from scipy.optimize import curve_fit
-
+from .powerlaw_lite import Truncated_Power_Law, Power_Law, Distribution
 from concurrent.futures import ProcessPoolExecutor
 import functools
 import os
@@ -21,198 +22,82 @@ os.makedirs(PLOTPATH + "debug/", exist_ok=True)
 MINIMIZER_COLORS = {"L-BFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
 
 
-def trim_to_range(data, xmin=None, xmax=None, **kwargs):
-    """
-    Removes elements of the data that are above xmin or below xmax (if present)
-    """
-    from numpy import asarray
-
-    data = asarray(data)
-    if xmin is not None:
-        data = data[data >= xmin]
-    if xmax is not None:
-        data = data[data <= xmax]
-    return data
-
-
-def cumulative_distribution_function(data, xmin=None, xmax=None, ccdf=False, **kwargs):
-    """
-    The cumulative distribution function (CDF) of the data.
-
-    Parameters
-    ----------
-    data : list or array, optional
-    survival : bool, optional
-        Whether to calculate a CDF (False) or CCDF (True). False by default.
-    xmin : int or float, optional
-        The minimum data size to include. Values less than xmin are excluded.
-    xmax : int or float, optional
-        The maximum data size to include. Values greater than xmin are
-        excluded.
-
-    Returns
-    -------
-    X : array
-        The sorted, unique values in the data.
-    probabilities : array
-        The portion of the data that is less than or equal to X.
-    """
-
-    from numpy import array
-
-    data = array(data)
-    if data.size == 0:
-        from numpy import nan
-
-        return array([nan]), array([nan])
-
-    data = trim_to_range(data, xmin=xmin, xmax=xmax)
-
-    n = float(len(data))
-    from numpy import sort
-
-    data = sort(data)
-    all_unique = not (any(data[:-1] == data[1:]))
-
-    if all_unique:
-        from numpy import arange
-
-        CDF = arange(n) / n
+def get_minimizer(df):
+    # We can find out what minimizer we have by looking at the third line in the
+    # csv file, and seeing which of
+    # LBFGS_Term_reason,CG_Term_reason,FIRE_Term_reason is non-zero
+    LBFGS = df["LBFGS_Term_reason"][2]
+    CG = df["CG_Term_reason"][2]
+    FIRE = df["FIRE_Term_reason"][2]
+    assert sum([LBFGS == 0, CG == 0, FIRE == 0]) == 2, (
+        "There is not exactly one non-zero term reason!"
+    )
+    if LBFGS != 0:
+        return "L-BFGS"
+    elif CG != 0:
+        return "CG"
+    elif FIRE != 0:
+        return "FIRE"
     else:
-        # This clever bit is a way of using searchsorted to rapidly calculate the
-        # CDF of data with repeated values comes from Adam Ginsburg's plfit code,
-        # specifically https://github.com/keflavich/plfit/commit/453edc36e4eb35f35a34b6c792a6d8c7e848d3b5#plfit/plfit.py
-        from numpy import searchsorted, unique
-
-        CDF = searchsorted(data, data, side="left") / n
-        unique_data, unique_indices = unique(data, return_index=True)
-        data = unique_data
-        CDF = CDF[unique_indices]
-
-    if ccdf:
-        CDF = 1 - CDF
-    return data, CDF
+        raise RuntimeError("Minimizer not found")
 
 
-def power_law_ks_distance(
-    data,
-    alpha,
-    xmin,
-    xmax=None,
-    truncated=True,
-    Lambda=None,
-):
-    """
-    data : array-like
-    alpha : float
-    xmin : float
-    xmax : float or None
-    truncated : bool
-        If True, use truncated power law p(x) ∝ x^{-alpha} exp(-Lamda * x).
-    Lambda : float or None
-        Exponential cutoff λ. Required when truncated=True.
+def get_system_size(csvPaths):
+    import re
 
-    Returns
-    -------
-    D : float KS distance
-    D_index : int
-    """
-    import numpy as np
-    from scipy.integrate import quad
-
-    data = np.asarray(data)
-
-    # Reject integer data
-    if np.issubdtype(data.dtype, np.integer):
-        raise TypeError("Discrete/integer data not supported. Use continuous data.")
-
-    # Apply range
-    data = data[data >= xmin]
-    if xmax is not None:
-        data = data[data <= xmax]
-    n = len(data)
-    if n < 2:
-        return 1, None
-
-    # Ensure sorted
-    if not np.all(data[:-1] <= data[1:]):
-        data = np.sort(data)
-
-    # Empirical CDF
-    # TODO: Check and verify
-    Actual_CDF = np.arange(n) / float(n)
-
-    # ---- Theoretical CDF ----
-    if not truncated:
-        if xmax is None:
-            Theoretical_CDF = 1.0 - (data / float(xmin)) ** (-alpha + 1)
-        else:
-            num = 1.0 - (data / float(xmin)) ** (1.0 - alpha)
-            den = 1.0 - (float(xmax) / float(xmin)) ** (1.0 - alpha)
-            Theoretical_CDF = num / den
-    else:
-        if Lambda is None or Lambda <= 0:
-            raise ValueError("When truncated=True, you must provide lam > 0.")
-
-        def f(t):
-            return (t ** (-alpha)) * np.exp(-Lambda * t)
-
-        upper = np.inf if xmax is None else float(xmax)
-        Z, _ = quad(f, float(xmin), upper, epsabs=1e-10, epsrel=1e-10, limit=200)
-
-        cdf_vals = np.empty_like(data, dtype=float)
-        for i, x in enumerate(data):
-            xi = float(x)
-            if xi <= xmin:
-                cdf_vals[i] = 0.0
-            elif xmax is not None and xi >= xmax:
-                cdf_vals[i] = 1.0
+    sizes = set()
+    for path in csvPaths:
+        match = re.search(r"s(\d+)x(\d+)l", path)
+        if match:
+            n1, n2 = match.groups()
+            if n1 != n2:
+                return -1
             else:
-                num, _ = quad(f, float(xmin), xi, epsabs=1e-10, epsrel=1e-10, limit=200)
-                cdf_vals[i] = num / Z
-        Theoretical_CDF = cdf_vals
-
-    # ---- KS statistic ----
-    diffs_plus = Theoretical_CDF - Actual_CDF
-    diffs_minus = Actual_CDF - Theoretical_CDF
-
-    D_plus = np.max(diffs_plus)
-    D_minus = np.max(diffs_minus)
-
-    D_plus_index = int(np.argmax(diffs_plus))
-    D_minus_index = int(np.argmax(diffs_minus))
-
-    if D_plus > D_minus:
-        D = D_plus
-        D_index = D_plus_index
+                sizes.add(int(n1))
+        else:
+            print("Not able to find system size")
+            re
+    if len(sizes) > 1:
+        print("More than one size!")
+        return -1
     else:
-        D = D_minus
-        D_index = D_minus_index
-
-    return float(D), D_index
+        return sizes.pop()
 
 
 def get_energy_drops(
-    csvPath, df=None, strainLim=[-np.inf, np.inf], debug=False, label=None
+    csvPaths, df=None, strainLim=[-np.inf, np.inf], debug=False, label=None
 ):
     """
     Strain energy drop data from CSV, filter by strain limits, and return drops.
     If debug=True, plot intermediate energy and drop traces.
     """
-    if df is None:
-        df = pd.read_csv(csvPath)
+    if isinstance(csvPaths, str):
+        csvPaths = [csvPaths]
 
-    if "avg_energy_change" not in df:
-        # Add 0 in the beginning
-        diffs = np.insert(np.diff(df["avg_energy"]), 0, 0)
-    else:
-        diffs = df["avg_energy_change"]
+    drops = []
+    for singlePath in csvPaths:
+        if df is None:
+            df = pd.read_csv(singlePath)
 
-    strain = df["load"]
-    lim_mask = (strain > strainLim[0]) & (strain < strainLim[1])
-    drop_mask = diffs < 0
-    mask = drop_mask & lim_mask
-    drops = -diffs[mask]
+        if "avg_energy_change" not in df:
+            # Add 0 in the beginning
+            diffs = np.insert(np.diff(df["avg_energy"]), 0, 0)
+        else:
+            diffs = df["avg_energy_change"]
+
+        strain = df["load"]
+        lim_mask = (strain > strainLim[0]) & (strain < strainLim[1])
+        drop_mask = diffs < 0
+        mask = drop_mask & lim_mask
+        drops.extend(-diffs[mask])
+
+    drops = np.array(drops)
+
+    data_info = {}
+    data_info["minimizer"] = get_minimizer(df)
+    data_info["nrSimulations"] = len(csvPaths)
+    data_info["strainLim"] = strainLim
+    data_info["L"] = get_system_size(csvPaths)
 
     if debug:
         # Only debug first seed when using labels
@@ -291,19 +176,19 @@ def get_energy_drops(
         else:
             axins2.set_ylim(0, drops_zoom.max() * 1.5)
 
-        debug_fig.tight_layout()
-        # Save debug energy plot
-        minimizer = get_attribute(label)
-        filename = f"{PLOTPATH}debug/{minimizer}_{csvPath.split('/')[-1]}_energy_drops_strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}{OUTPUTTYPE}"
+        name = make_path_name(data_info)
+        filename = f"{PLOTPATH}debug/{name}_energy_drops_strain{OUTPUTTYPE}"
         debug_fig.savefig(filename, dpi=300)
+        print(f"Saved figure to {filename}")
         # to save memory, close the figure
         plt.close(debug_fig)
-    return drops
+
+    return drops, data_info
 
 
-def get_bins(data):
+def getHist(data):
     # Find the start of the tail where Poisson noise exceeds threshold
-    data_min = min(data)
+    data_min = data.min()
     data_max = data.max()
 
     # Compute number of bins from x_min to data_max
@@ -313,15 +198,12 @@ def get_bins(data):
     # Define bin edges from data_max downward
     log_edges = np.log10(data_max) - np.arange(n_bins + 1) / bins_per_decade
     bin_edges = np.power(10, log_edges)[::-1]  # Reverse to make it ascending
-    bin_centers = np.sqrt(bin_edges[:-1] * bin_edges[1:])
-    return bin_edges, bin_centers
-
-
-def get_hist(data):
-    bin_edges, bin_centers = get_bins(data)
 
     # Compute the histogram for the tail (density=True → area under PDF = 1)
+    # To make the fit more easily align with the data plot, we normalize
+    # to density manually with the bin centers. Technically slightly incorrect.
     hist_vals, edges = np.histogram(data, bins=bin_edges, density=True)
+    bin_centers = np.sqrt(edges[:-1] * edges[1:])
     return bin_centers, hist_vals
 
 
@@ -330,21 +212,27 @@ def plot_data_pdf(
     data,
     label="Binned PDF of energy drops",
     edgecolor="black",
-    alphaColor=1,
+    alpha=1,
     color=None,
 ):
+    """
+    Plot the empirical PDF of the data on log–log axes using logarithmic bins.
+    Automatically identifies x_min via find_x_min and uses 0.1-decade bin widths.
+    If `fit` is provided and `data` is None, use `fit.data_original`.
+    """
+
     # Choose edgecolor if None
     if edgecolor is None:
         edgecolor = ax._get_lines.get_next_color()
 
-    bin_centers, hist_vals = get_hist(data)
+    bin_centers, hist_vals = getHist(data)
 
     # Plot as points
     plot_kwargs = {
         "marker": "o",
         "linestyle": "None",
         "label": label,
-        "alpha": alphaColor,
+        "alpha": alpha,
     }
     if color is not None:
         plot_kwargs["color"] = color
@@ -360,7 +248,6 @@ def plot_data_pdf(
     ax.set_xlabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
     ax.set_ylabel(r"$p(-\Delta \langle E \rangle)$")
     ax.legend()
-    return bin_centers, hist_vals
 
 
 def plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf, color="red"):
@@ -383,102 +270,44 @@ def plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf, color="red"):
 
 # --- Helper for annotating KS distance on PDF plot ---
 def annotate_ks_distance_pdf(ax, x_D, D_val, color="red"):
-    """
-    Mark the KS distance location on a PDF plot.
-
-    Parameters
-    ----------
-    ax : matplotlib.axes.Axes
-        Axis on which to draw.
-    x_D : float
-        Data value where the maximum KS distance occurs.
-    D_val : float
-        The KS distance (D statistic).
-    color : str, optional
-        Color for the marker and line.
-    """
-    # Vertical dashed line at x_D
     ax.axvline(
         x_D,
         color=color,
         linestyle="--",
         linewidth=1.2,
         label=f"KS Distance D = {D_val:.3f}",
+        zorder=-1,
+        alpha=0.5,
     )
 
 
-def fit_power_law(data, xmin, truncated=True):
-    bin_centers, hist_values = get_hist(data)
-    mask = (bin_centers > xmin) & (hist_values > 0)
-    xdata = bin_centers[mask]
-    ydata = hist_values[mask]
-
-    log_y = np.log(ydata)
-    if len(xdata) < 3:
-        print("Not enough data points above xmin for fitting.")
-        return None, None, None, None
-
-    if truncated:
-        # Truncated power law: log(y) = -alpha * log(x) - Lambda * x + logC
-        def log_model(x, alpha, Lambda, logC):
-            return -alpha * np.log(x) - Lambda * x + logC
-
-        popt, _ = curve_fit(log_model, xdata, log_y, p0=[1.5, 1e-3, 0])
-        alpha_fit, lambda_fit, logC_fit = popt
-        y_fit = np.exp(log_model(bin_centers, *popt))
-
-    else:
-        # Pure power law: log(y) = -alpha * log(x) + logC
-        def log_model(x, alpha, logC):
-            return -alpha * np.log(x) + logC
-
-        popt, _ = curve_fit(log_model, xdata, log_y, p0=[1.5, 0])
-        alpha_fit, logC_fit = popt
-        y_fit = np.exp(log_model(bin_centers, *popt))
-
-    return alpha_fit, lambda_fit, y_fit, bin_centers, hist_values
-
-
-def make_and_plot_truncated_fit_pdf(
+def plot_dist_pdf(
     ax,
     data,
-    xmin,
+    dist,
     title=None,
     color=None,
-    label=None,
+    alpha=1,
     linestyle="-",
     pre_label=None,
     add_ks_marker=False,
-    alpha_std=None,
 ):
-    alpha_fit, lambda_fit, y_fit, bin_centers, hist_values = fit_power_law(data, xmin)
-
-    if label is None:
-        err = f" \\pm {alpha_std:.2f}" if alpha_std is not None else ""
-        fit_label = (
-            rf"Trunc. Fit: $\alpha={alpha_fit:.2f}{err}, \lambda={lambda_fit:.2f}$"
-        )
-    else:
-        fit_label = label
-
     # Plot
+
+    tail_frac = (data >= dist.xmin).mean()
+    bins_for_model = np.unique(data)
+    # scale down to match full-data density
+    pdf_model = dist.pdf(bins_for_model) * tail_frac
     ax.plot(
-        bin_centers,
-        y_fit,
-        label=(pre_label or "") + fit_label,
+        bins_for_model,
+        pdf_model,
+        label=(pre_label or "") + pretty_text(dist.name),
         color=color,
+        alpha=alpha,
         linestyle=linestyle,
     )
     if add_ks_marker:
-        ks_distance, ks_index = power_law_ks_distance(
-            data, alpha_fit, xmin, Lambda=lambda_fit
-        )
-
-        # decide which index gives the max absolute deviation
-        sorted_tail = np.sort(data[data >= xmin])
-
-        x_D = sorted_tail[ks_index]
-        annotate_ks_distance_pdf(ax, x_D, ks_distance)
+        annotate_ks_distance_pdf(ax, dist.D_x, dist.D)
 
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -489,33 +318,33 @@ def make_and_plot_truncated_fit_pdf(
     return ax
 
 
-def compare_dists(fit):
-    mainDist = "truncated_power_law"
-    compareDists = ["lognormal", "power_law"]
-    # Compare distributions
-    for dist_name in compareDists:
-        # Likelihood ratio test comparing mainDist to dist_name
-        R, p = fit.distribution_compare(mainDist, dist_name, normalized_ratio=True)
-        print(
-            f"Likelihood ratio test ({mainDist} vs {dist_name}): R={R:.3f}, p={p:.3e}"
-        )
-
-
-def pretty_label(label):
+def pretty_text(text, addEquation=True):
     r"""
-    Make the lable nicer.
+    Make the text nicer.
     truncated_power_law: alpha=1.02, lambda=0.5
     ->
     Truncated Power Law: \alpha=1.02, \lambda=0.5
     """
-    label = label.replace("_", " ")
-    label = label.replace("alpha", r"$\alpha$")
-    label = label.replace("lambda", r"$\lambda$")
-    label = label.replace("mu", r"$\mu$")
-    label = label.replace("sigma", r"$\sigma$")
+    if addEquation:
+        if "truncated_power_law" in text:
+            text = text.replace(
+                "truncated_power_law",
+                "truncated_power_law " + r"$p(x) = x^{-\alpha} e^{-\lambda x}$)",
+            )
+        elif "power_law" in text:
+            text = text.replace(
+                "power_law",
+                "power_law " + r"$p(x) = x^{-\alpha}$)",
+            )
+
+    text = text.replace("_", " ")
+    text = text.replace(" alpha", r" $\alpha$")
+    text = text.replace(" lambda", r" $\lambda$")
+    text = text.replace(" mu", r" $\mu$")
+    text = text.replace(" sigma", r" $\sigma$")
     # Captialize first letter of the first word
-    label = label.capitalize()
-    return label
+    text = text.capitalize()
+    return text
 
 
 def get_drops_in_windows(
@@ -557,7 +386,7 @@ def get_drops_in_windows(
         min_strain = center - window_width / 2
         max_strain = center + window_width / 2
         # get the data in the window
-        drops = get_energy_drops(
+        drops, data_info = get_energy_drops(
             csvPath,
             df=df,
             strainLim=[min_strain, max_strain],
@@ -569,49 +398,88 @@ def get_drops_in_windows(
     return drops_in_windows, windows, centers
 
 
-def plot_data_and_fit(
+def make_title_from_dist(dist: Distribution):
+    title = rf"$E_{{\mathrm{{min}}}}$={dist.xmin:.2e}"
+
+    # add first parameter (assume greek variable name)
+    title += rf" $\{dist.parameter1_name}={dist.parameter1:.2f}$"
+
+    try:
+        title += rf"$\pm{getattr(dist, dist.parameter1_name + '_std'):.2f}$"
+    except AttributeError:
+        pass
+
+    if dist.p is not None:
+        title += f" p: {dist.p:.2f}"
+    return title
+
+
+def make_title_from_data_info(data_info):
+    strainLim = data_info["strainLim"]
+    L = data_info["L"]
+    n = data_info["nrSimulations"]
+    samples_string = f"{n} sample{'s' if n != 1 else ''}"
+    title = rf"{data_info['minimizer']} {L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f}"
+    return title
+
+
+def make_title(data_info=None, dist=None):
+    title = ""
+    if data_info:
+        title += make_title_from_data_info(data_info)
+    if dist:
+        if data_info:
+            title += " "
+        title += make_title_from_dist(dist)
+    return title
+
+
+def make_path_name(data_info):
+    if data_info is None:
+        return "unkown"
+    strainLim = data_info["strainLim"]
+    path_name = f"{data_info['minimizer']}_s{strainLim[0]:.2f}-{strainLim[1]:.2f}_samples{data_info['nrSimulations']}"
+    return path_name
+
+
+def plot_data_and_dist(
     data,
+    dist,
     ax=None,
-    xmin=None,
     title="",
-    alpha_std=None,
-    p_val=None,
     color=None,
     addFit=True,
 ):
     if ax is None:
         fig, ax = plt.subplots()
-    # plot the data
 
-    bin_centers, hist_values = plot_data_pdf(ax, data=data, color=color)
+    plot_data_pdf(ax, data)
 
     # plot the fit
     if addFit:
-        make_and_plot_truncated_fit_pdf(
-            ax,
-            data,
-            xmin,
-            title=title,
-            alpha_std=alpha_std,
-        )
+        plot_dist_pdf(ax, data, dist, color=color)
 
         # Add shaded fit region with formula in label
+        if dist.xmax is None:
+            xmax = max(data)
+        else:
+            xmax = dist.xmax
         ax.axvspan(
-            xmin,
-            data.max(),
+            dist.xmin,
+            xmax,
             color="gray",
             alpha=0.2,
-            label=r"Fit region ($x \geq E_\mathrm{min}$, $p(x) \propto x^{-\alpha} e^{-\lambda x}$)",
+            label="Fit region",
         )
+
     ax.legend()
     ax.set_title(title)
-    if p_val is not None:
-        ax.set_title(ax.get_title() + f" p: {p_val:.2f}")
     return ax
 
 
 def get_window_power_law_exponents(
     xmin=-np.inf,
+    dist=Truncated_Power_Law,
     syntheticData=False,
     syntheticExponent=1.0,
     **kwargs,
@@ -620,35 +488,20 @@ def get_window_power_law_exponents(
     We slide this window over the data and plot the power law fit for each window.
     """
     drops_in_windows, windows, centers = get_drops_in_windows(**kwargs)
-    fits = []
+    dists = []
     ps = []
     debug = kwargs.get("debug", False)
     for drops, strainLim in zip(drops_in_windows, windows):
-        if syntheticData:
-            # We generate synthetic data instead of using the real data
-            drops = create_synthetic_data(
-                drops,
-                xmin=xmin,
-                nrSets=1,
-                params={"alpha": syntheticExponent},
-            )[0]
-        # fit the data
-        fit = fit_power_law(drops, xmin)
-        fits.append(fit)
-        p, alpha, mean, std = evaluate_fit(
-            drops,
-            xmin=xmin,
-            parallel=False,
-            verbose=True,
-            debug=debug,
-        )
-        ps.append(p)
+        dist = dist(drops, xmin=xmin)
+        dists.append(dist)
+        dist.evaluate_fit()
+        ps.append(dist.p)
 
         if debug:
             debug_fig, debug_ax = plt.subplots()
             title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
 
-            plot_data_and_fit(fit, debug_ax, xmin, title)
+            plot_data_and_dist(drops, dist, debug_ax, title)
             debug_fig.tight_layout()
             debug_fig.show()
             # Save debug window power law plot
@@ -658,9 +511,7 @@ def get_window_power_law_exponents(
             plt.close(debug_fig)
 
     # plot the exponents against the window centers
-    # fit = (alpha_fit, lambda_fit, y_fit, bin_centers, hist_values)
-
-    exponents = [fit[0] for fit in fits]
+    exponents = [dist.alpha for dist in dists]
 
     return centers, exponents, ps
 
@@ -832,528 +683,151 @@ def make_debug_plot(xmins, strainLim=None):
         # plt.show()
 
 
-def scipy_truncated_powerlaw(xmin, alpha, Lambda, size, rng):
-    from scipy.special import gammainc, gammaincinv
-
-    k = 1.0 - alpha  # only valid when alpha < 1
-    theta = 1.0 / Lambda
-    Fmin = gammainc(k, xmin / theta)
-    u = Fmin + (1.0 - Fmin) * rng.random(size)
-    y = gammaincinv(k, u)
-    x = theta * y
-    return x
-
-
-def _plain_powerlaw(xmin, alpha, size, rng):
+def plot_ks_distance(drops, xmin, dist_name="truncated_power_law"):
     """
-    Sample from f(x) ∝ x^(-alpha), x >= xmin (proper only if alpha > 1).
-    Inverse-CDF: X = xmin * U^(-1/(alpha-1)).
+    Plot the empirical CCDF vs the fitted CCDF and visually show the KS distance (D).
     """
-    if alpha <= 1:
-        raise ValueError("For Lambda=None, a proper power-law requires alpha > 1.")
-    u = rng.random(size)
-    return xmin * u ** (-1.0 / (alpha - 1.0))
+    # Fit the distribution
+    fit = powerlaw.Fit(drops, xmin=xmin)
+    dist = getattr(fit, dist_name)
+    # Get the ECDF and model CCDF
+    data = fit.data
+    sorted_data = np.sort(data[data >= xmin])
+    ecdf = 1.0 - np.arange(1, len(sorted_data) + 1) / len(sorted_data)
+
+    model_ccdf = dist.ccdf(sorted_data)
+
+    # Plotting
+    fig, ax = plt.subplots()
+    ax.step(sorted_data, ecdf, where="post", label="Empirical CCDF", color="blue")
+    ax.plot(sorted_data, model_ccdf, label="Model CCDF", color="gray")
+    D_val = plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf)
+    ax.set_xscale("log")
+    # ax.set_yscale("log")
+    ax.set_xlabel(r"$-\Delta \langle E \rangle$")
+    ax.set_ylabel(r"$P(X > x)$")
+    ax.set_title("Kolmogorov–Smirnov Distance (CCDF)")
+    ax.legend()
+    fig.tight_layout()
+    # Save the plot
+    filename = f"{PLOTPATH}ks_distance_xmin_{xmin:.2e}_{dist_name}{OUTPUTTYPE}"
+    fig.savefig(filename, dpi=300)
+    # plt.show()
 
 
-def truncatedPowerlawGenerator(xmin, alpha, Lambda, size, rng):
-    """
-    f(x) ∝ x^(-alpha) * exp(-Lambda * x), x >= xmin.
-    If Lambda is None: use the *plain* power law f(x) ∝ x^(-alpha), x >= xmin (alpha > 1).
-    """
-    if xmin <= 0:
-        raise ValueError("xmin must be positive.")
-
-    # No truncation: fall back to standard power-law
-    if Lambda is None:
-        return _plain_powerlaw(xmin, alpha, size, rng)
-
-    if Lambda <= 0:
-        raise ValueError("Lambda must be positive when provided.")
-
-    # Heavy tail ⇒ inverse-CDF path is faster/numerically stable for alpha < 1
-    if alpha < 1:
-        return scipy_truncated_powerlaw(xmin, alpha, Lambda, size, rng)
-
-    accepted = []
-    need = size
-
-    # Heuristic initial acceptance-rate estimate
-    r_est = min(0.8, max(0.05, (xmin * Lambda) / (xmin * Lambda + alpha)))
-
-    while need > 0:
-        overshoot = 1.15
-        n_prop = max(32, int(np.ceil(overshoot * need / r_est)))
-
-        # Proposals from exponential tail anchored at xmin
-        prop = xmin + rng.exponential(scale=1.0 / Lambda, size=n_prop)
-
-        # Accept with probability (xmin / x)^alpha (log-space)
-        log_u = np.log(rng.random(n_prop))
-        mask = log_u < alpha * (np.log(xmin) - np.log(prop))
-
-        if mask.any():
-            accepted.extend(prop[mask])
-
-        got = min(len(accepted), size)
-        need = size - got
-
-        # Update acceptance-rate estimate (EMA)
-        inst_rate = mask.mean()
-        if inst_rate > 0:
-            r_est = 0.7 * r_est + 0.3 * float(inst_rate)
-            r_est = min(0.95, max(0.02, r_est))
-
-    if len(accepted) > size:
-        accepted = accepted[:size]
-    return np.asarray(accepted, dtype=float)
-
-
-def create_synthetic_data(
+def explore_xmin(
     drops,
-    xmin=-np.inf,
-    nrSets=2500,
+    min_xmin=None,
+    max_xmin=None,
+    nr_evaluation=10,
+    confidence=0.1,
+    DistType=Truncated_Power_Law,
     debug=False,
+    xmax=None,
 ):
-    """
-    Create synthetic data sets for testing the power law fitting.
+    if min_xmin is None:
+        min_xmin = min(drops)
+    if max_xmin is None:
+        max_xmin = max(drops)
+    # The last xmin usually have too few datapoints to be interesting,
+    # so we remove the few last xmin, but make sure to still have
+    # the correct number of evaluations
+    remove_nr = int(nr_evaluation * 0.2)
+    xmin_values = np.logspace(
+        np.log10(min_xmin), np.log10(max_xmin), nr_evaluation + remove_nr
+    )[:-remove_nr]
 
-    Parameters
-    ----------
-    drops : array-like
-        Original dataset of energy drops.
-    xmin : float
-        Lower cutoff for the power-law tail.
-    nrSets : int
-        Number of synthetic datasets to generate.
-    dist_name : str
-        Which distribution to use (default: truncated_power_law).
-    debug : bool
-        If True, make diagnostic plots.
-
-    Returns
-    -------
-    syntheticSets : ndarray, shape (nrSets, len(drops))
-        Synthetic datasets, each with the same size as `drops`.
-    """
-    # 1. Fit the chosen distribution (default: truncated power law) to the real data.
-    alpha_fit, lambda_fit, y_fit, bin_centers, hist_values = fit_power_law(drops, xmin)
-
-    # 2. Split the data into "tail" (>= xmin, assumed to follow the model)
-    #    and "non-tail" (< xmin, arbitrary background).
-    tailDrops = drops[drops >= xmin]
-    nonTailDrops = drops[drops < xmin]
-
-    # 3. Create a reproducible RNG, seeded deterministically by xmin.
-    rng = np.random.default_rng(int((np.log10(xmin) * 1e6) % (2**32)))
-
-    # 4. Special case: if there are no non-tail values,
-    #    just sample *everything* from the truncated power law.
-    if len(nonTailDrops) == 0:
-        total_samples = nrSets * len(drops)
-        samples = truncatedPowerlawGenerator(
-            xmin=xmin,
-            alpha=alpha_fit,
-            Lambda=lambda_fit,
-            size=total_samples,
-            rng=rng,
-        )
-        return samples.reshape((nrSets, len(drops)))
-
-    # 5. Otherwise, compute the fraction of tail observations in the real data.
-    nrTailObservations = len(tailDrops)
-    nrObservations = len(drops)
-    p_tail = nrTailObservations / nrObservations
-
-    # 6. For each synthetic dataset, randomly decide how many points
-    #    should come from the tail (binomial draw with prob = p_tail).
-    tail_counts = rng.binomial(nrObservations, p_tail, size=nrSets)
-
-    # 8. Generate the non-tail part by bootstrap resampling from the original non-tail data.
-    non_tail = rng.choice(nonTailDrops, size=(nrSets, nrObservations), replace=True)
-
-    # 9. Generate all required tail samples in bulk from the truncated power law.
-    total_tails = tail_counts.sum()
-    all_tails = truncatedPowerlawGenerator(
-        xmin=xmin,
-        alpha=alpha_fit,
-        Lambda=lambda_fit,
-        size=total_tails,
-        rng=rng,
-    )
-
-    # 10. Split the tail samples into slices of the right size for each dataset.
-    offsets = np.concatenate([[0], np.cumsum(tail_counts)])
-
-    # 11. Construct the synthetic datasets:
-    #     start with resampled non-tail values, then overwrite the first k entries
-    #     with tail values for each dataset.
-    syntheticSets = non_tail.copy()
-    for i in range(nrSets):
-        k = tail_counts[i]
-        if k:
-            start = offsets[i]
-            end = offsets[i + 1]
-            syntheticSets[i, :k] = all_tails[start:end]
-
-    if debug:
-        # plot three sample sets
-        debug_fig, debug_axes = plt.subplots(1, 4, figsize=(18, 6))
-        plot_data_and_fit(drops, debug_axes[0], xmin, "Original data")
-        for i, synth_drops in zip(
-            range(1, 4), syntheticSets[[0, len(syntheticSets) // 2, -1]]
-        ):
-            synth_alpha_fit, _, _, _, _ = fit_power_law(synth_drops, xmin)
-
-            title = rf"Synthetic set {i}, $\alpha$: {synth_alpha_fit:.3f}, $E_{{\mathrm{{min}}}}$={xmin:.2e}"
-
-            plot_data_and_fit(synth_drops, debug_axes[i], xmin, title, pdf=True)
-        debug_fig.tight_layout()
-        debug_fig.show()
-        # Save debug window power law plot
-        filename = f"{PLOTPATH}Synthetic_sets_xmin_{xmin:.2e}{OUTPUTTYPE}"
-        debug_fig.savefig(filename)
-        # to save memory, close the figure
-        plt.close(debug_fig)
-
-    return syntheticSets
-
-
-def _compute_D_for_set(args):
-    """
-    Worker for goodnessOfFit parallelization:
-      args = (synthetic_dataset, xmin, dist_name)
-    Returns the KS‐distance D for that dataset.
-    Note that we fit the synthetic data and evaluate
-    it's KS distance with new parameters (alpha and lambda)
-
-    Here is an analogy which helps justify why we should fit
-    with new parameters:
-    Say you and your friend are trying to determine who is better at darts.
-    To answer the question, you agree to place a dot on the dart board
-    and you both try to hit the dot. Fitting a distribution to data is a bit
-    like trying to find out where the dot was, after the darts have been trown.
-    If you first find the center of your throws and assume the dot must have
-    been in the middle of your throws (giving you the best score), and then
-    judge your friend based on the assumption that the dot was where it would be
-    most advantageous to you, there will be a significant bias in your favour.
-
-    We also return the alpha exponent. This can give us a expected std
-    """
-    data, xmin = args
-
-    alpha_fit, lambda_fit, y_fit, bin_centers, hist_values = fit_power_law(data, xmin)
-    D, _ = power_law_ks_distance(data, alpha_fit, xmin, Lambda=lambda_fit)
-    return D, alpha_fit
-
-
-# --- KS p-value computation function ---
-def goodnessOfFit(
-    drops,
-    synthetic_sets,
-    xmin=-np.inf,
-    parallel=False,
-    debug=False,
-):
-    # Fit the original data
-    alpha_fit, lambda_fit, y_fit, bin_centers, hist_values = fit_power_law(drops, xmin)
-    D_orig, _ = power_law_ks_distance(drops, alpha_fit, xmin, Lambda=lambda_fit)
-
-    # print("Computing KS distances for synthetic sets...")
-    if parallel:
-        # build arg‐tuples so each worker knows xmin & dist_name
-        args_list = [(synthetic_data, xmin) for synthetic_data in synthetic_sets]
-        with ProcessPoolExecutor() as executor:
-            # tqdm can wrap the map if you like progress bars
-            D_synth = list(
-                tqdm(
-                    executor.map(_compute_D_for_set, args_list),
-                    total=len(synthetic_sets),
-                )
-            )
-    else:
-        D_synth = []
-        for s in synthetic_sets:
-            D_synth.append(_compute_D_for_set((s, xmin)))
-    D_synth = np.array(D_synth)  # shape (N, 2): column 0=D, column 1=alpha
-    # Split into D values and alpha values
-    D_vals = D_synth[:, 0]
-    alpha_vals = D_synth[:, 1]
-    # p-value: proportion of synthetic distances >= original distance
-    p_value = np.mean(D_vals >= D_orig)
-    mean_alpha = np.mean(alpha_vals)
-    std_alpha = np.std(alpha_vals)
-
-    if debug:
-        fig, ax = plt.subplots()
-
-        bin_centers, hist_values = plot_data_pdf(ax, drops, label="Real data")
-        make_and_plot_truncated_fit_pdf(
-            ax,
-            drops,
-        )
-
-        for i, s_drops in enumerate(synthetic_sets[[0, len(synthetic_sets) // 2, -1]]):
-            alpha_fit, lambda_fit, y_fit, bin_centers, hist_values = fit_power_law(
-                s_drops, xmin
-            )
-
-            # synth_bin_centers, synth_hist_values = getHist(fit_synth)
-            synth_bin_centers, synth_hist_values = plot_data_pdf(
-                ax,
-                s_drops,
-                label=f"Synthetic sample {i}",
-                alphaColor=0.2,
-            )
-            synth_d, _ = power_law_ks_distance(s_drops, alpha_fit, xmin)
-
-            # plot the fit
-
-            make_and_plot_truncated_fit_pdf(
-                ax,
-                s_drops,
-                xmin=xmin,
-                bin_centers=synth_bin_centers,
-                hist_values=synth_hist_values,
-                pre_label=f"Synth fit {i} D:{synth_d:.2f}_",
-                alpha=0.2,
-                linestyle="--",
-            )
-
-        # Add shaded fit region
-        ax.axvspan(xmin, drops.max(), color="gray", alpha=0.2, label="Fit region")
-        ax.legend()
-        ax.figure.show()
-
-    return p_value, mean_alpha, std_alpha
-
-
-def evaluate_fit(
-    drops,
-    xmin,
-    parallel=True,
-    verbose=False,
-    debug=False,
-    nr_sets=2500,
-):
-    """
-    Compute (a) KS p-value using parametric synthetic sets *and* (b) exponent
-    uncertainty. This consolidates work so synthetic sets are generated once
-    and reused for both metrics.
-
-    Returns
-    """
-    import os
-    import json
-    from pathlib import Path
-
-    if verbose:
-        print("nr of drops:", len(drops))
-    if len(drops) < 200:
-        print("Warning: this is not a lot of data, the p-value might not be reliable.")
-
-    nr_sets = nr_sets if not debug else 3
-
-    # paths
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent
-    bootstrap_dir = repo_root / "bootstrapData"
-    os.makedirs(bootstrap_dir, exist_ok=True)
-
-    drop_sum = float(np.sum(drops))
-    p_file = bootstrap_dir / f"p_{drop_sum}_{xmin}_{nr_sets}.json"
-
-    p = None
-    mean_exponent = None
-    exponent_std = None
-
-    # --- (A) KS p-value + parametric exponent uncertainty via synthetic sets ---
-    if p_file.exists() and not debug:
-        with open(p_file, "r") as f:
-            result = json.load(f)
-        p = result["p"]
-        mean_exponent = result.get("mean")
-        exponent_std = result.get("std")
-        exponent = result.get("exp")
-        if verbose:
-            print(f"Loaded p-value + synthetic exponent stats from {p_file}")
-    else:
-        if verbose:
-            print("Generating synthetic data for KS test and parametric uncertainty…")
-
-        exponent, _, _, _, _ = fit_power_law(drops, xmin)
-
-        sets = create_synthetic_data(
-            drops,
-            xmin=xmin,
-            nrSets=nr_sets,
-            debug=debug,
-        )
-
-        p, mean_exponent, exponent_std = goodnessOfFit(
-            drops,
-            sets,
-            xmin,
-            parallel=parallel,
-            debug=debug,
-        )
-
-        with open(p_file, "w") as f:
-            json.dump(
-                {"p": p, "exp": exponent, "mean": mean_exponent, "std": exponent_std}, f
-            )
-
-    return p, exponent, mean_exponent, exponent_std
+    test_dists = []
+    for i, trial_xmin in enumerate(xmin_values):
+        print(f"xmin:{trial_xmin:.2e}: {i + 1}/{len(xmin_values)}")
+        dist = DistType(data=drops, xmin=trial_xmin, xmax=xmax)
+        dist.evaluate_fit(drops, confidence=confidence, parallel=not debug)
+        test_dists.append(dist)
+    return test_dists
 
 
 def find_best_xmin(
     drops,
     debug=False,
-    start_xmin=1e-7,
-    max_xmin=1e-4,
-    nr_sets_start=250,
-    nr_sets_final=2500,
+    min_xmin=None,
+    max_xmin=None,
+    xmax=None,
+    min_p=0.1,
+    nr_evaluation=20,
+    start_accuracy=0.05,
+    max_accuracy=0.01,
+    DistType: Distribution = Truncated_Power_Law,
+    data_info=None,
 ):
     """
-    Heuristically choose the smallest x_min whose truncated power‑law fit
-    passes the KS goodness‑of‑fit at p >= 0.1.
-
-    Strategy
-    --------
-    1) Build a log-spaced grid of candidate x_min values between
-       start_xmin and max_xmin.
-    2) Perform a binary search over that grid to find the *minimum* index
-       where p >= 0.1. To reduce variance, increase the number of synthetic
-       sets (nr_sets) as we move to larger x_min (closer to acceptance).
-    3) If no candidate reaches p >= 0.1, return the x_min with the largest
-       p observed.
-
-    Returns
-    -------
-    best_xmin : float
-        Selected x_min.
-    best_stats : dict
-        Dictionary with 'p', 'alpha', 'mean_alpha', 'std_alpha', 'nr_sets' for the best_xmin.
-    history : list of dict
-        One entry per evaluated candidate in ascending x_min order, each with:
-        {'xmin', 'p', 'alpha', 'mean_alpha', 'std_alpha', 'nr_sets'}.
+    We scan many possible xmin values. We try to identify a plateau region
+    in the exponents. We make sure the p-value is larger than min_p. If the
+    p-value is close to the min_p limit, we need to increaes the accuracy.
     """
-    # Candidates and corresponding synthetic-set budgets
-    xmins = np.logspace(np.log10(start_xmin), np.log10(max_xmin), num=100)
-    # Prepare a per-iteration schedule for the number of synthetic sets.
-    # We use the *maximum* number of iterations a binary search may take,
-    # then increase the budget monotonically along the search path.
-    max_iters = int(np.ceil(np.log2(len(xmins)))) + 1
-    nr_sets_schedule = np.logspace(
-        np.log10(nr_sets_start), np.log10(nr_sets_final), num=max_iters
-    ).astype(int)
+    test_dists = explore_xmin(
+        drops,
+        min_xmin,
+        max_xmin,
+        nr_evaluation,
+        start_accuracy,
+        DistType,
+        debug,
+        xmax=xmax,
+    )
 
-    p_threshold = 0.10
+    # We now have a rough sample on possible xmin values
+    exponents = [d.alpha for d in test_dists]
+    p_values = [d.p for d in test_dists]
+    xmins = [d.xmin for d in test_dists]
 
-    # Cache: idx -> {'p','alpha', 'mean_alpha','std_alpha','nr_sets'}
-    evaluated = {}
-    history = []
+    first_p_criteria = min_p / 2
 
-    def eval_idx(idx, nr_sets_min):
-        """
-        Evaluate candidate 'idx' using at least 'nr_sets_min' synthetic sets.
-        If we've already evaluated this idx with fewer sets, re-evaluate with the larger budget.
-        """
-        xmin = float(xmins[idx])
-        nr_sets = int(nr_sets_min)
+    # Vectorize for robust indexing and easy neighborhood expansion
+    x = np.array(xmins, dtype=float)
+    p = np.array(p_values, dtype=float)
 
-        prev = evaluated.get(idx)
-        if prev is not None and prev["nr_sets"] >= nr_sets:
-            # Already have an evaluation with >= this budget
-            return (
-                prev["p"],
-                prev["alpha"],
-                prev["mean_alpha"],
-                prev["std_alpha"],
-                prev["nr_sets"],
-            )
-
-        p, alpha, mean_alpha, std_alpha = evaluate_fit(
-            drops,
-            xmin,
-            parallel=True,
-            debug=debug,
-            nr_sets=nr_sets,
-        )
-        rec = {
-            "p": float(p),
-            "alpha": float(alpha),
-            "mean_alpha": None if mean_alpha is None else float(mean_alpha),
-            "std_alpha": None if std_alpha is None else float(std_alpha),
-            "nr_sets": int(nr_sets),
-        }
-        evaluated[idx] = rec
-
-        history.append(
-            {
-                "xmin": xmin,
-                **rec,
-            }
-        )
-        if debug:
-            print(
-                f"[find_best_xmin] xmin={xmin:.3e} -> p={rec['p']:.3f}, "
-                f"alpha={rec['alpha']:.3f}, "
-                f"mean_alpha={rec['mean_alpha']}, std_alpha={rec['std_alpha']}, "
-                f"nr_sets={rec['nr_sets']}"
-            )
-        return (
-            rec["p"],
-            rec["alpha"],
-            rec["mean_alpha"],
-            rec["std_alpha"],
-            rec["nr_sets"],
-        )
-
-    # Binary search on indices [lo, hi] with increasing evaluation budgets
-    lo, hi = 0, len(xmins) - 1
-    candidate_idx = None
-    iter_idx = 0  # how many evaluations we've attempted (upper-bounded by max_iters)
-
-    while lo <= hi and iter_idx < max_iters:
-        mid = (lo + hi) // 2
-        nr_sets_now = nr_sets_schedule[min(iter_idx, max_iters - 1)]
-        p_mid, _, _, _, _ = eval_idx(mid, nr_sets_now)
-
-        if p_mid >= p_threshold:
-            candidate_idx = mid
-            hi = mid - 1  # try smaller xmin
-        else:
-            lo = mid + 1  # need larger xmin
-
-        iter_idx += 1
-
-    if candidate_idx is None:
-        # No candidate reached threshold — choose the max-p option evaluated.
-        # Ensure all were evaluated so we can pick the true max p over the grid.
-        for i in range(len(xmins)):
-            eval_idx(i, nr_sets_schedule[-1])
-        # Find the index with the highest p (tie-breaker: smaller xmin)
-        best_i = min(
-            range(len(xmins)),
-            key=lambda i: (-evaluated[i]["p"], xmins[i]),
-        )
+    if not np.isfinite(p).any() or p.max() < first_p_criteria:
+        print("No pure power law found.")
+        best_dist = test_dists[0]
     else:
-        best_i = candidate_idx
+        # Identify contiguous region where p > threshold-start_accuracy
+        valid_idx = np.flatnonzero(p > first_p_criteria - start_accuracy)
+        i_min, i_max = valid_idx[0], valid_idx[-1]
 
-    rec = evaluated[best_i]
-    best_xmin = float(xmins[best_i])
-    best_stats = {
-        "p": rec["p"],
-        "alpha": rec["alpha"],
-        "mean_alpha": rec["mean_alpha"],
-        "std_alpha": rec["std_alpha"],
-        "nr_sets": rec["nr_sets"],
-    }
+        # Expand the search window by one neighbor on each side when available
+        i0 = max(0, i_min - 1)
+        i1 = min(len(x) - 1, i_max + 1)
+        new_min_xmin = x[i0]
+        new_max_xmin = x[i1]
 
-    # Sort history by xmin for readability
-    history.sort(key=lambda d: d["xmin"])
+        # remove dists that we are about to replace
+        test_dists = [
+            d for d in test_dists if d.xmin < new_min_xmin or d.xmin > new_max_xmin
+        ]
 
-    return best_xmin, best_stats, history
+        new_dists = explore_xmin(
+            drops,
+            new_min_xmin,
+            new_max_xmin,
+            nr_evaluation,
+            start_accuracy / 2,
+            DistType,
+            debug,
+            xmax,
+        )
+        idx = int(np.argmax([d.p for d in new_dists]))
+        best_dist = new_dists[idx]
+
+        test_dists.extend(new_dists)
+
+    # Plot p and exponent
+    path_name = make_path_name(data_info)
+    title = make_title(data_info)
+    plot_dists_over_xmin(
+        test_dists, best_dist, PLOTPATH + f"{path_name}_xMins.pdf", title=title
+    )
+
+    return best_dist
 
 
 def make_exponent_map():
@@ -1388,18 +862,16 @@ def make_exponent_map():
         make_debug_plot(xmins, strainLim=strainLim)
 
 
-def plot_history(history, savePath):
+def plot_dists_over_xmin(dists, best_dist=None, savePath=None, title=None):
     """
     Plot KS p-value and exponent (with std error bars) versus xmin.
     """
-    if not history:
-        return
-
-    hist_sorted = sorted(history, key=lambda d: d["xmin"])
-    x = np.array([h["xmin"] for h in hist_sorted], dtype=float)
-    pvals = np.array([h.get("p", np.nan) for h in hist_sorted], dtype=float)
-    alphas = np.array([h.get("alpha", np.nan) for h in hist_sorted], dtype=float)
-    stds = np.array([h.get("std_alpha", np.nan) for h in hist_sorted], dtype=float)
+    dists.sort(key=lambda d: d.xmin)
+    x = np.array([d.xmin for d in dists], dtype=float)
+    pvals = np.array([d.p for d in dists], dtype=float)
+    p_stds = np.array([d.p_std for d in dists], dtype=float)
+    alphas = np.array([d.alpha for d in dists], dtype=float)
+    alpha_stds = np.array([d.alpha_std for d in dists], dtype=float)
 
     # Colors assigned per axis (consistent with Matplotlib defaults)
     c_p = "tab:blue"  # left axis (p-values)
@@ -1409,15 +881,19 @@ def plot_history(history, savePath):
     ax1.set_xscale("log")
 
     # --- Left axis: p-values ---
-    (p_line,) = ax1.plot(
+    p_line = ax1.errorbar(
         x,
         pvals,
+        yerr=p_stds,
         marker="o",
         linestyle="-",
         linewidth=1.8,
         markersize=5,
         label="KS p-value",
         color=c_p,
+        elinewidth=1.0,
+        capsize=3,
+        capthick=1.0,
         zorder=3,
     )
     thr_line = ax1.axhline(
@@ -1434,15 +910,13 @@ def plot_history(history, savePath):
     ax1.tick_params(axis="y", colors=c_p)
     ax1.spines["left"].set_color(c_p)
     ax1.set_ylim(0, 1)
-    ax1.grid(True, which="both", axis="both", alpha=0.25)
 
     # --- Right axis: alpha (+ error bars) ---
     ax2 = ax1.twinx()
-    yerr = None if np.all(np.isnan(stds)) else stds
     alpha_err = ax2.errorbar(
         x,
         alphas,
-        yerr=yerr,
+        yerr=alpha_stds,
         marker="s",
         linestyle="-",
         linewidth=1.8,
@@ -1458,61 +932,51 @@ def plot_history(history, savePath):
     ax2.set_ylabel(r"Exponent $\alpha$", color=c_a)
     ax2.tick_params(axis="y", colors=c_a)
     ax2.spines["right"].set_color(c_a)
-    ax1.legend(handles=[p_line, thr_line, alpha_err], loc="upper left")
-    # ax2.legend()
 
-    fig.tight_layout()
-
-    if savePath:
-        fig.savefig(savePath, bbox_inches="tight")
-    else:
-        fig.show()
-
-
-def make_exponent_fit(csvPath, strainLim=[0.15, 1.0], debug=False):
-    # get name from path
-    name = os.path.basename(os.path.dirname(csvPath))
-    fig, ax = plt.subplots()
-    dropWindows, _, _ = get_drops_in_windows(csvPath, strainLim)
-    # drops = create_synthetic_data(
-    #     drops,
-    #     xmin=xmin,
-    #     nrSets=10,
-    #     params={"alpha": 1},
-    # )
-    for drops in dropWindows:
-        # find best xmin
-        xmin, stats, history = find_best_xmin(drops, debug=debug)
-        p = stats["p"]
-        alpha = stats["alpha"]
-        std = stats["std_alpha"]
-        alpha_fit, lambda_fit, y_fit, bin_centers, hist_values = fit_power_law(
-            drops, xmin
+    if best_dist:
+        best_line = ax1.axvline(
+            best_dist.xmin,
+            color="red",
+            linestyle="--",
+            linewidth=1.2,
+            label=f"Best xmin: {best_dist.xmin:.2e}",
+            zorder=-1,
+            alpha=0.5,
         )
 
-        title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
-        plot_data_and_fit(drops, ax, xmin, title, pdf=True, alpha_std=std, p_val=p)
-        print(f"E_min: {xmin:.2e}")
-        print(f"P value: {p:.2f}")
-        print(f"Exponent: {alpha:.3f} +/- {std:.3f}")
-        # Print p value for surrounding xmins
-        print("History:")
-        for rec in history:
-            print(
-                f"  xmin={rec['xmin']:.2e} -> p={rec['p']:.3f}, "
-                f"alpha={rec['alpha']:.3f}, "
-                f"std_alpha={rec['std_alpha']:.3f}, "
-                f"nr_sets={rec['nr_sets']}"
-            )
-        plot_history(history, savePath=PLOTPATH + f"searchHistory_{name}.pdf")
-        print(f"Saved history plot to {PLOTPATH}searchHistory_{name}.pdf")
+    ax1.legend(handles=[p_line, thr_line, alpha_err, best_line], loc="upper left")
+    fig.tight_layout()
+    ax1.set_title(title)
 
-        # plot_ks_distance(d, xmin)
-    plt.show()
+    if savePath:
+        fig.savefig(savePath, format="pdf", bbox_inches="tight")
+        print(f"Saved figure to {savePath}")
 
-    filename = f"{PLOTPATH}{name}.pdf"
+
+def make_exponent_fit(
+    csvPaths,
+    strainLim=[0.15, 1.0],
+    debug=False,
+    DistType: Distribution = Truncated_Power_Law,
+    xmax=None,
+    show=True,
+):
+    fig, ax = plt.subplots()
+    drops, data_info = get_energy_drops(csvPaths, strainLim=strainLim, debug=debug)
+
+    # find best xmin
+    dist = find_best_xmin(
+        drops, DistType=DistType, debug=debug, xmax=xmax, data_info=data_info
+    )
+    title = make_title(data_info, dist)
+    pathName = make_path_name(data_info)
+    plot_data_and_dist(drops, dist, ax, title=title)
+
+    filename = f"{PLOTPATH}{pathName}.pdf"
     fig.savefig(filename, format="pdf", bbox_inches="tight")
     print(f"Saved figure to {filename}")
+    if show:
+        plt.show()
 
 
 def get_attribute(label):
@@ -1537,6 +1001,7 @@ def plot_powerlaw(
     debug=False,
     show=False,
     evaluate=True,
+    DistType: Distribution = Truncated_Power_Law,
     save=True,
     addFit=True,
 ):
@@ -1558,9 +1023,7 @@ def plot_powerlaw(
             print(f"No valid drops found for {label} in strain range {strainLim}.")
             continue
 
-        # alpha_fit, lambda_fit, y_fit, bin_centers, hist_values = fit_power_law(
-        #     drops, xmin
-        # )
+        dist = DistType(data=all_drops, xmin=xmin)
 
         title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
         attribute = get_attribute(labels[0])
@@ -1571,9 +1034,7 @@ def plot_powerlaw(
             color = "black"
 
         if evaluate:
-            p, exp, mean_exp, exp_std = evaluate_fit(
-                all_drops, xmin, parallel=True, debug=debug
-            )
+            p, mean_exp, exp_std = dist.evaluate_fit(all_drops)
 
             rating = ["bad", "poor", "good", "excellent"]
             scores = [0.05, 0.1, 0.3]
@@ -1583,22 +1044,22 @@ def plot_powerlaw(
             else:
                 r = rating[-1]
             print(f"Number of drops: {len(all_drops)}")
-            print(f"{attribute}: P value: {p:.2f} ({r}), exp: {exp}, std: {exp_std}")
-            ax = plot_data_and_fit(
-                all_drops,
-                ax,
-                xmin,
-                title,
-                pdf=True,
-                p_val=p,
-                alpha_std=exp_std,
-                color=color,
-                addFit=addFit,
+            print(
+                f"{attribute}: P value: {p:.2f} ({r}), exp: {dist.alpha}, std: {exp_std}"
             )
-        else:
-            ax = plot_data_and_fit(
-                all_drops, ax, xmin, title, pdf=True, color=color, addFit=addFit
-            )
+
+        plot_data_and_dist(
+            drops,
+            dist,
+            ax,
+            xmin,
+            title,
+            pdf=True,
+            p_val=p,
+            alpha_std=exp_std,
+            color=color,
+            addFit=addFit,
+        )
 
         # plot_ks_distance(d, xmin)
         if show:
@@ -1626,10 +1087,22 @@ def plot_powerlaw(
 
 
 if __name__ == "__main__":
+    import powerlaw
+
     # csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-    csvPath = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-    csvPath = "/Users/elias/Downloads/macroData.csv"
-    strainLim = [1.0, 3.0]
+    strainLim = [0.65, 1.0]
+    paths = [
+        f"/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s{i}/macroData.csv"
+        for i in range(10)
+    ]
+    # paths = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
+    # strainLim = [1, 3]
     # csvPath = "/Volumes/data/MTS2D_output/simpleShear,s400x400l0.15,1e-05,1.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
 
-    make_exponent_fit(csvPath=csvPath, strainLim=strainLim)
+    make_exponent_fit(
+        csvPaths=paths,
+        strainLim=strainLim,
+        debug=True,
+        DistType=Truncated_Power_Law,
+        # xmax=1e-4,
+    )
