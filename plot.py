@@ -233,10 +233,10 @@ def plotEnergyRegion():
 
 
 if __name__ == "__main__":
-    # run_reconnection_demo()
+    run_reconnection_demo()
     # plotEnergyRegion()
     # plotSampleRuns()
-    plotPropperJob()
+    # plotPropperJob()
     # debugPlotAll()
     # energyField()
     # showPoincareDisk()
