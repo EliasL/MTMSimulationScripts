@@ -1037,7 +1037,7 @@ def get_previous_energy_and_rss(macro_data, current_line, X="load"):
         return np.array(prev_x), np.array(prev_energies), np.array(prev_rss)
 
 
-def make_images(vtu_files, num_processes=10, use_tqdm=True, X="load", **kwargs):
+def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
     print(f"Processing {kwargs['fileName']} video.")
     # Calculate global axis limits and energy range
     macro_data = kwargs["macro_data"]
@@ -1099,6 +1099,12 @@ def make_images(vtu_files, num_processes=10, use_tqdm=True, X="load", **kwargs):
         num_processes = 1  # Limited memory for large systems
 
     if multithread:
+        if num_processes < 0:
+            import multiprocessing
+
+            # Negative means "max + num_processes"
+            num_processes = multiprocessing.cpu_count() + num_processes
+
         with Pool(processes=num_processes) as pool:
             image_paths = list(
                 tqdm(
