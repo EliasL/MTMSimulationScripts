@@ -111,7 +111,7 @@ def energyField():
 def showPoincareDisk():
     from MTMath.plotEnergy import plotPoincareDisk
 
-    plotPoincareDisk()
+    plotPoincareDisk(depth=8)
 
 
 def oneDPlot():

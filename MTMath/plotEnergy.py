@@ -180,7 +180,7 @@ def generate_angle_region(resolution=500, zoom=1):
     return region
 
 
-def C_to_xy(C, eps=1e-12):
+def C_to_xy(C, eps=1e-12, transformation=None):
     """
     Map a symmetric 2x2 matrix C to (x, y) on the Poincaré disk by:
       (i)  normalizing C so det(C)=1 (if det>0),
@@ -191,6 +191,8 @@ def C_to_xy(C, eps=1e-12):
     """
     C = np.asarray(C, dtype=float)
 
+    C = transformC(C, transformation)
+
     a = C[..., 0, 0]
     b = C[..., 0, 1]
     c = C[..., 1, 1]
@@ -199,8 +201,10 @@ def C_to_xy(C, eps=1e-12):
     det = a * c - b * b
     valid = det > eps
 
-    # Scale to det=1: C_hat = S / sqrt(det)
-    scale = np.where(valid, np.sqrt(det), np.nan)
+    # Scale to det=1 without taking sqrt on invalid entries
+    scale = np.empty_like(det, dtype=float)
+    scale[valid] = np.sqrt(det[valid])
+    scale[~valid] = np.nan
     C_hat = C / scale[..., None, None]  # det(C_hat) = 1 where valid
 
     # Projection to (x,y) from the det=1 surface (stereographic-style inverse)
@@ -208,15 +212,15 @@ def C_to_xy(C, eps=1e-12):
     c12 = C_hat[..., 0, 1]
     c22 = C_hat[..., 1, 1]
 
-    t = 2.0 / (2.0 + c11 + c22)
-    x = t * (c11 - c22) * 0.5
-    y = t * c12
+    t = 1.0 / (2.0 + c11 + c22)
+    x = t * (c11 - c22)
+    y = 2 * t * c12
 
     return x, y
 
 
 def C2PoincareDisk(C, transformation=None):
-    return C_to_xy(C)
+    return C_to_xy(C, transformation=transformation)
 
     """Map a metric C to Poincaré disk coordinates (x, y).
 
@@ -817,7 +821,7 @@ def plotPoincareDisk(ax=None, fig=None, save=True, grid_size=200, depth=5):
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 6))
     zoom = 1
-    transformation = None  # "triangular"
+    transformation = "triangular"
 
     drawPoincareGrid(
         ax,
@@ -828,14 +832,14 @@ def plotPoincareDisk(ax=None, fig=None, save=True, grid_size=200, depth=5):
         transformation=transformation,
     )
 
-    drawSquareElasticDomain(
-        ax=ax,
-        grid_size=grid_size,
-        zoom=zoom,
-        c="red",
-        transformation=transformation,
-        linewidth=1,
-    )
+    # drawSquareElasticDomain(
+    #     ax=ax,
+    #     grid_size=grid_size,
+    #     zoom=zoom,
+    #     c="red",
+    #     transformation=transformation,
+    #     linewidth=1,
+    # )
     drawTriangularElasticDomain(
         ax=ax,
         grid_size=grid_size,
@@ -857,14 +861,14 @@ def plotPoincareDisk(ax=None, fig=None, save=True, grid_size=200, depth=5):
         transformation=transformation,
     )
 
-    drawShearPath(
-        ax,
-        grid_size=grid_size,
-        zoom=zoom,
-        linewidth=1.5,
-        c="blue",
-        transformation=transformation,
-    )
+    # drawShearPath(
+    #     ax,
+    #     grid_size=grid_size,
+    #     zoom=zoom,
+    #     linewidth=1.5,
+    #     c="blue",
+    #     transformation=transformation,
+    # )
 
     # Add a thin black circle
     circleSize = (grid_size / 2) * zoom
