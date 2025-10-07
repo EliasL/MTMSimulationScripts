@@ -459,7 +459,12 @@ def showMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
 
 
 def doubleDislocationTest(
-    nrThreads=3, nrSeeds=1, seeds=None, L=10, diagonal=["major", "minor"]
+    nrThreads=3,
+    nrSeeds=1,
+    seeds=None,
+    L=10,
+    diagonal=["major", "minor"],
+    reconnecting=False,
 ):
     if seeds is None:
         seeds = range(nrSeeds)
@@ -478,6 +483,7 @@ def doubleDislocationTest(
         epsR=1e-6,
         scenario=scenario,
         meshDiagonal=diagonal,
+        reconnectingEnabled="true" if reconnecting else "false",
     )
     return configs, labels
 
