@@ -247,11 +247,13 @@ def transformC(C, transformation, inverse=False):
     elif transformation.lower() == "none":
         return C
     elif transformation == "triangular":
-        M_old = np.array([[-1.0, 0.0], [0.5, -np.sqrt(3) / 2]])
         gamma = (4 / 3) ** (1 / 4)
-        M = gamma * M_old  # det(M_unit) == 1
+        # pre_M = gamma*np.array([[-1.0, 0.0], [0.5, -np.sqrt(3) / 2]])
+        pre_M = gamma * np.array([[1.0, 0.5], [0.0, np.sqrt(3) / 2]])
+        pre_M = np.linalg.inv(pre_M)
         # Optional: go the other direction
-        # M_unit = -M_unit
+        # pre_M = -pre_M
+        M = pre_M
     else:
         raise ValueError(f"Unknown transformation: {transformation}")
 

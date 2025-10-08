@@ -4,6 +4,7 @@ from MTMath.plotEnergy import (
     generate_poincare_disk,
     drawTriangularElasticDomain,
     drawShearPath,
+    drawFundamentalDomain,
 )
 import numpy.typing as npt
 
@@ -510,6 +511,7 @@ def test():
 
     drawTriangularElasticDomain(ax, grid_size=N, transformation=transformation)
     drawShearPath(ax, grid_size=N, transformation=transformation)
+    drawFundamentalDomain(ax, grid_size=N, transformation=transformation)
     # Find and plot the global minimum
     imin, jmin = np.unravel_index(np.nanargmax(error), error.shape)
     x_min = x_vals[jmin]
