@@ -180,17 +180,15 @@ def generate_angle_region(resolution=500, zoom=1):
     return region
 
 
-def C_to_xy(C, eps=1e-12, transformation=None):
+def C2PoincareDisk(C, transformation=None, eps=1e-12):
     """
     Map a symmetric 2x2 matrix C to (x, y) on the Poincaré disk by:
       (i)  normalizing C so det(C)=1 (if det>0),
       (ii) projecting the normalized matrix to (x,y).
 
     Supports a single 2x2 or a batch of shape (..., 2, 2).
-    Returns x, y, and the normalized matrix C_hat (det=1 where valid, else NaNs).
+    Returns x, y
     """
-    C = np.asarray(C, dtype=float)
-
     C = transformC(C, transformation)
 
     a = C[..., 0, 0]
@@ -219,84 +217,13 @@ def C_to_xy(C, eps=1e-12, transformation=None):
     return x, y
 
 
-def C2PoincareDisk(C, transformation=None):
-    return C_to_xy(C, transformation=transformation)
-
-    """Map a metric C to Poincaré disk coordinates (x, y).
-
-    By default, the identity metric maps to the center. To center another
-    target metric C0 at the origin, first apply a congruence transform that
-    sends C0 to the identity: choose M = inv(cholesky(C0)) and map
-    C -> M^T C M before computing (x, y).
-
-    Supported values for `transformation`:
-      - "triangular": centers the triangular metric [[1, 1/2], [1/2, 1]].
-      - np.ndarray (2x2 matrix): this matrix M is used directly as a
-        congruence transform C -> M^T C M.
-    """
-
-    C = transformC(C, transformation)
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        if C.ndim == 2:
-            # t = 2.0 / (2.0 + C[0, 0] + C[1, 1])
-            # x = t * (C[0, 0] - C[1, 1]) / 2.0
-            # y = t * C[0, 1]
-            # return x, y
-
-            det = np.linalg.det(C)
-            y_ = np.sqrt(det) / C[1, 1] if det >= 0 else np.nan
-            x_ = C[0, 1] / C[1, 1]
-            x = (x_**2 + y_**2 - 1) / (x_**2 + (y_ + 1) ** 2)
-            y = 2 * x_ / (x_**2 + (y_ + 1) ** 2)
-            if not np.isfinite(y_):
-                x, y = np.nan, np.nan
-
-        else:
-            # t = 2.0 / (2.0 + C[:, 0, 0] + C[:, 1, 1])
-
-            # x = t * (C[:, 0, 0] - C[:, 1, 1]) / 2.0
-            # y = t * C[:, 0, 1]
-            # return x, y
-            dets = np.linalg.det(C)
-            valid = dets >= 0
-            y_ = np.full_like(dets, np.nan)
-            y_[valid] = np.sqrt(dets[valid]) / C[valid, 1, 1]
-            x_ = C[:, 0, 1] / C[:, 1, 1]
-
-            denom = x_**2 + (y_ + 1) ** 2
-            x = (x_**2 + y_**2 - 1) / denom
-            y = 2 * x_ / denom
-
-            # Leave invalid points as NaN so plotting functions can ignore them
-            x[~valid] = np.nan
-            y[~valid] = np.nan
-
-        return x, y
-
-
-def poincareDisk2C(X, Y, transformation=None):
-    if True:
-        r = 1.0 - X**2 - Y**2
-        safe_r = np.where(r == 0, np.nan, r)
-        t = 2.0 / safe_r
-        C11 = t * (1.0 + X) - 1.0
-        C22 = t * (1.0 - X) - 1.0
-        C12 = t * Y
-    else:
-        # Old code. Should be equivalent
-        # Precompute some common terms used in a, b, c12, c22, and c11 calculations
-        denominator = X**2 - 2 * X + Y**2 + 1
-        a = (2 * Y) / denominator
-        b = -(X**2 + Y**2 - 1) / denominator
-
-        # Avoid division by zero or near-zero by masking those values in b
-        safe_b = np.where(b == 0, np.nan, b)
-
-        # Calculate c12, c22, and c11
-        C12 = a / safe_b
-        C22 = 1 / safe_b
-        C11 = (1 + C12**2) / C22
+def poincareDisk2C(X, Y, transformation=None, eps=1e-12):
+    r = 1.0 - X**2 - Y**2
+    safe_r = np.where(np.abs(r) <= eps, np.nan, r)
+    t = 2.0 / safe_r
+    C11 = t * (1.0 + X) - 1.0
+    C22 = t * (1.0 - X) - 1.0
+    C12 = t * Y
 
     C = np.stack(
         [
@@ -306,29 +233,33 @@ def poincareDisk2C(X, Y, transformation=None):
         axis=-2,
     )
 
-    C = transformC(C, transformation)
+    C = transformC(C, transformation, inverse=True)
     return C
 
 
-def transformC(C, transformation):
-    if transformation is not None:
-        if isinstance(transformation, np.ndarray):
-            # Use the provided matrix directly as a congruence transform
-            # (broadcasts over C if C has a leading dimension)
-            C = conTrans(C, transformation)
-        elif transformation == "triangular":
-            M = np.array([[-1.0, 0.0], [0.5, -np.sqrt(3) / 2]])
-            gamma = (4 / 3) ** (1 / 4)
-            M = np.array(
-                [
-                    [gamma, 0],
-                    [gamma / 2, gamma * np.sqrt(3) / 2],
-                ]
-            )
-            C = conTrans(C, M)
-        else:
-            raise ValueError(f"Unknown transformation: {transformation}")
-    return C
+def transformC(C, transformation, inverse=False):
+    if transformation is None:
+        return C
+    elif isinstance(transformation, np.ndarray):
+        # Use the provided matrix directly as a congruence transform
+        # (broadcasts over C if C has a leading dimension)
+        M = transformation
+    elif transformation.lower() == "none":
+        return C
+    elif transformation == "triangular":
+        M_old = np.array([[-1.0, 0.0], [0.5, -np.sqrt(3) / 2]])
+        gamma = (4 / 3) ** (1 / 4)
+        M = gamma * M_old  # det(M_unit) == 1
+        # Optional: go the other direction
+        # M_unit = -M_unit
+    else:
+        raise ValueError(f"Unknown transformation: {transformation}")
+
+    if inverse:
+        Minv = np.linalg.inv(M)
+        return conTrans(C, Minv)
+    else:
+        return conTrans(C, M)
 
 
 def drawC(
@@ -552,28 +483,55 @@ def _m3_const(dtype_str):
     return np.array([[1, -1], [0, 1]], dtype=dt)
 
 
-def _m3_for(C):
+def _m2_const(dtype_str):
+    dt = np.dtype(dtype_str)
+    # Shear matrix [[1, -1], [0, 1]] used in up/right moves
+    return np.array([[0, -1], [1, 0]], dtype=dt)
+
+
+# See SL2(Z)  KEITH CONRAD
+def get_T(C):
     """Return the canonical m3 with the proper dtype for C."""
     return _m3_const(np.asarray(C).dtype.str)
 
 
+def T(C):
+    M = get_T(C)  # shape (2,2), broadcasts over slices of C
+    return conTrans(C, M)
+
+
+def T_inv(C):
+    M = np.linalg.inv(get_T(C))
+    return conTrans(C, M)
+
+
+def get_S(C):
+    """Return the canonical m3 with the proper dtype for C."""
+    return _m2_const(np.asarray(C).dtype.str)
+
+
+def S(C):
+    M = get_S(C)
+    return conTrans(C, M)
+
+
 def up(C):
-    M = _m3_for(C)  # shape (2,2), broadcasts over slices of C
+    M = get_T(C)  # shape (2,2), broadcasts over slices of C
     return conTrans(C, M)
 
 
 def down(C):
-    M = np.linalg.inv(_m3_for(C))
+    M = np.linalg.inv(get_T(C))
     return conTrans(C, M)
 
 
 def right(C):
-    M = _m3_for(C).T
+    M = get_T(C).T
     return conTrans(C, M)
 
 
 def left(C):
-    M = np.linalg.inv(_m3_for(C).T)
+    M = np.linalg.inv(get_T(C).T)
     return conTrans(C, M)
 
 
@@ -610,12 +568,30 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
     # det=1, C12=C21, C12=0
     C = np.array([[t, zero], [zero, 1 / t]]).transpose(2, 0, 1)
 
-    drawC(ax, C, **kwargs)
-    drawC(ax, down(C), **kwargs)
-    drawC(ax, left(C), **kwargs)
-    drawC(ax, left(up(C)), **kwargs)
-    drawC(ax, left(up(left(C))), **kwargs)
-    drawC(ax, left(left(up(left(C)))), **kwargs)
+    def draw(C):
+        drawC(ax, C, **kwargs)
+
+    # See SL2(Z)  KEITH CONRAD page 3
+    # draw(C)  # I
+    # draw(S(C))
+    # draw(S(T_inv(C)))
+    # draw(T(S(T(C))))
+    # draw(T(S(C)))
+    # draw(T(C))
+
+    draw(C)  # I
+    draw(S(C))
+    draw(S(T(C)))
+    draw(S(T(S(C))))
+    draw(T_inv(S(C)))
+    draw(T_inv(C))
+
+    # drawC(ax, C, **kwargs)
+    # drawC(ax, down(C), **kwargs)
+    # drawC(ax, left(C), **kwargs)
+    # drawC(ax, left(up(C)), **kwargs)
+    # drawC(ax, left(up(left(C))), **kwargs)
+    # drawC(ax, left(left(up(left(C)))), **kwargs)
 
     # drawC(ax, C, **kwargs)
     # drawC(ax, right(upInv(C)), **kwargs)
@@ -625,7 +601,7 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
     # drawC(ax, rightInv(up(rightInv(C))), **kwargs)
 
     # Shade the region defined by 0 <= C12 <= min(C11, C22)
-    # Shading does not work with transformations
+    # Shading does not work with transformations yet
     transformation = kwargs.get("transformation", None)
     if shade and transformation is None:
         grid_size = kwargs.get("grid_size", 200)
