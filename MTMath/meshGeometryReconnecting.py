@@ -280,17 +280,54 @@ class DraggableTriangulation:
         return [(0, 1, 2), (0, 2, 3)] if d02 else [(1, 2, 3), (1, 3, 0)]
 
     def element_vectors(self):
-        """For each triangle, return (i,j,k, origin_point, a, b, centroid) with a,b avoiding the diagonal edge."""
+        """For each triangle, return (i, j, k, origin_point, a, b, centroid)
+        where a and b are the two *shortest* edge vectors of the triangle,
+        taken from their common vertex as origin.
+        """
         tris = self.triangles(False)
-        dpair = self.compute_diagonal_indices()
         out = []
         for tri in tris:
-            o, u, v = self.triangle_basis_indices(tri, dpair)
-            po = self.points[o]
-            a = self.points[u] - po
-            b = self.points[v] - po
             i, j, k = tri
-            centroid = (self.points[i] + self.points[j] + self.points[k]) / 3.0
+            pi, pj, pk = self.points[i], self.points[j], self.points[k]
+
+            # Squared lengths of the three edges
+            lij = float(np.sum((pi - pj) * (pi - pj)))
+            ljk = float(np.sum((pj - pk) * (pj - pk)))
+            lki = float(np.sum((pk - pi) * (pk - pi)))
+
+            edges = [
+                (lij, (i, j)),  # edge (i,j)
+                (ljk, (j, k)),  # edge (j,k)
+                (lki, (k, i)),  # edge (k,i)
+            ]
+            # pick two shortest edges
+            edges.sort(key=lambda t: t[0])
+            (_, (u1, v1)), (_, (u2, v2)) = edges[0], edges[1]
+
+            # Determine the shared vertex of the two shortest edges
+            shared = None
+            other_a = None
+            other_b = None
+            if u1 == u2 or u1 == v2:
+                shared = u1
+                other_a = v1
+                other_b = v2 if u1 == u2 else u2
+            elif v1 == u2 or v1 == v2:
+                shared = v1
+                other_a = u1
+                other_b = v2 if v1 == u2 else u2
+            else:
+                # Fallback (should not happen in a valid triangle):
+                # choose u1 as shared and build with its opposite endpoints
+                shared = u1
+                other_a = v1
+                other_b = u2
+
+            po = self.points[shared]
+            a = self.points[other_a] - po
+            b = self.points[other_b] - po
+
+            centroid = (pi + pj + pk) / 3.0
             out.append((i, j, k, po.copy(), a, b, centroid))
         return out
 
@@ -313,17 +350,13 @@ class DraggableTriangulation:
 
     def compute_poincare_points(self):
         """Return an (2,2) array with rows [x, y] for the two current triangles,
-        where (x,y) are the Poincaré disk coordinates mapped from the element Gram matrix G via C2PoincareDisk."""
-        tris = self.triangles(False)
-        dpair = self.compute_diagonal_indices()
+        where (x, y) are the Poincaré disk coordinates mapped from the element
+        Gram matrix G computed from the two shortest edges (see element_vectors).
+        """
         pts = []
-        for tri in tris:
-            o, u, v = self.triangle_basis_indices(tri, dpair)
-            po = self.points[o]
-            a = self.points[u] - po
-            b = self.points[v] - po
+        for i, j, k, origin, a, b, centroid in self.element_vectors():
             G = self.gram_matrix(a, b)
-            x, y = C2PoincareDisk(G)
+            x, y = C2PoincareDisk(G, "triangular")
             zoom = 1
             x = x * zoom * self.grid_size / 2 + self.grid_size / 2
             y = y * zoom * self.grid_size / 2 + self.grid_size / 2
@@ -541,6 +574,9 @@ class DraggableTriangulation:
         for idx, (i, j, k, origin, a, b, centroid) in enumerate(elems):
             G = self.gram_matrix(a, b)
             label = f"{G[0, 0]:4.1f}, {G[0, 1]:4.1f}\n{G[1, 0]:4.1f}, {G[1, 1]:4.1f}"
+            score = min(G[0, 1], min(G[0, 0], G[1, 1]) - G[0, 1])
+
+            label += "\n" + str(score)
             self.G_texts[idx].set_transform(self.ax.transAxes)
             self.G_texts[idx].set_ha("left")
             self.G_texts[idx].set_va("top")
