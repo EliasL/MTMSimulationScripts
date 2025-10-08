@@ -267,7 +267,10 @@ def plotEnergyRegion():
 
 
 if __name__ == "__main__":
-    run_reconnection_demo()
+    # run_reconnection_demo()
+    from MTMath.triangleError import test
+
+    test()
     # plotEnergyRegion()
     # plotSampleRuns()
     # plotLongJob()

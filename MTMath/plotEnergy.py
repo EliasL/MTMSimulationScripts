@@ -314,6 +314,13 @@ def transformC(C, transformation):
             C = conTrans(C, transformation)
         elif transformation == "triangular":
             M = np.array([[-1.0, 0.0], [0.5, -np.sqrt(3) / 2]])
+            gamma = (4 / 3) ** (1 / 4)
+            M = np.array(
+                [
+                    [gamma, 0],
+                    [gamma / 2, gamma * np.sqrt(3) / 2],
+                ]
+            )
             C = conTrans(C, M)
         else:
             raise ValueError(f"Unknown transformation: {transformation}")
