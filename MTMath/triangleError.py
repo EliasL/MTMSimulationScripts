@@ -5,8 +5,12 @@ from MTMath.plotEnergy import (
     drawTriangularElasticDomain,
     drawShearPath,
     drawFundamentalDomain,
+    drawUnitCircle,
+    poincareDisk2C,
 )
 import numpy.typing as npt
+from scipy import optimize as opt
+from pathlib import Path
 
 # -----------------------------------------------------------------------------
 # Waldron (1998), "The Error in Linear Interpolation" — triangle (2D) case.
@@ -449,6 +453,150 @@ def Shewchuk_error_Conditioning(
     return Q
 
 
+# ---------------------------------------------------------------------
+# Singular-value–based metrics (via Gram matrix C = J^T J)
+# For T3, J = [e1 e2], so C = [[e1·e1, e1·e2],[e2·e1, e2·e2]] = J^T J.
+# Singular values of J are sqrt of eigenvalues of C.
+# The element stiffness can be formed directly from C:
+#   K_elem = A * Ĝ^T * C^{-1} * Ĝ,  with A = 0.5*sqrt(det C), |Ω̂|=1/2.
+#
+# We report:
+#   - κ(J) = σ1/σ2
+#   - κ*(K) = ratio of the two positive eigenvalues of K_elem (ignoring the constant mode)
+#   - ρ := κ*(K) / κ(J)^2      (should be ~constant across shape, e.g. ≈ 1/3 for equilateral)
+#
+# Vectorized grid versions are provided as well.
+
+# Reference gradient matrix on the unit right reference triangle
+# N̂1 = 1 - x̂ - ŷ, N̂2 = x̂, N̂3 = ŷ  ->  ∇x̂N̂1=[-1,-1], ∇x̂N̂2=[1,0], ∇x̂N̂3=[0,1]
+G_HAT = np.array([[-1.0, 1.0, 0.0], [-1.0, 0.0, 1.0]], dtype=float)
+
+
+def _inv2x2_grid(Cgrid: npt.NDArray[np.floating]) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Invert a grid of 2x2 matrices with broadcasting.
+    Returns (Cinv, detC). NaNs propagate; singular detC -> NaNs in Cinv.
+    """
+    C = np.asarray(Cgrid, dtype=float)
+    if C.ndim != 4 or C.shape[-2:] != (2, 2):
+        raise ValueError("Cgrid must have shape (Ny, Nx, 2, 2)")
+    a = C[..., 0, 0]
+    b = C[..., 0, 1]
+    c = C[..., 1, 0]
+    d = C[..., 1, 1]
+    det = a * d - b * c
+    with np.errstate(divide="ignore", invalid="ignore"):
+        inv = np.empty_like(C)
+        inv[..., 0, 0] = d / det
+        inv[..., 0, 1] = -b / det
+        inv[..., 1, 0] = -c / det
+        inv[..., 1, 1] = a / det
+        inv = np.where(np.isfinite(det)[..., None, None], inv, np.nan)
+    return inv, det
+
+
+def svd_metrics_from_gram_grid(
+    Cgrid: npt.NDArray[np.floating],
+) -> Dict[str, np.ndarray]:
+    """
+    Grid of singular-value metrics: σ1, σ2, κ(J).
+    Robust to NaNs/degenerate cells: invalid cells → NaN outputs without crashing.
+    """
+    C = np.asarray(Cgrid, dtype=float)
+    if C.ndim != 4 or C.shape[-2:] != (2, 2):
+        raise ValueError("Cgrid must have shape (Ny, Nx, 2, 2)")
+    C11 = C[..., 0, 0]
+    C22 = C[..., 1, 1]
+    C12 = C[..., 0, 1]
+    C21 = C[..., 1, 0]
+    detC = C11 * C22 - C12 * C21
+    mask_bad = (
+        np.isnan(C11) | np.isnan(C22) | np.isnan(C12) | np.isnan(C21) | (detC <= 0)
+    )
+
+    # Build a clean SPD surrogate for bad cells to keep eigvalsh from failing
+    Cclean = C.copy()
+    I2 = np.eye(2, dtype=float)
+    if np.any(mask_bad):
+        Cclean[mask_bad] = I2
+
+    evals = np.linalg.eigvalsh(Cclean)  # shape (..., 2)
+    sigma2 = np.sqrt(evals[..., 0])
+    sigma1 = np.sqrt(evals[..., 1])
+    kappaJ = sigma1 / sigma2
+
+    # Invalidate bad cells and those with nonpositive smallest eigenvalue
+    bad2 = mask_bad | ~(evals[..., 0] > 0)
+    sigma1 = np.where(bad2, np.nan, sigma1)
+    sigma2 = np.where(bad2, np.nan, sigma2)
+    kappaJ = np.where(bad2, np.nan, kappaJ)
+    return dict(sigma1=sigma1, sigma2=sigma2, kappaJ=kappaJ)
+
+
+def kappa_star_K_from_gram_grid(
+    Cgrid: npt.NDArray[np.floating], *, tol: float = 1e-12
+) -> np.ndarray:
+    """
+    Grid of κ*(K) using K_elem = A * G_HAT^T * C^{-1} * G_HAT.
+    Robust to NaNs/degenerate cells: invalid cells → NaN outputs without crashing.
+    """
+    C = np.asarray(Cgrid, dtype=float)
+    if C.ndim != 4 or C.shape[-2:] != (2, 2):
+        raise ValueError("Cgrid must have shape (Ny, Nx, 2, 2)")
+    C11 = C[..., 0, 0]
+    C22 = C[..., 1, 1]
+    C12 = C[..., 0, 1]
+    C21 = C[..., 1, 0]
+    detC = C11 * C22 - C12 * C21
+    mask_badC = (
+        np.isnan(C11) | np.isnan(C22) | np.isnan(C12) | np.isnan(C21) | (detC <= 0)
+    )
+
+    # Inverse and area
+    Cinv, detC_inv = _inv2x2_grid(C)
+    A = 0.5 * np.sqrt(detC)
+
+    # S = G^T Cinv G  (broadcasted)
+    tmp = np.einsum("ia,...ab->...ib", G_HAT.T, Cinv)
+    S = np.einsum("...ib, bj->...ij", tmp, G_HAT)
+    K = A[..., None, None] * S
+
+    # For invalid cells, drop in a harmless SPD to keep eigvalsh stable
+    if np.any(mask_badC):
+        K = K.copy()
+        K[mask_badC] = np.eye(3, dtype=float)
+
+    evals = np.linalg.eigvalsh(K)  # (..., 3), sorted ascending
+    pos_min = evals[..., 1]
+    pos_max = evals[..., 2]
+
+    # Combine bad conditions
+    bad = (
+        mask_badC
+        | (A <= 0)
+        | (pos_max <= tol)
+        | (pos_min <= tol)
+        | ~np.isfinite(pos_max)
+        | ~np.isfinite(pos_min)
+    )
+    kappaK = pos_max / pos_min
+    kappaK = np.where(bad, np.nan, kappaK)
+    return kappaK
+
+
+def ratio_kappaK_over_kappaJ2_grid(Cgrid: npt.NDArray[np.floating]) -> np.ndarray:
+    """
+    Grid of ρ = κ*(K) / κ(J)^2.
+    """
+    sv = svd_metrics_from_gram_grid(Cgrid)
+    kJ2 = sv["kappaJ"] ** 2
+    kK = kappa_star_K_from_gram_grid(Cgrid)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rho = kK / kJ2
+    rho = np.where((kJ2 <= 0) | ~np.isfinite(kJ2) | ~np.isfinite(kK), np.nan, rho)
+    return rho
+
+
 def waldron_operator_seminorm_from_H(H: Optional[np.ndarray]) -> float:
     """
     Compute |D^2 f|(x) operator seminorm.
@@ -473,6 +621,8 @@ def waldron_operator_seminorm_from_H(H: Optional[np.ndarray]) -> float:
 
 # ---------------------------------------------------------------------
 # Option A: Hessian seminorm field generator
+
+
 def Hnorm_field_optionA(X: np.ndarray, Y: np.ndarray, k: float = 8.0) -> np.ndarray:
     """Diagonal Hessian with spatially varying eigenvalues; returns operator seminorm field.
     lam1 = 1 + 0.6*sin(k*X); lam2 = 0.3 + 0.7*cos(k*Y); Hnorm = max(|lam1|, |lam2|).
@@ -480,6 +630,319 @@ def Hnorm_field_optionA(X: np.ndarray, Y: np.ndarray, k: float = 8.0) -> np.ndar
     lam1 = 1.0 + 0.6 * np.sin(k * X)
     lam2 = 0.3 + 0.7 * np.cos(k * Y)
     return np.maximum(np.abs(lam1), np.abs(lam2))
+
+
+# ---------------------------------------------------------------------
+# Axis utilities
+
+
+def _set_axis_ticks_unit(ax, N: int, hide_y: bool = False) -> None:
+    """Set x and y axis ticks to [-1, -0.5, 0, 0.5, 1] mapped onto [0, N].
+    If hide_y is True, keep the y tick *positions* aligned but hide their labels
+    to avoid repetition on adjacent subplots.
+    """
+    positions = np.linspace(0, N, 5)
+    labels = ["-1", "-0.5", "0", "0.5", "1"]
+    ax.set_xticks(positions)
+    ax.set_xticklabels(labels)
+    ax.set_yticks(positions)
+    if hide_y:
+        ax.set_yticklabels([])
+    else:
+        ax.set_yticklabels(labels)
+
+
+def _save_plot(fig, filename_base: str) -> None:
+    """Save figure as PDF under Plots/elementError/ with a space-free name.
+    Prints: "Saved to <path>".
+    """
+    outdir = Path("Plots") / "elementError"
+    outdir.mkdir(parents=True, exist_ok=True)
+    safe = filename_base.replace(" ", "_")
+    outpath = outdir / f"{safe}.pdf"
+    fig.savefig(outpath, format="pdf", bbox_inches="tight")
+    print("Saved to", outpath)
+
+
+# ---------------------------------------------------------------------
+# Plot utilities to reduce duplication
+
+
+def _disk_to_plot(x: float, y: float, N: int) -> Tuple[float, float]:
+    """Map Poincaré disk coords in [-1,1]x[-1,1] to plot coords [0,N]x[0,N]."""
+    return 0.5 * (x + 1.0) * N, 0.5 * (y + 1.0) * N
+
+
+def _decorate_disk_axes(
+    ax,
+    *,
+    N: int,
+    transformation: str,
+    hide_y: bool,
+    title: Optional[str] = None,
+    xlabel: str = r"$x_p$",
+    ylabel: Optional[str] = r"$y_p$",
+) -> None:
+    """Common overlays + ticks + labels used on all disk plots."""
+    drawTriangularElasticDomain(ax, grid_size=N, transformation=transformation)
+    drawShearPath(ax, grid_size=N, transformation=transformation)
+    drawUnitCircle(ax, grid_size=N)
+    if title:
+        ax.set_title(title)
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlabel(xlabel)
+    if ylabel is not None:
+        ax.set_ylabel(ylabel)
+    _set_axis_ticks_unit(ax, N, hide_y=hide_y)
+
+
+def _contourf_with_min(
+    ax,
+    fig,
+    x_vals: np.ndarray,
+    y_vals: np.ndarray,
+    Z: np.ndarray,
+    *,
+    levels: int = 50,
+    cmap: str = "coolwarm",
+    label: Optional[str] = None,
+) -> Tuple[any, any, float]:
+    """Draw contourf with vmin at data minimum and ensure colorbar shows it.
+    Returns (cf, cbar, vmin).
+    """
+    vmin = float(np.nanmin(Z))
+    cf = ax.contourf(x_vals, y_vals, Z, levels=levels, cmap=cmap, vmin=vmin)
+    cf.set_edgecolor("face")
+    cbar = None
+    if label is not None:
+        cbar = fig.colorbar(cf, ax=ax, location="right", shrink=0.9, label=label)
+        try:
+            ticks = cbar.get_ticks()
+            if ticks is None:
+                ticks = np.array([])
+            if (ticks.size == 0) or (abs(float(ticks[0]) - vmin) > 1e-9):
+                cbar.set_ticks(np.concatenate(([vmin], ticks[1:])))
+                cbar.update_ticks()
+        except Exception:
+            pass
+    return cf, cbar, vmin
+
+
+def _plot_point(
+    ax,
+    x: float,
+    y: float,
+    marker: str = "o",
+    ms: float = 5.0,
+    label: Optional[str] = None,
+):
+    h = ax.plot(
+        x,
+        y,
+        marker,
+        markersize=ms,
+        label=label,
+        markerfacecolor="none",
+        markeredgecolor="k",
+    )
+    return h[0]
+
+
+def find_minimum_ratio(
+    method: str = "SLSQP",
+    tol: float = 1e-12,
+    maxiter: int = 200,
+    transformation="none",
+) -> Dict[str, float]:
+    """
+    Constrained minimization of ρ = κ*(K)/κ(J)^2 over the Poincaré disk.
+
+    The optimizer is constrained to the *unit circle*: x^2 + y^2 ≤ 1 and
+    coordinate bounds x ∈ [-1, 1], y ∈ [-1, 1].
+
+    Returns a dict with the optimal (y, x) and the minimized value.
+    Notes:
+      - The internal variable order is (y, x) for consistency with the codebase.
+      - We call poincareDisk2C(x, y), so we swap when evaluating.
+    """
+
+    def objective(ij: np.ndarray) -> float:
+        x, y = ij  # fractional (row, col)
+        # Hard guard: if outside unit disk, give a large penalty.
+        if x * x + y * y > 1.0:
+            return 1e6
+        C = poincareDisk2C(x, y, transformation=transformation)
+        C_grid = np.zeros((1, 1, 2, 2))
+        C_grid[0, 0] = C
+        ratio = ratio_kappaK_over_kappaJ2_grid(C_grid)[0, 0]
+        # Be robust to nans/infs coming from degenerate C
+        if not np.isfinite(ratio):
+            return 1e6
+        return float(ratio)
+
+    # Bounds |x|, |y| <= 1 (remember variable order is (y, x))
+    bounds = [(-1.0, 1.0), (-1.0, 1.0)]
+
+    # Nonlinear inequality constraint: 1 - (x^2 + y^2) >= 0 (i.e., x^2 + y^2 <= 1)
+    # SLSQP supports dict-style constraints.
+    constraints = [
+        {
+            "type": "ineq",
+            "fun": lambda ij: 1.0 - (ij[0] * ij[0] + ij[1] * ij[1]),
+        }
+    ]
+
+    res = opt.minimize(
+        objective,
+        x0=np.array([0.0, 0.0], dtype=float),  # start at the origin (inside the disk)
+        method=method,
+        bounds=bounds,
+        constraints=constraints,
+        tol=tol,
+        options={"maxiter": maxiter},
+    )
+
+    i_opt, j_opt = float(res.x[0]), float(res.x[1])
+    val_opt = float(objective(res.x))
+    print(i_opt, j_opt, val_opt)
+    return dict(i=i_opt, j=j_opt, value=val_opt)
+
+
+def test_Kappa():
+    N = 2000
+    transformation = "none"
+    C = generate_poincare_disk(resolution=N, transformation=transformation)
+
+    # Coordinates for field construction
+    x_vals = np.linspace(0, 1 * N, C.shape[1])
+    y_vals = np.linspace(0, 1 * N, C.shape[0])
+
+    from matplotlib import pyplot as plt
+
+    fig, axs = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
+    N_for_ticks = N
+    # Errors
+    error_J = svd_metrics_from_gram_grid(C)["kappaJ"]
+    error_J = error_J.clip(0, 10)
+    error_K = kappa_star_K_from_gram_grid(C)
+    error_K = error_K.clip(0, 10)
+    error_ratio = ratio_kappaK_over_kappaJ2_grid(C)
+
+    # Compute center indices and values for each field
+    ic, jc = error_J.shape[0] // 2, error_J.shape[1] // 2
+    center_vals = {
+        "kappaJ_center": float(error_J[ic, jc]),
+        "kappaK_center": float(error_K[ic, jc]),
+        "ratio_center": float(error_ratio[ic, jc]),
+    }
+
+    # --- κ(J)
+    cf0, cbar0, _ = _contourf_with_min(
+        axs[0],
+        fig,
+        x_vals,
+        y_vals,
+        error_J,
+        cmap="coolwarm",
+        label=r"$\kappa(J)$",
+    )
+    _decorate_disk_axes(
+        axs[0], N=N, transformation=transformation, hide_y=False, title=r"$\kappa(J)$"
+    )
+    iJmin, jJmin = np.unravel_index(np.nanargmin(error_J), error_J.shape)
+    _plot_point(
+        axs[0],
+        x_vals[jJmin],
+        y_vals[iJmin],
+    )
+
+    # --- κ(K)
+    cf1, cbar1, _ = _contourf_with_min(
+        axs[1],
+        fig,
+        x_vals,
+        y_vals,
+        error_K,
+        cmap="coolwarm",
+        label=r"$\kappa(K)$",
+    )
+    _decorate_disk_axes(
+        axs[1], N=N, transformation=transformation, hide_y=True, title=r"$\kappa(K)$"
+    )
+    iKmin, jKmin = np.unravel_index(np.nanargmin(error_K), error_K.shape)
+    _plot_point(
+        axs[1],
+        x_vals[jKmin],
+        y_vals[iKmin],
+    )
+
+    # --- ratio κ*(K)/κ(J)^2
+    cf2, cbar2, _ = _contourf_with_min(
+        axs[2],
+        fig,
+        x_vals,
+        y_vals,
+        error_ratio,
+        cmap="coolwarm",
+        label=r"$\kappa(K)/\kappa(J)^2$",
+    )
+    _decorate_disk_axes(
+        axs[2],
+        N=N,
+        transformation=transformation,
+        hide_y=True,
+        title=r"$\kappa(K)/\kappa(J)^2$",
+    )
+    # grid minimum
+    # iRmin, jRmin = np.unravel_index(np.nanargmin(error_ratio), error_ratio.shape)
+    # _plot_point(
+    #     axs[2],
+    #     x_vals[jRmin],
+    #     y_vals[iRmin],
+    #     marker="o",
+    #     ms=5.0,
+    #     label=rf"grid min: {error_ratio[iRmin, jRmin]:.4g}",
+    # )
+    # optimized minimum
+    opt_min = find_minimum_ratio(transformation=transformation)
+    x_plot, y_plot = _disk_to_plot(opt_min["i"], opt_min["j"], N)
+    _plot_point(
+        axs[2],
+        x_plot,
+        y_plot,
+    )
+
+    # Values at the minimum of κ(J) evaluated across all fields
+    minJ_vals = {
+        "kappaJ_at_minJ": float(error_J[iJmin, jJmin]),
+        "kappaK_at_minJ": float(error_K[iJmin, jJmin]),
+        "ratio_at_minJ": float(error_ratio[iJmin, jJmin]),
+    }
+
+    # Print summary for each subplot: center and min-κ(J) values
+    print(
+        "— κ(J) plot — center:",
+        center_vals["kappaJ_center"],
+        " | at min κ(J):",
+        minJ_vals["kappaJ_at_minJ"],
+    )
+    print(
+        "— κ(K) plot — center:",
+        center_vals["kappaK_center"],
+        " | at min κ(J):",
+        minJ_vals["kappaK_at_minJ"],
+    )
+    print(
+        "— κ(K)/κ(J)^2 plot — center:",
+        center_vals["ratio_center"],
+        " | at min κ(J):",
+        minJ_vals["ratio_at_minJ"],
+    )
+    if transformation == "none":
+        _save_plot(fig, "square_kappa_fields")
+    else:
+        _save_plot(fig, f"{transformation}_kappa_fields")
+    plt.show()
 
 
 def test():
@@ -492,9 +955,10 @@ def test():
 
     # error = waldron_Linf_bound_from_Cgrid_and_Hnorm(C, Hnorm)
     error = Shewchuk_error_Size_and_shape_f_g(C, Hnorm)
+    # error = ratio_kappaK_over_kappaJ2_grid(C)
     # error = Shewchuk_error_Size_and_shape_grad_f_grad_g(C, Hnorm)
     # error = Shewchuk_error_Conditioning(C, Hnorm)
-
+    error = np.clip(error, 0, 10)
     x_vals = np.linspace(0, 1 * N, C.shape[1])
     y_vals = np.linspace(0, 1 * N, C.shape[0])
 
@@ -502,18 +966,13 @@ def test():
 
     fig, ax = plt.subplots()
 
-    cf = ax.contourf(
-        x_vals,
-        y_vals,
-        error,
-        cmap="coolwarm",
+    cf, cbar, vmin_t = _contourf_with_min(
+        ax, fig, x_vals, y_vals, error, cmap="coolwarm", label=r"$r_{mc}^{-2}$"
     )
+    _decorate_disk_axes(ax, N=N, transformation=transformation, hide_y=False)
 
-    drawTriangularElasticDomain(ax, grid_size=N, transformation=transformation)
-    drawShearPath(ax, grid_size=N, transformation=transformation)
-    drawFundamentalDomain(ax, grid_size=N, transformation=transformation)
     # Find and plot the global minimum
-    imin, jmin = np.unravel_index(np.nanargmax(error), error.shape)
+    imin, jmin = np.unravel_index(np.nanargmin(error), error.shape)
     x_min = x_vals[jmin]
     y_min = y_vals[imin]
     C_min = C[imin, jmin]
@@ -521,27 +980,31 @@ def test():
     print("x_min, y_min:", x_min, y_min)
     print("error_min:", error[imin, jmin])
     print("C at global minimum (Gram matrix):\n", C_min)
-    ax.plot(
-        x_min,
-        y_min,
-        "o",
-        markersize=6,
-        markerfacecolor="none",
-        markeredgecolor="k",
-    )
+    _plot_point(ax, x_min, y_min, marker="o", ms=6.0)
 
-    cbar = fig.colorbar(cf, ax=ax, label=r"$r_{mc}^{-2}$")
+    cbar = fig.colorbar(cf, ax=ax, location="right", label=r"$r_{mc}^{-2}$")
+    try:
+        ticks = cbar.get_ticks()
+        if ticks is None:
+            ticks = np.array([])
+        if (ticks.size == 0) or (abs(float(ticks[0]) - float(vmin_t)) > 1e-9):
+            cbar.set_ticks(np.concatenate(([vmin_t], ticks)))
+            cbar.update_ticks()
+    except Exception:
+        pass
     ax.set_title("Waldron L error factor (unit curvature)")
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel(r"$x_p$")
     ax.set_ylabel(r"$y_p$")
+    _set_axis_ticks_unit(ax, N)
     # ax.legend(loc="upper right")
+    _save_plot(fig, "waldron_unit_curvature")
     plt.show()
 
 
 def test2():
-    # Choose which measure to visualize: 'f_g', 'grad', or 'cond'
-    measure = "f_g"
+    # Choose which measure to visualize: 'f_g', 'grad', 'cond', 'kappaJ', 'kappaK', or 'sv_ratio'
+    measure = "sv_ratio"
     N = 2000
     transformation = "triangular"
 
@@ -569,8 +1032,20 @@ def test2():
         # Conditioning is geometry-only; show same plot twice for completeness
         error_const = Shewchuk_error_Conditioning(C, Hnorm_scalar)
         error_field = error_const.copy()
+    elif measure == "kappaJ":
+        sv = svd_metrics_from_gram_grid(C)
+        error_const = sv["kappaJ"]
+        error_field = error_const.copy()
+    elif measure == "kappaK":
+        error_const = kappa_star_K_from_gram_grid(C)
+        error_field = error_const.copy()
+    elif measure == "sv_ratio":
+        error_const = ratio_kappaK_over_kappaJ2_grid(C)
+        error_field = error_const.copy()
     else:
-        raise ValueError("Unknown measure: choose 'f_g', 'grad', or 'cond'")
+        raise ValueError(
+            "Unknown measure: choose 'f_g', 'grad', 'cond', 'kappaJ', 'kappaK', or 'sv_ratio'"
+        )
 
     from matplotlib import pyplot as plt
 
@@ -590,8 +1065,8 @@ def test2():
     cf0 = axs[0].contourf(
         x_vals, y_vals, error_const, levels=64, vmin=vmin, vmax=vmax, cmap="coolwarm"
     )
-    drawTriangularElasticDomain(axs[0], grid_size=N, transformation=transformation)
-    drawShearPath(axs[0], grid_size=N, transformation=transformation)
+    cf0.set_edgecolor("face")
+    _decorate_disk_axes(axs[0], N=N, transformation=transformation, hide_y=False)
     i0, j0 = np.unravel_index(np.nanargmax(error_const), error_const.shape)
     axs[0].plot(
         x_vals[j0],
@@ -602,16 +1077,13 @@ def test2():
         markeredgecolor="k",
     )
     axs[0].set_title(f"{measure} — constant |D^2f| (unit)")
-    axs[0].set_aspect("equal", adjustable="box")
-    axs[0].set_xlabel(r"$x_p$")
-    axs[0].set_ylabel(r"$y_p$")
 
     # Right: Option A field
     cf1 = axs[1].contourf(
         x_vals, y_vals, error_field, levels=64, vmin=vmin, vmax=vmax, cmap="coolwarm"
     )
-    drawTriangularElasticDomain(axs[1], grid_size=N, transformation=transformation)
-    drawShearPath(axs[1], grid_size=N, transformation=transformation)
+    cf1.set_edgecolor("face")
+    _decorate_disk_axes(axs[1], N=N, transformation=transformation, hide_y=True)
     i1, j1 = np.unravel_index(np.nanargmax(error_field), error_field.shape)
     axs[1].plot(
         x_vals[j1],
@@ -622,12 +1094,38 @@ def test2():
         markeredgecolor="k",
     )
     axs[1].set_title(f"{measure} — Option A |D^2f|(x,y)")
-    axs[1].set_aspect("equal", adjustable="box")
-    axs[1].set_xlabel(r"$x_p$")
 
-    # Single shared colorbar
-    cbar = fig.colorbar(
-        cf1, ax=axs, location="right", shrink=0.9, label="quality measure Q"
+    # Left: set axis ticks and colorbar
+    _set_axis_ticks_unit(axs[0], N, hide_y=False)
+    cbarL = fig.colorbar(
+        cf0, ax=axs[0], location="right", shrink=0.9, label="quality measure Q"
     )
+    try:
+        if vmin is not None and np.isfinite(vmin):
+            ticksL = cbarL.get_ticks()
+            if ticksL is None:
+                ticksL = np.array([])
+            if (ticksL.size == 0) or (abs(float(ticksL[0]) - float(vmin)) > 1e-9):
+                cbarL.set_ticks(np.concatenate(([vmin], ticksL)))
+                cbarL.update_ticks()
+    except Exception:
+        pass
 
+    # Right: set axis ticks and colorbar
+    _set_axis_ticks_unit(axs[1], N, hide_y=True)
+    cbarR = fig.colorbar(
+        cf1, ax=axs[1], location="right", shrink=0.9, label="quality measure Q"
+    )
+    try:
+        if vmin is not None and np.isfinite(vmin):
+            ticksR = cbarR.get_ticks()
+            if ticksR is None:
+                ticksR = np.array([])
+            if (ticksR.size == 0) or (abs(float(ticksR[0]) - float(vmin)) > 1e-9):
+                cbarR.set_ticks(np.concatenate(([vmin], ticksR)))
+                cbarR.update_ticks()
+    except Exception:
+        pass
+
+    _save_plot(fig, f"comparison_{measure}")
     plt.show()

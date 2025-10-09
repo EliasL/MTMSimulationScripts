@@ -219,6 +219,8 @@ def C2PoincareDisk(C, transformation=None, eps=1e-12):
 
 def poincareDisk2C(X, Y, transformation=None, eps=1e-12):
     r = 1.0 - X**2 - Y**2
+    if np.any(r < 0):
+        raise ValueError("Point outside of disk!")
     safe_r = np.where(np.abs(r) <= eps, np.nan, r)
     t = 2.0 / safe_r
     C11 = t * (1.0 + X) - 1.0
@@ -713,6 +715,21 @@ def drawShearPath(ax, **kwargs):
     drawC(ax, C, **kwargs)
 
 
+def drawUnitCircle(ax, grid_size, zoom=1):
+    circle_size = (grid_size / 2) * zoom
+    circle_center_x = grid_size / 2
+    circle_center_y = grid_size / 2
+
+    circle = Circle(
+        (circle_center_x, circle_center_y),
+        circle_size,
+        color="black",
+        fill=False,
+        linewidth=1,
+    )
+    ax.add_patch(circle)
+
+
 def plotEnergyField(
     energy_grid,
     fig=None,
@@ -745,17 +762,7 @@ def plotEnergyField(
     img = ax.imshow(energy_grid, cmap=cmap, origin="lower")
 
     # Add a thin black circle
-    circleSize = (grid_size / 2) * zoom
-    circle_center_x = grid_size / 2
-    circle_center_y = grid_size / 2
-    circle = Circle(
-        (circle_center_x, circle_center_y),
-        circleSize,
-        color="black",
-        fill=False,
-        linewidth=1,
-    )
-    fig.gca().add_patch(circle)
+    drawUnitCircle(ax, grid_size=grid_size, zoom=zoom)
 
     # Draw fundamental domain
     # drawFundamentalDomain(ax, grid_size=grid_size, zoom=zoom)
