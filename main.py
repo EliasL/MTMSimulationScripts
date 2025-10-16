@@ -32,6 +32,7 @@ from Management.jobs import (
     reconnectionJob,
     remeshTest,
     initalInstability,
+    reconnectionTest,
 )
 
 
@@ -100,6 +101,48 @@ def benchmark():
 
     # remesh-locking (24.04.25)
     # 2% RT: 1m 58s  ETR: 52m 34s    Load: 0.173380
+
+
+def reconnectingBenchmark():
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnecting=True)
+    run_locally(configs[0], resume=False)
+    """
+        - Config File: /Users/eliaslundheim/work/PhD/MTS2D/build-release/simpleShear,s50x50l0.15,1e-05,1.0PBCReCONt3LBFGSEpsx1e-06s0.conf
+        - Data Path: /Volumes/data/MTS2D_output/
+        Name: simpleShear,s50x50l0.15,1e-05,1.0PBCReCONt3LBFGSEpsx1e-06s0
+        Rows, Cols: 50, 50
+        Boundary Conditions: PBC
+        Reconnection enabled: True
+        Scenario: simpleShear
+        Number of Threads: 3
+        Seed: 0
+        Quenched disorder standard deviation: 0
+        Initial guess noise: 0.05
+        Mesh diagonal: major
+        Loading Settings:
+        Start Load: 0.15
+        Load Increment: 1e-05
+        Max Load: 1
+        Minimizer: LBFGS
+        LBFGS Settings:
+            Number of Corrections: 3
+            Scale: 1
+            EpsR: 1e-20
+            EpsG: 1e-15
+            EpsF: 0
+            EpsX: 1e-06
+            Max LBFGS Iterations: 0
+        Plasticity event threshold: 0.05
+        Energy drop threshold: 0.0001
+        Show progress: 1
+        Log during minimization: 0
+    Load_step,Load,Avg_energy,Avg_energy_change,Max_energy,Max_force,Avg_RSS,Nr_plastic_deformations,Max_plastic_deformation,Max_positive_plastic_jump,Max_negative_plastic_jump,Nr_LBFGS_iterations,Nr_LBFGS_func_evals,LBFGS_Term_reason,Nr_CG_iterations,Nr_CG_iterations,CG_Term_reason,Nr_FIRE_iterations,Nr_FIRE_func_evals,FIRE_Term_reason,Run_time,Minimization_time,Write_time,Est_time_remaining,maxX,minX,maxY,minY
+    1,0.15,0.0029348038974,0,0.116149747,7.5951451434e-07,-0.027403998156,777,2,2,0,1961,4176,8,0,0,0,0,0,0,1.005s,1.004s,0.000s,0.000s,-inf,inf,-inf,inf
+    2,0.15001,0.002934666803,-1.3709446572e-07,0.11616923863,3.0124384019e-07,-0.027433627681,0,2,2,0,477,1117,1,0,0,0,0,0,0,1.289s,1.266s,0.021s,6h 42m 19s,-inf,inf,-inf,inf
+
+    """
+    # New reconnecting (15.09.25)
+    # 2% RT: 2m 5s   ETR: 1h 9m 50s  Load: 0.174020
 
 
 def parameterExploring():
@@ -278,16 +321,21 @@ def runOnServer():
     queueJobs(server, configs, job_name="bkw")
 
 
+def runReconnectionJob(L=100):
+    configs, labels = reconnectionTest(L=L)
+    run_many_locally(configs, taskNames=labels, resume=True)
+
+
 def runOnLocalMachine():
     configs, labels = propperJob(3, nrSeeds=10, size=200, group_by_seeds=False)
     # configs, labels = allPlasticEventsJob()
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
     # configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
-    configs, labels = reconnectionJob(L=100)
-    configs, labels = doubleDislocationTest(
-        nrThreads=4, nrSeeds=1, L=4, diagonal="minor", reconnecting=True
-    )
+    configs, labels = reconnectionJob(L=300)
+    # configs, labels = doubleDislocationTest(
+    #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
+    # )
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
@@ -309,7 +357,7 @@ def runOnLocalMachine():
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=3)
     # run_locally(configs[0], resume=False)  # , dump=dump)
-    run_many_locally(configs, taskNames=labels, resume=True)
+    # run_many_locally(configs, taskNames=labels, resume=False)
 
 
 def startJobs():
@@ -377,7 +425,8 @@ if __name__ == "__main__":
 
     # runOnServer()
     # parameterExploring()
-    runOnLocalMachine()
+    runReconnectionJob()
+    # runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
@@ -388,4 +437,5 @@ if __name__ == "__main__":
     # plotSizeScaling()
     # plotBigJob()
     # threadTest()
+    # reconnectingBenchmark()
     # benchmark()

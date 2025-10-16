@@ -8,6 +8,7 @@ from Management.jobs import (
     findMinimizationCriteriaJobs,
     compareWithOldStoppingCriteria,
     showMinimizationCriteriaJobs,
+    reconnectionTest,
 )
 
 
@@ -266,12 +267,19 @@ def plotEnergyRegion():
     makePlot(csvFile, show=True, xlim=[2.9, 3.1])
 
 
+def plotReconnectionJob():
+    size = 100
+    configs, labels = reconnectionTest(L=size)
+    plotEnergy(configs, labels=labels, legend=True)
+
+
 if __name__ == "__main__":
     # run_reconnection_demo()
     from MTMath.triangleError import test, test_Kappa
 
     # test()
-    test_Kappa()
+    plotReconnectionJob()
+    # test_Kappa()
     # plotEnergyRegion()
     # plotSampleRuns()
     # plotLongJob()

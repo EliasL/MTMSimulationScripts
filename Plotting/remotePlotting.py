@@ -871,15 +871,17 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
     if len(paths) == 0:
         print("No files found for plotting energy.")
         return
-    base_colors = {"LBFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
-    color = to_rgba(base_colors[configs[0].minimizer], alpha=0.2)
+    if kwargs.get("colors") == "minimizer":
+        base_colors = {"LBFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
+        kwargs["colors"] = to_rgba(base_colors[configs[0].minimizer], alpha=0.2)
+    if kwargs.get("legend") is None:
+        kwargs["legend"] = name
+
     fig, ax = makePlot(
         paths,
         name=f"{name}.pdf",
         labels=labels,
         # legend=True,
-        colors=color,
-        legend=name,
         **kwargs,
     )
     plt.close(fig)

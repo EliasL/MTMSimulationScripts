@@ -212,6 +212,30 @@ class EnergyFunction:
         return P
 
     @classmethod
+    def cauchy_from_F(cls, F, M=None, beta=-1 / 4, K=4, noise=1):
+        """
+        Compute the Cauchy stress tensor σ from the deformation gradient F.
+        Uses σ = (1/J) * P * F^T with J = det(F), where P is the first
+        Piola–Kirchhoff stress from P_from_F.
+        """
+        assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
+        # First Piola–Kirchhoff
+        P = cls.P_from_F(F, M=M, beta=beta, K=K, noise=noise)
+
+        # Jacobian (area change in 2D)
+        J = np.linalg.det(F)
+        if np.any(J <= 0):
+            raise ValueError(
+                "Non-positive J encountered in Cauchy_from_F (det(F) <= 0)."
+            )
+
+        # σ = (1/J) * P * F^T
+        FT = F.swapaxes(-1, -2)
+        sigma_cauchy = np.einsum("...ij,...jk->...ik", P, FT)
+        sigma_cauchy /= J[..., None, None]
+        return sigma_cauchy
+
+    @classmethod
     def forces_from_F(cls, F, dN_dX, beta=-1 / 4, K=4, noise=1):
         """
         Compute the forces from the first Piola-Kirchhoff stress tensor P.

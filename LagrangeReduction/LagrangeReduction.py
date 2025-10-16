@@ -166,6 +166,141 @@ def old_lagrange_reduction(v1, v2):
     return v1, v2, m1, m2, m3
 
 
+# Right-multiply accumulator m by H(n) = [[1, -n], [0, 1]]
+def lag_mH(m, n):
+    if n == 0:
+        return
+    m[:] = m @ np.array([[1, -n], [0, 1]])
+
+
+# Right-multiply accumulator m by V(n) = [[1, 0], [-n, 1]]
+def lag_mV(m, n):
+    if n == 0:
+        return
+    m[:] = m @ np.array([[1, 0], [-n, 1]])
+
+
+def _apply_H_on_metric(C, n):
+    """C' = H(n)^T C H(n), with H(n) = [[1,-n],[0,1]].
+    For C=[[a,b],[b,c]]:
+      b' = b - n a
+      c' = c - 2 n b + n^2 a
+      a' unchanged
+    """
+    if n == 0:
+        return False
+    a, b, c = C[0, 0], C[0, 1], C[1, 1]
+    b_old = b
+    b = b_old - n * a
+    c = c - 2.0 * n * b_old + (n * n) * a
+    C[0, 1] = C[1, 0] = b
+    C[1, 1] = c
+    return True
+
+
+def _apply_V_on_metric(C, n):
+    """C' = V(n)^T C V(n), with V(n) = [[1,0],[-n,1]].
+    For C=[[a,b],[b,c]]:
+      b' = b - n c
+      a' = a - 2 n b + n^2 c
+      c' unchanged
+    """
+    if n == 0:
+        return False
+    a, b, c = C[0, 0], C[0, 1], C[1, 1]
+    b_old = b
+    b = b_old - n * c
+    a = a - 2.0 * n * b_old + (n * n) * c
+    C[0, 0] = a
+    C[0, 1] = C[1, 0] = b
+    return True
+
+
+def lagrange_reduction_shears(v1, v2, max_loops=64, eps=1e-12):
+    """
+    Pure-shear Gauss/Lagrange reduction for a 2x2 metric.
+    Uses only H(n) and V(n) with nearest-integer n; no flip/swap ops.
+
+    Inputs:
+      v1, v2: your vectors (as in your existing generate_matrix)
+    Returns:
+      v1r, v2r, C_R, C_E_R, m, H_count, V_count, moves
+    """
+    F, C_E_R = generate_matrix(v1, v2)  # C_R = [[a,b],[b,c]] (unreduced)
+    m = np.eye(2)
+
+    H_count = 0
+    V_count = 0
+    moves = []  # 1 -> H, 2 -> V (for tracing)
+    for _ in range(max_loops):
+        a, b, c = C_E_R[0, 0], C_E_R[0, 1], C_E_R[1, 1]
+        # convergence check (Lagrange/Gauss reduced region)
+        if abs(2.0 * b) <= min(a, c) + eps:
+            break
+
+        # Choose which shear to apply:
+        # If a <= c, reduce c via H (pick n ~ b/a);
+        # else (a > c) reduce a via V (pick n ~ b/c).
+        if a <= c + eps:
+            # single-shot horizontal shear
+            if a <= eps:  # safety
+                n = 0
+            else:
+                n = int(np.rint(b / a))
+            changed = _apply_H_on_metric(C_E_R, n)
+            if changed:
+                lag_mH(m, n)
+                H_count += abs(n)
+                moves.append(1)
+        else:
+            # single-shot vertical shear
+            if c <= eps:  # safety
+                n = 0
+            else:
+                n = int(np.rint(b / c))
+            changed = _apply_V_on_metric(C_E_R, n)
+            if changed:
+                lag_mV(m, n)
+                V_count += abs(n)
+                moves.append(2)
+
+        # If nearest-integer picks n=0 and we're not reduced yet,
+        # take a unit step in the steepest direction to avoid stalling.
+        if not changed:
+            if a <= c + eps:
+                n = -1 if b > 0 else +1 if b < 0 else 0
+                changed = _apply_H_on_metric(C_E_R, n)
+                if changed:
+                    lag_mH(m, n)
+                    H_count += 1
+                    moves.append(1)
+            else:
+                n = -1 if b > 0 else +1 if b < 0 else 0
+                changed = _apply_V_on_metric(C_E_R, n)
+                if changed:
+                    lag_mV(m, n)
+                    V_count += 1
+                    moves.append(2)
+
+    # Now we have the elastic reduction, but we still want to reduce to the
+    # fundamental domain by ensuring that a <= c and abs(2.0 * b) <= min(a, c) + eps
+    # Since we are already in the elastic domain, we only need to do a single
+
+    C_R = C_E_R.copy()
+
+    if C_R[0, 1] < 0:
+        flip(C_R, 0, 1)
+        lag_m1(m)
+    if C_R[1, 1] < C_R[0, 0]:
+        swap(C_R, 0, 0, 1, 1)
+        lag_m2(m)
+
+    C_R[1, 0] = C_R[0, 1]
+
+    v1r, v2r = C2V(C_R)
+    return v1r, v2r, C_R, C_E_R, m, H_count, V_count, moves
+
+
 def lagrange_reduction(v1, v2):
     F, C_R = generate_matrix(v1, v2)  # Note that C_ is not reduced yet.
 
@@ -206,15 +341,14 @@ def lagrange_reduction(v1, v2):
 
     C_R[1, 0] = C_R[0, 1]
 
-    C_E_R = C_R.copy()
-
-    if m1 % 2 == 1:
-        flip(C_E_R, 0, 1)
-    if m2 % 2 == 1:
-        swap(C_E_R, 0, 0, 1, 1)
-    C_E_R[1, 0] = C_E_R[0, 1]
-
+    v1r, v2r, C_R_, C_E_R, m, H_count, V_count, moves = lagrange_reduction_shears(
+        v1, v2
+    )
     v1, v2 = C2V(C_R)
+    assert np.allclose(C_R, C_R_), f"C_R: {C_R}\nC_R_: {C_R_}"
+    assert np.allclose(v1, v1r), "v1 mismatch"
+    assert np.allclose(v2, v2r), "v2 mismatch"
+
     return v1, v2, C_R, C_E_R, m, m1, m2, m3, ms
 
 

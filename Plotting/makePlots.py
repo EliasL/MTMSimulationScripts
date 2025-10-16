@@ -96,6 +96,8 @@ def plotYOverX(
         mad = np.median(np.abs(y - med)) or 1e-12
         # For normal dist, std ≈ 1.4826 * MAD
         z = np.abs(y - med) / (1.4826 * mad)
+        if np.all(np.isnan(z)):
+            return False
         return np.nanmax(z) > k
 
     if auto_scale == "break" and ax is not None and ax.get_yscale() == "log":
@@ -1171,22 +1173,7 @@ def makePlot(
     # Set the legend with the filtered handles and labels
     if legend and isinstance(legend, bool):
         ax.legend(line_handles, line_labels, loc=legend_loc)
-    elif isinstance(legend, list):
-        custom_legend = [
-            mlines.Line2D(
-                [], [], color="blue", marker="o", linestyle="-", label="Custom Label 1"
-            ),
-            mlines.Line2D(
-                [],
-                [],
-                color="green",
-                marker="o",
-                linestyle="--",
-                label="Custom Label 2",
-            ),
-        ]
-        # Create the legend with custom labels
-        ax.legend(handles=custom_legend, loc=legend_loc)
+
     elif isinstance(legend, str):
         ax.legend(line_handles, [legend], loc=legend_loc)
     if add_images:

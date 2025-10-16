@@ -92,25 +92,27 @@ def framesToGif(frames, outFile, fps):
     imageio.mimsave(outFile, frames, "GIF", duration=1 / fps, loop=0)
 
 
-def combine_videoes(path, n1, n2, n3=None, n4=None):
+def combine_videoes(path, n1, n2, n3=None, n4=None, vertical=False):
     if n3 is None and n4 is None:
         v1 = os.path.join(path, f"{n1}_video.mp4")
         v2 = os.path.join(path, f"{n2}_video.mp4")
-        assert os.path.isfile(v1), f"The file {v1} does not exsist"
-        assert os.path.isfile(v2), f"The fire {v2} does not exsist"
-        # Split the command into a list of arguments to avoid using shell=True
+        assert os.path.isfile(v1), f"The file {v1} does not exist"
+        assert os.path.isfile(v2), f"The file {v2} does not exist"
+
+        stack_type = "vstack" if vertical else "hstack"
+        scale_filter = "scale=-1:1080" if not vertical else "scale=1920:-1"
+
         command = [
             "ffmpeg",
-            "-y",  # Automatically overwrite existing file
+            "-y",
             "-i",
             v1,
             "-i",
             v2,
-            # Filter complex for scaling and cropping to make sure width and height are even
             "-filter_complex",
-            "[0:v]scale=-1:1080,crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v0];"  # Crop if width/height are odd
-            "[1:v]scale=-1:1080,crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v1];"
-            "[v0][v1]hstack=inputs=2",
+            f"[0:v]{scale_filter},crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v0];"
+            f"[1:v]{scale_filter},crop=iw-mod(iw\\,2):ih-mod(ih\\,2)[v1];"
+            f"[v0][v1]{stack_type}=inputs=2",
             os.path.join(path, f"{n1}_and_{n2}.mp4"),
         ]
         subprocess.run(command)
@@ -213,13 +215,13 @@ def makeAnimations(
     for function, fileName in [
         # (plot_and_save_nodes, "nodes"),
         (plot_and_save_mesh, "mesh"),
-        (plot_and_save_mesh_with_force, "mesh_with_forces"),
+        # (plot_and_save_mesh_with_force, "mesh_with_forces"),
         (plot_and_save_in_poincare_disk, "disk"),
-        # (plot_and_save_plot, "e_drop_plot"),
-        # (plot_and_save_plot, "energy_plot"),
+        (plot_and_save_plot, "e_drop_plot"),
+        (plot_and_save_plot, "energy_plot"),
         # (plot_and_save_m_diff_mesh, "m_diff_mesh"),
-        # (plot_and_save_m_mesh, "m_mesh"),
-        # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
+        (plot_and_save_m_mesh, "m_mesh"),
+        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
     ]:
         images = make_images(
             vtu_files,
@@ -255,11 +257,12 @@ def makeAnimations(
             pass
     if combineVideos:
         try:
-            combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
+            # combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
+            combine_videoes(path, "mesh", "energy_plot", vertical=True)
             combine_videoes(path, "m_mesh", "mesh")
             combine_videoes(path, "mesh", "disk")
             combine_videoes(path, "m_mesh", "disk")
-            # combine_videoes(path, "mesh", "erDisk")
+            combine_videoes(path, "mesh", "erDisk")
         except:
             pass
 

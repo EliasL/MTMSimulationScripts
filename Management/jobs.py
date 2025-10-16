@@ -163,7 +163,9 @@ def propperJobFIRE():
     return propperJob(3, nrSeeds=10, size=200, group_by_seeds=False, minimizer=["FIRE"])
 
 
-def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0):
+def basicJob(
+    nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0, reconnecting=False
+):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
         group_by_seeds=group_by_seeds,
@@ -178,10 +180,11 @@ def basicJob(nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0):
         LBFGSEpsx=1e-6,
         # LBFGSEpsg=1e-8,
         scenario="simpleShear",
+        reconnectingEnabled="true" if reconnecting else "false",
         # remesh=1,
         # temp
         # energyDropThreshold=1e-10,
-        # logDuringMinimization=1,
+        logDuringMinimization=1,
     )
     return configs, labels
 
@@ -404,6 +407,29 @@ def compareWithOldStoppingCriteria(nrSeeds=5, seeds=None):
     return configs, labels
 
 
+def reconnectionTest(L=100):
+    configs1, labels1 = doubleDislocationTest(
+        nrThreads=3, nrSeeds=1, L=L, diagonal="minor", reconnecting=False
+    )
+    configs2, labels2 = doubleDislocationTest(
+        nrThreads=3, nrSeeds=1, L=L, diagonal="major", reconnecting=False
+    )
+    configs3, labels3 = doubleDislocationTest(
+        nrThreads=3, nrSeeds=1, L=L, diagonal="minor", reconnecting=True
+    )
+    configs4, labels4 = doubleDislocationTest(
+        nrThreads=3, nrSeeds=1, L=L, diagonal="major", reconnecting=True
+    )
+    configs = configs1 + configs2 + configs3 + configs4
+    labels = [
+        "Minor",
+        "Major",
+        "Minor with reconnecting",
+        "Major with reconnecting",
+    ]
+    return configs, labels
+
+
 def fixedBoundaries(nrThreads, nrSeeds=1, seeds=None, L=40, fixed=True):
     if seeds is None:
         seeds = range(nrSeeds)
@@ -527,7 +553,7 @@ def remeshTest(diagonal="major"):
     return configs, labels
 
 
-def reconnectionJob(L=200):
+def reconnectionJob(L=100):
     configs, labels = ConfigGenerator.generate(
         usingPBC="true",
         rows=L,
@@ -536,7 +562,7 @@ def reconnectionJob(L=200):
         reconnectingEnabled="true",
         epsR=1e-5,
         startLoad=0.15,
-        maxLoad=1.0,
+        maxLoad=2.0,
         nrThreads=8,
         loadIncrement=1e-5,
         minimizer="LBFGS",

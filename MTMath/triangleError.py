@@ -820,7 +820,6 @@ def test_Kappa():
     from matplotlib import pyplot as plt
 
     fig, axs = plt.subplots(1, 3, figsize=(16, 5), constrained_layout=True)
-    N_for_ticks = N
     # Errors
     error_J = svd_metrics_from_gram_grid(C)["kappaJ"]
     error_J = error_J.clip(0, 10)

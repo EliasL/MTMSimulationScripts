@@ -44,20 +44,26 @@ VIRIDIS_LUT = (
 
 
 class LagrangeReductionVisualization(QtWidgets.QWidget):
-    energyComputed = pyqtSignal(np.ndarray)
+    from PyQt5 import QtCore
+
+    energyComputed = pyqtSignal(object)  # carry the ndarray as a plain Python object
 
     def __init__(self):
         # Create two separate executors for quick and high-resolution updates
         self._energy_executor_quick = ThreadPoolExecutor(max_workers=1)
         self._energy_executor_highres = ThreadPoolExecutor(max_workers=1)
-        self._target_version = 0
         super().__init__()
+        self._target_version = 0
+        self._heatmap_update_pending = False
+        self._deferred_timer = QTimer(self)
+        self._deferred_timer.setSingleShot(True)
+        self._deferred_timer.timeout.connect(self._doDeferredUpdates)
 
         # Colors and line size
         self.background_line_color = np.array([100, 100, 100])
         self.handleColor = "#008B8B"
         self.reducedColor = "#FF6347"
-        self.elasticReducedColor = "orange"
+        self.elasticReducedColor = "#0073FF"
         self.lineSize = 2
         self.markerSize = 15
         self.vectorWidth = 8
@@ -110,8 +116,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.w_LR.keyReleaseEvent = self.keyReleaseEvent
         self.timer.timeout.connect(self.moveVector)
         self.timer.start(40)  # Every 20 milliseconds
-        self.energyComputed.connect(self.updateEnergyHeatmap)
-
+        self.energyComputed.connect(self.updateEnergyHeatmap, Qt.QueuedConnection)
         # Connect the signal once after setting up the plot
         self.GV_plot.getViewBox().sigRangeChanged.connect(self.onViewRangeChanged)
 
@@ -724,11 +729,72 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
     @staticmethod
     def loadImage(fileName):
         img = QImage(fileName)
-        img = img.convertToFormat(QImage.Format_RGBA64)
+        # Use 8-bit format, not RGBA64
+        if img.format() != QImage.Format_RGBA8888:
+            img = img.convertToFormat(QImage.Format_RGBA8888)
+
+        # Get uint8 array (H, W, 4)
         imgArray = pg.imageToArray(img, copy=True)
+        if imgArray.dtype != np.uint8:
+            imgArray = imgArray.astype(np.uint8, copy=False)
+
         imageItem = pg.ImageItem(imgArray)
-        imageItem.setAutoDownsample(False)
+        imageItem.setAutoDownsample(True)  # helps stability/perf while panning/zooming
+
         return imageItem
+
+    def _snapshot_energy_inputs(self, resolution):
+        # Called on the GUI thread only
+        lastUsed = self.GV_VP.lastDragged
+        last_used_is_e1 = lastUsed is self.GV_VP.e1
+        dragged_pos = np.array(lastUsed.head.pos())
+        not_dragged_pos = (
+            np.array(self.GV_VP.e2.head.pos())
+            if last_used_is_e1
+            else np.array(self.GV_VP.e1.head.pos())
+        )
+        x_range, y_range = self.GV_plot.viewRange()
+
+        # Precompute grid sizes to avoid any decisions in worker
+        xResolution = int(resolution)
+        yResolution = int(
+            xResolution * (y_range[1] - y_range[0]) / (x_range[1] - x_range[0])
+        )
+
+        return {
+            "last_used_is_e1": last_used_is_e1,
+            "dragged_pos": dragged_pos,
+            "fixed_pos": not_dragged_pos,
+            "x_range": tuple(x_range),
+            "y_range": tuple(y_range),
+            "xResolution": xResolution,
+            "yResolution": yResolution,
+        }
+
+    @staticmethod
+    def _build_F_grid_from_snapshot(snap):
+        x0, x1 = snap["x_range"]
+        y0, y1 = snap["y_range"]
+        xR = snap["xResolution"]
+        yR = snap["yResolution"]
+
+        # avoid 0 boundary as you did
+        eps = 1 - 0.00001
+        x_vals, y_vals = np.meshgrid(
+            np.linspace(x0 * eps, x1, xR), np.linspace(y0 * eps, y1, yR)
+        )
+        grid_positions = np.stack([x_vals, y_vals], axis=-1)
+
+        F_grid = np.zeros((*grid_positions.shape[:-1], 2, 2))
+        if snap["last_used_is_e1"]:
+            # First column varies with grid, second fixed
+            F_grid[..., :, 0] = grid_positions
+            F_grid[..., :, 1] = snap["fixed_pos"]
+        else:
+            F_grid[..., :, 0] = snap["fixed_pos"]
+            F_grid[..., :, 1] = grid_positions
+
+        return F_grid
 
     @staticmethod
     def getPlotRange(plot):
@@ -793,48 +859,60 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     def updateFEnergyBackground(self):
         self._target_version += 1
-        # Quick update
+        if not self._heatmap_update_pending:
+            self._heatmap_update_pending = True
+            # run after the current paint cycle
+            self._deferred_timer.start(0)
+
+    def _doDeferredUpdates(self):
+        self._heatmap_update_pending = False
+        # Quick + highres after paint returns
         self._scheduleEnergyUpdate(resolution=100, is_highres=False)
-        # High-resolution update
         self._scheduleEnergyUpdate(resolution=700, is_highres=True)
 
     def _scheduleEnergyUpdate(self, resolution, is_highres):
         executor = (
             self._energy_executor_highres if is_highres else self._energy_executor_quick
         )
+        snap = self._snapshot_energy_inputs(resolution)
+
+        # capture all scalars used in the worker
+        scalars = dict(
+            beta=self.currentBeta,
+            K=(4 if self.volumetricEnergy else 0),
+            energy_lim=tuple(self.energy_lim),
+        )
+        version = self._target_version
         executor.submit(
-            self._processEnergyUpdate, resolution, self._target_version, is_highres
+            self._processEnergyUpdate_worker, snap, scalars, version, is_highres
         )
 
-    def _processEnergyUpdate(self, resolution, version, is_highres):
+    def _processEnergyUpdate_worker(self, snap, scalars, version, is_highres):
         if version < self._target_version:
             return
         if is_highres:
-            # We wait a bit to see if the user has perhaps already changed the view
+            from time import sleep
+
             sleep(0.01)
             if version < self._target_version:
                 return
 
-        F_grid = self.getFGrid(resolution)
-        # We only need high accuracy if the zoom level is high
-        x_range, _ = self.GV_plot.viewRange()
-        r = np.diff(x_range)[0]
-        r = min(r, 0.03)
+        F_grid = self._build_F_grid_from_snapshot(snap)
+        r = min(snap["x_range"][1] - snap["x_range"][0], 0.03)
+
         with np.errstate(over="ignore", invalid="ignore"):
             energy_grid = self.energyFunc.energy_from_F(
                 F_grid,
-                self.currentBeta,
-                K=4 if self.volumetricEnergy else 0,
+                scalars["beta"],
+                K=scalars["K"],
                 zeroReference=True,
                 accuracy=1 - r,
             )
-        energy_grid = np.clip(energy_grid, *self.energy_lim).transpose()
 
-        # Check if this result is outdated (for highres only)
+        energy_grid = np.clip(energy_grid, *scalars["energy_lim"]).transpose()
         if version < self._target_version:
-            return  # discard outdated results
-
-        self.energyComputed.emit(energy_grid)
+            return
+        self.energyComputed.emit(energy_grid)  # object payload (queued)
 
     def updateEnergyHeatmap(self, energy_grid):
         image_attr = "PCS_Energy"
@@ -1071,6 +1149,9 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         line = self.PCS_plot.plot(
             x, y, pen=pg.mkPen(color=color, width=width, dash=dashPattern)
         )
+        line.setClipToView(True)
+        line.setDownsampling(auto=True)  # automatic LTTB-like downsampling
+        line.setSkipFiniteCheck(True)
         line.setZValue(zValue)
         if showArrows and len(x) > 1 and len(y) > 1:
             # Calculate angle for the arrow at the end of the line

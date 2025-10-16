@@ -107,7 +107,7 @@ def base_plot(
     avgRSS=None,
     delAvgEnergy=None,
     delAvgRSS=None,
-    delLoad=None,
+    delx=None,
     macroData=None,
     macroDataRowIndex=None,
     equalAspect=True,
@@ -119,7 +119,7 @@ def base_plot(
     width = 1920 * quality
     height = 1080 * quality
     if not remove_ticks:
-        height = 500
+        height = 512
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
     if equalAspect:
         ax.set_aspect("equal")
@@ -153,7 +153,7 @@ def base_plot(
 
         if delta_title:
             data_row = [
-                rf"$\Delta\gamma$: {delLoad:.1e}",
+                rf"$\Delta\gamma$: {delx:.1e}",
                 rf"$\Delta\langle E \rangle$: {delAvgEnergy:.2e}",
                 rf"$\Delta\langle \sigma \rangle$: {delAvgRSS:.2e}",
             ]
@@ -241,11 +241,11 @@ def round_to_nearest_16(x):
 def save_and_close_plot(ax, path, transparent=False):
     # Save the figure using matplotlib
     fig = ax.get_figure()
+    # Not fixing this can cause jitter
+    ax.xaxis.set_label_coords(0.5, -0.08)  # centered, fixed offset below axes
     fig.tight_layout()
     fig.savefig(
         path,
-        bbox_inches="tight",
-        pad_inches=0,
         transparent=transparent,
     )
     plt.close(fig)
@@ -715,15 +715,8 @@ def remove_vlines(ax):
 def plot_plot(
     vtu_file,
     ax=None,
-    fig=None,
     fileName=None,
-    macro_data=None,
-    macroDataRowIndex=None,
-    avgEnergy=None,
-    avgRSS=None,
     delAvgEnergy=None,
-    delAvgRSS=None,
-    delLoad=None,
     **kwargs,
 ):
     remove_vlines(ax)
@@ -981,11 +974,14 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
                 # This can happen in the beginning in simulations
                 pass
 
-            if (
-                matching_row["avg_energy_change"] < 0
-                and -matching_row["avg_energy_change"] < 5e-8
-            ):
-                print(f"Super small energy drop: {matching_row_index}, {X}={x}")
+            # We were a bit curious about very small energy drops, but now we
+            # understand them better. They occur in the beginning of the simulation
+            # due to the sample preparation method used.
+            # if (
+            #     matching_row["avg_energy_change"] < 0
+            #     and -matching_row["avg_energy_change"] < 5e-8
+            # ):
+            #     print(f"Super small energy drop: {matching_row_index}, {X}={x}")
         else:
             if matching_row_index == 0:
                 diff = 0
