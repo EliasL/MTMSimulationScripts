@@ -576,7 +576,7 @@ class DraggableTriangulation:
             label = f"{G[0, 0]:4.1f}, {G[0, 1]:4.1f}\n{G[1, 0]:4.1f}, {G[1, 1]:4.1f}"
             score = min(G[0, 1], min(G[0, 0], G[1, 1]) - G[0, 1])
 
-            label += "\n" + str(score)
+            # label += "\n" + str(score)
             self.G_texts[idx].set_transform(self.ax.transAxes)
             self.G_texts[idx].set_ha("left")
             self.G_texts[idx].set_va("top")

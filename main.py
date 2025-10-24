@@ -104,7 +104,7 @@ def benchmark():
 
 
 def reconnectingBenchmark():
-    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnecting=True)
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection=True)
     run_locally(configs[0], resume=False)
     """
         - Config File: /Users/eliaslundheim/work/PhD/MTS2D/build-release/simpleShear,s50x50l0.15,1e-05,1.0PBCReCONt3LBFGSEpsx1e-06s0.conf
@@ -321,7 +321,7 @@ def runOnServer():
     queueJobs(server, configs, job_name="bkw")
 
 
-def runReconnectionJob(L=100):
+def runReconnectionJob(L=30):
     configs, labels = reconnectionTest(L=L)
     run_many_locally(configs, taskNames=labels, resume=True)
 

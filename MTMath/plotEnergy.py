@@ -118,15 +118,24 @@ def generate_poincare_disk(
     return C
 
 
-def generate_energy_grid(
+def generate_energy_grid(beta=-0.25, K=4, energy_lim=[None, 0.37], **kwargs):
+    return generate_grid(
+        ContiEnergy.energy_from_C_in_place, beta=beta, K=K, lim=energy_lim, **kwargs
+    )
+
+
+def generate_stress_grid(beta=-0.25, K=4, **kwargs):
+    return generate_grid(ContiEnergy.cauchy_from_C, beta=beta, K=K, **kwargs)
+
+
+def generate_grid(
+    function,
     resolution=500,
     zoom=1,
-    beta=-0.25,
-    K=4,
-    energy_lim=[None, 0.37],
+    lim=[None, 0.37],
     return_XY=False,
     poincareDisk=True,
-    zeroReference=True,
+    **kwargs,
 ):
     x_min, x_max = 0, 1
     y_min, y_max = -0.5, 0.5
@@ -149,24 +158,24 @@ def generate_energy_grid(
             axis=-2,
         )
 
-    energy_grid = ContiEnergy.energy_from_C_in_place(C, beta, K, 1, zeroReference)
+    grid = function(C, **kwargs)
 
-    if energy_lim is None:
-        energy_lim = (np.nanmin(energy_grid), np.nanmax(energy_grid))
-    elif energy_lim[0] is None:
-        energy_lim[0] = np.nanmin(energy_grid)
-    elif energy_lim[1] is None:
-        energy_lim[1] = np.nanmax(energy_grid)
+    if lim is None:
+        lim = (np.nanmin(grid), np.nanmax(grid))
+    elif lim[0] is None:
+        lim[0] = np.nanmin(grid)
+    elif lim[1] is None:
+        lim[1] = np.nanmax(grid)
 
-    energy_grid = np.clip(energy_grid, *energy_lim)
+    grid = np.clip(grid, *lim)
     if return_XY:
         # We don't need to have nan in X and Y, only in the energy grid
         X, Y = np.meshgrid(
             np.linspace(x_min, x_max, resolution), np.linspace(y_min, y_max, resolution)
         )
-        return energy_grid, X, Y
+        return grid, X, Y
     else:
-        return energy_grid
+        return grid
 
 
 def generate_angle_region(resolution=500, zoom=1):
@@ -607,7 +616,7 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
     # Shade the region defined by 0 <= C12 <= min(C11, C22)
     # Shading does not work with transformations yet
     transformation = kwargs.get("transformation", None)
-    if shade and transformation is None:
+    if True:  # shade and transformation is None:
         grid_size = kwargs.get("grid_size", 200)
         zoom_val = kwargs.get("zoom", 1)
 
@@ -615,16 +624,25 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
         C, r_mask = generate_poincare_disk(
             grid_size, zoom_val, returnMask=True, transformation=transformation
         )
+        r_mask = np.zeros_like(r_mask, dtype=bool)
+        for i in range(3):
+            G = C
+            if i == 1:
+                G = T_inv(S(G))
 
-        C11 = C[..., 0, 0]
-        C12 = C[..., 0, 1]
-        C22 = C[..., 1, 1]
+            elif i == 2:
+                G = T(G)
 
-        # Region: 0 <= C12 <= min(C11, C22)
-        region_mask = np.logical_and(0 <= C12, C12 <= np.minimum(C11, C22))
+            G11 = G[..., 0, 0]
+            G12 = G[..., 0, 1]
+            G22 = G[..., 1, 1]
+
+            # Region: 0 <= C12 <= min(C11, C22)
+            r_mask = np.logical_or(r_mask, abs(2 * G12) <= np.minimum(G11, G22))
+
         drawRegion(
             ax,
-            region=region_mask.astype(float),
+            region=r_mask.astype(float),
             grid_size=grid_size,
             zoom=zoom_val,
             alpha=0.3,

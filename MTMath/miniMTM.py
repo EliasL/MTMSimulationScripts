@@ -108,7 +108,7 @@ def calculateForcesAndEnergy(F_values, dN_dX):
     n_shear = F_values.shape[0]
     # Shape: (strainSteps, elements, nodes, 2)
     # dN_dX = np.tile(dN_dX, (n_shear, 1, 1, 1))
-    force = ContiEnergy.forces_from_F(F_values, dN_dX)
+    force = ContiEnergy.lagrangian_forces_from_F(F_values, dN_dX)
     return energies, force
 
 

@@ -164,7 +164,7 @@ def propperJobFIRE():
 
 
 def basicJob(
-    nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0, reconnecting=False
+    nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0, reconnection="none"
 ):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -180,7 +180,7 @@ def basicJob(
         LBFGSEpsx=1e-6,
         # LBFGSEpsg=1e-8,
         scenario="simpleShear",
-        reconnectingEnabled="true" if reconnecting else "false",
+        reconnectionMethod=reconnection,
         # remesh=1,
         # temp
         # energyDropThreshold=1e-10,
@@ -409,23 +409,31 @@ def compareWithOldStoppingCriteria(nrSeeds=5, seeds=None):
 
 def reconnectionTest(L=100):
     configs1, labels1 = doubleDislocationTest(
-        nrThreads=3, nrSeeds=1, L=L, diagonal="minor", reconnecting=False
+        nrThreads=3, nrSeeds=1, L=L, diagonal="minor", reconnecton="none"
     )
     configs2, labels2 = doubleDislocationTest(
-        nrThreads=3, nrSeeds=1, L=L, diagonal="major", reconnecting=False
+        nrThreads=3, nrSeeds=1, L=L, diagonal="major", reconnecton="none"
     )
     configs3, labels3 = doubleDislocationTest(
-        nrThreads=3, nrSeeds=1, L=L, diagonal="minor", reconnecting=True
+        nrThreads=3, nrSeeds=1, L=L, diagonal="major", reconnecton="edgeFlip"
     )
     configs4, labels4 = doubleDislocationTest(
-        nrThreads=3, nrSeeds=1, L=L, diagonal="major", reconnecting=True
+        nrThreads=3, nrSeeds=1, L=L, diagonal="minor", reconnecton="edgeFlip"
     )
-    configs = configs1 + configs2 + configs3 + configs4
+    configs5, labels5 = doubleDislocationTest(
+        nrThreads=3, nrSeeds=1, L=L, diagonal="major", reconnecton="delaunay"
+    )
+    configs6, labels6 = doubleDislocationTest(
+        nrThreads=3, nrSeeds=1, L=L, diagonal="minor", reconnecton="delaunay"
+    )
+    configs = configs1 + configs2 + configs3 + configs4 + configs5 + configs6
     labels = [
         "Minor",
         "Major",
-        "Minor with reconnecting",
-        "Major with reconnecting",
+        "Minor with edge flip",
+        "Major with edge flip",
+        "Major with Delaunay",
+        "Minor with Delaunay",
     ]
     return configs, labels
 
@@ -490,11 +498,12 @@ def doubleDislocationTest(
     seeds=None,
     L=10,
     diagonal=["major", "minor"],
-    reconnecting=False,
+    reconnecton="none",
 ):
     if seeds is None:
         seeds = range(nrSeeds)
     scenario = "doubleDislocationTest"
+    # scenario = "simpleShear"
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",
         seed=seeds,
@@ -509,7 +518,8 @@ def doubleDislocationTest(
         epsR=1e-6,
         scenario=scenario,
         meshDiagonal=diagonal,
-        reconnectingEnabled="true" if reconnecting else "false",
+        reconnectionMethod=reconnecton,
+        logDuringMinimization=1,
     )
     return configs, labels
 
@@ -559,7 +569,7 @@ def reconnectionJob(L=100):
         rows=L,
         cols=L,
         meshDiagonal="major",
-        reconnectingEnabled="true",
+        reconnectionMethod="edgeFlip",
         epsR=1e-5,
         startLoad=0.15,
         maxLoad=2.0,

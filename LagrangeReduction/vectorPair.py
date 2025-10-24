@@ -1,4 +1,5 @@
 from .vector import Vector
+import numpy as np
 
 
 class VectorPair:
@@ -114,7 +115,42 @@ class VectorPair:
             else:
                 vec.lastY = pos[1]
 
-    def applyTransformation(self, transformation, roundToInt=False):
-        # transformation is a 2x2 matrix
-        self.e1.applyTransformation(transformation, roundToInt)
-        self.e2.applyTransformation(transformation, roundToInt)
+    def _get_basis_matrix(self):
+        """Return B = [v1 v2] as a 2x2 numpy array (columns)."""
+        p1 = self.e1.head.pos()
+        p2 = self.e2.head.pos()
+        return np.column_stack(([p1.x(), p1.y()], [p2.x(), p2.y()]))
+
+    def _set_basis_matrix(self, B, snap_for_drawing=False):
+        """Write columns of B back to e1/e2 (and update the square)."""
+        if snap_for_drawing:
+            Bd = np.round(B)
+        else:
+            Bd = B
+
+        # columns → endpoints
+        self.e1.head.setPos(Bd[0, 0], Bd[1, 0])
+        self.e2.head.setPos(Bd[0, 1], Bd[1, 1])
+
+        # keep the “square/parallelogram” overlay in sync
+        self.setPosForSquare(self.e1.head.pos(), self.e2.head.pos())
+        self.view.update()
+
+    def applyBasisTransformation(self, S, roundToInt=False):
+        """
+        Apply a *basis* transformation (column operation):
+            [v1 v2] ← [v1 v2] @ S
+        Mirrors Lagrange/Gauss reduction steps (C ← Sᵀ C S).
+        """
+        B = self._get_basis_matrix()
+        B_new = B @ np.asarray(S, dtype=float)
+        self._set_basis_matrix(B_new, snap_for_drawing=roundToInt)
+
+    def applyPointTransformation(self, S, roundToInt=False):
+        """
+        Apply a *point-space* transformation (left multiplication):
+            p ← S @ p
+        Applies to coordinates directly rather than to the basis.
+        """
+        self.e1.applyTransformation(S, roundToInt)
+        self.e2.applyTransformation(S, roundToInt)

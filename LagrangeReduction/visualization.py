@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 from .LagrangeReduction import (
     C2PoincareDisk,
+    F2C,
     CPos,
     CToAngle,
     conTrans,
@@ -22,7 +23,11 @@ from .LagrangeReduction import (
     manhattanDistance,
 )
 from .vectorPair import VectorPair
-from MTMath.plotEnergy import generate_energy_grid, generate_angle_region
+from MTMath.plotEnergy import (
+    generate_energy_grid,
+    generate_angle_region,
+    generate_stress_grid,
+)
 from MTMath.contiPotential import ZeroEnergy, ContiEnergy, SuperSimple
 
 # Suppress scientific notation in NumPy arrays
@@ -116,6 +121,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.w_LR.keyReleaseEvent = self.keyReleaseEvent
         self.timer.timeout.connect(self.moveVector)
         self.timer.start(40)  # Every 20 milliseconds
+        # Rotation state (Home + Left/Right)
+        self.home_held = False
+        self.rotation_step_small = np.pi / 180  # 1° per press
+        self.rotation_step_large = 5 * np.pi / 180  # 5° when holding Shift
         self.energyComputed.connect(self.updateEnergyHeatmap, Qt.QueuedConnection)
         # Connect the signal once after setting up the plot
         self.GV_plot.getViewBox().sigRangeChanged.connect(self.onViewRangeChanged)
@@ -681,7 +690,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.GV_bg2.setOpacity(0)  # Set opacity to 0 to hide it
 
     def drawEnergyBackground(self):
-        ppu = 2000  # Pixels per unit
+        ppu = 200  # Pixels per unit
         folder = "precomputedEnergyBackgrounds"
         self.triangularEnergy = None
         self.squareEnergy = None
@@ -691,12 +700,18 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         for shape, beta, offset in zip(["triangular", "square"], [4, -0.25], [-10, -1]):
             fName = f"{SCRIPT_DIR}/{folder}/{ppu},{shape},Poincare,LRBackround.png"
             # Check if file exists, if not generate and save
-            if os.path.isfile(fName):
+            if os.path.isfile(fName) and ppu >= 1000:
                 energyImage = self.loadImage(fName)
             else:
-                energy_grid = generate_energy_grid(
-                    resolution=ppu, beta=beta, K=0, zeroReference=True
-                ).transpose()
+                # energy_grid = generate_energy_grid(
+                #     resolution=ppu, beta=beta, K=0, zeroReference=True
+                # ).transpose()
+                energy_grid = generate_stress_grid(
+                    resolution=ppu,
+                    beta=beta,
+                    lim=[-0.3, 0.3],
+                )[..., 0, 0].transpose()
+
                 energyImage = pg.ImageItem(energy_grid)
                 energyImage.setLookupTable(COOLWARM_LUT)
                 energyImage.save(fName)
@@ -974,10 +989,99 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     def applyTransformation(self, transform, roundToInt=False):
         for VP in [self.LR_VP, self.GV_VP]:
-            VP.applyTransformation(transform, roundToInt)
+            if self.alt_held:
+                VP.applyBasisTransformation(transform, roundToInt)
+            else:
+                VP.applyPointTransformation(transform, roundToInt)
         self.updateMarkers()
         self.updateGVSpheres()
         self.updateFEnergyBackground()
+
+    def drawHistory(
+        self, history, color=None, width=2, zValue=3, clear=True, arrows=True
+    ):
+        """
+        Draw the reduction path in the Poincaré disk.
+
+        Parameters
+        ----------
+        history : sequence of 2x2 matrices or (N,2,2) ndarray
+            The successive C matrices visited during the algorithm.
+        color : any pyqtgraph color (tuple/str), optional
+            Line/arrow color. Defaults to a muted gray if None.
+        width : int, optional
+            Line width.
+        zValue : int, optional
+            Z stacking value so the path sits above backgrounds.
+        clear : bool, optional
+            If True, remove previously drawn history items first.
+        """
+        # Lazily create a bucket to track added items so we can remove them later
+        if not hasattr(self, "_history_items"):
+            self._history_items = []
+
+        if clear:
+            # Remove any previously drawn history graphics
+            for it in self._history_items:
+                try:
+                    self.PCS_plot.removeItem(it)
+                except Exception:
+                    pass
+            self._history_items.clear()
+
+        if history is None:
+            return
+
+        C = np.asarray(history)
+        if C.ndim == 2:  # single matrix -> nothing to connect
+            C = C[None, ...]
+
+        if len(C) < 2:
+            # Still draw the single point if you like; here we just exit quietly
+            return
+
+        # Map C path to (x, y) in the Poincaré disk
+        xs, ys = C2PoincareDisk(C)
+        xs = np.asarray(xs).ravel()
+        ys = np.asarray(ys).ravel()
+
+        # Defaults
+        if color is None:
+            color = (160, 160, 160)
+
+        pen = pg.mkPen(color=color, width=width)
+
+        # Draw a single polyline for the whole path (nice for panning/zooming)
+        poly = self.PCS_plot.plot(xs, ys, pen=pen)
+        poly.setClipToView(True)
+        poly.setDownsampling(False)
+        poly.setSkipFiniteCheck(True)
+        poly.setZValue(zValue)
+        self._history_items.append(poly)
+        if arrows:
+            # Draw arrows for *each* segment to indicate direction
+            for i in range(1, len(xs)):
+                x0, y0 = xs[i - 1], ys[i - 1]
+                x1, y1 = xs[i], ys[i]
+
+                # Short segment line (helps if poly is downsampled)
+                seg = self.PCS_plot.plot([x0, x1], [y0, y1], pen=pen)
+                seg.setZValue(zValue)
+                self._history_items.append(seg)
+
+                # Arrow at the end of the segment
+                # Angle expected by ArrowItem: use 180 - atan2deg, matching drawLine()
+                angle_deg = np.degrees(np.arctan2(y1 - y0, x1 - x0))
+                arrow = pg.ArrowItem(
+                    pos=(x1, y1),
+                    headLen=width + 8,
+                    angle=180 - angle_deg,
+                    brush=color,
+                    pen=(0, 0, 0),
+                )
+                arrow.setZValue(zValue)
+                self.PCS_plot.addItem(arrow)
+                self._history_items.append(arrow)
 
     def updateMarkers(self):
         # Normal lagrange reduction
@@ -986,8 +1090,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # in case no vetor pair is defined
         if not hasattr(self, "VP"):
             self.VP = self.LR_VP
-        rePos1, rePos2, C_R, C_E_R, M, m1, m2, m3, ms = lagrange_reduction(
-            self.VP.pos1(), self.VP.pos2()
+        rePos1, rePos2, C_R, C_E_R, M, m1, m2, m3, ms, history1, history2 = (
+            lagrange_reduction(self.VP.pos1(), self.VP.pos2())
         )
         # rePos1, rePos2, m1, m2, m3 = old_lagrange_reduction(
         #     self.VP.pos1(), self.VP.pos2())
@@ -1020,15 +1124,46 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.elastic_reduced_marker.setData(pos=np.array([elastic_reduced_pos]))
 
         # Calculate P
-        P = self.energyFunc.P_from_F(F, M, self.currentBeta, K=4)
-
+        F_grid = F[np.newaxis, np.newaxis, :, :]  # shape (1, 1, 2, 2)
+        P = self.energyFunc.P_from_F(F_grid, beta=self.currentBeta, K=4)[0, 0]
         # Update table
         self.updateInfoDisplay(F, C, C_R, M, P, ms, m1, m2, m3)
+        # Draw the histories (first clears, second overlays)
+        self.drawHistory(
+            history1, color=self.reducedColor, width=3, zValue=4, clear=True
+        )
+        self.drawHistory(
+            history2, color=self.elasticReducedColor, width=2, zValue=4, clear=False
+        )
+
+        self.makeCircles(F)
+
+    def makeCircles(self, F):
+        def Sx_plus(i):
+            return np.array([[1, i], [0, 1]], dtype=int)
+
+        def Sx_minus(i):
+            return np.array([[1, -i], [0, 1]], dtype=int)
+
+        def Sy_plus(i):
+            return np.array([[1, 0], [i, 1]], dtype=int)
+
+        def Sy_minus(i):
+            return np.array([[1, 0], [-i, 1]], dtype=int)
+
+        moves = (Sx_plus, Sx_minus, Sy_plus, Sy_minus)
+
+        for M in moves:
+            history = [F2C(M(j) @ F) for j in range(20)]
+            self.drawHistory(history, color="gray", clear=False, arrows=False)
 
     def onViewRangeChanged(self, view, range):
         self.updateFEnergyBackground()
 
     def keyPressEvent(self, event):
+        # Track Home key pressed state for rotation mode
+        if event.key() == Qt.Key_Home:
+            self.home_held = True
         if hasattr(self, "VP"):
             dragged_vector, not_dragged_vector = self.VP.dragging_vector()
         else:
@@ -1043,6 +1178,28 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 dragged_vector.moveInX = False
             else:
                 dragged_vector.moveInX = True
+
+        # If Home is held, use Left/Right to rotate the basis; Up/Down do nothing
+        if getattr(self, "home_held", False):
+            shift_held_local = event.modifiers() & Qt.ShiftModifier
+            step = (
+                self.rotation_step_large
+                if shift_held_local
+                else self.rotation_step_small
+            )
+
+            if event.key() == Qt.Key_Left:
+                angle = -step  # rotate backwards
+            elif event.key() == Qt.Key_Right:
+                angle = step  # rotate forwards
+            else:
+                return  # Up/Down or other keys do nothing in rotation mode
+
+            c, s = np.cos(angle), np.sin(angle)
+            rot = np.array([[c, -s], [s, c]])
+            # Apply rotation to both vectors (basis transformation)
+            self.applyTransformation(rot)
+            return
 
         if event.key() == Qt.Key_R:
             for vp in [self.GV_VP, self.LR_VP]:
@@ -1096,7 +1253,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # If the shift key is down, we should perform an integer shear.
         # Otherwise, we should set some shear velocity that is applied every frame.
         shift_held = event.modifiers() & Qt.ShiftModifier  # Check if Shift is held
-        alt_held = event.modifiers() & Qt.AltModifier  # Check if Alt is held
+        self.alt_held = event.modifiers() & Qt.AltModifier  # Check if Alt is held
 
         upShear = np.array([[1, 0], [1, 1]])
         downShear = np.array([[1, 0], [-1, 1]])
@@ -1104,12 +1261,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         rightShear = np.array([[1, 1], [0, 1]])
         shearDirection = None
 
-        if shift_held and alt_held:
-            shearStep = 0.5
-        elif shift_held:
+        if shift_held:
             shearStep = 1
-        elif alt_held:
-            shearStep = 0.01
         else:
             shearStep = 0.1
 
@@ -1138,6 +1291,9 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         if event.key() == Qt.Key_Y:
             self.VP.e1.moveInX = True
             self.VP.e2.moveInX = True
+
+        if event.key() == Qt.Key_Home:
+            self.home_held = False
 
         self.shearVelocity = np.eye(2)
 
