@@ -15,14 +15,14 @@ from tqdm import tqdm
 from pathlib import Path
 from .dataFunctions import get_data_from_name
 from collections import defaultdict
-import warnings
 
-if True:
+# in Plotting/makePlots.py
+
+
+def enable_strict_runtimewarnings():
     import warnings
 
     warnings.filterwarnings("ignore", message=".*tight_layout.*")
-
-    # This line converts all RuntimeWarnings into errors (exceptions).
     warnings.simplefilter("error", RuntimeWarning)
 
 

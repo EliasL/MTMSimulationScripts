@@ -451,7 +451,7 @@ def fixedBoundaries(nrThreads, nrSeeds=1, seeds=None, L=40, fixed=True):
         cols=L,
         startLoad=0.15,
         maxLoad=1.0,
-        loadIncrement=1e-5,
+        loadIncrement=1e-6,
         nrThreads=nrThreads,
         minimizer="LBFGS",
         epsR=1e-6,

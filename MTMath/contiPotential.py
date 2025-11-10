@@ -220,40 +220,38 @@ class EnergyFunction:
         """
         assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
         C = np.einsum("...ji,...jk->...ik", F, F)
+        C_R = C.copy()  # to be modified in place
+        M_R = lagrange_reduction(C_R, returnM=True)
 
-        M_R = lagrange_reduction(C, returnM=True)
-
-        C_E, C_R, M_E, M_2 = lagrange_reduction_shears_vectorized(
+        C_E, C_R2, M_E, M_2 = lagrange_reduction_shears_vectorized(
             C, fundamental=True, returnM=True
         )
-        # Here, C is modified in place
-        M_R = lagrange_reduction(C, returnM=True)  # after fixing lag_m2
-        print(np.allclose(C_R, C, equal_nan=True))
-        print(np.allclose(M_R, M_2, equal_nan=True))
+        # print(np.allclose(C_R, C_R2, equal_nan=True))
+        # print(np.allclose(M_R, M_2, equal_nan=True))
 
         # Find indices where they differ (excluding equal NaNs)
         mask_diff = ~(np.isclose(M_R, M_2, equal_nan=True))
 
         # Get first differing matrix index
         idx = np.argwhere(mask_diff.any(axis=(-1, -2)))
-        if idx.size > 0:
-            i = tuple(idx[0])
-            print("First differing 2x2 matrix:")
-            print("M_R:")
-            print(M_R[i])
-            print("M_2:")
-            print(M_2[i])
-            print("C:", C[i])
-        else:
-            print("All 2x2 matrices are equal (accounting for NaNs).")
+        # if idx.size > 0:
+        #     i = tuple(idx[0])
+        #     print("First differing 2x2 matrix:")
+        #     print("M_R:")
+        #     print(M_R[i])
+        #     print("M_2:")
+        #     print(M_2[i])
+        #     print("C:", C[i])
+        # else:
+        #     print("All 2x2 matrices are equal (accounting for NaNs).")
 
         def congruence(M, C):  # returns M C M^T
             return M @ C @ np.swapaxes(M, -1, -2)
 
         # Which M maps C_R -> C ?
-        print("M_2 back to C:", np.allclose(C, congruence(M_2, C_R), equal_nan=True))
-        print("M_R back to C:", np.allclose(C, congruence(M_R, C_R), equal_nan=True))
-        print(np.allclose(np.linalg.inv(M_R), np.swapaxes(M_R, -1, -2), equal_nan=True))
+        # print("M_2 back to C:", np.allclose(C, congruence(M_2, C_R), equal_nan=True))
+        # print("M_R back to C:", np.allclose(C, congruence(M_R, C_R), equal_nan=True))
+        # print(np.allclose(np.linalg.inv(M_R), np.swapaxes(M_R, -1, -2), equal_nan=True))
 
         sigma = cls.sigma_from_C_R(C_R, beta=beta, K=K, noise=noise)
 
@@ -297,7 +295,7 @@ class EnergyFunction:
         return cls.cauchy_from_F(cls.F_from_C(C), M=M, beta=beta, K=K, noise=noise)
 
     @classmethod
-    def lagrangian_forces_from_F(cls, F, dN_dX, beta=-1 / 4, K=4, noise=1):
+    def lagrangian_forces_from_F(cls, F, dN_dX, beta=-1 / 4, K=4, noise=1, area=0.5):
         """
         Compute the forces from the first Piola-Kirchhoff stress tensor P.
         dN_dX is the partial derivative of the shape functions with respect to the reference coordinates.
@@ -307,72 +305,30 @@ class EnergyFunction:
 
         P = cls.P_from_F(F, beta=beta, K=K, noise=noise)
         # f = -P * dN_dX^T
-        forces = -np.einsum("...ij,...jk->...ik", P, dN_dX.swapaxes(-1, -2))
+        forces = -area * np.einsum("...ij,...jk->...ik", P, dN_dX.swapaxes(-1, -2))
 
         # forces is now an ND-array with shape (..., 2, n_nodes)
         # so we swap the last two axes to get forces with shape (..., n_nodes, 2)
         return forces.swapaxes(-1, -2)
 
     @classmethod
-    def eluerian_forces_from_F(cls, F, coords, t=1.0, beta=-1 / 4, K=4, noise=1):
+    def eulerian_forces_from_F(cls, F, dN_dx, beta=-1 / 4, K=4, noise=1, area=0.5):
         """
-        Compute the internal nodal forces (negative energy gradient) in the
-        current (Eulerian) configuration, using the Cauchy stress derived from F.
-
-        Parameters
-        ----------
-        F : array_like, shape (..., 2, 2)
-            Deformation gradient per element (assumed constant over the T3).
-        coords : array_like, shape (..., 3, 2)
-            Current nodal coordinates [[x1,y1],[x2,y2],[x3,y3]] for each element.
-        t : float
-            Thickness.
-        external : bool
-            If True, returns equivalent external nodal loads (negated).
-        beta, K, noise : model parameters passed to cauchy_from_F.
-
-        Returns
-        -------
-        forces : ndarray, shape (..., 3, 2)
-            Nodal force vector (node-major): [[Fx1,Fy1],[Fx2,Fy2],[Fx3,Fy3]].
+        Eulerian internal nodal forces using a single matmul, mirroring the Lagrangian form.
+        Inputs:
+        F      : (...,2,2)
+        dN_dx  : (...,3,2)  # current gradients (row i = [∂N_i/∂x, ∂N_i/∂y])
+        area   : (...,)     # current element area A
+        Returns:
+        forces : (...,3,2)
         """
-        F = np.asarray(F)
-        coords = np.asarray(coords)
-        assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
-        assert coords.shape[-2:] == (3, 2), "coords must have shape (..., 3, 2)"
+        assert F.shape[-2:] == (2, 2), "F must have shape (...,2,2)"
+        assert dN_dx.shape[-2:] == (3, 2), "dN_dx must have shape (...,3,2)"
 
-        # Cauchy stress from F (σ is symmetric 2×2)
-        sigma = cls.cauchy_from_F(F, beta=beta, K=K, noise=noise)
-        sig_xx = sigma[..., 0, 0]
-        sig_yy = sigma[..., 1, 1]
-        sig_xy = sigma[..., 0, 1]  # = sigma[...,1,0]
-
-        # Current-configuration geometry coefficients (constant over T3)
-        x = coords[..., :, 0]
-        y = coords[..., :, 1]
-        b = np.stack(
-            [y[..., 1] - y[..., 2], y[..., 2] - y[..., 0], y[..., 0] - y[..., 1]],
-            axis=-1,
-        )
-        c = np.stack(
-            [x[..., 2] - x[..., 1], x[..., 0] - x[..., 2], x[..., 1] - x[..., 0]],
-            axis=-1,
-        )
-
-        # Gradient of internal potential energy w.r.t. nodal displacements
-        # (internal resisting forces = negative energy gradient)
-
-        # ∂U_int/∂x_i = (t/2)*( b_i*σxx + c_i*σxy )
-        # ∂U_int/∂y_i = (t/2)*( c_i*σyy + b_i*σxy )
-
-        grad_Ux = 0.5 * t * (b * sig_xx[..., None] + c * sig_xy[..., None])
-        grad_Uy = 0.5 * t * (c * sig_yy[..., None] + b * sig_xy[..., None])
-
-        energy_grad = np.stack([grad_Ux, grad_Uy], axis=-1)  # (..., 3, 2)
-
-        # Internal forces oppose increases in potential energy
-        internal_force = -energy_grad
-        return internal_force
+        sigma = cls.cauchy_from_F(F, beta=beta, K=K, noise=noise)  # (...,2,2)
+        # Mirror your Lagrangian pattern: -σ @ (dN_dx)^T, then swap last two axes
+        forces = -area * np.einsum("...ij,...jk->...ik", sigma, dN_dx.swapaxes(-1, -2))
+        return forces.swapaxes(-1, -2)  # (...,3,2)
 
     # Strain is an ND-array of strain values with shape (..., 1)
     @classmethod
@@ -409,7 +365,7 @@ class EnergyFunction:
 
     @classmethod
     def lagrangian_forces_from_simpleShear(
-        cls, strain, dN_dX, beta=-1 / 4, K=4, noise=1
+        cls, strain, dN_dX, beta=-1 / 4, K=4, noise=1, area=0.5
     ):
         """
         Compute the forces from the first Piola-Kirchhoff stress tensor P for simple shear.
@@ -417,12 +373,12 @@ class EnergyFunction:
         strain = np.atleast_1d(strain)
         F = np.tile(np.eye(2), (*strain.shape, 1, 1)).astype(float)
         F[..., 0, 1] = strain
-        forces = cls.lagrangian_forces_from_F(F, dN_dX, beta, K, noise)
+        forces = cls.lagrangian_forces_from_F(F, dN_dX, beta, K, noise, area)
         return forces
 
     @classmethod
     def eulerian_forces_from_simpleShear(
-        cls, strain, coords, beta=-1 / 4, K=4, noise=1
+        cls, strain, dN_dx, beta=-1 / 4, K=4, noise=1, area=0.5
     ):
         """
         Compute the forces from the first Piola-Kirchhoff stress tensor P for simple shear.
@@ -430,7 +386,7 @@ class EnergyFunction:
         strain = np.atleast_1d(strain)
         F = np.tile(np.eye(2), (*strain.shape, 1, 1)).astype(float)
         F[..., 0, 1] = strain
-        forces = cls.eluerian_forces_from_F(F, coords, beta, K, noise)
+        forces = cls.eulerian_forces_from_F(F, dN_dx, beta, K, noise, area)
         return forces
 
 
@@ -755,26 +711,35 @@ def lagrange_reduction_shears_vectorized(
 
 
 def lagrange_reduction(C, loops=1000, returnM=False):
+    """
+    Modifies C in place to its Lagrange-reduced form.
+    """
     assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
 
-    # Extract views (no copy)
-    C11, C22, C12 = C[..., 0, 0], C[..., 1, 1], C[..., 0, 1]
+    squeeze_back = False
+    if C.ndim == 2:
+        C_view = C[np.newaxis, ...]  # view, not a copy
+        squeeze_back = True
+    else:
+        C_view = C
+
+    # Extract views (no copy) from the promoted array
+    C11, C22, C12 = C_view[..., 0, 0], C_view[..., 1, 1], C_view[..., 0, 1]
 
     # Call original function (which modifies arrays in-place)
     ms = lagrange_reduction_components(C11, C22, C12, loops=loops, returnMs=returnM)
 
     # Explicitly enforce symmetry
-    C[..., 1, 0] = C[..., 0, 1]
+    C_view[..., 1, 0] = C_view[..., 0, 1]
 
     if returnM:
-        # Warning: This M calculation is not tested and probably donesn't work yet
         # Now we need to construct the matrix of M matrices
-        # M should be like C, but where each 2x2 matrix is the identity matrix
-        M = np.eye(2) * np.ones_like(C)  # broadcast 2×2 identity across shape of C
+        # M matches the (possibly promoted) shape of C_view
+        M = np.eye(2) * np.ones_like(C_view)  # broadcast 2×2 identity across shape
         # Set M to NaN where C has any NaN
-        M[np.isnan(C).any(axis=(-2, -1))] = np.nan
+        M[np.isnan(C_view).any(axis=(-2, -1))] = np.nan
 
-        # It is slow, but we will contruct the M matrices one at a time
+        # Construct the M matrices one at a time (scalar-robust due to promotion)
         for i in range(len(ms)):
             for m in ms[i]:
                 if m == 1:
@@ -783,7 +748,9 @@ def lagrange_reduction(C, loops=1000, returnM=False):
                     lag_m2(M[i])
                 elif m == 3:
                     lag_m3(M[i], n=1)
-        return M
+        # Squeeze back to (2,2) if input was (2,2)
+        return M[0] if squeeze_back else M
+    # When returnM is False we just modify C in place and return None
 
 
 def flip(matrix, row, col):
@@ -908,21 +875,69 @@ def compute_energy_and_derivatives(
         return energy_code, first_derivative_code
 
 
+def sanityCheck_Piola(verbose=True):
+    """Quick regression test for the first Piola–Kirchhoff stress.
+
+    Uses a simple-shear deformation with strain = 0.15 and compares
+    the computed P against a stored reference matrix `true_P`.
+
+    Returns
+    -------
+    ok : bool
+        Whether the computed tensor matches the reference within tolerances.
+    P : ndarray, shape (2, 2)
+        The computed first Piola–Kirchhoff stress.
+    """
+
+    def check(true_P, gamma):
+        F = np.eye(2, dtype=float)
+        F[0, 1] = gamma
+
+        # Compute P using the model (ContiEnergy inherits the implementation)
+        P = ContiEnergy.P_from_F(F)
+
+        # Compare with reference
+        rtol = 1e-3
+        atol = 1e-5
+        ok = np.allclose(P, true_P, rtol=rtol, atol=atol, equal_nan=False)
+
+        if verbose:
+            print("Sanity check (Piola)")
+            print("Reference P:\n", true_P)
+            print("Computed  P:\n", P)
+            err = np.abs(P - true_P)
+            print("Max abs error:", np.max(err))
+            print("Result:", "PASS" if ok else "FAIL")
+
+    # Reference Piola tensor for simple shear gamma = 0.15
+    true_P = np.array([[-0.017859, 0.31451], [0.3189, -0.029317]])
+
+    # Build deformation gradient for simple shear: F = [[1, gamma],[0,1]]
+    gamma = 0.15
+
+    check(true_P, gamma)
+
+    true_P = np.array([[0.25499, -0.28435], [-0.26254, -0.02723]])
+    gamma = 0.801
+    check(true_P, gamma)
+
+
 if __name__ == "__main__":
-    # Get symbolic expressions from ContiEnergy
-    phi_func, div_phi_dict, div_div_phi_dict = ContiEnergy.symbolic_potential()
+    sanityCheck_Piola()
+    # # Get symbolic expressions from ContiEnergy
+    # phi_func, div_phi_dict, div_div_phi_dict = ContiEnergy.symbolic_potential()
 
-    # Choose whether to include second derivatives
-    include_second_derivatives = False  # Set to True when needed
+    # # Choose whether to include second derivatives
+    # include_second_derivatives = False  # Set to True when needed
 
-    # Generate the code
-    energy_code, stress_code = compute_energy_and_derivatives(
-        phi_func, div_phi_dict, div_div_phi_dict, include_second_derivatives
-    )
+    # # Generate the code
+    # energy_code, stress_code = compute_energy_and_derivatives(
+    #     phi_func, div_phi_dict, div_div_phi_dict, include_second_derivatives
+    # )
 
-    # Output results
-    print("Energy function:\n", energy_code)
-    print("\n")
+    # # Output results
+    # print("Energy function:\n", energy_code)
+    # print("\n")
 
-    print("Stress function:\n", stress_code)
-    print(ContiEnergy.ground_state_energy())
+    # print("Stress function:\n", stress_code)
+    # print(ContiEnergy.ground_state_energy())

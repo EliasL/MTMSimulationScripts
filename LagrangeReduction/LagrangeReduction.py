@@ -240,7 +240,7 @@ def lagrange_reduction_shears(v1, v2, max_loops=64):
     return v1r, v2r, C_R, C_E_R, m, H_count, V_count, moves, history
 
 
-def active_shear_reduction(v1, v2, max_iters=20):
+def rotation_free_active_shear_reduction(v1, v2, max_iters=20):
     """
     2D reduction by active (left-applied) integer simple shears only.
     Columns are basis vectors: F = [v1 v2]. We apply F <- M @ F, M ∈ SL(2,Z).
@@ -269,9 +269,9 @@ def active_shear_reduction(v1, v2, max_iters=20):
         # Try all four unit shears, choose the one with the best score
         best = None
         for j, M in enumerate(moves):
-            F2 = M @ F
+            F2 = F @ M
             sc = score(F2)
-            print(j, sc)
+            # print(j, sc)
             if best is None or sc < best[0]:
                 best = (sc, M, F2)
 
@@ -282,13 +282,107 @@ def active_shear_reduction(v1, v2, max_iters=20):
         # Apply the best shear
         _, Mbest, F = best
         history.append(F2C(F))
-        Z = Mbest @ Z
+        Z = Z @ Mbest
         prev = best[0]
         if i == max_iters - 1:
             print("Too few itterations (Stuck)")
 
     # Fallback: return current state
     return F[:, 0], F[:, 1], Z, history
+
+
+def align_matrix(F, align_to="x"):
+    """
+    Rotate matrix F (2x2) so that:
+    - if align_to='x', the first column aligns with the x-axis
+    - if align_to='y', the second column aligns with the y-axis
+
+    Returns the rotation matrix R and the rotated matrix FR.
+    """
+    if F.shape != (2, 2):
+        raise ValueError("F must be a 2x2 matrix.")
+
+    if align_to == "x":
+        v = F[:, 0]  # first column
+        target_angle = 0.0  # align with x-axis
+    elif align_to == "y":
+        v = F[:, 1]  # second column
+        target_angle = np.pi / 2  # align with y-axis
+    else:
+        raise ValueError("align_to must be 'x' or 'y'.")
+
+    # Current angle of v relative to x-axis
+    angle = np.arctan2(v[1], v[0])
+
+    # Rotation angle needed
+    theta = target_angle - angle
+
+    # Rotation matrix
+    R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+
+    # Apply rotation
+    FR = R @ F
+
+    return R, FR
+
+
+def active_shear_reduction(v1, v2):
+    """
+    2D reduction by active (left-applied) integer simple shears only.
+    Columns are basis vectors: F = [v1 v2]. We apply F <- M @ F, M ∈ SL(2,Z).
+    Returns reduced (v1r, v2r), the accumulated unimodular Z, and a history.
+    """
+    # F = np.column_stack((np.asarray(v1, float), np.asarray(v2, float)))
+    F, _ = generate_matrix(v1, v2)
+    oldF = F.copy()
+
+    Z = np.eye(2, dtype=int)  # TODO, don't know if this works yet
+    history = []
+    F_history = []
+
+    history.append(F2C(F))
+    F_history.append(F.copy())
+    # We first align v1 with the x-axis
+    # can't add history with rotation steps, since they don't change C
+    R, F = align_matrix(F, align_to="x")
+    F_history.append(F.copy())
+    # if not np.allclose(F, oldF):
+    #     history.append(F2C(F))
+    #     oldF = F.copy()
+    # Then we apply horixontal simple unit shears to reduce v2's x-component as
+    # much as possible (bring it within [-0.5, 0.5])
+    # 2) One-shot horizontal simple shear to reduce v2.x
+    x2, y2 = F[0, 1], F[1, 1]
+    if not np.isclose(y2, 0.0):
+        m = int(-np.round(x2 / y2))  # nearest-integer choice
+        if m != 0:
+            M = np.array([[1, m], [0, 1]], dtype=int)
+            F = M @ F
+            Z = M @ Z
+            history.append(F2C(F))
+            F_history.append(F.copy())
+            oldF = F.copy()
+    # Now we align v2 with the y-axis
+    R, F = align_matrix(F, align_to="y")
+    F_history.append(F.copy())
+    # Can't add history with rotation steps, since they don't change C
+    # if not np.allclose(F, oldF):
+    #     history.append(F2C(F))
+    #     oldF = F.copy()
+    # Then we apply vertical simple unit shears to reduce v1's y-component as
+    # much as possible (bring it within [-0.5, 0.5])
+    x1, y1 = F[0, 0], F[1, 0]
+    if not np.isclose(x1, 0.0):
+        n = int(-np.round(y1 / x1))  # nearest-integer choice
+        if n != 0:
+            N = np.array([[1, 0], [n, 1]], dtype=int)
+            F = N @ F
+            Z = N @ Z
+            history.append(F2C(F))
+            F_history.append(F.copy())
+
+    # Fallback: return current state
+    return F[:, 0], F[:, 1], Z, history, F_history
 
 
 def lagrange_reduction(v1, v2):
@@ -343,7 +437,8 @@ def lagrange_reduction(v1, v2):
     v1r, v2r, C_R_, C_E_R, m, H_count, V_count, moves, history2 = (
         lagrange_reduction_shears(v1, v2)
     )
-    _, _, _, history3 = active_shear_reduction(v1, v2)
+    _, _, _, history3, F_history = active_shear_reduction(v1, v2)
+    _, _, _, history3 = rotation_free_active_shear_reduction(v1, v2)
 
     v1, v2 = C2V(C_R)
     assert np.allclose(C_R, C_R_), f"C_R: {C_R}\nC_R_: {C_R_}"

@@ -9,12 +9,15 @@ class Servers:
     pascal = "pascal.pmmh-cluster.espci.fr"
     schwartz = "schwartz.pmmh-cluster.espci.fr"
     lagrange = "lagrange.pmmh-cluster.espci.fr"
-    # Condorcet is slow
-    # condorcet = "condorcet.pmmh-cluster.espci.fr"
+    # Condorcet is maybe still slow?
+    condorcet = "condorcet.pmmh-cluster.espci.fr"
     dalembert = "dalembert.pmmh-cluster.espci.fr"
     poincare = "poincare.pmmh-cluster.espci.fr"
     fourier = "fourier.pmmh-cluster.espci.fr"
     descartes = "descartes.pmmh-cluster.espci.fr"
+    legendre = "legendre.pmmh-cluster.espci.fr"
+    duchemin = "duchemin.pmmh-cluster.espci.fr"
+    cauchy = "cauchy.pmmh-cluster.espci.fr"
 
     # mesopsl = "mesopsl.obspm.fr"
 
@@ -25,14 +28,17 @@ class Servers:
     # List of server variables for iteration or list-like access
     servers = [
         galois,
-        # pascal,
+        pascal,
         schwartz,
         lagrange,
-        # condorcet,
-        # dalembert,
-        # poincare,
-        # fourier,
-        # descartes,
+        condorcet,
+        dalembert,
+        poincare,
+        fourier,
+        descartes,
+        legendre,
+        duchemin,
+        cauchy,
         # mesopsl,
         # jeanZay,
     ]

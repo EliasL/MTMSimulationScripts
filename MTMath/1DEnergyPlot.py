@@ -47,12 +47,13 @@ def _forces_worker(args):
     x_chunk = np.empty((len(strain_chunk), 3, 2), dtype=float)
     x_chunk[..., 0] = X[None, :, 0] + strain_chunk[:, None] * X[None, :, 1]
     x_chunk[..., 1] = X[None, :, 1]
+    # Compute dN/dx from current coordinates for Eulerian forces
+    dN_dx_chunk = dN_dx_from_coords(x_chunk)
     f_lag = ContiEnergy.lagrangian_forces_from_simpleShear(strain_chunk, dN_dX_chunk)
-    f_eul = ContiEnergy.eulerian_forces_from_simpleShear(strain_chunk, x_chunk)
+    f_eul = ContiEnergy.eulerian_forces_from_simpleShear(strain_chunk, dN_dx_chunk)
     return f_lag, f_eul, x_chunk
 
 
-# ---------- your existing plots (unchanged) ----------
 def plot_energy():
     strain = np.linspace(0.0, 1, 100)
     e = ContiEnergy.energy_from_simpleShear(strain)
@@ -81,8 +82,50 @@ def plot_forces():
             ax.set_ylabel("Force")
         ax.set_title(f"Node {i + 1}")
         ax.legend()
+        ax.grid()
     fig.suptitle("Lagrangian Forces in Simple Shear")
     fig.tight_layout()
+
+
+def dN_dx_from_coords(coords):
+    """
+    Compute dN/dx and area for a linear T3 element using only matrix multiplications.
+
+    Parameters
+    ----------
+    coords : array_like, shape (..., 3, 2)
+        Nodal coordinates [[x1, y1], [x2, y2], [x3, y3]].
+
+    Returns
+    -------
+    dN_dx : ndarray, shape (..., 3, 2)
+        Gradient of shape functions wrt x,y (row i = [∂N_i/∂x, ∂N_i/∂y]).
+    area : ndarray, shape (...)
+        Element area (positive scalar).
+    """
+    coords = np.asarray(coords)
+    assert coords.shape[-2:] == (3, 2), "coords must have shape (..., 3, 2)"
+
+    # Reference (natural) shape function derivatives wrt (ξ, η)
+    dN_dxi = np.array(
+        [
+            [-1.0, -1.0],
+            [1.0, 0.0],
+            [0.0, 1.0],
+        ],
+        dtype=coords.dtype,
+    )  # (3, 2)
+
+    # Jacobian: J = dX/dξ = coords^T @ dN_dxi
+    J = coords.swapaxes(-1, -2) @ dN_dxi  # (..., 2, 2)
+
+    # Inverse Jacobian
+    J_inv = np.linalg.inv(J)  # (..., 2, 2)
+
+    # Transform shape function gradients: dN/dx = dN/dξ @ J^{-1}
+    dN_dx = dN_dxi @ J_inv  # (..., 3, 2)
+
+    return dN_dx
 
 
 def plot_eulerian_forces(coords=None):
@@ -92,8 +135,9 @@ def plot_eulerian_forces(coords=None):
     coords = np.asarray(coords, dtype=float)
     if coords.shape != (3, 2):
         raise ValueError("coords must have shape (3, 2)")
-    coords_batched = np.tile(coords, (len(strain), 1, 1))
-    forces = ContiEnergy.eulerian_forces_from_simpleShear(strain, coords_batched)
+    # Compute dN_dx and area from coords
+    dN_dx = dN_dx_from_coords(np.tile(coords, (len(strain), 1, 1)))
+    forces = ContiEnergy.eulerian_forces_from_simpleShear(strain, dN_dx)
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharex=True, sharey=True)
     for i, ax in enumerate(axes):
@@ -104,6 +148,7 @@ def plot_eulerian_forces(coords=None):
             ax.set_ylabel("Eulerian Force")
         ax.set_title(f"Node {i + 1}")
         ax.legend()
+        ax.grid()
     fig.suptitle("Eulerian Forces in Simple Shear")
     fig.tight_layout()
 
@@ -112,9 +157,8 @@ def plot_eulerian_forces(coords=None):
 def animate_nodes_and_forces(
     coords_ref=None,
     strain=None,
-    t=1.0,
     interval=20,
-    arrow_scale=0.15,
+    arrow_scale=1.0,
     save_path=None,
     writer=None,  # "ffmpeg" | "pillow" | None (auto from save_path)
     dpi=150,
@@ -158,8 +202,10 @@ def animate_nodes_and_forces(
         x_series = np.empty((len(strain), 3, 2), dtype=float)
         x_series[..., 0] = X[None, :, 0] + strain[:, None] * X[None, :, 1]
         x_series[..., 1] = X[None, :, 1]
+        # Compute dN/dx for each frame from current coordinates
+        dN_dx_series = dN_dx_from_coords(x_series)
         f_lag = ContiEnergy.lagrangian_forces_from_simpleShear(strain, dN_dX_batched)
-        f_eul = ContiEnergy.eulerian_forces_from_simpleShear(strain, x_series)
+        f_eul = ContiEnergy.eulerian_forces_from_simpleShear(strain, dN_dx_series)
 
     # Axis limits
     all_pts = np.vstack([x_series.reshape(-1, 2), X])

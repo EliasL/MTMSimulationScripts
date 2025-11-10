@@ -333,6 +333,7 @@ def runOnLocalMachine():
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
     # configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
     configs, labels = reconnectionJob(L=300)
+    configs, labels = fixedBoundaries(1, 1, L=3)
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
     # )
@@ -356,7 +357,7 @@ def runOnLocalMachine():
 
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=3)
-    # run_locally(configs[0], resume=False)  # , dump=dump)
+    run_locally(configs[0], resume=False)  # , dump=dump)
     # run_many_locally(configs, taskNames=labels, resume=False)
 
 
@@ -364,6 +365,7 @@ def startJobs():
     print("Building on all servers... ")
 
     # build_on_all_servers()
+
     # Make largeProperJob with notFIRE=True to exclude FIRE
     def notFIRE_largePropperJob(**kwargs):
         return largePropperJob(notFIRE=True, **kwargs)
@@ -385,7 +387,7 @@ def startJobs():
                 print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
                 if confs:
                     # Queue jobs (uncomment to actually submit)
-                    queueJobs(server, confs, job_name="opt", stopExsistingJobs=False)
+                    # queueJobs(server, confs, job_name="opt", stopExsistingJobs=False)
                     pass
 
 
@@ -425,8 +427,8 @@ if __name__ == "__main__":
 
     # runOnServer()
     # parameterExploring()
-    runReconnectionJob()
-    # runOnLocalMachine()
+    # runReconnectionJob()
+    runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()

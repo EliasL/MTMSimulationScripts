@@ -16,6 +16,12 @@ from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
 from MTMath.plotPowerLaw import plot_powerlaw, make_exponent_fit
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
+from MTMath.poincareTiling import (
+    poincareTiling,
+    calculateSimpleFiniteDifferenceDerivatives,
+    calculateShearFiniteDifferenceDerivatives,
+    plotShearFiniteDifferenceDerivatives,
+)
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     get_csv_files,
@@ -274,8 +280,12 @@ def plotReconnectionJob():
 
 
 if __name__ == "__main__":
-    run_reconnection_demo()
-    from MTMath.triangleError import test, test_Kappa
+    # calculateSimpleFiniteDifferenceDerivatives()
+    plotShearFiniteDifferenceDerivatives()
+    # calculateShearFiniteDifferenceDerivatives()
+    # poincareTiling()
+    # run_reconnection_demo()
+    # from MTMath.triangleError import test, test_Kappa
 
     # test()
     # plotReconnectionJob()

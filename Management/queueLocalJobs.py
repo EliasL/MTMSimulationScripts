@@ -11,7 +11,7 @@ def get_batch_script(command, job_name, nrThreads, outPath):
     batch_script = textwrap.dedent(f"""
         #!/bin/bash
         #SBATCH --job-name={job_name}
-        #SBATCH --time=7-19:00:00
+        #SBATCH --time=5-00:00:00
         #SBATCH --ntasks={nrThreads}
         #SBATCH --output={output_file}
         #SBATCH --error={error_file}

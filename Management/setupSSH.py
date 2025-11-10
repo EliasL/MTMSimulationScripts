@@ -74,13 +74,13 @@ def main():
     generate_ssh_key(key_path)
 
     # Loop through servers and copy the SSH key
-    for server in [Servers.pascal]:
+    for server in Servers.servers:
         copy_ssh_key_to_server(server, username, key_path, password)
 
-    # Prompt for the new password
+    # # Prompt for the new password
     # new_password = getpass("Enter the new password (will not be echoed): ")
 
-    # Change password on each server
+    # # Change password on each server
     # for server in Servers.servers:
     #     try:
     #         change_password(server, username, password, new_password)

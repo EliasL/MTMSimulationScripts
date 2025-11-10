@@ -703,14 +703,14 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             if os.path.isfile(fName) and ppu >= 1000:
                 energyImage = self.loadImage(fName)
             else:
-                # energy_grid = generate_energy_grid(
-                #     resolution=ppu, beta=beta, K=0, zeroReference=True
-                # ).transpose()
-                energy_grid = generate_stress_grid(
-                    resolution=ppu,
-                    beta=beta,
-                    lim=[-0.3, 0.3],
-                )[..., 0, 0].transpose()
+                energy_grid = generate_energy_grid(
+                    resolution=ppu, beta=beta, K=0, zeroReference=True
+                ).transpose()
+                # energy_grid = generate_stress_grid(
+                #     resolution=ppu,
+                #     beta=beta,
+                #     lim=[-0.3, 0.3],
+                # )[..., 0, 0].transpose()
 
                 energyImage = pg.ImageItem(energy_grid)
                 energyImage.setLookupTable(COOLWARM_LUT)
@@ -989,7 +989,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     def applyTransformation(self, transform, roundToInt=False):
         for VP in [self.LR_VP, self.GV_VP]:
-            if self.alt_held:
+            if not self.alt_held:
                 VP.applyBasisTransformation(transform, roundToInt)
             else:
                 VP.applyPointTransformation(transform, roundToInt)
@@ -1199,6 +1199,20 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             rot = np.array([[c, -s], [s, c]])
             # Apply rotation to both vectors (basis transformation)
             self.applyTransformation(rot)
+            return
+        self.meta_held = (
+            event.modifiers() & Qt.MetaModifier
+        )  # Check if meta key is held
+
+        s = None
+        if event.key() == Qt.Key_Y:
+            s = -0.01
+        elif event.key() == Qt.Key_U:
+            s = 0.01
+        if s is not None:
+            shear = np.array([[1 + s, 0], [0, 1 / (1 + s)]])
+            self.applyTransformation(shear)
+            print("pure shear applied")
             return
 
         if event.key() == Qt.Key_R:
