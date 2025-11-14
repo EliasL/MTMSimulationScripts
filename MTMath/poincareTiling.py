@@ -106,6 +106,18 @@ def plotShearFiniteDifferenceDerivatives():
         # Pure shear
         return np.array([[1.0 + eps, 0.0], [0.0, 1.0 / (1.0 + eps)]], dtype=float)
 
+    def S(eps, theta=np.pi / 4) -> np.ndarray:
+        # Shear along 45 degrees
+        c = np.cos(theta)
+        s = np.sin(theta)
+        return np.array(
+            [
+                [1.0 - eps * c * s, eps * c * c],
+                [-eps * s * s, 1.0 + eps * c * s],
+            ],
+            dtype=float,
+        )
+
     # Build right-Cauchy–Green tensor from an upper shear F(γ)
     def C_from_gamma(g: float, horizontal=True) -> np.ndarray:
         A = np.array(
@@ -169,16 +181,16 @@ def plotShearFiniteDifferenceDerivatives():
         label=r"$\partial\phi/\partial \mathbf{C}_\mathbf{V}$",
         linestyle="--",
     )
-    dphi_dP = np.array(
+    dphi_dS = np.array(
         [
-            central_diff_phi(lambda e, F=F_from_gamma4(g): left_apply(F, P(e)), eps)
+            central_diff_phi(lambda e, F=F_from_gamma4(g): left_apply(F, S(e)), eps)
             for g in gamma
         ]
     )
     plt.plot(
         gamma,
-        dphi_dP,
-        label=r"$\partial\phi/\partial \mathbf{C}_\mathbf{P}$",
+        dphi_dS,
+        label=r"$\partial\phi/\partial \mathbf{C}_{\mathbf{S}45}$",
         linestyle="-",
     )
     # for eps in [1e-5, 1e-6, 1e-7, 1e-8]:
@@ -205,8 +217,8 @@ def plotShearFiniteDifferenceDerivatives():
     for x_target, label in points:
         idx = np.argmin(np.abs(gamma - x_target))
         x = gamma[idx]
-        y = dphi_dV[idx]
-        print(dphi_dP[idx])
+        y = dphi_dS[idx]
+        print(dphi_dS[idx])
         plt.scatter(x, y, zorder=3)
         plt.annotate(
             label,
@@ -311,11 +323,17 @@ def poincareTiling():
     # ax.clear()
     # plotPoincareTiling(ax=ax, fig=fig, depth=2, quadrants="a")
     # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=2, quadrants="abcd")
-    # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=2, quadrants="ab")
-    # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=2, quadrants="cd")
+    plotPoincareTiling(ax=ax, fig=fig, depth=3, quadrants="abcd")
+    ax.clear()
+    plotPoincareTiling(ax=ax, fig=fig, depth=3, quadrants="ab")
+    ax.clear()
+    plotPoincareTiling(ax=ax, fig=fig, depth=3, quadrants="cd")
+
+    plotPoincareTiling(ax=ax, fig=fig, depth=4, quadrants="abcd")
+    ax.clear()
+    plotPoincareTiling(ax=ax, fig=fig, depth=4, quadrants="ab")
+    ax.clear()
+    plotPoincareTiling(ax=ax, fig=fig, depth=4, quadrants="cd")
 
     # ax.clear()
     # plotPoincareTiling(ax=ax, fig=fig, depth=1, use_labels=False, quadrants="a")

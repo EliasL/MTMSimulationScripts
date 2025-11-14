@@ -119,6 +119,7 @@ class EnergyFunction:
         cls, C, beta=-1 / 4, K=4, noise=1, zeroReference=True, loops=1000
     ):
         # Reduce using Lagrange reduction
+        # C is reduced!
         lagrange_reduction(C, loops=loops)
         return cls.energy_from_reduced_C(C, beta, K, noise, zeroReference)
 
@@ -140,24 +141,44 @@ class EnergyFunction:
         )
 
     @staticmethod
-    def F_from_C(C, tol=1e-15):
-        """We choose F21=0."""
-        # C: (..., 2, 2) SPD
+    def F_from_C(C, tol=1e-15, upper=True):
+        """
+        C = F^T F
+        If upper=True  -> enforce F21 = 0   (upper-triangular F)
+        If upper=False -> enforce F12 = 0   (lower-triangular F)
+        """
         C11 = C[..., 0, 0]
         C12 = C[..., 0, 1]
         C22 = C[..., 1, 1]
 
-        # Guard tiny numerical issues; SPD implies C11>0 and the Schur complement ≥0
-        F11 = np.sqrt(np.maximum(C11, tol))
-        F12 = C12 / F11
-        r_sq = C22 - F12**2
-        F22 = np.sqrt(np.maximum(r_sq, 0.0))
+        if upper:
+            # F = [[F11, F12],
+            #      [0,   F22]]
+            F11 = np.sqrt(np.maximum(C11, tol))
+            F12 = C12 / F11
+            r_sq = C22 - F12**2
+            F22 = np.sqrt(np.maximum(r_sq, 0.0))
 
-        # Assemble F = [[p, q], [0, r]]
-        zeros = np.zeros_like(F11)
-        F = np.stack(
-            [np.stack([F11, F12], axis=-1), np.stack([zeros, F22], axis=-1)], axis=-2
-        )
+            zeros = np.zeros_like(F11)
+            F = np.stack(
+                [np.stack([F11, F12], axis=-1), np.stack([zeros, F22], axis=-1)],
+                axis=-2,
+            )
+
+        else:
+            # F = [[F11, 0],
+            #      [F21, F22]]
+            F22 = np.sqrt(np.maximum(C22, tol))
+            F21 = C12 / F22
+            r_sq = C11 - F21**2
+            F11 = np.sqrt(np.maximum(r_sq, 0.0))
+
+            zeros = np.zeros_like(F11)
+            F = np.stack(
+                [np.stack([F11, zeros], axis=-1), np.stack([F21, F22], axis=-1)],
+                axis=-2,
+            )
+
         return F
 
     # F is a deformation gradient tensor of shape (..., 2, 2)
@@ -188,6 +209,7 @@ class EnergyFunction:
         elif loops is None:
             loops = 1000
 
+        # C is reduced in place
         energy = cls.energy_from_C_in_place(
             C, beta, K, noise, zeroReference, loops=loops
         )
@@ -223,17 +245,17 @@ class EnergyFunction:
         C_R = C.copy()  # to be modified in place
         M_R = lagrange_reduction(C_R, returnM=True)
 
-        C_E, C_R2, M_E, M_2 = lagrange_reduction_shears_vectorized(
-            C, fundamental=True, returnM=True
-        )
+        # C_E, C_R, M_E, M_R = lagrange_reduction_shears_vectorized(
+        #     C, fundamental=True, returnM=True
+        # )
         # print(np.allclose(C_R, C_R2, equal_nan=True))
         # print(np.allclose(M_R, M_2, equal_nan=True))
 
         # Find indices where they differ (excluding equal NaNs)
-        mask_diff = ~(np.isclose(M_R, M_2, equal_nan=True))
+        # mask_diff = ~(np.isclose(M_R, M_2, equal_nan=True))
 
         # Get first differing matrix index
-        idx = np.argwhere(mask_diff.any(axis=(-1, -2)))
+        # idx = np.argwhere(mask_diff.any(axis=(-1, -2)))
         # if idx.size > 0:
         #     i = tuple(idx[0])
         #     print("First differing 2x2 matrix:")
@@ -245,13 +267,13 @@ class EnergyFunction:
         # else:
         #     print("All 2x2 matrices are equal (accounting for NaNs).")
 
-        def congruence(M, C):  # returns M C M^T
-            return M @ C @ np.swapaxes(M, -1, -2)
+        def mapBack(M, C_R):  # returns M C M^T
+            Minv = np.linalg.inv(M)
+            return np.swapaxes(Minv, -1, -2) @ C_R @ Minv
 
         # Which M maps C_R -> C ?
         # print("M_2 back to C:", np.allclose(C, congruence(M_2, C_R), equal_nan=True))
-        # print("M_R back to C:", np.allclose(C, congruence(M_R, C_R), equal_nan=True))
-        # print(np.allclose(np.linalg.inv(M_R), np.swapaxes(M_R, -1, -2), equal_nan=True))
+        print("M_R back to C:", np.allclose(C, mapBack(M_R, C_R), equal_nan=True))
 
         sigma = cls.sigma_from_C_R(C_R, beta=beta, K=K, noise=noise)
 
@@ -460,33 +482,51 @@ class ZeroEnergy(EnergyFunction):
         return 0
 
 
+def apply_right_trans(t, A):
+    # We apply a matrix multiplication from the right: A@t
+    # This is because we are using the right cauchy green stress tensor C
+    # So C=F^TF, so when we apply something to F, we need to do it from
+    # the right, so that F'=Ft => C' = t^TF^TFt = t^TCt.
+    # If we were applying changes from the left, we need to have access to F:
+    # F_=tF => C_=F^Tt^TtF. Here, unlike when applying changes from the right,
+    # the changes appear "inside" C_, so we can't apply them.
+    return np.einsum("...ij,...jk->...ik", A, t)
+
+
 def lagrange_reduction_components(C11, C22, C12, loops=1000, returnMs=False):
-    # If reurnM is True, we create an array of numbers from 1 to 3 where each number
-    # corresponds to the m1, m2 or m3 operation that is applied to the C matrix
+    """
+    Lagrange reduction of (C11, C22, C12) in place.
+    If returnMs is True, returns an array M of right-multiplication matrices such that
+    the reduced C = M.T @ C @ M for each entry.
+    """
     if returnMs:
-        ms = np.empty_like(C11, dtype=object)
-        # Initialize each element with its own empty list
-        it = np.nditer(C11, flags=["multi_index"])
-        while not it.finished:
-            ms[it.multi_index] = []
-            it.iternext()
+        # Initialize M as identity matrices everywhere, shape (...,2,2)
+        M = np.zeros(C11.shape + (2, 2), dtype=float)
+        M[..., 0, 0] = 1.0
+        M[..., 1, 1] = 1.0
+
+        # Define the three right-multiplication matrices
+        m1 = np.array([[1, 0], [0, -1]], dtype=float)
+        m2 = np.array([[0, 1], [1, 0]], dtype=float)
+        m3 = np.array([[1, -1], [0, 1]], dtype=float)
 
     for i in range(loops):
         mask1 = C12 < 0
         # m1 (flip) operation
         C12[mask1] *= -1
         if returnMs:
-            indices = np.where(mask1)
-            for idx in zip(*indices):
-                ms[idx].append(1)
+            M_mask = M[mask1]
+            if M_mask.shape[0] > 0:
+                # Right-multiply: M <- M @ m1
+                M[mask1] = apply_right_trans(m1, M_mask)
 
         mask2 = C22 < C11
         # m2 (swap) operation
         C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
         if returnMs:
-            indices = np.where(mask2)
-            for idx in zip(*indices):
-                ms[idx].append(2)
+            M_mask = M[mask2]
+            if M_mask.shape[0] > 0:
+                M[mask2] = apply_right_trans(m2, M_mask)
 
         mask3 = 2 * C12 > C11
         # Stop the loop if no changes are made
@@ -497,16 +537,16 @@ def lagrange_reduction_components(C11, C22, C12, loops=1000, returnMs=False):
         C22[mask3] += C11[mask3] - 2 * C12[mask3]
         C12[mask3] -= C11[mask3]
         if returnMs:
-            indices = np.where(mask3)
-            for idx in zip(*indices):
-                ms[idx].append(3)
+            M_mask = M[mask3]
+            if M_mask.shape[0] > 0:
+                M[mask3] = apply_right_trans(m3, M_mask)
 
         if i + 1 == loops and loops > 200:
             print("Warning: Not enough loops")
+            raise (RuntimeError("Not reduced"))
     # Modifies in place
-    # return C11, C22, C12
     if returnMs:
-        return ms
+        return M
 
 
 def lagrange_reduction_shears_vectorized(
@@ -726,29 +766,17 @@ def lagrange_reduction(C, loops=1000, returnM=False):
     # Extract views (no copy) from the promoted array
     C11, C22, C12 = C_view[..., 0, 0], C_view[..., 1, 1], C_view[..., 0, 1]
 
-    # Call original function (which modifies arrays in-place)
-    ms = lagrange_reduction_components(C11, C22, C12, loops=loops, returnMs=returnM)
+    # Call function (which modifies arrays in-place and returns M if requested)
+    M = lagrange_reduction_components(C11, C22, C12, loops=loops, returnMs=returnM)
 
     # Explicitly enforce symmetry
     C_view[..., 1, 0] = C_view[..., 0, 1]
 
     if returnM:
-        # Now we need to construct the matrix of M matrices
-        # M matches the (possibly promoted) shape of C_view
-        M = np.eye(2) * np.ones_like(C_view)  # broadcast 2×2 identity across shape
         # Set M to NaN where C has any NaN
-        M[np.isnan(C_view).any(axis=(-2, -1))] = np.nan
-
-        # Construct the M matrices one at a time (scalar-robust due to promotion)
-        for i in range(len(ms)):
-            for m in ms[i]:
-                if m == 1:
-                    lag_m1(M[i])
-                elif m == 2:
-                    lag_m2(M[i])
-                elif m == 3:
-                    lag_m3(M[i], n=1)
-        # Squeeze back to (2,2) if input was (2,2)
+        mask_nan = np.isnan(C_view).any(axis=(-2, -1))
+        if np.any(mask_nan):
+            M[mask_nan] = np.nan
         return M[0] if squeeze_back else M
     # When returnM is False we just modify C in place and return None
 

@@ -1191,15 +1191,15 @@ def plotPoincareTiling(
 
     for t, L in zip(transformations, labels):
         if "a" in quadrants:
-            df("green", t, label=rf"${L}$", label_va="bottom")
+            df("green", t, label=rf"$1{L}$", label_va="bottom")
         if L == r"\mathbf{I}":
             L = ""
         if "b" in quadrants:
-            df("blue", t @ swap, label=rf"$s{L}$", label_va="bottom")
+            df("blue", t @ swap, label=rf"$2{L}$", label_va="bottom")
         if "c" in quadrants:
-            df("red", t @ flip, label=rf"$f{L}$", label_va="top")
+            df("red", t @ flip, label=rf"$3{L}$", label_va="top")
         if "d" in quadrants:
-            df("purple", t @ swap @ flip, label=rf"$sf{L}$", label_va="top")
+            df("purple", t @ swap @ flip, label=rf"$4{L}$", label_va="top")
 
     # Add a thin black circle
     circleSize = (grid_size / 2) * zoom

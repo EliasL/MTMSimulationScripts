@@ -281,9 +281,9 @@ def plotReconnectionJob():
 
 if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
-    plotShearFiniteDifferenceDerivatives()
+    # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    # poincareTiling()
+    poincareTiling()
     # run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 

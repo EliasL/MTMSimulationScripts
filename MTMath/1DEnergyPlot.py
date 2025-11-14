@@ -314,9 +314,9 @@ def animate_nodes_and_forces(
 if __name__ == "__main__":
     plot_eulerian_forces()
     plot_forces()
-    animate_nodes_and_forces(
-        save_path="simple_shear_nodes_forces.mp4",
-        interval=30,
-        n_procs=1,  # try >1 if ContiEnergy calls are expensive
-    )
+    # animate_nodes_and_forces(
+    #     save_path="simple_shear_nodes_forces.mp4",
+    #     interval=30,
+    #     n_procs=1,  # try >1 if ContiEnergy calls are expensive
+    # )
     plt.show()
