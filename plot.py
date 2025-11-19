@@ -21,7 +21,11 @@ from MTMath.poincareTiling import (
     calculateSimpleFiniteDifferenceDerivatives,
     calculateShearFiniteDifferenceDerivatives,
     plotShearFiniteDifferenceDerivatives,
+    quadrantIdentification,
+    checkPoincareQuadrants,
+    drawPoincareGrid,
 )
+from MTMath.plotEnergy import generate_stress_grid, generate_energy_grid
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     get_csv_files,
@@ -283,7 +287,7 @@ if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    poincareTiling()
+    # poincareTiling()
     # run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
@@ -305,3 +309,4 @@ if __name__ == "__main__":
     # plotMaxForce()
     # plotMinimizationCriteriaData()
     # plotShowMinCriteria()
+    checkPoincareQuadrants()

@@ -93,7 +93,11 @@ def oneDPotentialDissordered():
 
 
 def generate_poincare_disk(
-    resolution=500, zoom=1, returnMask=False, transformation=None
+    resolution=500,
+    zoom=1,
+    returnMask=False,
+    transformation=None,
+    eps=1e-9,
 ):
     # Define the range for x and y based on the unit circle
     radius = 1.0 / zoom
@@ -107,7 +111,7 @@ def generate_poincare_disk(
     )
     # Calculate the mask for points inside the unit circle
     # (We don't need to use radius or zoom here because its only to avoid infinities anyway)
-    mask = (X**2 + Y**2) >= (1 - 1e-9)
+    mask = (X**2 + Y**2) >= (1 - eps)
     X[mask] = np.nan
     Y[mask] = np.nan
 
@@ -135,13 +139,14 @@ def generate_grid(
     lim=[None, 0.37],
     return_XY=False,
     poincareDisk=True,
+    eps=1e-9,
     **kwargs,
 ):
     x_min, x_max = 0, 1
     y_min, y_max = -0.5, 0.5
     # Poicare disk
     if poincareDisk:
-        C = generate_poincare_disk(resolution, zoom)
+        C = generate_poincare_disk(resolution, zoom, eps=eps)
     else:
         # Create the meshgrid for the x and y coordinates
         X, Y = np.meshgrid(
@@ -275,10 +280,20 @@ def transformC(C, transformation, inverse=False):
         return conTrans(C, M)
 
 
+def drawF(ax=None, F=None, transformation=None, leftApplied=False, **kwargs):
+    if transformation is not None:
+        if leftApplied:
+            F = transformation @ F
+        else:
+            F = F @ transformation
+    C = F.swapaxes(-1, -2) @ F
+    return drawC(ax=ax, C=C, **kwargs)
+
+
 def drawC(
-    ax,
-    C,
-    grid_size,
+    ax=None,
+    C=None,
+    grid_size=200,
     zoom=1,
     c="black",
     linestyle="-",
@@ -287,25 +302,28 @@ def drawC(
     scatter=False,
     arrow=False,
     label=None,
-    label_ha="left",
-    label_va="bottom",
-    label_color=None,
-    fontsize=20,
+    shade=False,
+    shadeColor=None,
     **kwargs,
 ):
+    if ax is None:
+        fig, ax = prepPoincareFig(grid_size=grid_size, zoom=zoom)
+
     x, y = C2PoincareDisk(C, transformation=transformation)
 
     valid = np.isfinite(x) & np.isfinite(y)
     if not np.any(valid):
-        return
+        return ax
 
     x_plot = x * zoom * grid_size / 2 + grid_size / 2
     y_plot = y * zoom * grid_size / 2 + grid_size / 2
 
+    plt_kwargs = {k: v for k, v in kwargs.items() if not k.startswith("label_")}
+
     if scatter:
-        ax.scatter(x_plot, y_plot, c=c, **kwargs)
-        xm = float(x_plot)
-        ym = float(y_plot)
+        ax.scatter(x_plot, y_plot, c=c, **plt_kwargs)
+        xm = x_plot
+        ym = y_plot
     elif arrow:
         # Expect two endpoints
         assert len(x_plot) == len(y_plot) == 2, "Arrow mode requires two points (x,y)."
@@ -317,27 +335,53 @@ def drawC(
                 arrowstyle="-|>", mutation_scale=20, color=c, linewidth=linewidth
             ),
         )
-        xm = (x_plot[0] + x_plot[1]) / 2
-        ym = (y_plot[0] + y_plot[1]) / 2
-    else:
-        ax.plot(x_plot, y_plot, c=c, linewidth=linewidth, linestyle=linestyle, **kwargs)
-        return  # No label in line mode
+        xm = [(x_plot[0] + x_plot[1]) / 2]
+        ym = [(y_plot[0] + y_plot[1]) / 2]
+    elif shade:
+        if shadeColor is None:
+            shadeColor = c
+        # We start from a blank grid, and flip each pixel that has an x,y
+        pixels = np.zeros((grid_size, grid_size))
 
-    if label is not None:
-        # ensure x and y are numbers (not arrays) and scatter is True
-        assert np.isscalar(xm) and np.isscalar(ym), "Label requires scalar x and y."
-        if label_color is None:
-            label_color = c
-        ax.text(
-            xm,
-            ym,
-            label,
-            ha=label_ha,
-            va=label_va,
-            fontsize=fontsize,
-            color=label_color,
-            zorder=3,
+        # Convert to integer pixel indices
+        ix = np.rint(x_plot).astype(int)
+        iy = np.rint(y_plot).astype(int)
+
+        # Keep only pixels inside the grid
+        mask = (ix >= 0) & (ix < grid_size) & (iy >= 0) & (iy < grid_size)
+        ix = ix[mask]
+        iy = iy[mask]
+
+        # Flip pixels (0 → 1)
+        np.add.at(pixels, (iy, ix), 1)
+        pixels = (pixels > 0).astype(float)
+        # Draw the pixels
+        drawRegion(
+            ax, region=pixels, grid_size=grid_size, zoom=zoom, label=label, **kwargs
         )
+
+    else:
+        ax.plot(
+            x_plot,
+            y_plot,
+            c=c,
+            linewidth=linewidth,
+            linestyle=linestyle,
+            **plt_kwargs,
+        )
+        return ax  # No label in line mode
+
+    if label is not None and not shade:
+        # If we shade, the label is taken care of in drawRegion
+        # ensure x and y are numbers (not arrays) and scatter is True
+        if isinstance(label, str):
+            label = [label]
+
+        assert len(label) == len(xm), "Number of labels does not match number of points"
+
+        for x, y, lab in zip(xm, ym, label):
+            addLabel(ax, x, y, lab, **kwargs)
+    return ax
 
 
 def drawRegion(ax, region, grid_size=200, zoom=1, label=None, **kwargs):
@@ -395,19 +439,37 @@ def drawRegion(ax, region, grid_size=200, zoom=1, label=None, **kwargs):
             xc = xs[ix].mean()
             yc = ys[iy].mean()
 
-            ax.text(
-                xc,
-                yc,
-                label,
-                ha=kwargs.pop("label_ha", "center"),
-                va=kwargs.pop("label_va", "center"),
-                fontsize=kwargs.pop("label_fontsize", 16),
-                color=kwargs.pop("label_color", "black"),
-                bbox=kwargs.pop("label_bbox", None),
-                zorder=kwargs.pop("label_zorder", 3),
-            )
+            addLabel(ax, xc, yc, label, **kwargs)
 
     return img
+
+
+def addLabel(
+    ax,
+    x,
+    y,
+    label,
+    label_x=0,
+    label_y=0,
+    label_ha="center",
+    label_va="center",
+    label_color="black",
+    label_fontsize=16,
+    label_bbox=None,
+    label_zorder=3,
+    **kwargs,
+):
+    ax.text(
+        x + label_x,
+        y + label_y,
+        label,
+        ha=label_ha,
+        va=label_va,
+        fontsize=label_fontsize,
+        color=label_color,
+        bbox=label_bbox,
+        zorder=label_zorder,
+    )
 
 
 def drawCScatter(
@@ -486,7 +548,35 @@ def drawCScatter(
     plt.colorbar(scatter, ax=ax, label="Kernel density estimate", pad=-0.0005)
 
 
-def drawFundamentalDomain(ax, shade, **kwargs):
+def getCFundamental(grid_size=200, zoom_val=1, transformation=None, returnMask=False):
+    C = generate_poincare_disk(grid_size, zoom_val, transformation=transformation)
+    # Get the grid from C (NxMx2x2)
+    r_mask = np.ones(C.shape[:2], dtype=bool)  # NxM
+
+    C11 = C[..., 0, 0]
+    C12 = C[..., 0, 1]
+    C22 = C[..., 1, 1]
+
+    # Region: 0 <= C12 <= min(C11, C22)
+    r_mask = np.logical_and(r_mask, 0 < C12)
+    r_mask = np.logical_and(r_mask, C12 < C11 / 2)
+    r_mask = np.logical_and(r_mask, C11 <= C22)
+    # Set C outside of fundamental domain to nan
+    C[np.logical_not(r_mask), :, :] = np.nan
+    if returnMask:
+        return C, r_mask
+    return C
+
+
+def getFFundamental(grid_size=200, zoom_val=1, transformation=None, returnMask=False):
+    C, r_mask = getCFundamental(grid_size, zoom_val, transformation, returnMask=True)
+    F = ContiEnergy.F_from_C(C)
+    if returnMask:
+        return F, r_mask
+    return F
+
+
+def drawFundamentalDomain(ax, shade=False, **kwargs):
     #  0<=C12<=C11/2, C11<=C22
     nr = 1000
     zero = np.array([0] * nr)
@@ -520,30 +610,21 @@ def drawFundamentalDomain(ax, shade, **kwargs):
 
         grid_size = kwargs.get("grid_size", 200)
         zoom_val = kwargs.get("zoom", 1)
-
-        # C has shape (grid, grid, 2, 2); r_mask is True on/outside the rim
-        G, r_mask = generate_poincare_disk(
-            grid_size, zoom_val, returnMask=True, transformation=transformation
+        C, r_mask = getCFundamental(
+            grid_size, zoom_val, transformation, returnMask=True
         )
-        r_mask = np.ones_like(r_mask, dtype=bool)
+        drawC(ax, C, shade=True, **kwargs)
 
-        G11 = G[..., 0, 0]
-        G12 = G[..., 0, 1]
-        G22 = G[..., 1, 1]
-
-        # Region: 0 <= C12 <= min(C11, C22)
-        r_mask = np.logical_and(r_mask, 0 < G12)
-        r_mask = np.logical_and(r_mask, G12 < G11 / 2)
-        r_mask = np.logical_and(r_mask, G11 <= G22)
-
-        drawRegion(
-            ax,
-            region=r_mask.astype(float),
-            **kwargs,
-        )
+        # drawRegion(
+        #     ax,
+        #     region=r_mask.astype(float),
+        #     **kwargs,
+        # )
 
 
-def drawPoincareGrid(ax, grid_size, zoom=1, depth=6, **kwargs):
+def drawPoincareGrid(ax=None, grid_size=200, zoom=1, depth=6, **kwargs):
+    if ax is None:
+        fig, ax = prepPoincareFig(grid_size=grid_size, zoom=zoom)
     nr = 1000
     zero = np.array([0] * nr)
     # VERTICAL LINE
@@ -576,6 +657,7 @@ def drawPoincareGrid(ax, grid_size, zoom=1, depth=6, **kwargs):
     C = np.array([[t, t / 2], [t / 2, (t**2 + 4) / (4 * t)]]).transpose(2, 0, 1)
 
     drawAllVariations(ax, C, grid_size, depth=depth, zoom=zoom, **kwargs)
+    return ax
 
 
 def conTrans(C, M):
@@ -588,14 +670,7 @@ def conTrans(C, M):
     C_arr = np.asarray(C)
     M_arr = np.asarray(M, dtype=C_arr.dtype)
 
-    if M_arr.ndim == 2:
-        # Broadcast a single 2x2 over all slices of C
-        return M_arr.T @ C_arr @ M_arr
-    if M_arr.ndim == 3:
-        # Per-slice transform; relies on batch matmul broadcasting
-        return np.swapaxes(M_arr, -1, -2) @ C_arr @ M_arr
-
-    raise ValueError("M must have shape (2,2) or (N,2,2)")
+    return np.swapaxes(M_arr, -1, -2) @ C_arr @ M_arr
 
 
 def _m3_const(dtype_str):
@@ -801,20 +876,6 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
     draw(T_inv(S(G)))
     draw(T_inv(G))
 
-    # drawC(ax, C, **kwargs)
-    # drawC(ax, down(C), **kwargs)
-    # drawC(ax, left(C), **kwargs)
-    # drawC(ax, left(up(C)), **kwargs)
-    # drawC(ax, left(up(left(C))), **kwargs)
-    # drawC(ax, left(left(up(left(C)))), **kwargs)
-
-    # drawC(ax, C, **kwargs)
-    # drawC(ax, right(upInv(C)), **kwargs)
-    # drawC(ax, upInv(C), **kwargs)
-    # drawC(ax, rightInv(C), **kwargs)
-    # drawC(ax, upInv(up(rightInv(C))), **kwargs)
-    # drawC(ax, rightInv(up(rightInv(C))), **kwargs)
-
     # Shade the region defined by 0 <= C12 <= min(C11, C22)
     # Shading does not work with transformations yet
     transformation = kwargs.get("transformation", None)
@@ -917,7 +978,7 @@ def drawAllVariations(
     return drawn
 
 
-def generateShearTransformations(depth):
+def generateShearTransformations(depth, startingPoint=None, leftApplied=False):
     # Generate all unique combinations of up, down, left, right moves up to the given depth
     # Remove duplicate transformations using a set
     transformation_keys = set()
@@ -940,14 +1001,17 @@ def generateShearTransformations(depth):
         l = np.array([[1, -1], [0, 1]], dtype=int)  # col1 <- col1 - col2
         u = np.array([[1, 0], [1, 1]], dtype=int)  # col2 <- col2 + col1
         d = np.array([[1, 0], [-1, 1]], dtype=int)  # col2 <- col2 - col1
-        recurse(F @ r, current_depth - 1, current_label=current_label + "r")
-        recurse(F @ l, current_depth - 1, current_label=current_label + "l")
-        recurse(F @ u, current_depth - 1, current_label=current_label + "u")
-        recurse(F @ d, current_depth - 1, current_label=current_label + "d")
+        for t, label in zip([r, l, u, d], ["r", "l", "u", "d"]):
+            if leftApplied:
+                recurse(t @ F, current_depth - 1, current_label=current_label + label)
+            else:
+                recurse(F @ t, current_depth - 1, current_label=current_label + label)
 
-    # Start with the identity matrix
-    identity_C = np.array([[1, 0], [0, 1]], dtype=float)
-    recurse(identity_C, depth)
+    if startingPoint is None:
+        # Start with the identity matrix
+        startingPoint = np.array([[1, 0], [0, 1]], dtype=float)
+
+    recurse(startingPoint, depth)
     return transformations, labels
 
 
@@ -1057,12 +1121,40 @@ def plotEnergyField(
         )
 
 
-def plotPoincareDisk(
-    ax=None, fig=None, save=True, grid_size=200, depth=5, transformation="none"
-):
+def prepPoincareFig(grid_size=200, zoom=1):
+    # Zoom does not always work properly. Be careful
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    # Add a thin black circle
+    circleSize = (grid_size / 2) * zoom
+    circle_center_x = grid_size / 2
+    circle_center_y = grid_size / 2
+    circle = Circle(
+        (circle_center_x, circle_center_y),
+        circleSize,
+        color="black",
+        fill=False,
+        linewidth=1,
+    )
+    fig.gca().add_patch(circle)
+
+    ax.set_xticks(
+        np.linspace(0, grid_size, 5),
+        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
+    )
+    ax.set_yticks(
+        np.linspace(0, grid_size, 5),
+        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
+    )
+    ax.set_xlabel(r"$x_p$")
+    ax.set_ylabel(r"$y_p$")
+    return fig, ax
+
+
+def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation="none"):
     # Make plot of fundamental domain
     if ax is None:
-        fig, ax = plt.subplots(figsize=(6, 6))
+        fig, ax = prepPoincareFig(grid_size=grid_size)
     zoom = 1
 
     drawPoincareGrid(
@@ -1112,30 +1204,6 @@ def plotPoincareDisk(
     #     transformation=transformation,
     # )
 
-    # Add a thin black circle
-    circleSize = (grid_size / 2) * zoom
-    circle_center_x = grid_size / 2
-    circle_center_y = grid_size / 2
-    circle = Circle(
-        (circle_center_x, circle_center_y),
-        circleSize,
-        color="black",
-        fill=False,
-        linewidth=1,
-    )
-    fig.gca().add_patch(circle)
-
-    ax.set_xticks(
-        np.linspace(0, grid_size, 5),
-        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-    )
-    ax.set_yticks(
-        np.linspace(0, grid_size, 5),
-        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-    )
-    ax.set_xlabel(r"$x_p$")
-    ax.set_ylabel(r"$y_p$")
-
     plt.tight_layout()
     if save:
         import os
@@ -1147,19 +1215,20 @@ def plotPoincareDisk(
         plt.show()
 
 
-def plotPoincareTiling(
+def plotPoincareCTiling(
     ax=None,
-    fig=None,
     save=True,
     grid_size=1000,
     depth=2,
     quadrants="abcd",
     show=False,
     use_labels=True,
+    leftApplied=False,
+    arrows=False,
 ):
     # Make plot of fundamental domain
     if ax is None:
-        fig, ax = plt.subplots(figsize=(6, 6))
+        fig, ax = prepPoincareFig(grid_size=grid_size)
     zoom = 1
 
     drawPoincareGrid(
@@ -1169,7 +1238,7 @@ def plotPoincareTiling(
         depth=6,
         c="gray",
     )
-    transformations, labels = generateShearTransformations(depth=depth)
+    Fs, labels = generateShearTransformations(depth=depth, leftApplied=leftApplied)
 
     swap = np.array([[0, 1], [1, 0]], dtype=int)  # col1 <- col1 + col2
     flip = np.array([[-1, 0], [0, 1]], dtype=int)  # col1 <- col1 - col2
@@ -1189,7 +1258,7 @@ def plotPoincareTiling(
             label_va=label_va if quadrants == "abcd" else "center",
         )
 
-    for t, L in zip(transformations, labels):
+    for t, L in zip(Fs, labels):
         if "a" in quadrants:
             df("green", t, label=rf"$1{L}$", label_va="bottom")
         if L == r"\mathbf{I}":
@@ -1201,29 +1270,21 @@ def plotPoincareTiling(
         if "d" in quadrants:
             df("purple", t @ swap @ flip, label=rf"$4{L}$", label_va="top")
 
-    # Add a thin black circle
-    circleSize = (grid_size / 2) * zoom
-    circle_center_x = grid_size / 2
-    circle_center_y = grid_size / 2
-    circle = Circle(
-        (circle_center_x, circle_center_y),
-        circleSize,
-        color="black",
-        fill=False,
-        linewidth=1,
-    )
-    fig.gca().add_patch(circle)
-
-    ax.set_xticks(
-        np.linspace(0, grid_size, 5),
-        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-    )
-    ax.set_yticks(
-        np.linspace(0, grid_size, 5),
-        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-    )
-    ax.set_xlabel(r"$x_p$")
-    ax.set_ylabel(r"$y_p$")
+    if arrows and False:
+        center_point = np.array([[0.86, 0.20], [0.20, 1.21]])  # Random central point
+        points_to_transform = [center_point]
+        nr_points = len(points_to_transform)
+        for i in range(depth):
+            for t in generateShearTransformations(i, leftApplied=leftApplied):
+                for startC in points_to_transform:
+                    drawC(
+                        ax,
+                        np.stack(
+                            [
+                                startC,
+                            ]
+                        ),
+                    )
 
     # plt.tight_layout()
     if save:
@@ -1231,14 +1292,60 @@ def plotPoincareTiling(
 
         if not os.path.exists("Plots"):
             os.makedirs("Plots")
-        path = (
-            f"Plots/poincareDisk_{quadrants}_{depth}{'_lab' if use_labels else ''}.pdf"
-        )
+        path = f"Plots/poincareDisk_{'left' if leftApplied else 'right'}_{quadrants}_{depth}{'_lab' if use_labels else ''}.pdf"
         plt.savefig(path, dpi=500, bbox_inches="tight")
 
         print(f"Saved plot to {path}")
         if show:
             plt.show()
+
+    return ax
+
+
+def plotPoincareFTiling(
+    ax=None,
+    save=True,
+    grid_size=1000,
+    depth=2,
+    quadrants="abcd",
+    show=False,
+    use_labels=True,
+    leftApplied=False,
+    arrows=False,
+):
+    # Make plot of fundamental domain
+    if ax is None:
+        fig, ax = prepPoincareFig(grid_size=grid_size)
+    zoom = 1
+
+    drawPoincareGrid(
+        ax,
+        grid_size=grid_size,
+        zoom=zoom,
+        depth=6,
+        c="gray",
+    )
+    Fs, labels = generateShearTransformations(depth=depth, leftApplied=leftApplied)
+
+    F = getFFundamental(grid_size=grid_size)
+    for t in Fs:
+        drawF(
+            ax, F, transformation=t, leftApplied=True, grid_size=grid_size, shade=True
+        )
+
+    # plt.tight_layout()
+    if save:
+        import os
+
+        if not os.path.exists("Plots"):
+            os.makedirs("Plots")
+        path = f"Plots/poincareDisk_{'left' if leftApplied else 'right'}_{quadrants}_{depth}{'_lab' if use_labels else ''}.pdf"
+        plt.savefig(path, dpi=500, bbox_inches="tight")
+
+        print(f"Saved plot to {path}")
+        if show:
+            plt.show()
+    return ax
 
 
 def plotPoincarePointMapping(
@@ -1250,7 +1357,7 @@ def plotPoincarePointMapping(
 ):
     # Make plot of fundamental domain
     if ax is None:
-        fig, ax = plt.subplots(figsize=(6, 6))
+        fig, ax = prepPoincareFig(grid_size=grid_size)
     zoom = 1
 
     drawPoincareGrid(
@@ -1323,30 +1430,6 @@ def plotPoincarePointMapping(
     drawPoint(applyCongruenceTransformations(p2, "u"), "gray")
     drawPoint(applyCongruenceTransformations(p2, "l"), "gray")
     drawPoint(applyCongruenceTransformations(p2, "ul"), "green", label="C")
-
-    # Add a thin black circle
-    circleSize = (grid_size / 2) * zoom
-    circle_center_x = grid_size / 2
-    circle_center_y = grid_size / 2
-    circle = Circle(
-        (circle_center_x, circle_center_y),
-        circleSize,
-        color="black",
-        fill=False,
-        linewidth=1,
-    )
-    fig.gca().add_patch(circle)
-
-    ax.set_xticks(
-        np.linspace(0, grid_size, 5),
-        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-    )
-    ax.set_yticks(
-        np.linspace(0, grid_size, 5),
-        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-    )
-    ax.set_xlabel(r"$x_p$")
-    ax.set_ylabel(r"$y_p$")
 
     # plt.tight_layout()
     if save:

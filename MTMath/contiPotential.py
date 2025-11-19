@@ -141,43 +141,51 @@ class EnergyFunction:
         )
 
     @staticmethod
-    def F_from_C(C, tol=1e-15, upper=True):
+    def F_from_C(C):
         """
-        C = F^T F
-        If upper=True  -> enforce F21 = 0   (upper-triangular F)
-        If upper=False -> enforce F12 = 0   (lower-triangular F)
+        Return the symmetric positive-definite square root of C.
+
+        Given C = F^T F (right Cauchy–Green tensor), this function returns
+        the unique symmetric positive-definite tensor U such that
+
+            U^T U = C,
+
+        i.e. the right stretch U in the polar decomposition F = R U.
+
+        Note:
+            From C alone the rotation R is not identifiable; only U is.
+            The `upper` argument is kept only for backward compatibility
+            and is ignored.
         """
-        C11 = C[..., 0, 0]
-        C12 = C[..., 0, 1]
-        C22 = C[..., 1, 1]
+        C = np.asarray(C)
+        assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
 
-        if upper:
-            # F = [[F11, F12],
-            #      [0,   F22]]
-            F11 = np.sqrt(np.maximum(C11, tol))
-            F12 = C12 / F11
-            r_sq = C22 - F12**2
-            F22 = np.sqrt(np.maximum(r_sq, 0.0))
+        # Track NaNs to reinsert later
+        nan_mask = np.isnan(C).any(axis=(-1, -2))
 
-            zeros = np.zeros_like(F11)
-            F = np.stack(
-                [np.stack([F11, F12], axis=-1), np.stack([zeros, F22], axis=-1)],
-                axis=-2,
-            )
+        # Create a safe copy where NaN blocks are replaced with identity
+        C_safe = C.copy()
+        C_safe[nan_mask] = np.eye(2)
 
-        else:
-            # F = [[F11, 0],
-            #      [F21, F22]]
-            F22 = np.sqrt(np.maximum(C22, tol))
-            F21 = C12 / F22
-            r_sq = C11 - F21**2
-            F11 = np.sqrt(np.maximum(r_sq, 0.0))
+        # Eigen-decomposition of symmetric 2x2 blocks (vectorized)
+        # C = Q diag(λ) Q^T
+        evals, evecs = np.linalg.eigh(C_safe)
 
-            zeros = np.zeros_like(F11)
-            F = np.stack(
-                [np.stack([F11, zeros], axis=-1), np.stack([F21, F22], axis=-1)],
-                axis=-2,
-            )
+        # Check positive semi-definiteness
+        assert np.all(evals >= 0), "Negative Eigen values"
+        sqrt_evals = np.sqrt(evals)
+
+        # Build diag(sqrt(λ)) as a matrix with the same broadcast shape as C
+        sqrt_diag = np.zeros_like(C, dtype=float)
+        sqrt_diag[..., 0, 0] = sqrt_evals[..., 0]
+        sqrt_diag[..., 1, 1] = sqrt_evals[..., 1]
+
+        # U = Q diag(sqrt(λ)) Q^T
+        F = evecs @ sqrt_diag @ evecs.swapaxes(-1, -2)
+
+        # Restore NaNs where original C had NaNs
+        if np.any(nan_mask):
+            F[nan_mask, :, :] = np.nan
 
         return F
 
@@ -267,13 +275,13 @@ class EnergyFunction:
         # else:
         #     print("All 2x2 matrices are equal (accounting for NaNs).")
 
-        def mapBack(M, C_R):  # returns M C M^T
-            Minv = np.linalg.inv(M)
-            return np.swapaxes(Minv, -1, -2) @ C_R @ Minv
+        # def mapBack(M, C_R):  # returns M C M^T
+        #     Minv = np.linalg.inv(M)
+        #     return np.swapaxes(Minv, -1, -2) @ C_R @ Minv
 
         # Which M maps C_R -> C ?
         # print("M_2 back to C:", np.allclose(C, congruence(M_2, C_R), equal_nan=True))
-        print("M_R back to C:", np.allclose(C, mapBack(M_R, C_R), equal_nan=True))
+        # print("M_R back to C:", np.allclose(C, mapBack(M_R, C_R), equal_nan=True))
 
         sigma = cls.sigma_from_C_R(C_R, beta=beta, K=K, noise=noise)
 
@@ -803,6 +811,20 @@ def lag_m3(matrix, n=1):
     multiplier_matrix = np.array([[1, -n], [0, 1]])
     # Perform matrix multiplication on the last two axes
     np.einsum("...ij,...jk->...ik", matrix, multiplier_matrix, out=matrix)
+
+
+# Shear along an angle theta
+def SShear(eps, theta=0) -> np.ndarray:
+    # Shear along 45 degrees
+    c = np.cos(theta)
+    s = np.sin(theta)
+    return np.array(
+        [
+            [1.0 - eps * c * s, eps * c * c],
+            [-eps * s * s, 1.0 + eps * c * s],
+        ],
+        dtype=float,
+    )
 
 
 def elastic_reduction(C11, C22, C12, loops=1000):

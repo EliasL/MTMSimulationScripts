@@ -1,13 +1,15 @@
 import matplotlib.pyplot as plt
 from .plotEnergy import (
-    plotPoincareTiling,
     plotPoincarePointMapping,
+    plotPoincareCTiling,
+    plotPoincareFTiling,
     applyCongruenceTransformations,
+    drawC,
+    drawPoincareGrid,
+    generateShearTransformations,
 )
 import numpy as np
-from MTMath.contiPotential import ContiEnergy
-
-EPS = 1e-8
+from MTMath.contiPotential import ContiEnergy, SShear
 
 
 # Energy adapter (expects full 2x2 C)
@@ -16,10 +18,17 @@ def energy_from_C(C_: np.ndarray) -> float:
 
 
 # Generic central 3-point finite difference for φ along any matrix path C(ε)
-def central_diff_phi(path_fn, eps: float = EPS) -> float:
+def central_diff_phi(path_fn, eps: float = 1e-6) -> float:
     C_plus = path_fn(+eps)
     C_minus = path_fn(-eps)
     return (energy_from_C(C_plus) - energy_from_C(C_minus)) / (2.0 * eps)
+
+
+def diff(F, eps=1e-6):
+    directions = (0, np.pi / 4)
+    return [
+        central_diff_phi(lambda e: left_apply(F, SShear(e, d)), eps) for d in directions
+    ]
 
 
 # Convenience: congruence update C' = M^T C M
@@ -106,18 +115,6 @@ def plotShearFiniteDifferenceDerivatives():
         # Pure shear
         return np.array([[1.0 + eps, 0.0], [0.0, 1.0 / (1.0 + eps)]], dtype=float)
 
-    def S(eps, theta=np.pi / 4) -> np.ndarray:
-        # Shear along 45 degrees
-        c = np.cos(theta)
-        s = np.sin(theta)
-        return np.array(
-            [
-                [1.0 - eps * c * s, eps * c * c],
-                [-eps * s * s, 1.0 + eps * c * s],
-            ],
-            dtype=float,
-        )
-
     # Build right-Cauchy–Green tensor from an upper shear F(γ)
     def C_from_gamma(g: float, horizontal=True) -> np.ndarray:
         A = np.array(
@@ -183,7 +180,9 @@ def plotShearFiniteDifferenceDerivatives():
     )
     dphi_dS = np.array(
         [
-            central_diff_phi(lambda e, F=F_from_gamma4(g): left_apply(F, S(e)), eps)
+            central_diff_phi(
+                lambda e, F=F_from_gamma4(g): left_apply(F, SShear(e, np.pi / 4)), eps
+            )
             for g in gamma
         ]
     )
@@ -314,36 +313,160 @@ def plotShearFiniteDifferenceDerivatives():
 
 
 def poincareTiling():
-    fig, (ax) = plt.subplots(1, 1, figsize=(10, 10))
-
+    ax = None
     # plotPoincarePointMapping(ax=ax, fig=fig)
     # ax.clear()
-
-    # plotPoincareTiling(ax=ax, fig=fig, depth=1, quadrants="a")
-    # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=2, quadrants="a")
-    # ax.clear()
-    plotPoincareTiling(ax=ax, fig=fig, depth=3, quadrants="abcd")
+    ax = plotPoincareFTiling(ax=ax, depth=1, quadrants="a", arrows=True)
     ax.clear()
-    plotPoincareTiling(ax=ax, fig=fig, depth=3, quadrants="ab")
-    ax.clear()
-    plotPoincareTiling(ax=ax, fig=fig, depth=3, quadrants="cd")
+    # plotPoincareTiling(ax=ax, depth=2, quadrants="a")
+    # ax.clear()
+    # plotPoincareTiling(ax=ax, depth=3, quadrants="abcd")
+    # ax.clear()
+    # plotPoincareTiling(ax=ax, depth=3, quadrants="ab")
+    # ax.clear()
+    # plotPoincareTiling(ax=ax, depth=3, quadrants="cd")
 
-    plotPoincareTiling(ax=ax, fig=fig, depth=4, quadrants="abcd")
-    ax.clear()
-    plotPoincareTiling(ax=ax, fig=fig, depth=4, quadrants="ab")
-    ax.clear()
-    plotPoincareTiling(ax=ax, fig=fig, depth=4, quadrants="cd")
+    # plotPoincareTiling(ax=ax, depth=4, quadrants="abcd")
+    # ax.clear()
+    # plotPoincareTiling(ax=ax, depth=4, quadrants="ab")
+    # ax.clear()
+    # plotPoincareTiling(ax=ax, depth=4, quadrants="cd")
 
     # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=1, use_labels=False, quadrants="a")
+    # plotPoincareTiling(ax=ax, depth=1, use_labels=False, quadrants="a")
     # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=2, use_labels=False, quadrants="a")
+    # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="a")
     # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=2, use_labels=False, quadrants="abcd")
+    # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="abcd")
     # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=2, use_labels=False, quadrants="ab")
+    # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="ab")
     # ax.clear()
-    # plotPoincareTiling(ax=ax, fig=fig, depth=2, use_labels=False, quadrants="cd")
+    # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="cd")
 
-    plt.show()
+
+def quadrantIdentification(F, show=False):
+    step = 0.4
+    directions = [i * np.pi / 4 for i in range(4)]
+    # directions = [-i * np.pi / 2 for i in range(2)]
+
+    shears = [SShear(s, d) for s in (step, -step) for d in directions]
+    direction = np.array([s / abs(s) for s in (step, -step) for d in directions])
+    labels = np.array(
+        [("-" if s == -1 else "") + str(d) for s in (1, -1) for d in range(4)]
+    )
+
+    shears = [SShear(s, d) for s in (step, -step) for d in directions]
+    # for s, l in zip(shears, labels):
+    #     print(l)
+    #     print(s)
+    direction = np.array([s / abs(s) for s in (step, -step) for d in directions])
+
+    # print("\n".join(map(str, shears)))
+
+    newF = [S @ F for S in shears]
+    newC = np.array([F.T @ F for F in newF])
+    energies = np.array([energy_from_C(C) for C in newC])
+    derivative_like = energies / direction
+    derivatives = np.array([diff(F) for F in newF])
+
+    # Show why we should use eps=1e-6
+    # exp = [10**e for e in np.linspace(-1, -15, 100)]
+    # d = [diff(newF[0], e)[0] for e in exp]
+    # plt.plot(exp, abs(np.array(d) - 0.08097078563196192))
+    # plt.loglog()
+    # plt.show()
+
+    # """
+    # Values in elastic domain:
+    # """
+    # point_1 = [0.08097117, 0.03222707]
+    # point_2 = [-0.08097117, 0.03222707]
+    # point_3 = [-0.08097117, -0.03222707]
+    # point_4 = [0.08097117, -0.03222707]
+    # points = np.array([point_1, point_2, point_3, point_4])
+    # # We define this arbitrary order, and we now make sure each of the
+    # # derivatives fits uniquely will one of these 4 points, and we
+    # # return them in that order.
+    # # For now, let's try to check if the order is always the same:
+
+    # assert np.allclose(derivatives, points), "Not the same order"
+
+    """
+    Energies in elastic domain:
+    """
+    point0 = 0.0864664948363627
+    point1 = 0.1603721122909092
+    point2 = 0.0864664948363627
+    point3 = 0.1603721122909092
+    point_0 = -0.0864664948363627
+    point_1 = -0.1603721122909083
+    point_2 = -0.0864664948363627
+    point_3 = -0.1603721122909083
+
+    points = [
+        point0,
+        point1,
+        point2,
+        point3,
+        point_0,
+        point_1,
+        point_2,
+        point_3,
+    ]
+    domains = [
+        (point0, point_3),
+        (point_0, point1),
+        (point_1, point2),
+        (point3, point_2),
+    ]
+    # for d in domains:
+    #     print(d)
+    if not np.allclose(derivative_like, points, atol=1e-8):
+        show = True
+        error = True
+    else:
+        error = False
+
+    if show:
+        ax = drawPoincareGrid()
+        drawC(
+            ax,
+            newC,
+            scatter=True,
+            label=labels,
+            label_x=1,
+            fontsize=18,
+            s=5,
+        )
+        # [print(f"point {i + 1}: {c}") for i, c in enumerate(derivatives)]
+        [
+            print(f"point{l} = {c}".replace("-", "_"))
+            for l, c in zip(labels, derivative_like)
+        ]
+        plt.tight_layout()
+        path = "Plots/quadrantIdentification.pdf"
+        plt.savefig(path)
+        print(f"Fig saved to {path}")
+        plt.show()
+        if error:
+            for i, j in zip(derivative_like, points):
+                print(i, j)
+            raise RuntimeError("Derivatives have changed")
+
+
+def checkPoincareQuadrants(depth=6):
+    # F = np.array([[1, 1], [0, 1]])
+    # F = [[1, 0], [1, 1]] @ F
+    F = np.array([[1, 0], [0, 1]])
+    # # quadrantIdentification(F, show=False)
+    # print(F)
+
+    # F = np.array([[1, 0], [1, 1]])
+    # F = F @ [[1, 1], [0, 1]]
+    # print(F)
+    # quadrantIdentification(F, show=True)
+    # Generate all F:
+    Fs, labels = generateShearTransformations(depth, startingPoint=F, leftApplied=False)
+
+    for F in Fs:
+        quadrantIdentification(F, show=False)

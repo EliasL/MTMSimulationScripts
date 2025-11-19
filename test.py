@@ -1,44 +1,23 @@
-import numpy as np
+import sympy as sp
 
+# Symbols
+eps, theta = sp.symbols("eps theta", real=True)
 
-# w-functions cause warnings
-# s-functions are "safe" and do not cause warnings
+c = sp.cos(theta)
+s = sp.sin(theta)
 
+# Simple shear
+S = sp.Matrix([[1, eps], [0, 1]])
 
-# def w1():
-#     p1 = np.array([[0.0, 1], [1, 1]])
-#     A0 = p1.T @ p1
+# Rotation matrix
+R = sp.Matrix([[c, -s], [s, c]])
 
+# Two different “rotations” of S
+S_theta_RSRt = sp.simplify(R * S * R.T)  # R S R^T
+S_theta_RtSR = sp.simplify(R.T * S * R)  # R^T S R
 
-# w1()
+print("R S R^T =")
+sp.pprint(S_theta_RSRt)
 
-
-"""
-This does not cause warning
-p1 = np.array([[1, 1], [0.0, 1]])
-A0 = p1.T @ p1
-"""
-
-
-# def s1():
-#     p1 = np.array([[0, 1], [1, 1]])
-#     A0 = p1.T @ p1
-
-
-# s1()
-
-
-# def s2():
-#     p1 = np.array([[0, 1.0], [1, 1]], dtype=float)
-#     A0 = p1.T @ p1
-
-
-# s2()
-
-
-def s3():
-    p1 = np.array([[1.0, 0.3], [0, 1.0]])
-    A0 = p1.T @ p1
-
-
-s3()
+print("\nR^T S R =")
+sp.pprint(S_theta_RtSR)

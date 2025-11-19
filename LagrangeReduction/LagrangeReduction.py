@@ -4,6 +4,7 @@ import numpy as np
 from collections import deque
 from tqdm import tqdm
 from matplotlib import pyplot as plt
+from MTMath.contiPotential import EnergyFunction
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -50,33 +51,8 @@ def F2C(F):
     return C
 
 
-def C2F(C):
-    """
-    We are free to choose the rotation of F, therefore we set the first
-    vector to have a y-component of 0.
-
-                     a  b           a^2 ab
-    If we assume F = 0  d, then C = ab  b^2+d^2
-    We now only have to choose between a negative and positive sign, and we
-    choose positive
-    """
-
-    if C.ndim == 2:
-        a = np.sqrt(C[0, 0])
-        b = C[0, 1] / a
-        d = np.sqrt(C[1, 1] - b * b)
-        return np.array([[a, b], [0, d]])
-
-    elif C.ndim == 3:
-        a = np.sqrt(C[:, 0, 0])
-        b = C[:, 0, 1] / a
-        d = np.sqrt(C[:, 1, 1] - b * b)
-        zero = np.zeros_like(a)
-        return np.array([[a, b], [zero, d]]).transpose(2, 0, 1)
-
-
 def C2V(C):
-    F = C2F(C)
+    F = EnergyFunction.F_from_C(C)
     return F[:, 0], F[:, 1]
 
 

@@ -27,8 +27,9 @@ from MTMath.plotEnergy import (
     generate_energy_grid,
     generate_angle_region,
     generate_stress_grid,
+    drawPoincareGrid,
 )
-from MTMath.contiPotential import ZeroEnergy, ContiEnergy, SuperSimple
+from MTMath.contiPotential import ZeroEnergy, ContiEnergy, SuperSimple, SShear
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -78,6 +79,12 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.volumetricEnergy = True
         self.energy_lim = [0, 0.37]
         self.energyFunc = ContiEnergy  # SuperSimple
+
+        # Div
+        self.showHistory = False
+        self.showStress = True
+        self.showCircles = True
+        self.showRightOrth = False
 
         # Basic widget setup
         self.setWindowTitle("Lagrange reduction with Poincaré Disk")
@@ -138,7 +145,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.LR_VP.setVisible(reduced=not self.LR_VP.isVisible(reduced=True))
         self.GV_VP.setVisible(reduced=not self.GV_VP.isVisible(reduced=True))
         self.reduced_marker.setVisible(not self.reduced_marker.isVisible())
-        self.showHistory = True
 
         self.show()
 
@@ -484,8 +490,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     def drawMetricSpaceBackground(self):
         # Draw lines
+        return
         self.drawCircle(1)
-        nr = 1000
+
+        nr = 100
         one = np.array([1] * nr)
         zero = np.array([0] * nr)
 
@@ -499,7 +507,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         """
         See Note 1 at the bottom of the document for more theory on what follows
         """
-        depth = 5
+        depth = 6
 
         # VERTICAL LINE
         t = np.sinh(np.linspace(np.arcsinh(1), np.arcsinh(2 / np.sqrt(3)), nr))
@@ -692,30 +700,102 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.GV_bg1.setOpacity(0)  # Set opacity to 0 to hide it
         self.GV_bg2.setOpacity(0)  # Set opacity to 0 to hide it
 
+    @staticmethod
+    def fig_to_pg(fig):
+        # Ensure the figure renders exactly the pixels we expect
+        fig.canvas.draw()
+
+        # Extract RGBA buffer directly
+        w, h = fig.canvas.get_width_height()
+        buf = np.frombuffer(fig.canvas.tostring_argb(), dtype=np.uint8)
+        buf = buf.reshape((h, w, 4))
+
+        # Matplotlib gives ARGB; convert to RGBA
+        # buf[..., 0] = A, 1 = R, 2 = G, 3 = B
+        rgba = np.empty_like(buf)
+        rgba[..., 0] = buf[..., 1]  # R
+        rgba[..., 1] = buf[..., 2]  # G
+        rgba[..., 2] = buf[..., 3]  # B
+        rgba[..., 3] = buf[..., 0]  # A
+
+        shiftx = -1
+        shifty = 0
+        if not (shiftx == 0 and shifty == 0):
+            # Allocate output filled with zeros
+            shifted = np.zeros_like(rgba)
+
+            # Compute valid source & destination ranges
+            src_y0 = max(0, -shifty)
+            src_y1 = min(rgba.shape[0], rgba.shape[0] - shifty)
+            dst_y0 = max(0, shifty)
+            dst_y1 = min(rgba.shape[0], rgba.shape[0] + shifty)
+
+            src_x0 = max(0, -shiftx)
+            src_x1 = min(rgba.shape[1], rgba.shape[1] - shiftx)
+            dst_x0 = max(0, shiftx)
+            dst_x1 = min(rgba.shape[1], rgba.shape[1] + shiftx)
+
+            # Copy data into shifted buffer
+            shifted[dst_y0:dst_y1, dst_x0:dst_x1] = rgba[src_y0:src_y1, src_x0:src_x1]
+        else:
+            shifted = rgba
+
+        # Create pg.ImageItem
+        img_item = pg.ImageItem(shifted.swapaxes(1, 0))
+
+        return img_item
+
     def drawEnergyBackground(self):
-        ppu = 200  # Pixels per unit
+        ppu = 2001  # Pixels per unit
         folder = "precomputedEnergyBackgrounds"
+        component = (0, 1)
+        quantity = f"stress{component}" if self.showStress else "energy"
         self.triangularEnergy = None
         self.squareEnergy = None
         self.angleRegionImage = None
 
         # Generate energy images for triangular and square shapes
         for shape, beta, offset in zip(["triangular", "square"], [4, -0.25], [-10, -1]):
-            fName = f"{SCRIPT_DIR}/{folder}/{ppu},{shape},Poincare,LRBackround.png"
+            fName = f"{SCRIPT_DIR}/{folder}/{ppu},{shape},{quantity},Poincare,LRBackround.png"
             # Check if file exists, if not generate and save
-            if os.path.isfile(fName) and ppu >= 1000:
+            if os.path.isfile(fName) and ppu >= 500 and False:
                 energyImage = self.loadImage(fName)
             else:
-                # energy_grid = generate_energy_grid(
-                #     resolution=ppu, beta=beta, K=0, zeroReference=True
-                # ).transpose()
-                energy_grid = generate_stress_grid(
-                    resolution=ppu,
-                    beta=beta,
-                    lim=[-0.3, 0.3],
-                )[..., 0, 1].transpose()
+                # BACKGROUND stress/energy
+                from matplotlib import pyplot as plt
 
-                energyImage = pg.ImageItem(energy_grid)
+                dpi = 400  # any value, just keep it consistent
+                fig = plt.figure(figsize=(ppu / dpi, ppu / dpi), dpi=dpi)
+
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.set_axis_off()
+
+                # Transparent background so only grid lines are opaque
+                fig.patch.set_alpha(0)
+                ax.set_facecolor((0, 0, 0, 0))
+                drawPoincareGrid(
+                    ax,
+                    grid_size=ppu,
+                    depth=6,
+                    c=(0.2, 0.2, 0.2, 0.4),
+                    linewidth=ppu / (4 * dpi),
+                )
+
+                if not self.showStress:
+                    field = generate_energy_grid(
+                        resolution=ppu, beta=beta, K=0, zeroReference=True, eps=1e-2
+                    )
+                else:
+                    field = generate_stress_grid(
+                        resolution=ppu, beta=beta, lim=[-0.3, 0.3], eps=1e-2
+                    )[..., *component]
+                ax.imshow(
+                    field,
+                    origin="lower",
+                    cmap="coolwarm",
+                )
+
+                energyImage = self.fig_to_pg(fig)
                 energyImage.setLookupTable(COOLWARM_LUT)
                 energyImage.save(fName)
             if offset == -1:
@@ -728,21 +808,21 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 self.drawHeatMap(energyImage, offset, self.PCS_plot, 1, 1),
             )
 
-        # Generate angle region image with a different colormap
-        fName_angle = f"{SCRIPT_DIR}/{folder}/{ppu},angleRegion,LRBackround.png"
-        if os.path.isfile(fName_angle) and False:
-            angleRegionImage = self.loadImage(fName_angle)
-        else:
-            angle_region_data = generate_angle_region(resolution=ppu).transpose()
-            angleRegionImage = pg.ImageItem(angle_region_data)
-            angleRegionImage.setLookupTable(VIRIDIS_LUT)
-            angleRegionImage.save(fName_angle)
+        # # Generate angle region image with a different colormap
+        # fName_angle = f"{SCRIPT_DIR}/{folder}/{ppu},angleRegion,LRBackround.png"
+        # if os.path.isfile(fName_angle) and False:
+        #     angleRegionImage = self.loadImage(fName_angle)
+        # else:
+        #     angle_region_data = generate_angle_region(resolution=ppu).transpose()
+        #     angleRegionImage = pg.ImageItem(angle_region_data)
+        #     angleRegionImage.setLookupTable(VIRIDIS_LUT)
+        #     angleRegionImage.save(fName_angle)
 
-        angleRegionImage.setOpacity(0.5)
-        self.angleRegionImage = self.drawHeatMap(
-            angleRegionImage, 0, self.PCS_plot, 1, 1
-        )
-        self.angleRegionImage.setVisible(False)
+        # angleRegionImage.setOpacity(0.5)
+        # self.angleRegionImage = self.drawHeatMap(
+        #     angleRegionImage, 0, self.PCS_plot, 1, 1
+        # )
+        # self.angleRegionImage.setVisible(False)
 
     @staticmethod
     def loadImage(fileName):
@@ -1153,27 +1233,52 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.makeCircles(F)
 
     def makeCircles(self, F):
+        if not self.showCircles:
+            return
+
         def Sx(g):
-            return S(g, 0)
+            return SShear(g, 0)
 
         def Sy(g):
-            return S(g, np.pi / 2)
+            return SShear(g, np.pi / 2)
 
         def Sxy(g):
-            return S(g, np.pi / 4)
+            return SShear(g, np.pi / 4)
 
-        moves = (Sx, Sy, Sxy)
+        def Sxy2(g):
+            return SShear(g, 3 * np.pi / 4)
+
+        moves = (Sx, Sy, Sxy, Sxy2)
         colors = (
-            "grey",
+            "black",
             "black",
             "white",
+            "white",
         )
+        h = 20  # nr of energy well jumps
+        q = 200  # quality of curve
+        u = np.linspace(-1, 1, q)
+        p = 2.0  # 1 = linear, >1 = more points near zero
+        vals = np.sign(u) * (np.abs(u) ** p) * h
+        for i, M, c in zip(range(len(moves)), moves, colors):
+            if self.alt_held:
+                history = [F2C(M(j) @ F) for j in vals]
+                self.drawHistory(
+                    history, color=c, clear=False, arrows=False, dashed=i % 2 == 1
+                )
+            else:
+                history = [F2C(F @ M(j)) for j in vals]
+                self.drawHistory(
+                    history, color=c, clear=False, arrows=False, dashed=i % 2 == 1
+                )
+        if self.showRightOrth:
+            gamma = F[0, 1]
+            theta_orth = orth_theta_ref0(gamma)
 
-        for M, c in zip(moves, colors):
-            history = [F2C(M(j) @ F) for j in np.linspace(-5, 5, 100)]
-            self.drawHistory(history, color=c, clear=False, arrows=False)
-            history = [F2C(F @ M(j)) for j in np.linspace(-5, 5, 100)]
-            self.drawHistory(history, color=c, clear=False, arrows=False, dashed=True)
+            history = [F2C(F @ SShear(j, theta_orth)) for j in vals]
+            self.drawHistory(
+                history, color="green", clear=False, arrows=False, dashed=True
+            )
 
     def onViewRangeChanged(self, view, range):
         self.updateFEnergyBackground()
@@ -1225,11 +1330,12 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         gamma = None
         if event.key() == Qt.Key_Y:
-            gamma = -0.1
+            gamma = -1 if shift_held else -0.1
         elif event.key() == Qt.Key_U:
-            gamma = 0.1
+            gamma = 1 if shift_held else 0.1
         if gamma is not None:
-            # shear = np.array([[1 + s, 0], [0, 1 / (1 + s)]])
+            # shear = 45 degree angle
+
             t = np.array(
                 [[1 - 0.5 * gamma, 0.5 * gamma], [-0.5 * gamma, 1 + 0.5 * gamma]]
             )
@@ -1242,10 +1348,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 vp.e2.head.setPos(0, 1)
             s = 2
             self.GV_plot.setRange(xRange=[-s, s], yRange=[-s, s])
-            self.updateMarkers()
-            self.LR_plot.update()
-            self.updateGVSpheres()
-            self.updateFEnergyBackground()
 
         if event.key() == Qt.Key_T:
             self.triangularEnergy.setZValue(-1)
@@ -1261,6 +1363,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             self.w_PCS.setVisible(not self.w_PCS.isVisible())
         if event.key() == Qt.Key_G:
             self.w_GV.setVisible(not self.w_GV.isVisible())
+        if event.key() == Qt.Key_C:
+            self.showCircles = not self.showCircles
         if event.key() == Qt.Key_L:
             self.elastic_reduced_marker.setVisible(
                 not self.elastic_reduced_marker.isVisible()
@@ -1296,10 +1400,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         rightShear = np.array([[1, 1], [0, 1]])
         shearDirection = None
 
-        if shift_held:
-            shearStep = 1
-        else:
-            shearStep = 0.1
+        shearStep = 1 if shift_held else 0.1
 
         if event.key() == Qt.Key_Up:
             shearDirection = upShear
@@ -1318,6 +1419,11 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             elif shearDirection is not None:
                 self.shearVelocity = step_adjusted_shear  # Continuous shear
 
+        self.updateMarkers()
+        self.LR_plot.update()
+        self.updateGVSpheres()
+        self.updateFEnergyBackground()
+
     def keyReleaseEvent(self, event):
         if event.key() == Qt.Key_X:
             self.VP.e1.moveInY = True
@@ -1330,7 +1436,15 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         if event.key() == Qt.Key_Home:
             self.home_held = False
 
+        self.alt_held = event.modifiers() & Qt.AltModifier  # Check if Alt is held
+        self.meta_held = event.modifiers() & Qt.MetaModifier
+
         self.shearVelocity = np.eye(2)
+
+        self.updateMarkers()
+        self.LR_plot.update()
+        self.updateGVSpheres()
+        self.updateFEnergyBackground()
 
     def drawLine(
         self, x, y, color=None, width=1, dashed=False, zValue=-1, showArrows=False
@@ -1340,9 +1454,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         line = self.PCS_plot.plot(
             x, y, pen=pg.mkPen(color=color, width=width, dash=dashPattern)
         )
-        line.setClipToView(True)
-        line.setDownsampling(auto=True)  # automatic LTTB-like downsampling
-        line.setSkipFiniteCheck(True)
+        # line.setClipToView(True)
         line.setZValue(zValue)
         if showArrows and len(x) > 1 and len(y) > 1:
             # Calculate angle for the arrow at the end of the line
@@ -1409,18 +1521,25 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         return colormap
 
 
-# Shear matrix along an angle theta with shear factor eps
-def S(eps, theta=np.pi / 4) -> np.ndarray:
-    # Shear along 45 degrees
-    c = np.cos(theta)
-    s = np.sin(theta)
-    return np.array(
-        [
-            [1.0 - eps * c * s, eps * c * c],
-            [-eps * s * s, 1.0 + eps * c * s],
-        ],
-        dtype=float,
+def orth_theta_ref0(gamma):
+    return -np.atan(
+        gamma - np.sqrt(gamma**4 + 3 * gamma**2 + 1) / np.sqrt(gamma**2 + 1)
     )
+
+
+# def orth_theta_ref0(gamma):
+#     gamma = np.asarray(gamma)
+
+#     term1 = np.arctan((2 * gamma * (gamma**2 + 1)) / (3 * gamma**2 + 2))
+#     term2 = np.arccos(
+#         -(gamma**2) / np.sqrt(4 * gamma**6 + 17 * gamma**4 + 16 * gamma**2 + 4)
+#     )
+
+#     # θ⊥ = -1/2 ( term1 ± term2 )
+#     theta_plus = -0.5 * (term1 + term2)
+#     theta_minus = -0.5 * (term1 - term2)
+
+#     return theta_minus
 
 
 def runVisualization():
