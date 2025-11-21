@@ -75,6 +75,9 @@ def simpleShearSystem2(L=2, shearValues=np.linspace(0, 3, 100)):
 
     shear = sp.symbols("shear")
 
+    # Apply shear to deformation gradient and interpolated x field
+    sheared_F = FEM.apply_shear(F, shear)
+
     # Apply shear to interpolated x field for each node, gather into matrix
     sheared_positions = sp.Matrix(
         [FEM.apply_shear(node["x"], shear) for node in FEM.nodes]
@@ -82,7 +85,7 @@ def simpleShearSystem2(L=2, shearValues=np.linspace(0, 3, 100)):
 
     # Lambdify evaluation functions
     ref_positions = np.array([[i % L, i // L] for i in range(N)])
-    F_func = sp.lambdify([FEM.X, FEM.u, shear], F, "numpy")
+    F_func = sp.lambdify([FEM.X, FEM.u, shear], sheared_F, "numpy")
     zero_u = np.zeros_like(ref_positions)
     dN_dX_func = sp.lambdify(FEM.X, dN_dX, "numpy")
     pos_func = sp.lambdify([FEM.X, FEM.u, shear], sheared_positions, "numpy")
@@ -161,14 +164,16 @@ def plotFValues(F):
     plt.show()
 
 
-def makeVideo(pos, forces):
+def makeVideo(pos, forces, element_indices):
     # Use FEM.x to get the node positions
-    n_shear, n_elements, n_nodes, _ = forces.shape
+    n_shear, n_elements, n_local_nodes, _ = forces.shape
     import matplotlib.animation as animation
 
     # Pos is frames, nodes, 2
     # Forces is frames, elements, nodes, 2
     fig, ax = plt.subplots(figsize=(10, 6))
+    print("max |force| =", np.max(np.linalg.norm(forces, axis=-1)))
+    print("min |force| =", np.min(np.linalg.norm(forces, axis=-1)))
 
     def update(frame):
         ax.clear()
@@ -183,11 +188,12 @@ def makeVideo(pos, forces):
 
         # Draw force vectors as arrows on top of node positions
         # Optional: scale forces for better visualization
-        arrow_scale = 0.00001  # Increase for shorter arrows, decrease for longer arrows
+        arrow_scale = 1  # Increase for shorter arrows, decrease for longer arrows
         for e_idx in range(n_elements):
-            for n_idx in range(n_nodes):
-                node_pos = pos[frame][n_idx]
-                fx, fy = forces[frame][e_idx][n_idx]
+            for local_idx in range(n_local_nodes):
+                global_idx = element_indices[e_idx][local_idx]
+                node_pos = pos[frame][global_idx]
+                fx, fy = forces[frame, e_idx, local_idx]
                 ax.quiver(
                     node_pos[0],
                     node_pos[1],
@@ -197,7 +203,7 @@ def makeVideo(pos, forces):
                     scale_units="xy",
                     scale=arrow_scale,
                     color="red",
-                    width=0.01,
+                    width=0.005,
                 )
 
     ani = animation.FuncAnimation(fig, update, frames=n_shear, repeat=True)
@@ -210,4 +216,10 @@ if __name__ == "__main__":
     energies, forces = calculateForcesAndEnergy(F, dN_dX)
     # plotEnergyAndForces(shear, energies, forces)
     # plotFValues(F)
-    makeVideo(pos, forces)
+    element_indices = [
+        [0, 1, 2],
+        [1, 2, 3],
+        [2, 3, 0],
+        [3, 0, 1],
+    ]
+    makeVideo(pos, forces, element_indices)

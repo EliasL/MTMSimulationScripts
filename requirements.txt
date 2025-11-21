@@ -14,7 +14,7 @@ tabulate
 fabric
 opencv-python
 imageio[ffmpeg]
-vtk
+meshio
 powerlaw
 simplification
 debugpy

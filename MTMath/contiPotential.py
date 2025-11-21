@@ -814,17 +814,36 @@ def lag_m3(matrix, n=1):
 
 
 # Shear along an angle theta
-def SShear(eps, theta=0) -> np.ndarray:
-    # Shear along 45 degrees
-    c = np.cos(theta)
-    s = np.sin(theta)
-    return np.array(
-        [
-            [1.0 - eps * c * s, eps * c * c],
-            [-eps * s * s, 1.0 + eps * c * s],
-        ],
-        dtype=float,
-    )
+def SShear(eps=1, theta=0) -> np.ndarray:
+    if not isinstance(eps, str):
+        c = np.cos(theta)
+        s = np.sin(theta)
+
+        a11 = 1.0 - eps * c * s
+        a12 = eps * c * c
+        a21 = -eps * s * s
+        a22 = 1.0 + eps * c * s
+
+        # Stack last two dims as 2×2
+        return np.stack(
+            [
+                np.stack([a11, a12], axis=-1),
+                np.stack([a21, a22], axis=-1),
+            ],
+            axis=-2,
+        )
+    else:
+        eps = eps.lower()
+        if eps in ["r", "right"]:
+            return SShear(1, 0)
+        elif eps in ["l", "left"]:
+            return SShear(-1, 0)
+        elif eps in ["u", "up"]:
+            return SShear(-1, np.pi / 2)
+        elif eps in ["d", "down"]:
+            return SShear(1, np.pi / 2)
+        else:
+            raise ValueError(f"Unkown direction: {eps}")
 
 
 def elastic_reduction(C11, C22, C12, loops=1000):

@@ -758,7 +758,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         for shape, beta, offset in zip(["triangular", "square"], [4, -0.25], [-10, -1]):
             fName = f"{SCRIPT_DIR}/{folder}/{ppu},{shape},{quantity},Poincare,LRBackround.png"
             # Check if file exists, if not generate and save
-            if os.path.isfile(fName) and ppu >= 500 and False:
+            if os.path.isfile(fName) and ppu >= 500 and True:
                 energyImage = self.loadImage(fName)
             else:
                 # BACKGROUND stress/energy
@@ -1249,11 +1249,13 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             return SShear(g, 3 * np.pi / 4)
 
         moves = (Sx, Sy, Sxy, Sxy2)
+        c1 = "#06923E"
+        c2 = "#F4991A"
         colors = (
-            "black",
-            "black",
-            "white",
-            "white",
+            c1,
+            c1,
+            c2,
+            c2,
         )
         h = 20  # nr of energy well jumps
         q = 200  # quality of curve
@@ -1264,12 +1266,22 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             if self.alt_held:
                 history = [F2C(M(j) @ F) for j in vals]
                 self.drawHistory(
-                    history, color=c, clear=False, arrows=False, dashed=i % 2 == 1
+                    history,
+                    color=c,
+                    clear=False,
+                    arrows=False,
+                    dashed=i % 2 == 1,
+                    width=3,
                 )
             else:
                 history = [F2C(F @ M(j)) for j in vals]
                 self.drawHistory(
-                    history, color=c, clear=False, arrows=False, dashed=i % 2 == 1
+                    history,
+                    color=c,
+                    clear=False,
+                    arrows=False,
+                    dashed=i % 2 == 1,
+                    width=3,
                 )
         if self.showRightOrth:
             gamma = F[0, 1]

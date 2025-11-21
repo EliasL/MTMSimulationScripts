@@ -1,7 +1,6 @@
 import xml.etree.ElementTree as ET
 import os
-from vtk import vtkXMLUnstructuredGridReader
-from vtk.util.numpy_support import vtk_to_numpy  # type: ignore
+import meshio
 import numpy as np
 import re
 
@@ -33,22 +32,36 @@ class VTUData:
         return self.size
 
     def _read_vtu_file(self):
-        # Create a reader for the VTU file
-        reader = vtkXMLUnstructuredGridReader()
-        reader.SetFileName(self.vtu_file_path)
-        reader.Update()
-
-        # Get the 'vtkUnstructuredGrid' object from the reader
-        return reader.GetOutput()
+        """Read the VTU file using meshio and return a mesh object."""
+        return meshio.read(self.vtu_file_path)
 
     def get_point_data(self, field):
-        return vtk_to_numpy(self.mesh.GetPointData().GetArray(field))
+        """Return a NumPy array with point data for the given field name."""
+        try:
+            return self.mesh.point_data[field]
+        except KeyError:
+            raise KeyError(f"Point data field '{field}' not found in VTU file")
 
     def get_cell_data(self, field):
-        return vtk_to_numpy(self.mesh.GetCellData().GetArray(field))
+        """Return a NumPy array with cell data for the given field name.
+
+        meshio stores cell data as a dict mapping names to lists aligned with
+        self.mesh.cells. We assume a single cell block and return its array.
+        """
+        if field not in self.mesh.cell_data:
+            raise KeyError(f"Cell data field '{field}' not found in VTU file")
+
+        data_list = self.mesh.cell_data[field]
+        if len(data_list) != 1:
+            raise ValueError(
+                f"Cell data field '{field}' has {len(data_list)} blocks; "
+                "VTUData assumes a single cell block."
+            )
+        return data_list[0]
 
     def get_nodes(self):
-        return vtk_to_numpy(self.mesh.GetPoints().GetData())
+        """Return node coordinates as a NumPy array of shape (n_points, 3)."""
+        return self.mesh.points
 
     def get_force_field(self):
         return self.get_point_data("stress_field")
@@ -119,12 +132,26 @@ class VTUData:
         return -eGradientDensity * initArea
 
     def get_connectivity(self):
-        # Extract Connectivity
-        _connectivity = vtk_to_numpy(self.mesh.GetCells().GetData())
-        # _connectivity is in a special format: 3 a b c 3 d e f 3 ...
-        # We reshape into 4 long arrays, and then drop the column of 3s
-        connectivity = _connectivity.reshape(-1, 4)[:, 1:]
-        return connectivity
+        """Return connectivity as an array of shape (n_cells, n_vertices_per_cell).
+
+        For typical triangle meshes this will be (n_cells, 3). We prefer the
+        "triangle" or "quad" blocks if available, otherwise we fall back to
+        the first cell block.
+        """
+        # Prefer the dictionary interface if available (newer meshio)
+        cells_dict = getattr(self.mesh, "cells_dict", None)
+        if cells_dict:
+            if "triangle" in cells_dict:
+                return cells_dict["triangle"]
+            if "quad" in cells_dict:
+                return cells_dict["quad"]
+            # Fall back to an arbitrary first entry from the dict
+            first_key = next(iter(cells_dict))
+            return cells_dict[first_key]
+
+        # Fallback for older meshio versions: use the first cell block
+        cell_type, data = self.mesh.cells[0]
+        return data
 
 
 def arrsToMat(A11, A12, A21, A22):

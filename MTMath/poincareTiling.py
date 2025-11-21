@@ -6,7 +6,9 @@ from .plotEnergy import (
     applyCongruenceTransformations,
     drawC,
     drawPoincareGrid,
+    prepPoincareFig,
     generateShearTransformations,
+    drawCircles,
 )
 import numpy as np
 from MTMath.contiPotential import ContiEnergy, SShear
@@ -344,64 +346,15 @@ def poincareTiling():
     # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="cd")
 
 
-def quadrantIdentification(F, show=False):
-    step = 0.4
-    directions = [i * np.pi / 4 for i in range(4)]
-    # directions = [-i * np.pi / 2 for i in range(2)]
-
-    shears = [SShear(s, d) for s in (step, -step) for d in directions]
-    direction = np.array([s / abs(s) for s in (step, -step) for d in directions])
-    labels = np.array(
-        [("-" if s == -1 else "") + str(d) for s in (1, -1) for d in range(4)]
-    )
-
-    shears = [SShear(s, d) for s in (step, -step) for d in directions]
-    # for s, l in zip(shears, labels):
-    #     print(l)
-    #     print(s)
-    direction = np.array([s / abs(s) for s in (step, -step) for d in directions])
-
-    # print("\n".join(map(str, shears)))
-
-    newF = [S @ F for S in shears]
-    newC = np.array([F.T @ F for F in newF])
-    energies = np.array([energy_from_C(C) for C in newC])
-    derivative_like = energies / direction
-    derivatives = np.array([diff(F) for F in newF])
-
-    # Show why we should use eps=1e-6
-    # exp = [10**e for e in np.linspace(-1, -15, 100)]
-    # d = [diff(newF[0], e)[0] for e in exp]
-    # plt.plot(exp, abs(np.array(d) - 0.08097078563196192))
-    # plt.loglog()
-    # plt.show()
-
-    # """
-    # Values in elastic domain:
-    # """
-    # point_1 = [0.08097117, 0.03222707]
-    # point_2 = [-0.08097117, 0.03222707]
-    # point_3 = [-0.08097117, -0.03222707]
-    # point_4 = [0.08097117, -0.03222707]
-    # points = np.array([point_1, point_2, point_3, point_4])
-    # # We define this arbitrary order, and we now make sure each of the
-    # # derivatives fits uniquely will one of these 4 points, and we
-    # # return them in that order.
-    # # For now, let's try to check if the order is always the same:
-
-    # assert np.allclose(derivatives, points), "Not the same order"
-
-    """
-    Energies in elastic domain:
-    """
-    point0 = 0.0864664948363627
-    point1 = 0.1603721122909092
-    point2 = 0.0864664948363627
-    point3 = 0.1603721122909092
-    point_0 = -0.0864664948363627
-    point_1 = -0.1603721122909083
-    point_2 = -0.0864664948363627
-    point_3 = -0.1603721122909083
+def baseValues():
+    point0 = 0.0864664948363627  # 0
+    point1 = 0.1603721122909092  # 1
+    point2 = 0.0864664948363627  # 2
+    point3 = 0.1603721122909092  # 3
+    point_0 = -0.0864664948363627  # 4
+    point_1 = -0.1603721122909083  # 5
+    point_2 = -0.0864664948363627  # 6
+    point_3 = -0.1603721122909083  # 7
 
     points = [
         point0,
@@ -414,47 +367,94 @@ def quadrantIdentification(F, show=False):
         point_3,
     ]
     domains = [
-        (point0, point_3),
-        (point_0, point1),
-        (point_1, point2),
-        (point3, point_2),
+        [point0, point_3],
+        [point_0, point1],
+        [point_1, point2],
+        [point3, point_2],
     ]
-    # for d in domains:
-    #     print(d)
+    d_indexes = [
+        [0, 7],
+        [4, 1],
+        [5, 2],
+        [3, 6],
+    ]
+    return np.array(points), np.array(domains), np.array(d_indexes)
+
+
+def quadrantIdentification(F, show=False, ax=None, numbers=False):
+    step = 0.4
+    directions = [i * np.pi / 4 for i in range(4)]
+    # directions = [-i * np.pi / 2 for i in range(2)]
+
+    shears = [SShear(s, d) for s in (step, -step) for d in directions]
+    direction = np.array([s / abs(s) for s in (step, -step) for d in directions])
+    labels = np.array(
+        [("-" if s == -1 else "") + str(d) for s in (1, -1) for d in range(4)]
+    )
+
+    shears = [SShear(s, d) for s in (step, -step) for d in directions]
+
+    direction = np.array([s / abs(s) for s in (step, -step) for d in directions])
+
+    newF = [S @ F for S in shears]
+    newC = np.array([F.T @ F for F in newF])
+    energies = np.array([energy_from_C(C) for C in newC])
+    derivative_like = energies / direction
+    # derivatives = np.array([diff(F) for F in newF])
+
+    points, domains, i = baseValues()
+
     if not np.allclose(derivative_like, points, atol=1e-8):
         show = True
         error = True
     else:
         error = False
 
-    if show:
+    if ax is None and show:
         ax = drawPoincareGrid()
-        drawC(
-            ax,
-            newC,
-            scatter=True,
-            label=labels,
-            label_x=1,
-            fontsize=18,
-            s=5,
-        )
-        # [print(f"point {i + 1}: {c}") for i, c in enumerate(derivatives)]
-        [
-            print(f"point{l} = {c}".replace("-", "_"))
-            for l, c in zip(labels, derivative_like)
-        ]
+    if ax is not None or show:
+        if numbers:
+            drawC(
+                ax,
+                newC,
+                scatter=True,
+                label=labels,
+                label_x=1,
+                label_fontsize=18,
+                s=5,
+            )
+        else:
+            # Instead of using numbers, we use scatter points with colors
+            colors = ["red", "green", "blue", "black"]
+            markerShape = ["o", "^", "x", "+"]
+            p, d, i = baseValues()
+            for ids, c, m in zip(i, colors, markerShape):
+                drawC(
+                    ax,
+                    newC[ids],
+                    scatter=True,
+                    c=c if m in "x+" else None,
+                    s=20,
+                    marker=m,  # marker shape
+                    facecolors="none",
+                    edgecolors=c,  # outline color
+                )
+    if show:
         plt.tight_layout()
         path = "Plots/quadrantIdentification.pdf"
         plt.savefig(path)
         print(f"Fig saved to {path}")
         plt.show()
-        if error:
-            for i, j in zip(derivative_like, points):
-                print(i, j)
-            raise RuntimeError("Derivatives have changed")
+
+    if error:
+        for i, j in zip(derivative_like, points):
+            print(i, j)
+        raise RuntimeError("Derivatives have changed")
+
+    return ax
 
 
-def checkPoincareQuadrants(depth=6):
+def checkPoincareQuadrants(depth=1):
     # F = np.array([[1, 1], [0, 1]])
     # F = [[1, 0], [1, 1]] @ F
     F = np.array([[1, 0], [0, 1]])
@@ -468,5 +468,68 @@ def checkPoincareQuadrants(depth=6):
     # Generate all F:
     Fs, labels = generateShearTransformations(depth, startingPoint=F, leftApplied=False)
 
+    ax = drawPoincareGrid()
     for F in Fs:
-        quadrantIdentification(F, show=False)
+        quadrantIdentification(F, ax=ax, show=False, numbers=False)
+
+    plt.tight_layout()
+    path = f"Plots/quadrantIdentification{depth}.pdf"
+    plt.savefig(path)
+    print(f"Fig saved to {path}")
+    plt.show()
+
+
+def drawExplanationFigs():
+    import os
+    import string
+
+    alphabet = iter(string.ascii_uppercase)
+
+    # Create a 3x2 grid of subplots: rows correspond to shear=0,1,2 and
+    # columns to left/right application
+    fig, axes = plt.subplots(3, 2, figsize=(8, 12))
+
+    shears = (0, 1, 2)
+    left_flags = (True, False)
+
+    for i, shear in enumerate(shears):
+        for j, left in enumerate(left_flags):
+            ax = axes[i, j]
+            prepPoincareFig(ax=ax)
+
+            # Draw the Poincaré grid on this subplot
+            drawPoincareGrid(ax=ax)
+
+            # Build deformation gradient F
+            F = np.eye(2)
+            if shear:
+                F = np.linalg.matrix_power(SShear("r"), shear) @ F
+
+            # Draw the circles for this configuration
+            drawCircles(ax, F, applyFromLeft=left)
+
+            # Add a small title for clarity
+            side = (
+                r"\mathbf{C}_\mathbf{S}"
+                if left
+                else r"\mathbf{S}_\theta^\mathsf{T}\mathbf{C}\mathbf{S}_\theta"
+            )
+            fig_name = next(alphabet)
+            ax.set_title(rf"{fig_name}: $h={shear}$, ${side}$")
+
+    # Remove x-labels for all but bottom row
+    for ax in axes[:-1, :].ravel():
+        ax.set_xlabel("")
+
+    # Remove y-labels for all but left column
+    for ax in axes[:, 1:].ravel():
+        ax.set_ylabel("")
+
+    plt.tight_layout()
+
+    if not os.path.exists("Plots"):
+        os.makedirs("Plots")
+
+    path = "Plots/Circles_grid.pdf"
+    plt.savefig(path, dpi=300)
+    print(f"Fig saved to {path}")

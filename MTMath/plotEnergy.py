@@ -1,10 +1,7 @@
 import numpy as np
 
 
-try:
-    from .contiPotential import ContiEnergy, lagrange_reduction
-except ModuleNotFoundError:
-    from contiPotential import ContiEnergy, lagrange_reduction
+from .contiPotential import ContiEnergy, lagrange_reduction, SShear
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
@@ -660,6 +657,49 @@ def drawPoincareGrid(ax=None, grid_size=200, zoom=1, depth=6, **kwargs):
     return ax
 
 
+def drawCircles(ax=None, F=None, applyFromLeft=True, grid_size=200, zoom=1):
+    if ax is None:
+        fig, ax = prepPoincareFig(grid_size=grid_size, zoom=zoom)
+    h = 500  # nr of energy well jumps
+    q = 200  # quality of curve
+    # vals has many values close to 0, and fewer larger values
+    vals = np.sinh(np.linspace(np.arcsinh(-h), np.arcsinh(h), q))
+
+    def Sx(g):
+        return SShear(g, 0)
+
+    def Sy(g):
+        return SShear(g, np.pi / 2)
+
+    def Sxy(g):
+        return SShear(g, np.pi / 4)
+
+    def Sxy2(g):
+        return SShear(g, 3 * np.pi / 4)
+
+    moves = (Sx, Sy, Sxy, Sxy2)
+    c1 = "#06923E"
+    c2 = "#F4991A"
+    colors = (c1, c1, c2, c2)
+    for i, M, c in zip(range(len(moves)), moves, colors):
+        S = M(vals)
+        if applyFromLeft:
+            pert_F = S @ F
+        else:
+            pert_F = F @ S
+        C = np.einsum("...ji,...jk->...ik", pert_F, pert_F)
+        dash = i % 2 == 1
+        drawC(
+            ax,
+            C,
+            grid_size=grid_size,
+            zoom=zoom,
+            c=c,
+            linestyle="--" if dash else "-",
+            linewidth=5,
+        )
+
+
 def conTrans(C, M):
     """Apply a congruence transform: return M^T @ C @ M.
 
@@ -997,15 +1037,21 @@ def generateShearTransformations(depth, startingPoint=None, leftApplied=False):
         if current_depth == 0:
             return
 
-        r = np.array([[1, 1], [0, 1]], dtype=int)  # col1 <- col1 + col2
-        l = np.array([[1, -1], [0, 1]], dtype=int)  # col1 <- col1 - col2
-        u = np.array([[1, 0], [1, 1]], dtype=int)  # col2 <- col2 + col1
-        d = np.array([[1, 0], [-1, 1]], dtype=int)  # col2 <- col2 - col1
-        for t, label in zip([r, l, u, d], ["r", "l", "u", "d"]):
+        for label in ["r", "l", "u", "d"]:
+            # SShear can take these string directions as an argument. Sorry if
+            # that's a bit confusing
             if leftApplied:
-                recurse(t @ F, current_depth - 1, current_label=current_label + label)
+                recurse(
+                    SShear(label) @ F,
+                    current_depth - 1,
+                    current_label=current_label + label,
+                )
             else:
-                recurse(F @ t, current_depth - 1, current_label=current_label + label)
+                recurse(
+                    F @ SShear(label),
+                    current_depth - 1,
+                    current_label=current_label + label,
+                )
 
     if startingPoint is None:
         # Start with the identity matrix
@@ -1121,10 +1167,12 @@ def plotEnergyField(
         )
 
 
-def prepPoincareFig(grid_size=200, zoom=1):
+def prepPoincareFig(grid_size=200, zoom=1, ax=None):
     # Zoom does not always work properly. Be careful
-
-    fig, ax = plt.subplots(figsize=(6, 6))
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 6))
+    else:
+        fig = ax.get_figure()
     # Add a thin black circle
     circleSize = (grid_size / 2) * zoom
     circle_center_x = grid_size / 2
@@ -1136,7 +1184,7 @@ def prepPoincareFig(grid_size=200, zoom=1):
         fill=False,
         linewidth=1,
     )
-    fig.gca().add_patch(circle)
+    ax.add_patch(circle)
 
     ax.set_xticks(
         np.linspace(0, grid_size, 5),

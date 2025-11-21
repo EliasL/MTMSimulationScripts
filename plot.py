@@ -24,6 +24,7 @@ from MTMath.poincareTiling import (
     quadrantIdentification,
     checkPoincareQuadrants,
     drawPoincareGrid,
+    drawExplanationFigs,
 )
 from MTMath.plotEnergy import generate_stress_grid, generate_energy_grid
 from plotAll import plotAll
@@ -309,4 +310,5 @@ if __name__ == "__main__":
     # plotMaxForce()
     # plotMinimizationCriteriaData()
     # plotShowMinCriteria()
-    checkPoincareQuadrants()
+    # checkPoincareQuadrants()
+    drawExplanationFigs()
