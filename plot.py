@@ -24,7 +24,9 @@ from MTMath.poincareTiling import (
     quadrantIdentification,
     checkPoincareQuadrants,
     drawPoincareGrid,
-    drawExplanationFigs,
+    drawLeftRightExplanationFigs,
+    drawRotationExplanationFigs,
+    drawRotation2ExplanationFigs,
 )
 from MTMath.plotEnergy import generate_stress_grid, generate_energy_grid
 from plotAll import plotAll
@@ -288,7 +290,6 @@ if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    # poincareTiling()
     # run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
@@ -299,6 +300,7 @@ if __name__ == "__main__":
     # plotSampleRuns()
     # plotLongJob()
     # plotPropperJob()
+
     # debugPlotAll()
     # energyField()
     # showPoincareDisk()
@@ -310,5 +312,8 @@ if __name__ == "__main__":
     # plotMaxForce()
     # plotMinimizationCriteriaData()
     # plotShowMinCriteria()
+    poincareTiling()
     # checkPoincareQuadrants()
-    drawExplanationFigs()
+    # drawLeftRightExplanationFigs()
+    # drawRotationExplanationFigs()
+    # drawRotation2ExplanationFigs()

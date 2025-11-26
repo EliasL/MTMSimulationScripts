@@ -80,6 +80,7 @@ def find_data():
         print(
             f"Warning: The folder {out_dir} does not exsist! Found: {find_first_folder(base_dir)}"
         )
+        return
 
     simulation_folders = find_folders(out_dir)
     print(len(simulation_folders))

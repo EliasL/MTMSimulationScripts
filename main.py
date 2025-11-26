@@ -364,13 +364,13 @@ def runOnLocalMachine():
 def startJobs():
     print("Building on all servers... ")
 
-    # build_on_all_servers()
+    build_on_all_servers()
 
     # Make largeProperJob with notFIRE=True to exclude FIRE
     def notFIRE_largePropperJob(**kwargs):
         return largePropperJob(notFIRE=True, **kwargs)
 
-    for job in [size_scaling_job, notFIRE_largePropperJob]:
+    for job in [notFIRE_largePropperJob, size_scaling_job]:
         configs, labels = job()
 
         # Normalize to batches so we handle both a single list of configs
@@ -387,7 +387,7 @@ def startJobs():
                 print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
                 if confs:
                     # Queue jobs (uncomment to actually submit)
-                    # queueJobs(server, confs, job_name="opt", stopExsistingJobs=False)
+                    queueJobs(server, confs, job_name="opt", stopExsistingJobs=False)
                     pass
 
 
@@ -420,6 +420,7 @@ def cleanData():
 
 
 if __name__ == "__main__":
+    # build_on_all_servers()
     # 150x150 64 threads -> 23 days
     # 150x150 32 threads -> 22 days
     # 150x150 16 threads -> 16 days
@@ -428,14 +429,14 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    runOnLocalMachine()
+    # runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
     # startJobs()
 
-    # plotPropperJob()
+    plotPropperJob()
     # plotSizeScaling()
     # plotBigJob()
     # threadTest()

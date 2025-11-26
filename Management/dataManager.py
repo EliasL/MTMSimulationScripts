@@ -49,7 +49,10 @@ class DataManager:
                     int(parts[1])
                 )  # The second part is the size, converted to int
         # The last line is the free space in GB
-        free_space_in_gb = float(lines[-1])
+        try:
+            free_space_in_gb = float(lines[-1])
+        except ValueError as e:
+            free_space_in_gb = -1
         return folders, sizes, free_space_in_gb
 
     def find_data_on_server(self, server, pbar_index, silent):

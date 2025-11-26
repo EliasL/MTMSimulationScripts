@@ -5,6 +5,7 @@ from .plotEnergy import (
     plotPoincareFTiling,
     applyCongruenceTransformations,
     drawC,
+    drawFVectors,
     drawPoincareGrid,
     prepPoincareFig,
     generateShearTransformations,
@@ -318,31 +319,21 @@ def poincareTiling():
     ax = None
     # plotPoincarePointMapping(ax=ax, fig=fig)
     # ax.clear()
-    ax = plotPoincareFTiling(ax=ax, depth=1, quadrants="a", arrows=True)
-    ax.clear()
+    # plotPoincareFTiling(ax=ax, depth=2, quadrants="a", leftApplied=False)
+    plotPoincareFTiling(ax=ax, depth=2, quadrants="a", leftApplied=True)
     # plotPoincareTiling(ax=ax, depth=2, quadrants="a")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=3, quadrants="abcd")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=3, quadrants="ab")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=3, quadrants="cd")
 
     # plotPoincareTiling(ax=ax, depth=4, quadrants="abcd")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=4, quadrants="ab")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=4, quadrants="cd")
 
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=1, use_labels=False, quadrants="a")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="a")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="abcd")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="ab")
-    # ax.clear()
     # plotPoincareTiling(ax=ax, depth=2, use_labels=False, quadrants="cd")
 
 
@@ -454,7 +445,7 @@ def quadrantIdentification(F, show=False, ax=None, numbers=False):
     return ax
 
 
-def checkPoincareQuadrants(depth=1):
+def checkPoincareQuadrants(depth=5):
     # F = np.array([[1, 1], [0, 1]])
     # F = [[1, 0], [1, 1]] @ F
     F = np.array([[1, 0], [0, 1]])
@@ -466,20 +457,25 @@ def checkPoincareQuadrants(depth=1):
     # print(F)
     # quadrantIdentification(F, show=True)
     # Generate all F:
-    Fs, labels = generateShearTransformations(depth, startingPoint=F, leftApplied=False)
+    leftAppllied = False
+    Fs, labels = generateShearTransformations(
+        depth, startingPoint=F, leftApplied=leftAppllied
+    )
 
     ax = drawPoincareGrid()
     for F in Fs:
         quadrantIdentification(F, ax=ax, show=False, numbers=False)
 
     plt.tight_layout()
-    path = f"Plots/quadrantIdentification{depth}.pdf"
+    path = (
+        f"Plots/quadrantIdentification{depth}{'left' if leftAppllied else 'right'}.pdf"
+    )
     plt.savefig(path)
     print(f"Fig saved to {path}")
     plt.show()
 
 
-def drawExplanationFigs():
+def drawLeftRightExplanationFigs():
     import os
     import string
 
@@ -506,7 +502,7 @@ def drawExplanationFigs():
                 F = np.linalg.matrix_power(SShear("r"), shear) @ F
 
             # Draw the circles for this configuration
-            drawCircles(ax, F, applyFromLeft=left)
+            drawCircles(ax, F, applyFromLeft=left, dot=True)
 
             # Add a small title for clarity
             side = (
@@ -532,4 +528,104 @@ def drawExplanationFigs():
 
     path = "Plots/Circles_grid.pdf"
     plt.savefig(path, dpi=300)
+    print(f"Fig saved to {path}")
+
+
+def drawRotationExplanationFigs():
+    import os
+    import string
+
+    alphabet = iter(string.ascii_uppercase)
+
+    # Create a 3x2 grid of subplots: rows correspond to shear=0,1,2 and
+    # columns to left/right application
+    fig, axes = plt.subplots(2, 2, figsize=(8, 8))
+    n = [0, 1, 2, 4]
+    rotations = [np.pi * i / 8 for i in n]
+    for i, r in enumerate(rotations):
+        ax = axes.ravel()[i]
+        prepPoincareFig(ax=ax)
+
+        # Draw the Poincaré grid on this subplot
+        drawPoincareGrid(ax=ax)
+
+        # Build deformation gradient F
+        F = SShear("r")
+        # Rotate
+        s = np.sin(r)
+        c = np.cos(r)
+        rot = np.array([[c, -s], [s, c]])
+        F = rot @ F
+        # Draw the circles for this configuration
+        drawCircles(ax, F, applyFromLeft=True, dot=True)
+
+        # Add a small title for clarity
+        side = r"\mathbf{C}_\mathbf{S}"
+        fig_name = next(alphabet)
+        ax.set_title(rf"{fig_name}: $h=1$, $\theta_R={n[i]}\pi/8$, ${side}$")
+
+        drawFVectors(ax, F, scale=0.3, margin=0)
+
+    # Remove x-labels for all but bottom row
+    for ax in axes[:-1, :].ravel():
+        ax.set_xlabel("")
+
+    # Remove y-labels for all but left column
+    for ax in axes[:, 1:].ravel():
+        ax.set_ylabel("")
+
+    plt.tight_layout()
+
+    if not os.path.exists("Plots"):
+        os.makedirs("Plots")
+
+    path = "Plots/Circles_vectors_grid.pdf"
+    plt.savefig(path, dpi=300)
+    print(f"Fig saved to {path}")
+
+
+def drawRotation2ExplanationFigs():
+    import os
+    import string
+
+    alphabet = iter(string.ascii_uppercase)
+
+    # Create a 3x2 grid of subplots: rows correspond to shear=0,1,2 and
+    # columns to left/right application
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    F1 = SShear("r")
+    F2 = SShear(-1, np.pi / 2)
+    F3 = SShear(-1, 0) @ SShear(-1, np.pi / 2)
+    Fs = [F1, F2, F3]
+    F_strings = [
+        r"\mathbf{F}=\mathbf{S}|_{\theta=0}^{h=1}",
+        r"\mathbf{F}=\mathbf{S}|_{\theta=\pi/2}^{h=-1}",
+        r"\mathbf{F}=\mathbf{S}|_{\theta=0}^{h=-1}\mathbf{S}|_{\theta=\pi/2}^{h=-1}",
+    ]
+    # Build deformation gradient F
+    for i, F in enumerate(Fs):
+        ax = axes.ravel()[i]
+        prepPoincareFig(ax=ax)
+
+        # Draw the Poincaré grid on this subplot
+        drawPoincareGrid(ax=ax)
+        # Draw the circles for this configuration
+        drawCircles(ax, F, applyFromLeft=True, dot=True)
+
+        # Add a small title for clarity
+        side = r"\mathbf{C}_\mathbf{S}"
+        fig_name = next(alphabet)
+        ax.set_title(rf"{fig_name}: $h=1$, ${F_strings[i]}$, ${side}$")
+
+        drawFVectors(ax, F, scale=0.3, margin=0)
+
+    # Remove y-labels for all but left column
+    for ax in axes[1:].ravel():
+        ax.set_ylabel("")
+
+    if not os.path.exists("Plots"):
+        os.makedirs("Plots")
+
+    path = "Plots/Circles_2vectors_grid.pdf"
+    plt.savefig(path, dpi=300, bbox_inches="tight")
     print(f"Fig saved to {path}")

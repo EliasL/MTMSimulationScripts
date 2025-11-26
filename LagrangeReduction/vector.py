@@ -174,7 +174,8 @@ class Vector(ROI):
         h1 = self.endpoints[0].pos()
         h2 = self.endpoints[1].pos()
         dh = h2 - h1
-        if dh.length() == 0:
+        dh_len = np.hypot(dh.x(), dh.y())
+        if dh_len == 0:
             return p
         pxv = self.pixelVectors(dh)[1]
         if pxv is None:

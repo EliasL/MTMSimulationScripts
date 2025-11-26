@@ -26,9 +26,16 @@ def get_minimizer(df):
     # We can find out what minimizer we have by looking at the third line in the
     # csv file, and seeing which of
     # LBFGS_Term_reason,CG_Term_reason,FIRE_Term_reason is non-zero
-    LBFGS = df["LBFGS_Term_reason"][2]
-    CG = df["CG_Term_reason"][2]
-    FIRE = df["FIRE_Term_reason"][2]
+    if not len(df["LBFGS_Term_reason"]) >= 2:
+        print("No data in file!")
+        return "Unkown"
+
+    # We use iloc so that if for example the second half of the file is loaded,
+    # we take the third line from that arbitrary startingpoint, instead of trying
+    # to find the third line from the top of the file (which might not be loaded)
+    LBFGS = df["LBFGS_Term_reason"].iloc[2]
+    CG = df["CG_Term_reason"].iloc[2]
+    FIRE = df["FIRE_Term_reason"].iloc[2]
     assert sum([LBFGS == 0, CG == 0, FIRE == 0]) == 2, (
         "There is not exactly one non-zero term reason!"
     )
@@ -1025,7 +1032,7 @@ def plot_powerlaw(
 
         dist = DistType(data=all_drops, xmin=xmin)
 
-        title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
+        title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}, $\alpha=${dist.alpha:.2f}"
         attribute = get_attribute(labels[0])
         title = attribute + " " + title
         if attribute in MINIMIZER_COLORS:
@@ -1034,7 +1041,7 @@ def plot_powerlaw(
             color = "black"
 
         if evaluate:
-            p, mean_exp, exp_std = dist.evaluate_fit(all_drops)
+            p, mean_exp, exp_std = dist.evaluate_fit(all_drops, parallel=True)
 
             rating = ["bad", "poor", "good", "excellent"]
             scores = [0.05, 0.1, 0.3]
@@ -1049,14 +1056,10 @@ def plot_powerlaw(
             )
 
         plot_data_and_dist(
-            drops,
+            all_drops,
             dist,
             ax,
-            xmin,
             title,
-            pdf=True,
-            p_val=p,
-            alpha_std=exp_std,
             color=color,
             addFit=addFit,
         )

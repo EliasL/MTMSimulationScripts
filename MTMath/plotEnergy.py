@@ -340,9 +340,13 @@ def drawC(
         # We start from a blank grid, and flip each pixel that has an x,y
         pixels = np.zeros((grid_size, grid_size))
 
-        # Convert to integer pixel indices
-        ix = np.rint(x_plot).astype(int)
-        iy = np.rint(y_plot).astype(int)
+        valid = np.isfinite(x_plot) & np.isfinite(y_plot)
+
+        xv = x_plot[valid]
+        yv = y_plot[valid]
+
+        ix = np.rint(xv).astype(int)
+        iy = np.rint(yv).astype(int)
 
         # Keep only pixels inside the grid
         mask = (ix >= 0) & (ix < grid_size) & (iy >= 0) & (iy < grid_size)
@@ -657,7 +661,101 @@ def drawPoincareGrid(ax=None, grid_size=200, zoom=1, depth=6, **kwargs):
     return ax
 
 
-def drawCircles(ax=None, F=None, applyFromLeft=True, grid_size=200, zoom=1):
+def drawFVectors(ax=None, F=None, scale=0.2, margin=0.05, **kwargs):
+    """
+    Draw the two column vectors of F as arrows in a small inset
+    in the top-right corner of `ax`.
+
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes or None
+        Axes to draw into. If None, a new figure and axes are created.
+    F : array_like, shape (2, 2)
+        Linear map whose columns are drawn as vectors.
+    scale : float
+        Fraction of the main axes width/height occupied by the inset
+        (in axes coordinates).
+    margin : float
+        Offset from the top and right edges, in axes coordinates.
+    **kwargs :
+        Passed on to `Axes.annotate` for the arrows (e.g. zorder, linewidth,
+        arrowprops, etc.). If `arrowprops` is not provided, a default is used.
+    """
+    import numpy as _np
+
+    # Ensure we have an axes
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.get_figure()
+
+    # Default F is identity
+    if F is None:
+        F = _np.eye(2)
+    F = _np.asarray(F, dtype=float)
+    if F.shape != (2, 2):
+        raise ValueError(f"drawFVectors expects a (2,2) matrix, got shape {F.shape}")
+
+    # Create an inset in axes coordinates in the top-right corner
+    # [left, bottom, width, height] all in axes fraction
+    left = 1.0 - margin - scale
+    bottom = 1.0 - margin - scale
+    width = scale
+    height = scale
+    inset = ax.inset_axes([left, bottom, width, height])
+
+    # Make inset clean: no frame, ticks, or labels
+    inset.set_axis_off()
+    inset.patch.set_alpha(0.0)
+    inset.set_aspect("equal", adjustable="box")
+
+    cols = [F[:, 0], F[:, 1]]
+
+    # Norms of the two column vectors
+    norms = _np.linalg.norm(F, axis=0)  # shape (2,)
+    max_norm = float(_np.max(norms)) if norms.size > 0 else 0.0
+
+    # Enforce a minimum "visual" scale so tiny F is still visible
+    base_scale = max(1.0, max_norm)
+
+    L = base_scale
+
+    inset.set_xlim(-L, L)
+    inset.set_ylim(-L, L)
+
+    # Prepare arrow properties
+    user_arrowprops = kwargs.pop("arrowprops", None)
+    default_arrowprops = dict(arrowstyle="-|>", lw=1.5)
+    if user_arrowprops is not None:
+        arrowprops = {**default_arrowprops, **user_arrowprops}
+    else:
+        arrowprops = default_arrowprops
+
+    # Colors for the two basis vectors if user did not specify one
+    base_colors = kwargs.pop("colors", None)
+    if base_colors is None:
+        base_colors = ["C0", "C1"]
+
+    # Draw each column as an arrow from the origin
+    origin = (0.0, 0.0)
+    for idx, v in enumerate(cols):
+        c = base_colors[idx % len(base_colors)]
+        # Allow per-vector override while keeping user kwargs
+        this_arrowprops = dict(arrowprops)
+        if "color" not in this_arrowprops and "edgecolor" not in this_arrowprops:
+            this_arrowprops["color"] = c
+        inset.annotate(
+            "",
+            xy=(v[0], v[1]),
+            xytext=origin,
+            arrowprops=this_arrowprops,
+            **kwargs,
+        )
+
+    return ax
+
+
+def drawCircles(ax=None, F=None, applyFromLeft=True, grid_size=200, zoom=1, dot=False):
     if ax is None:
         fig, ax = prepPoincareFig(grid_size=grid_size, zoom=zoom)
     h = 500  # nr of energy well jumps
@@ -698,6 +796,9 @@ def drawCircles(ax=None, F=None, applyFromLeft=True, grid_size=200, zoom=1):
             linestyle="--" if dash else "-",
             linewidth=5,
         )
+
+    if dot:
+        drawC(ax, F.T @ F, scatter=True, c="blue", zorder=10)
 
 
 def conTrans(C, M):
@@ -1018,7 +1119,7 @@ def drawAllVariations(
     return drawn
 
 
-def generateShearTransformations(depth, startingPoint=None, leftApplied=False):
+def generateShearTransformations(depth, startingPoint=None, leftApplied=True):
     # Generate all unique combinations of up, down, left, right moves up to the given depth
     # Remove duplicate transformations using a set
     transformation_keys = set()
@@ -1031,7 +1132,7 @@ def generateShearTransformations(depth, startingPoint=None, leftApplied=False):
             transformation_keys.add(key)
             transformations.append(F)
             if current_label == "":
-                labels.append(r"\mathbf{I}")
+                labels.append(r"$\mathbf{I}$")
             else:
                 labels.append(current_label)
         if current_depth == 0:
@@ -1044,9 +1145,10 @@ def generateShearTransformations(depth, startingPoint=None, leftApplied=False):
                 recurse(
                     SShear(label) @ F,
                     current_depth - 1,
-                    current_label=current_label + label,
+                    current_label=current_label + rf"${label}$",
                 )
             else:
+                print("Warning, using right applied shears!")
                 recurse(
                     F @ SShear(label),
                     current_depth - 1,
@@ -1196,6 +1298,7 @@ def prepPoincareFig(grid_size=200, zoom=1, ax=None):
     )
     ax.set_xlabel(r"$x_p$")
     ax.set_ylabel(r"$y_p$")
+    ax.set_aspect("equal")
     return fig, ax
 
 
@@ -1354,6 +1457,7 @@ def plotPoincareFTiling(
     ax=None,
     save=True,
     grid_size=1000,
+    extra_grid=1,
     depth=2,
     quadrants="abcd",
     show=False,
@@ -1375,10 +1479,17 @@ def plotPoincareFTiling(
     )
     Fs, labels = generateShearTransformations(depth=depth, leftApplied=leftApplied)
 
-    F = getFFundamental(grid_size=grid_size)
-    for t in Fs:
+    F = getFFundamental(grid_size=int(grid_size * extra_grid))
+    for t, lab in zip(Fs, labels):
         drawF(
-            ax, F, transformation=t, leftApplied=True, grid_size=grid_size, shade=True
+            ax,
+            F,
+            transformation=t,
+            leftApplied=leftApplied,
+            grid_size=grid_size,
+            shade=True,
+            label=lab if use_labels else None,
+            alpha=0.3,
         )
 
     # plt.tight_layout()

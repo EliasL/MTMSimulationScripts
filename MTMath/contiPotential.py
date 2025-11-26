@@ -141,7 +141,7 @@ class EnergyFunction:
         )
 
     @staticmethod
-    def F_from_C(C):
+    def F_from_C(C, theta=np.pi / 3):
         """
         Return the symmetric positive-definite square root of C.
 
@@ -151,6 +151,8 @@ class EnergyFunction:
             U^T U = C,
 
         i.e. the right stretch U in the polar decomposition F = R U.
+
+        Optionally, you can choose a rotation theta
 
         Note:
             From C alone the rotation R is not identifiable; only U is.
@@ -167,9 +169,26 @@ class EnergyFunction:
         C_safe = C.copy()
         C_safe[nan_mask] = np.eye(2)
 
+        R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+        # C_safe = R.T @ C_safe @ R
+
         # Eigen-decomposition of symmetric 2x2 blocks (vectorized)
         # C = Q diag(λ) Q^T
         evals, evecs = np.linalg.eigh(C_safe)
+
+        # # Suppose for 2×2 block we want to swap index 0 and 1
+        # idx = np.array([1, 0])  # swap first ↔ second
+
+        # # Permute eigenvalues and eigenvectors accordingly
+        # evals = evals[..., idx]
+        # evecs = evecs[..., :, idx]
+
+        # Reconstruct C from its eigen-decomposition: C = Q Λ Q^T
+        # Multiply columns of Q by the eigenvalues
+        C_recon = (evecs * evals[..., None, :]) @ evecs.swapaxes(-1, -2)
+
+        # Check reconstruction (with numerical tolerance)
+        assert np.allclose(C_safe, C_recon), "Not able to reconstruct!"
 
         # Check positive semi-definiteness
         assert np.all(evals >= 0), "Negative Eigen values"
@@ -182,7 +201,7 @@ class EnergyFunction:
 
         # U = Q diag(sqrt(λ)) Q^T
         F = evecs @ sqrt_diag @ evecs.swapaxes(-1, -2)
-
+        # F = R.T @ F @ R
         # Restore NaNs where original C had NaNs
         if np.any(nan_mask):
             F[nan_mask, :, :] = np.nan

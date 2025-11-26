@@ -1,5 +1,6 @@
 from .vector import Vector
 import numpy as np
+from PyQt5.QtCore import QPointF
 
 
 class VectorPair:
@@ -61,8 +62,21 @@ class VectorPair:
             self.setPosForSquare(VP.r1.head.pos(), VP.r2.head.pos())
 
     def setPosForSquare(self, p1, p2):
-        self.r1.head.setPos(p1[0], p1[1])
-        self.r2.head.setPos(p2[0], p2[1])
+        # Normalize p1 to (x1, y1)
+        if isinstance(p1, QPointF):
+            x1, y1 = p1.x(), p1.y()
+        else:
+            x1, y1 = p1[0], p1[1]
+
+        # Normalize p2 to (x2, y2)
+        if isinstance(p2, QPointF):
+            x2, y2 = p2.x(), p2.y()
+        else:
+            x2, y2 = p2[0], p2[1]
+
+        # Set the square corners
+        self.r1.head.setPos(x1, y1)
+        self.r2.head.setPos(x2, y2)
         self.r3.root.setPos(self.r1.head.pos())
         self.r3.head.setPos(self.r1.head.pos() + self.r2.head.pos())
         self.r4.root.setPos(self.r2.head.pos())

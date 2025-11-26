@@ -745,23 +745,92 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         return img_item
 
-    def drawEnergyBackground(self):
+    @staticmethod
+    def compute_stress_scalar_field(stress, mode="det", component=(0, 0)):
+        """
+        Convert a tensor-valued stress field sigma_ij into a scalar field.
+
+        Parameters
+        ----------
+        stress : ndarray
+            (..., 2, 2) array of stresses.
+        mode : str
+            One of:
+            - "det"      : determinant of sigma
+            - "I1"       : trace(sigma)
+            - "J2"       : second invariant of deviatoric stress
+            - "sqrtJ2"   : sqrt(J2) = max shear (in 2D convention)
+            - "component": single tensor component specified by `component`
+        component : tuple of int
+            Component indices (i, j) for mode == "component".
+
+        Returns
+        -------
+        field : ndarray
+            Scalar field with shape stress.shape[:-2].
+        """
+        if mode == "det":
+            # det over last two axes
+            return np.linalg.det(stress)
+
+        elif mode in ("I1", "trace"):
+            # trace over last two axes
+            return np.trace(stress, axis1=-2, axis2=-1)
+
+        elif mode in ("J2", "sqrtJ2"):
+            # mean (hydrostatic) stress in 2D: (sigma_xx + sigma_yy) / 2
+            I1 = np.trace(stress, axis1=-2, axis2=-1)
+            mean = I1 / 2.0  # shape (...,)
+
+            # deviatoric stress: s_ij = sigma_ij - mean * delta_ij
+            s = stress - mean[..., None, None] * np.eye(2, dtype=stress.dtype)
+
+            # J2 = 1/2 * s : s  (double contraction over last two axes)
+            J2 = 0.5 * np.sum(s * s, axis=(-2, -1))  # shape (...,)
+
+            if mode == "J2":
+                return J2
+            else:  # "sqrtJ2"
+                with np.errstate(invalid="ignore"):
+                    return np.sqrt(np.clip(J2, 0.0, None))
+
+        elif mode == "component":
+            i, j = component
+            return stress[..., i, j]
+
+        raise ValueError(f"Unknown stress mode: {mode}")
+
+    def drawEnergyBackground(
+        self,
+        stress_mode="det",  # "det", "trace", "J2", "sqrtJ2", or "component"
+        component=(0, 0),  # used only if stress_mode == "component"
+        stressLim=(-0.2, 0.2),
+    ):
         ppu = 2001  # Pixels per unit
         folder = "precomputedEnergyBackgrounds"
-        component = (0, 1)
-        quantity = f"stress{component}" if self.showStress else "energy"
+
+        # Set quantity name for caching
+        if self.showStress:
+            if stress_mode == "component":
+                comp_str = f"{component[0]}{component[1]}"
+                quantity = f"stress_comp{comp_str}"
+            else:
+                quantity = f"stress_{stress_mode}_clip{stressLim[1]}"
+        else:
+            quantity = "energy"
+
         self.triangularEnergy = None
         self.squareEnergy = None
         self.angleRegionImage = None
 
         # Generate energy images for triangular and square shapes
-        for shape, beta, offset in zip(["triangular", "square"], [4, -0.25], [-10, -1]):
-            fName = f"{SCRIPT_DIR}/{folder}/{ppu},{shape},{quantity},Poincare,LRBackround.png"
+        for shape, beta, opacity in zip(["triangular", "square"], [4, -0.25], [0, 1]):
+            fName = f"{SCRIPT_DIR}/{folder}/{ppu}_{shape}_{quantity}_Poincare_LRBackround.png"
+
             # Check if file exists, if not generate and save
-            if os.path.isfile(fName) and ppu >= 500 and True:
+            if os.path.isfile(fName) and ppu > 500:
                 energyImage = self.loadImage(fName)
             else:
-                # BACKGROUND stress/energy
                 from matplotlib import pyplot as plt
 
                 dpi = 400  # any value, just keep it consistent
@@ -786,26 +855,99 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                         resolution=ppu, beta=beta, K=0, zeroReference=True, eps=1e-2
                     )
                 else:
-                    field = generate_stress_grid(
-                        resolution=ppu, beta=beta, lim=[-0.3, 0.3], eps=1e-2
-                    )[..., *component]
+                    stress = generate_stress_grid(
+                        resolution=ppu, beta=beta, eps=1e-2
+                    )  # shape (ppu, ppu, 2, 2)
+
+                    with np.errstate(invalid="ignore"):
+                        field = self.compute_stress_scalar_field(
+                            stress, mode=stress_mode, component=component
+                        )
+                        field = np.clip(field, *stressLim)
+
                 ax.imshow(
                     field,
                     origin="lower",
                     cmap="coolwarm",
                 )
+                mappable = ax.images[-1]
 
-                energyImage = self.fig_to_pg(fig)
-                energyImage.setLookupTable(COOLWARM_LUT)
-                energyImage.save(fName)
-            if offset == -1:
+                # [left, bottom, width, height] in *figure* coordinates
+                # height = 0.20 -> 20% of the image height
+                cax = fig.add_axes([0.98, 0.02, 0.015, 0.20])
+
+                cb = plt.colorbar(mappable, cax=cax, orientation="vertical")
+
+                # Transparent background
+                cax.set_facecolor((1, 1, 1, 0.0))
+
+                # White outline
+                cb.outline.set_edgecolor("white")
+                for spine in cax.spines.values():
+                    spine.set_edgecolor("white")
+
+                textSize = 2 * ppu / dpi
+
+                cb.ax.yaxis.tick_left()  # Put ticks + labels on the left
+                cb.ax.yaxis.set_label_position("left")
+
+                cb.ax.tick_params(
+                    labelsize=textSize,
+                    length=1,
+                    width=0.4,
+                    color="white",
+                    left=True,  # ticks on left
+                    right=False,
+                )
+
+                for label in cb.ax.get_yticklabels():
+                    label.set_ha("right")  # horizontal alignment: pull toward bar
+                    label.set_va("center")  # vertical alignment is usually fine
+                cb.outline.set_linewidth(0.2)
+
+                for label in cb.ax.get_yticklabels():
+                    label.set_color("white")
+
+                # The "×10⁻¹⁰" offset text: white and small
+                offset_text = cb.ax.yaxis.get_offset_text()
+                offset_text.set_color("white")
+                offset_text.set_ha("right")
+                offset_text.set_va("top")
+                offset_text.set_size(textSize)
+
+                # Ensure directory exists
+                dirpath = os.path.dirname(fName)
+                os.makedirs(dirpath, exist_ok=True)
+
+                # Save with matplotlib
+                fig.savefig(
+                    fName,
+                    dpi=dpi,
+                    transparent=True,
+                )
+                plt.close(fig)
+
+                if os.path.isfile(fName):
+                    print(f"Saved to {fName}")
+                    print(f"Max: {np.nanmax(field)}\nMin: {np.nanmin(field)}")
+                    # print(f"where: {np.nanargmin(field)}")
+                else:
+                    print("NOT SAVED!")
+
+                # Load back into pyqtgraph / your format
+                energyImage = self.loadImage(fName)
+
+            # Apply LUT for both cached and newly generated images
+            energyImage.setLookupTable(COOLWARM_LUT)
+
+            if opacity == 1:
                 self.currentBeta = beta
 
             # Dynamically assign attributes for triangularEnergy and squareEnergy
             setattr(
                 self,
                 f"{shape}Energy",
-                self.drawHeatMap(energyImage, offset, self.PCS_plot, 1, 1),
+                self.drawHeatMap(energyImage, opacity, self.PCS_plot, 1, 1),
             )
 
         # # Generate angle region image with a different colormap
@@ -827,19 +969,16 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
     @staticmethod
     def loadImage(fileName):
         img = QImage(fileName)
-        # Use 8-bit format, not RGBA64
+
         if img.format() != QImage.Format_RGBA8888:
             img = img.convertToFormat(QImage.Format_RGBA8888)
 
-        # Get uint8 array (H, W, 4)
         imgArray = pg.imageToArray(img, copy=True)
-        if imgArray.dtype != np.uint8:
-            imgArray = imgArray.astype(np.uint8, copy=False)
+        imgArray = imgArray.astype(np.uint8, copy=False)
 
-        imageItem = pg.ImageItem(imgArray)
-        imageItem.setAutoDownsample(True)  # helps stability/perf while panning/zooming
+        imgArray = np.fliplr(imgArray)  # Fix vertical flip
 
-        return imageItem
+        return pg.ImageItem(imgArray)
 
     def _snapshot_energy_inputs(self, resolution):
         # Called on the GUI thread only
@@ -906,8 +1045,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         rect_height = y_range[1] - y_range[0]
         return x, y, rect_width, rect_height
 
-    def drawHeatMap(self, heatmap, zValue, plot, width=None, height=None):
-        heatmap.setZValue(zValue)
+    def drawHeatMap(self, heatmap, opacity, plot, width=None, height=None):
+        heatmap.setOpacity(opacity)
         if width is None or height is None:
             rect = pg.QtCore.QRectF(*self.getPlotRange(plot))
             heatmap.setRect(rect)
@@ -1362,12 +1501,12 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             self.GV_plot.setRange(xRange=[-s, s], yRange=[-s, s])
 
         if event.key() == Qt.Key_T:
-            self.triangularEnergy.setZValue(-1)
-            self.squareEnergy.setZValue(-10)
+            self.triangularEnergy.setOpacity(1)
+            self.squareEnergy.setOpacity(0)
             self.currentBeta = 4
         if event.key() == Qt.Key_S:
-            self.triangularEnergy.setZValue(-10)
-            self.squareEnergy.setZValue(-1)
+            self.triangularEnergy.setOpacity(0)
+            self.squareEnergy.setOpacity(1)
             self.currentBeta = -0.25
         if event.key() == Qt.Key_F:
             self.w_LR.setVisible(not self.w_LR.isVisible())

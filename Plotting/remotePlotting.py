@@ -339,7 +339,7 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
 # config with the path is is most likely to corespond to.
 # If a config could match with two paths, the first path found is chosen
 def configToPath(config, paths=None):
-    if paths:
+    if paths is not None:
         # Search for the coresponding path and config
         matches = [path for path in paths if config.name in path]
         if matches:
@@ -347,6 +347,7 @@ def configToPath(config, paths=None):
         else:
             return None
     else:
+        # Assume it is found in the MACRO_PATH
         return f"{MACRO_PATH}/{config.name}.csv"
 
 
@@ -378,7 +379,7 @@ def rematchPathsAndLabels(configs, labels, paths):
             matched_paths.append(path)
             matched_labels.append(label)
         else:
-            print(f"Warning: missing file:\n {path}")
+            print(f"Warning: missing file:\n{config.name}")
     return matched_paths, matched_labels
 
 
@@ -459,12 +460,13 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
                 if useOldFiles is False:
                     return get_csv_files(config_groups, useOldFiles=True, labels=labels)
     print("")  # New line from progress indicator
+    print(f"Found {len(paths)} files.")
     if nested:
-        paths, labels = flatToStructure(config_groups, labels)
+        paths, labels = flatToStructure(config_groups, labels, paths + localPaths)
     else:
         # The paths are returned in psedu random order, so we need to
         # match them with their correct label again
-        paths, labels = rematchPathsAndLabels(all_configs, labels, paths)
+        paths, labels = rematchPathsAndLabels(all_configs, labels, paths + localPaths)
     return paths, labels
 
 

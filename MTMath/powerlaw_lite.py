@@ -169,7 +169,10 @@ class Distribution(object):
             which the Distribution object is contained.
         """
         if len(data) < 2:
-            print("Not enough data. Returning nan", file=sys.stderr)
+            print(
+                f"Not enough data ({len(data)} point(s)). Returning nan",
+                file=sys.stderr,
+            )
             from numpy import nan
 
             self.D = nan
@@ -266,6 +269,14 @@ class Distribution(object):
         from functools import partial
 
         data = self.trim_to_range(data)
+        if len(data) <= 2:
+            print(f"Not enough data to evaluate fit ({len(data)} point(s))")
+            self.p = -0.01
+            self.p_std = 0
+            # keep both mean and std; fix the original overwrite bug
+            self.alpha_mean = 0
+            self.alpha_std = 0
+            return self.p, self.alpha_mean, self.alpha_std
 
         # --- compute number of synthetic sets
         nr_sets = max(1, int(1 / (4 * confidence**2)))  # At least one set
