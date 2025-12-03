@@ -3,33 +3,25 @@ from PyQt5 import QtWidgets
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QImage, QFontDatabase
 import pyqtgraph as pg
-import random
 import numpy as np
 from PyQt5.QtWidgets import QApplication
 import matplotlib
 from concurrent.futures import ThreadPoolExecutor
-from time import sleep
 from .LagrangeReduction import (
     C2PoincareDisk,
     F2C,
-    CPos,
-    CToAngle,
-    conTrans,
     constrainDeterminant,
-    generate_flood_fill_coordinates,
     generate_matrix,
     lagrange_reduction,
     lagrange_reduction_visualization,
-    manhattanDistance,
 )
 from .vectorPair import VectorPair
 from MTMath.plotEnergy import (
     generate_energy_grid,
-    generate_angle_region,
     generate_stress_grid,
     drawPoincareGrid,
 )
-from MTMath.contiPotential import ZeroEnergy, ContiEnergy, SuperSimple, SShear
+from MTMath.contiPotential import ContiEnergy, SShear
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -83,6 +75,9 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Div
         self.showHistory = False
         self.showStress = True
+        # "det", "trace","-I1", "J2", "sqrtJ2", or "i,j" for components
+        self.stress_mode = "trace"
+        self.stressLim = (-0.2, 0.2)
         self.showCircles = True
         self.showRightOrth = False
 
@@ -142,9 +137,9 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.elastic_reduced_marker.setVisible(
             not self.elastic_reduced_marker.isVisible()
         )
-        self.LR_VP.setVisible(reduced=not self.LR_VP.isVisible(reduced=True))
-        self.GV_VP.setVisible(reduced=not self.GV_VP.isVisible(reduced=True))
-        self.reduced_marker.setVisible(not self.reduced_marker.isVisible())
+        self.LR_VP.setVisible(reduced=False)
+        self.GV_VP.setVisible(reduced=False)
+        self.reduced_marker.setVisible(False)
 
         self.show()
 
@@ -303,6 +298,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             size=self.markerSize,
             brush=pg.mkBrush(self.handleColor),  # Fill color
             pen=pg.mkPen(color="white", width=2),  # Outline color and width
+            zorder=5,
         )
 
         self.reduced_marker = pg.ScatterPlotItem(
@@ -488,166 +484,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             degrees = np.degrees(angle)
             self.angle_label.setText(f"Angle (θ): {degrees:.2f}°")
 
-    def drawMetricSpaceBackground(self):
-        # Draw lines
-        return
-        self.drawCircle(1)
-
-        nr = 100
-        one = np.array([1] * nr)
-        zero = np.array([0] * nr)
-
-        # t has many values close to 0, and fewer larger values
-        t = np.sinh(np.linspace(np.arcsinh(0.001), np.arcsinh(300), nr))
-
-        # Shearing circles
-        self.drawF(one, zero, t, one, width=1, color="#222", zValue=-2)
-        self.drawF(one, t, zero, one, width=1, color="#222", zValue=-2)
-
-        """
-        See Note 1 at the bottom of the document for more theory on what follows
-        """
-        depth = 6
-
-        # VERTICAL LINE
-        t = np.sinh(np.linspace(np.arcsinh(1), np.arcsinh(2 / np.sqrt(3)), nr))
-        # Values from -1<t<1 give complex solutions
-        # det=1, C12=C21, C11=C22
-        # Vertical Positive
-        C_V_P = np.array([[t, np.sqrt(t**2 - 1)], [np.sqrt(t**2 - 1), t]]).transpose(
-            2, 0, 1
-        )
-        self.drawAllVariations(C_V_P, depth)
-        # Vertical Negative
-        C_V_N = np.array([[t, -np.sqrt(t**2 - 1)], [-np.sqrt(t**2 - 1), t]]).transpose(
-            2, 0, 1
-        )
-
-        self.drawAllVariations(C_V_N, depth)
-
-        # HORIZONTAL LINE
-        # Values from -1<t<1 are outside of the circle
-        t = np.sinh(np.linspace(np.arcsinh(0.0000001), np.arcsinh(1), nr))
-        # det=1, C12=C21, C12=0
-        C_H = np.array([[t, zero], [zero, 1 / t]]).transpose(2, 0, 1)
-        self.drawAllVariations(C_H, depth, color="green")
-
-        # FUNDAMENTAL DOMAIN (0.01 to avoid div by 0)
-        # https://www.wolframalpha.com/input?i=0%3Ca%3Cd%2C+b%3Da%2F2%2C+++a*d-b*c%3D1%2C+b%3Dc
-        t = np.sinh(np.linspace(np.arcsinh(0.0000001), np.arcsinh(2 / np.sqrt(3)), nr))
-        # Negative values are outside of the circle
-        # det=1, C12=C21,
-        C_F = np.array([[t, t / 2], [t / 2, (t**2 + 4) / (4 * t)]]).transpose(2, 0, 1)
-
-        self.drawAllVariations(C_F, depth, color="red")
-
-    def drawTriangularConfigurationLines(self, C, loops=1, width=1, color=None):
-        if color is None:
-            color = self.background_line_color
-
-        for x in range(-loops, loops + 1):
-            for y in range(-loops, loops + 1):
-                C_ = self.CPos(C, x, y)
-                self.drawAllVariations(C_, color=color, width=width)
-
-    def drawColorfullTriangularConfigurationLines(
-        self, C, conjugations=2, width=10, color=None
-    ):
-        if color is None:
-            color = self.background_line_color
-
-        # The transposing and swaping of the top and bottom rows means that
-        # purple is now [1,1], and red is [0,0]. When we then shift everything
-        # +1,+1, purple is (0,0) and red is (-1, -1)
-        color_matrix = np.array(
-            [
-                ["red", "pink", "blue"],
-                ["yellow", "purple", "orange"],
-                ["green", "white", "grey"],
-            ]
-        ).transpose()
-        temp = color_matrix[:, 2].copy()
-        color_matrix[:, 2] = color_matrix[:, 0]
-        color_matrix[:, 0] = temp
-
-        nr_colors = (2 * conjugations + 1) ** 2
-        i = min([nr_colors * 2, 30])
-
-        # We want to record the start and stop possition of each line. We do
-        # this using the angle on the unit circle
-        CLineAngles = np.zeros((conjugations * 2 + 1, conjugations * 2 + 1, 2))
-
-        for x, y in generate_flood_fill_coordinates(conjugations, manhattanDistance):
-            C_ = CPos(C, x, y).copy()
-            # print(f"{x}, {y}")
-            # print(color_matrix[x+1, y+1])
-            # m = len(C_)//2 # Middle
-            # print(C_[0],C_[m], C_[-1])
-            if conjugations == 1:
-                color = color_matrix[x + 1, y + 1]
-            else:
-                color = (
-                    random.randint(0, 255),
-                    random.randint(0, 255),
-                    random.randint(0, 255),
-                )
-            self.drawAllVariations(C_, color=color, width=i, showArrows=False)
-            i = i - 2
-            i = max([i, 1])
-
-            CLineAngles[x + conjugations, y + conjugations, :] = CToAngle(C_)
-        return CLineAngles
-
-    def drawAllVariations(self, C, depth=0, drawn=None, **kwards):
-        # Initialize/set carry-over dedup set
-        if drawn is None:
-            drawn = set()
-
-        # Build stable hash for an individual or batched metric
-        def _hash_metric(M):
-            A = np.asarray(M)
-            return tuple(np.round(A.reshape(-1), 12))
-
-        # Attempt a draw if we haven't seen this metric yet
-        def _maybe_draw(MC):
-            key = _hash_metric(MC)
-            if key in drawn:
-                return False
-            drawn.add(key)
-            self.drawC(MC, **kwards)
-            return True
-
-        # Support both single (2,2) and batched (N,2,2) C
-        # The original code assumed batched along axis 0 for generator matrices
-        # We keep the previous vectorized path.
-        if C.ndim == 2:
-            C = C[None, ...]
-
-        nr = len(C)
-        one = np.array([1] * nr)
-        zero = np.array([0] * nr)
-
-        m1 = np.array([[one, zero], [zero, -one]]).transpose(2, 0, 1)
-        m2 = np.array([[zero, one], [one, zero]]).transpose(2, 0, 1)
-        m3 = np.array([[one, -one], [zero, one]]).transpose(2, 0, 1)
-
-        def up(M):
-            return conTrans(M, m3)
-
-        def right(M):
-            return conTrans(M, m3.transpose(0, 2, 1))
-
-        # Draw the base and a few simple symmetries (deduped)
-        _maybe_draw(C)
-        _maybe_draw(conTrans(C, m1))
-        _maybe_draw(conTrans(C, m2))
-        _maybe_draw(conTrans(conTrans(C, m1), m2))
-
-        # Recurse via generators corresponding to up/right moves
-        if depth > 0:
-            self.drawAllVariations(up(C), depth - 1, drawn=drawn, **kwards)
-            self.drawAllVariations(right(C), depth - 1, drawn=drawn, **kwards)
-
     def drawLagrangeReductionBackground(self):
         # We want to visualize where the lagrange reduction occurs when moving either vector
         # We solve this by creating two heatmaps and changing which heatmap is in front depending on what
@@ -746,7 +582,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         return img_item
 
     @staticmethod
-    def compute_stress_scalar_field(stress, mode="det", component=(0, 0)):
+    def compute_stress_scalar_field(stress, mode="det"):
         """
         Convert a tensor-valued stress field sigma_ij into a scalar field.
 
@@ -756,13 +592,12 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             (..., 2, 2) array of stresses.
         mode : str
             One of:
-            - "det"      : determinant of sigma
-            - "I1"       : trace(sigma)
-            - "J2"       : second invariant of deviatoric stress
-            - "sqrtJ2"   : sqrt(J2) = max shear (in 2D convention)
-            - "component": single tensor component specified by `component`
-        component : tuple of int
-            Component indices (i, j) for mode == "component".
+            - "det"         : determinant of sigma
+            - "I1"/"trace"  : trace(sigma)
+            - "-I1"         : sigma_xx - sigma_yy
+            - "J2"          : second invariant of deviatoric stress
+            - "sqrtJ2"      : sqrt(J2) = max shear (in 2D convention)
+            - "(i, j)"      : specific component of sigma
 
         Returns
         -------
@@ -776,6 +611,9 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         elif mode in ("I1", "trace"):
             # trace over last two axes
             return np.trace(stress, axis1=-2, axis2=-1)
+        elif mode in ("-I1", "-trace"):
+            # sigma_xx - sigma_yy
+            return stress[..., 0, 0] - stress[..., 1, 1]
 
         elif mode in ("J2", "sqrtJ2"):
             # mean (hydrostatic) stress in 2D: (sigma_xx + sigma_yy) / 2
@@ -794,16 +632,18 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 with np.errstate(invalid="ignore"):
                     return np.sqrt(np.clip(J2, 0.0, None))
 
-        elif mode == "component":
-            i, j = component
-            return stress[..., i, j]
-
-        raise ValueError(f"Unknown stress mode: {mode}")
+        else:
+            try:
+                if isinstance(mode, str):
+                    mode = tuple(int(i) for i in mode.strip("()").split(","))
+                i, j = mode
+                return stress[..., i, j]
+            except Exception:
+                raise ValueError("Unknown stress mode:", mode)
 
     def drawEnergyBackground(
         self,
-        stress_mode="det",  # "det", "trace", "J2", "sqrtJ2", or "component"
-        component=(0, 0),  # used only if stress_mode == "component"
+        stress_mode="-I1",  # "det", "trace","-I1", "J2", "sqrtJ2", or "i,j" for components
         stressLim=(-0.2, 0.2),
     ):
         ppu = 2001  # Pixels per unit
@@ -811,11 +651,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         # Set quantity name for caching
         if self.showStress:
-            if stress_mode == "component":
-                comp_str = f"{component[0]}{component[1]}"
-                quantity = f"stress_comp{comp_str}"
-            else:
-                quantity = f"stress_{stress_mode}_clip{stressLim[1]}"
+            quantity = f"stress_{stress_mode}_clip{stressLim[1]}"
         else:
             quantity = "energy"
 
@@ -861,7 +697,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
                     with np.errstate(invalid="ignore"):
                         field = self.compute_stress_scalar_field(
-                            stress, mode=stress_mode, component=component
+                            stress, mode=stress_mode
                         )
                         field = np.clip(field, *stressLim)
 
@@ -880,11 +716,11 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
                 # Transparent background
                 cax.set_facecolor((1, 1, 1, 0.0))
-
+                text_color = "#777777"
                 # White outline
-                cb.outline.set_edgecolor("white")
+                cb.outline.set_edgecolor(text_color)
                 for spine in cax.spines.values():
-                    spine.set_edgecolor("white")
+                    spine.set_edgecolor(text_color)
 
                 textSize = 2 * ppu / dpi
 
@@ -895,7 +731,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                     labelsize=textSize,
                     length=1,
                     width=0.4,
-                    color="white",
+                    color=text_color,
                     left=True,  # ticks on left
                     right=False,
                 )
@@ -906,11 +742,11 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 cb.outline.set_linewidth(0.2)
 
                 for label in cb.ax.get_yticklabels():
-                    label.set_color("white")
+                    label.set_color(text_color)
 
-                # The "×10⁻¹⁰" offset text: white and small
+                # The "×10⁻¹⁰" offset text: gray and small
                 offset_text = cb.ax.yaxis.get_offset_text()
-                offset_text.set_color("white")
+                offset_text.set_color(text_color)
                 offset_text.set_ha("right")
                 offset_text.set_va("top")
                 offset_text.set_size(textSize)
@@ -929,8 +765,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
                 if os.path.isfile(fName):
                     print(f"Saved to {fName}")
-                    print(f"Max: {np.nanmax(field)}\nMin: {np.nanmin(field)}")
-                    # print(f"where: {np.nanargmin(field)}")
                 else:
                     print("NOT SAVED!")
 
@@ -1047,6 +881,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     def drawHeatMap(self, heatmap, opacity, plot, width=None, height=None):
         heatmap.setOpacity(opacity)
+        heatmap.setZValue(-5)  # Ensure it's in the background
         if width is None or height is None:
             rect = pg.QtCore.QRectF(*self.getPlotRange(plot))
             heatmap.setRect(rect)
@@ -1157,7 +992,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         energyImage.setLookupTable(COOLWARM_LUT)
 
         if not hasattr(self, image_attr) or getattr(self, image_attr) is None:
-            heatmap = self.drawHeatMap(energyImage, -1, self.GV_plot)
+            heatmap = self.drawHeatMap(energyImage, 1, self.GV_plot)
             setattr(self, image_attr, heatmap)
         else:
             heatmap = getattr(self, image_attr)
@@ -1169,8 +1004,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     def drawBackground(self):
         self.drawLagrangeReductionBackground()
-        self.drawEnergyBackground()
-        self.drawMetricSpaceBackground()
+        self.drawEnergyBackground(self.stress_mode, self.stressLim)
 
     def mouseMove(self, pos):
         for VP in [self.LR_VP, self.GV_VP]:
@@ -1596,80 +1430,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.LR_plot.update()
         self.updateGVSpheres()
         self.updateFEnergyBackground()
-
-    def drawLine(
-        self, x, y, color=None, width=1, dashed=False, zValue=-1, showArrows=False
-    ):
-        dashPattern = [10, 10] if dashed else None
-        color = color if color is not None else self.background_line_color
-        line = self.PCS_plot.plot(
-            x, y, pen=pg.mkPen(color=color, width=width, dash=dashPattern)
-        )
-        # line.setClipToView(True)
-        line.setZValue(zValue)
-        if showArrows and len(x) > 1 and len(y) > 1:
-            # Calculate angle for the arrow at the end of the line
-
-            angle = self.angleBetweenPoints((x[-1], y[-1]), (x[-2], y[-2]))
-
-            # Create and add an arrow at the end of the lineangle at the end of a line python
-            endArrow = pg.ArrowItem(
-                pos=(x[-1], y[-1]),
-                headLen=width + 10,
-                angle=180 - angle,
-                brush=color,
-                pen=(0, 0, 0),
-            )
-            self.PCS_plot.addItem(endArrow)
-
-    def drawEllipse(self, a, b, x=0, y=0, color=None):
-        """
-        Draw an ellipse with semi-major axis 'a' and semi-minor axis 'b'.
-        (h,k) is the center of the ellipse.
-        """
-        t = np.linspace(0, np.pi * 2, 100)
-        x = x + a * np.sin(t)
-        y = y + b * np.cos(t)
-        self.drawLine(x, y, color)
-
-    def drawCircle(self, r, x=0, y=0, color=None):
-        """
-        Draw a circle of radius 'r' centered at (x,y).
-        """
-        self.drawEllipse(r, r, x, y, color)
-
-    def drawF(self, F11, F12, F21, F22, **kwargs):
-        F = np.array([[F11, F12], [F21, F22]]).transpose(2, 0, 1)
-        C = F.transpose(0, 2, 1) @ F
-        self.drawC(C, **kwargs)
-
-    def drawC(self, C, C12=None, C22=None, **kwargs):
-        if C12 is not None and C22 is not None:
-            # Assuming C is C11 here
-            C = np.array([[C, C12], [C12, C22]]).transpose(2, 0, 1)
-        # If C is already the array, it will be used as is
-        pos = C2PoincareDisk(C)
-        self.drawLine(pos[0], pos[1], **kwargs)
-
-    def dim_colormap(self, colormap, factor=0.5, neutral=(0, 0, 0), alpha=1):
-        """
-        Dim a colormap by interpolating its colors with a neutral color.
-
-        Parameters:
-        - colormap: The original colormap.
-        - factor: A factor between 0 (fully neutral) and 1 (original colormap).
-        - neutral: A neutral color to interpolate with, e.g., (0, 0, 0) for black.
-
-        Returns:
-        - A new dimmed colormap.
-        """
-        for i, color in enumerate(colormap.color):
-            r = color[0] * factor + neutral[0] * (1 - factor)
-            g = color[1] * factor + neutral[1] * (1 - factor)
-            b = color[2] * factor + neutral[2] * (1 - factor)
-            colormap.color[i] = (r, g, b, alpha)
-
-        return colormap
 
 
 def orth_theta_ref0(gamma):

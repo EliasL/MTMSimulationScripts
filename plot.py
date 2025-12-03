@@ -18,6 +18,8 @@ from MTMath.plotPowerLaw import plot_powerlaw, make_exponent_fit
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
     poincareTiling,
+    plotStressFromRealF,
+    plotsLotsOfRealFStress,
     calculateSimpleFiniteDifferenceDerivatives,
     calculateShearFiniteDifferenceDerivatives,
     plotShearFiniteDifferenceDerivatives,
@@ -312,8 +314,11 @@ if __name__ == "__main__":
     # plotMaxForce()
     # plotMinimizationCriteriaData()
     # plotShowMinCriteria()
-    poincareTiling()
+    # poincareTiling()
+
     # checkPoincareQuadrants()
     # drawLeftRightExplanationFigs()
     # drawRotationExplanationFigs()
     # drawRotation2ExplanationFigs()
+    # plotStressFromRealF()
+    plotsLotsOfRealFStress()

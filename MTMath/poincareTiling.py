@@ -5,6 +5,7 @@ from .plotEnergy import (
     plotPoincareFTiling,
     applyCongruenceTransformations,
     drawC,
+    drawF,
     drawFVectors,
     drawPoincareGrid,
     prepPoincareFig,
@@ -12,7 +13,9 @@ from .plotEnergy import (
     drawCircles,
 )
 import numpy as np
-from MTMath.contiPotential import ContiEnergy, SShear
+from MTMath.contiPotential import ContiEnergy, SShear, Rotation
+import os
+import string
 
 
 # Energy adapter (expects full 2x2 C)
@@ -476,9 +479,6 @@ def checkPoincareQuadrants(depth=5):
 
 
 def drawLeftRightExplanationFigs():
-    import os
-    import string
-
     alphabet = iter(string.ascii_uppercase)
 
     # Create a 3x2 grid of subplots: rows correspond to shear=0,1,2 and
@@ -532,9 +532,6 @@ def drawLeftRightExplanationFigs():
 
 
 def drawRotationExplanationFigs():
-    import os
-    import string
-
     alphabet = iter(string.ascii_uppercase)
 
     # Create a 3x2 grid of subplots: rows correspond to shear=0,1,2 and
@@ -585,9 +582,6 @@ def drawRotationExplanationFigs():
 
 
 def drawRotation2ExplanationFigs():
-    import os
-    import string
-
     alphabet = iter(string.ascii_uppercase)
 
     # Create a 3x2 grid of subplots: rows correspond to shear=0,1,2 and
@@ -629,3 +623,50 @@ def drawRotation2ExplanationFigs():
     path = "Plots/Circles_2vectors_grid.pdf"
     plt.savefig(path, dpi=300, bbox_inches="tight")
     print(f"Fig saved to {path}")
+
+
+def plotStressFromRealF(
+    grid_size=100,
+    nr_theta=12,
+    nr_gamma=1000,
+    gamma_lim=3,
+    limits=(-0.2, 0.2),
+    s_component=(0, 0),
+):
+    theta = np.linspace(0, 1 * np.pi, nr_theta + 1)[:-1]
+    gamma = np.linspace(0, gamma_lim, nr_gamma)
+
+    F = SShear(h=gamma, theta=theta, s_conponent=s_component)
+    stress = ContiEnergy.cauchy_from_F(F)
+    # N1 is the first normal stress difference
+    N1 = stress[..., 0, 0] - stress[..., 1, 1]
+    N1 = np.clip(N1, *limits)
+    shear_stress = stress[..., 0, 1]
+    shear_stress = np.clip(shear_stress, *limits)
+
+    for val, quantity in zip([N1, shear_stress], ["N1", "shear_stress"]):
+        ax = drawPoincareGrid(grid_size=grid_size)
+        drawF(ax, F, shade=True, shade_values=val, grid_size=grid_size)
+        path = f"Plots/RealFStress/Stress_from_realF_{quantity}_t{nr_theta}_g{nr_gamma}_{gamma_lim}_q{grid_size}_S{'_'.join(map(str, s_component))}.pdf"
+        os.makedirs("Plots/RealFStress", exist_ok=True)
+        plt.savefig(
+            path,
+            dpi=300,
+            bbox_inches="tight",
+        )
+        print(f"Fig saved to {path}")
+        # plt.show()
+    return ax
+
+
+def plotsLotsOfRealFStress():
+    for s_component in [(0, 0), (1, 0), (0, 1), (1, 1)]:
+        for nr_theta, grid_size in zip([8, 100, 2000], [100, 200, 1000]):
+            plotStressFromRealF(
+                grid_size=grid_size,
+                nr_theta=nr_theta,
+                nr_gamma=2000,
+                gamma_lim=4,
+                limits=(-0.2, 0.2),
+                s_component=s_component,
+            )

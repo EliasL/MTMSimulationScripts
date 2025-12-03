@@ -132,6 +132,7 @@ class Process:
         remote_file_path = os.path.join(
             self.output_path, self.name, settings["MACRODATANAME"] + ".csv"
         )
+        # Example path:
         "/data/elundheim/MTS2D_output/simpleShear,s200x200l0.15,0.0002,1.0PBCt3minimizerCGLBFGSEpsg0.0001CGEpsg0.0001eps0.0001s14/simpleShear,s200x200l0.15,0.0002,1.0PBCt3minimizerCGLBFGSEpsg0.0001CGEpsg0.0001eps0.0001s14/macroData.csv"
 
         with self.ssh.open_sftp() as sftp:
@@ -424,134 +425,187 @@ class JobManager:
         self.findSlurmJobs()
         self.findProcesses()
 
-    def cancel_jobs_on_server(self, server, job_ids):
+    def cancel_jobs_on_server(self, server, job_ids="all", force=False):
         """
         Cancel jobs on a specific server after verifying their existence using self.slurmJobs.
 
-        Parameters:
-            server (str): The server on which to cancel the jobs.
-            job_ids (str or list): A single job ID or a list of job IDs to cancel.
+        Parameters
+        ----------
+        server : str
+            The server on which to cancel the jobs.
+        job_ids : str | int | Iterable
+            A single job ID, an iterable of job IDs, or the string "all".
         """
 
-        # Ensure job_ids is a list
-        if not isinstance(job_ids, list):
-            job_ids = [job_ids]
+        # 1. Special case: cancel all and stop.
+        if job_ids == "all":
+            return self.cancelAllJobs(force=force, on=server)
 
-        # Check if self.slurmJobs is available
-        if self.slurmJobs is None:
+        # 2. Normalize job_ids to a list of strings.
+        if not isinstance(job_ids, (list, tuple, set)):
+            job_ids = [job_ids]
+        job_ids = [str(j) for j in job_ids]
+
+        # 3. Precompute known jobs for this server (if available).
+        if self.slurmJobs is not None:
+            known_ids = {
+                str(job["job_id"])
+                for job in self.slurmJobs
+                if job.get("server") == server
+            }
+        else:
+            known_ids = None
             print("WARNING: self.slurmJobs is None. Job existence will not be checked.")
 
+        results = {}
+
+        ssh_client = None
         try:
-            # Establish SSH connection
-            ssh_client = connectToCluster(server, False)
-
-            for job_id in job_ids:
-                # Step 1: Check if the job exists using self.slurmJobs
-                job_exists = False
-                if self.slurmJobs is not None:
-                    for job in self.slurmJobs:
-                        if job["server"] == server and str(job["job_id"]) == str(
-                            job_id
-                        ):
-                            job_exists = True
-                            break
-                    if not job_exists:
-                        print(
-                            f"Job {job_id} does not exist on {server}. Skipping cancellation."
-                        )
-                        continue  # Skip to the next job_id
-                else:
-                    # If self.slurmJobs is None, skip existence check
-                    pass
-
-                # Step 2: Attempt to cancel the job
-                cancel_command = f"scancel {job_id}"
-                try:
-                    stdin, stdout, stderr = ssh_client.exec_command(cancel_command)
-                    cancel_error = stderr.read().decode().strip()
-
-                    if cancel_error:
-                        print(
-                            f"Error canceling job {job_id} on {server}: {cancel_error}"
-                        )
-                        continue  # Skip verification if cancellation failed
-
-                    print(f"Cancellation command sent for job {job_id} on {server}.")
-                except SSHException as ssh_exc:
-                    print(
-                        f"SSH error while canceling job {job_id} on {server}: {ssh_exc}"
-                    )
-                    continue
-                except Exception as exc:
-                    print(
-                        f"Unexpected error while canceling job {job_id} on {server}: {exc}"
-                    )
-                    continue  # Depending on your needs, you might want to handle this differently
-
-                # Step 3: Verify cancellation using squeue
-                check_command = f"squeue -j {job_id} -h"
-                try:
-                    stdin, stdout, stderr = ssh_client.exec_command(check_command)
-                    verify_output = stdout.read().decode().strip()
-                    verify_error = stderr.read().decode().strip()
-
-                    if verify_error:
-                        print(
-                            f"Error verifying cancellation for job {job_id} on {server}: {verify_error}"
-                        )
-                        continue  # Proceed to the next job_id
-
-                    else:
-                        # Probably successful
-                        print(f"Successfully canceled job {job_id} on {server}.")
-
-                except SSHException as ssh_exc:
-                    print(
-                        f"SSH error while verifying cancellation for job {job_id} on {server}: {ssh_exc}"
-                    )
-                    continue
-                except Exception as exc:
-                    print(
-                        f"Unexpected error while verifying cancellation for job {job_id} on {server}: {exc}"
-                    )
-                    continue
-
-        except (SSHException, NoValidConnectionsError) as conn_exc:
-            print(f"Error connecting to server {server}: {conn_exc}")
-        except Exception as exc:
-            print(
-                f"An unexpected error occurred while connecting to server {server}: {exc}"
-            )
-        finally:
-            # Close SSH connection if it's open
+            # 4. Connect once.
             try:
-                ssh_client.close()
-            except (AttributeError, SSHException) as close_exc:
-                print(f"Error closing SSH connection to {server}: {close_exc}")
+                ssh_client = connectToCluster(server, False)
+            except (SSHException, NoValidConnectionsError) as exc:
+                msg = f"Error connecting to server {server}: {exc}"
+                print(msg)
+                # Mark all jobs as failed at connect stage.
+                for jid in job_ids:
+                    results[jid] = {"ok": False, "stage": "connect", "error": msg}
+                return results
+            except Exception as exc:
+                msg = f"Unexpected error connecting to server {server}: {exc}"
+                print(msg)
+                for jid in job_ids:
+                    results[jid] = {"ok": False, "stage": "connect", "error": msg}
+                return results
+
+            # 5. Process each job.
+            for job_id in job_ids:
+                # 5a. Existence check (if we have slurmJobs).
+                if known_ids is not None and job_id not in known_ids:
+                    msg = f"Job {job_id} does not exist on {server}. Skipping."
+                    print(msg)
+                    results[job_id] = {"ok": False, "stage": "precheck", "error": msg}
+                    continue
+
+                # 5b. Cancel job.
+                cancel_cmd = f"scancel {job_id}"
+                try:
+                    stdin, stdout, stderr = ssh_client.exec_command(cancel_cmd)
+                    cancel_err = stderr.read().decode().strip()
+                except SSHException as exc:
+                    msg = f"SSH error while canceling job {job_id} on {server}: {exc}"
+                    print(msg)
+                    results[job_id] = {"ok": False, "stage": "cancel", "error": msg}
+                    continue
+                except Exception as exc:
+                    msg = f"Unexpected error while canceling job {job_id} on {server}: {exc}"
+                    print(msg)
+                    results[job_id] = {"ok": False, "stage": "cancel", "error": msg}
+                    continue
+
+                if cancel_err:
+                    msg = f"Error canceling job {job_id} on {server}: {cancel_err}"
+                    print(msg)
+                    results[job_id] = {"ok": False, "stage": "cancel", "error": msg}
+                    continue
+
+                print(f"Cancellation command sent for job {job_id} on {server}.")
+
+                # 5c. Verify cancellation.
+                check_cmd = f"squeue -j {job_id} -h"
+                try:
+                    stdin, stdout, stderr = ssh_client.exec_command(check_cmd)
+                    verify_out = stdout.read().decode().strip()
+                    verify_err = stderr.read().decode().strip()
+                except SSHException as exc:
+                    msg = (
+                        f"SSH error while verifying cancellation for job {job_id} "
+                        f"on {server}: {exc}"
+                    )
+                    print(msg)
+                    results[job_id] = {"ok": False, "stage": "verify", "error": msg}
+                    continue
+                except Exception as exc:
+                    msg = (
+                        f"Unexpected error while verifying cancellation for job {job_id} "
+                        f"on {server}: {exc}"
+                    )
+                    print(msg)
+                    results[job_id] = {"ok": False, "stage": "verify", "error": msg}
+                    continue
+
+                if verify_err:
+                    msg = (
+                        f"Error verifying cancellation for job {job_id} on {server}: "
+                        f"{verify_err}"
+                    )
+                    print(msg)
+                    results[job_id] = {"ok": False, "stage": "verify", "error": msg}
+                elif verify_out:
+                    # Job still appears in squeue.
+                    msg = (
+                        f"Job {job_id} still appears in squeue output on {server} "
+                        f"after cancellation."
+                    )
+                    print(msg)
+                    results[job_id] = {"ok": False, "stage": "verify", "error": msg}
+                else:
+                    msg = f"Successfully canceled job {job_id} on {server}."
+                    print(msg)
+                    results[job_id] = {"ok": True, "stage": "done", "error": None}
+
+        finally:
+            if ssh_client is not None:
+                try:
+                    ssh_client.close()
+                except (SSHException, Exception) as exc:
+                    print(f"Error closing SSH connection to {server}: {exc}")
+
+        return results
 
     def cancelAllJobs(self, force=False, on=None):
-        """Cancel all Slurm jobs listed in self.slurmJobs."""
+        """Cancel Slurm jobs listed in self.slurmJobs.
+
+        Args:
+            force: if True, cancel without asking.
+            on:    None, a single server name, or an iterable of server names.
+        """
         if len(self.slurmJobs) == 0:
             print("No jobs found. Do you run showSlurmJobs first?")
+            return
+
+        assert isinstance(force, bool), "Must be bool"
+
+        def _matches_server(server, on):
+            if on is None:
+                return True
+            if isinstance(on, str):
+                return server == on
+            # assume iterable of server names
+            return server in on
+
         if force:
-            jobs = {}
+            jobs_by_server = {}
             for job in self.slurmJobs:
-                if job["server"] not in jobs:
-                    jobs[job["server"]] = [job["job_id"]]
-                else:
-                    jobs[job["server"]].append(job["job_id"])
-            for server, jobs in jobs.items():
-                self.cancel_jobs_on_server(server, jobs)
+                if not _matches_server(job["server"], on):
+                    continue
+                jobs_by_server.setdefault(job["server"], []).append(job["job_id"])
+
+            for server, job_ids in jobs_by_server.items():
+                self.cancel_jobs_on_server(server, job_ids)
         else:
             for job in self.slurmJobs:
-                if on is None or on == job["server"] or job["server"] in on:
-                    print(
-                        f"Are you sure you want to cancle job {job['job_id']} on {job['server']}?:"
-                    )
-                    if input("yes/no: ") != "yes":
-                        continue
+                if not _matches_server(job["server"], on):
+                    continue
 
-                    self.cancel_jobs_on_server(job["server"], job["job_id"])
+                print(
+                    f"Are you sure you want to cancel job {job['job_id']} on {job['server']}?:"
+                )
+                if input("yes/no: ") != "yes":
+                    continue
+
+                # See point 2 below
+                self.cancel_jobs_on_server(job["server"], [job["job_id"]])
 
     def kill_all_processes(self, server):
         """Kill all processes related to the user on the specified server."""

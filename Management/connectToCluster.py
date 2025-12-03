@@ -12,7 +12,7 @@ class Servers:
     # Condorcet is maybe still slow?
     condorcet = "condorcet.pmmh-cluster.espci.fr"
     dalembert = "dalembert.pmmh-cluster.espci.fr"
-    poincare = "poincare.pmmh-cluster.espci.fr"
+    # poincare = "poincare.pmmh-cluster.espci.fr"
     fourier = "fourier.pmmh-cluster.espci.fr"
     descartes = "descartes.pmmh-cluster.espci.fr"
     legendre = "legendre.pmmh-cluster.espci.fr"
@@ -27,13 +27,13 @@ class Servers:
 
     # List of server variables for iteration or list-like access
     servers = [
-        galois,
+        # galois,
         pascal,
         schwartz,
         lagrange,
         condorcet,
         dalembert,
-        poincare,
+        # poincare,
         fourier,
         descartes,
         legendre,

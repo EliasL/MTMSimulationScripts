@@ -55,7 +55,7 @@ def _forces_worker(args):
 
 
 def plot_energy():
-    strain = np.linspace(0.0, 1, 100)
+    strain = np.linspace(-3, 3, 1000)
     e = ContiEnergy.energy_from_simpleShear(strain)
 
     fig, ax = plt.subplots()
@@ -312,8 +312,9 @@ def animate_nodes_and_forces(
 
 
 if __name__ == "__main__":
-    plot_eulerian_forces()
-    plot_forces()
+    plot_energy()
+    # plot_eulerian_forces()
+    # plot_forces()
     # animate_nodes_and_forces(
     #     save_path="simple_shear_nodes_forces.mp4",
     #     interval=30,

@@ -105,6 +105,8 @@ def propperJob(
 ):
     if minimizer is None:
         minimizer = ["LBFGS", "CG", "FIRE"]
+    elif "L-BFGS" in minimizer:
+        print("Warning! Maybe you meant LBFGS?")
     if seeds is None:
         seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(

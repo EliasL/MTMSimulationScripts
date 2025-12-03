@@ -284,7 +284,8 @@ def drawF(ax=None, F=None, transformation=None, leftApplied=False, **kwargs):
         else:
             F = F @ transformation
     C = F.swapaxes(-1, -2) @ F
-    return drawC(ax=ax, C=C, **kwargs)
+    # Pass F through so drawC can use it for debugging/inspection
+    return drawC(ax=ax, C=C, F=F, **kwargs)
 
 
 def drawC(
@@ -301,6 +302,10 @@ def drawC(
     label=None,
     shade=False,
     shadeColor=None,
+    shade_values=None,  # scalar field, same indexing as C
+    cmap="coolwarm",  # colormap
+    agg="mean",  # aggregation method when using shade_values
+    F=None,  # optional: underlying deformation gradients for debugging
     **kwargs,
 ):
     if ax is None:
@@ -335,31 +340,153 @@ def drawC(
         xm = [(x_plot[0] + x_plot[1]) / 2]
         ym = [(y_plot[0] + y_plot[1]) / 2]
     elif shade:
-        if shadeColor is None:
-            shadeColor = c
-        # We start from a blank grid, and flip each pixel that has an x,y
-        pixels = np.zeros((grid_size, grid_size))
-
-        valid = np.isfinite(x_plot) & np.isfinite(y_plot)
-
+        # --- convert all valid points to pixel indices ---
         xv = x_plot[valid]
         yv = y_plot[valid]
 
         ix = np.rint(xv).astype(int)
         iy = np.rint(yv).astype(int)
 
-        # Keep only pixels inside the grid
         mask = (ix >= 0) & (ix < grid_size) & (iy >= 0) & (iy < grid_size)
         ix = ix[mask]
         iy = iy[mask]
 
-        # Flip pixels (0 → 1)
-        np.add.at(pixels, (iy, ix), 1)
-        pixels = (pixels > 0).astype(float)
-        # Draw the pixels
-        drawRegion(
-            ax, region=pixels, grid_size=grid_size, zoom=zoom, label=label, **kwargs
-        )
+        if shade_values is None:
+            # old binary mask behaviour
+            pixels = np.zeros((grid_size, grid_size), dtype=float)
+            np.add.at(pixels, (iy, ix), 1.0)
+            pixels = (pixels > 0).astype(float)
+            drawRegion(
+                ax,
+                region=pixels,
+                grid_size=grid_size,
+                zoom=zoom,
+                label=label,
+                c=shadeColor if shadeColor is not None else c,
+                **kwargs,
+            )
+        else:
+            # --- scalar field case: build a float grid ---
+            # align shade_values with valid & mask
+            vals = shade_values[valid]
+            vals = vals[mask]
+
+            pixels = np.full((grid_size, grid_size), np.nan, dtype=float)
+
+            # Temporary check of values. Remove later.
+            # Do the overlapping values have similar magnitudes?
+            # nan-safe max
+            if False:
+                tmp = np.full_like(pixels, -np.inf)
+                np.maximum.at(tmp, (iy, ix), vals)
+                tmp[tmp == -np.inf] = np.nan
+                max_vals = tmp
+                sum_ = np.zeros_like(pixels)
+                cnt_ = np.zeros_like(pixels)
+                np.add.at(sum_, (iy, ix), vals)
+                np.add.at(cnt_, (iy, ix), 1.0)
+                average_vals = np.where(cnt_ > 0, sum_ / cnt_, np.nan)
+                print(
+                    "Shade values aggregation check: max vs mean difference statistics:"
+                )
+                diff = np.abs(max_vals - average_vals)
+                print(
+                    "  max - mean (min, max, mean):  ",
+                    np.nanmin(diff),
+                    np.nanmax(diff),
+                    np.nanmean(diff),
+                )
+                print("max nr overlapping values per pixel:", np.nanmax(cnt_))
+
+                # --- Debug information: locate pixels with largest max-vs-mean difference ---
+                # Only consider pixels where we truly have overlap (more than one value)
+                overlap_mask = (cnt_ > 1) & np.isfinite(diff)
+                if np.any(overlap_mask):
+                    # Indices (iy, ix) of pixels with overlap
+                    overlap_indices = np.argwhere(overlap_mask)
+                    diff_flat = diff[overlap_mask]
+
+                    # How many pixels to inspect (up to 3)
+                    k = min(3, diff_flat.size)
+                    # Indices of top-k differences (sorted descending)
+                    top_k_idx = np.argsort(diff_flat)[-k:][::-1]
+                    top_pixels = overlap_indices[top_k_idx]
+
+                    print(
+                        "Top pixels by |max-mean| difference (only where overlap occurs):"
+                    )
+
+                    # If F is available, align it with the same valid/mask selection as vals
+                    F_vals = None
+                    if F is not None:
+                        try:
+                            F_vals = F[valid]
+                            F_vals = F_vals[mask]
+                        except Exception as e:
+                            print("Warning: could not align F with shade_values:", e)
+
+                    for rank, (py, px) in enumerate(top_pixels, start=1):
+                        d_val = diff[py, px]
+                        count_here = int(cnt_[py, px])
+                        print(
+                            f"  #{rank}: pixel (ix={px}, iy={py}), diff={d_val}, count={count_here}"
+                        )
+
+                        # Collect all samples that landed in this pixel
+                        same_pixel = (ix == px) & (iy == py)
+                        pixel_vals = vals[same_pixel]
+                        print("    shade_values at this pixel:", pixel_vals)
+
+                        if F_vals is not None:
+                            pixel_F = F_vals[same_pixel]
+                            print(
+                                "    Associated F values (one per overlapping point):"
+                            )
+                            for i_F, Fmat in enumerate(pixel_F):
+                                # Fmat expected shape (2,2)
+                                print(f"      F[{i_F}]:\n{Fmat}")
+
+                        # Also mark these pixels visually with circles on the plot
+                        try:
+                            circ = Circle(
+                                (px + 0.5, py + 0.5),
+                                radius=3.0,
+                                edgecolor="black",
+                                facecolor="none",
+                                linewidth=1.5,
+                                zorder=10,
+                            )
+                            ax.add_patch(circ)
+                        except Exception as e:
+                            print("Warning: could not draw debug circle:", e)
+
+            if agg == "max":
+                # nan-safe max
+                tmp = np.full_like(pixels, -np.inf)
+                np.maximum.at(tmp, (iy, ix), vals)
+                tmp[tmp == -np.inf] = np.nan
+                pixels = tmp
+            elif agg == "mean":
+                sum_ = np.zeros_like(pixels)
+                cnt_ = np.zeros_like(pixels)
+                np.add.at(sum_, (iy, ix), vals)
+                np.add.at(cnt_, (iy, ix), 1.0)
+                pixels = np.full_like(sum_, np.nan, dtype=float)
+                np.divide(sum_, cnt_, out=pixels, where=cnt_ > 0)
+            else:
+                raise ValueError(f"Unknown agg mode: {agg}")
+
+            # You can either implement color support in drawRegion,
+            # or plot directly with imshow here
+            im = ax.imshow(
+                pixels,
+                origin="lower",
+                extent=(0, grid_size, 0, grid_size),
+                cmap=cmap,
+                interpolation="nearest",
+            )
+            # Optional: add a colorbar
+            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     else:
         ax.plot(

@@ -184,12 +184,15 @@ def plotPropperJob():
     nrThreads = 3
     nrSeeds = 10
     size = 200
-    configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True, size=size)
+    mini = ["LBFGS", "CG"]  # , "FIRE"]
+    configs, labels = propperJob(
+        nrThreads, nrSeeds, group_by_seeds=True, size=size, minimizer=mini
+    )
 
     # Energy
-    mini = ["L-BFGS", "CG", "FIRE"]
     for c, lab, m in zip(configs, labels, mini):
         plotEnergy(c, lab, f"{m}-Energy", plot_average=True)
+
     # Powerlaw
     # xlim = [0.25, 0.55]
     strainLim = [0.15, 0.5]
@@ -309,15 +312,15 @@ def threadTest():
 
 
 def runOnServer():
-    server = Servers.pascal
-    uploadProject(server, verbose=True)  # , setup=True)
+    server = Servers.fourier
+    # uploadProject(server, verbose=True)  # , setup=True)
     # Choose script to run
     # remote_script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
     # run_remote_script(server, remote_script_path)
 
     configs, labels = allPlasticEventsJob()
     configs, labels = backwards(nrThreads=20, seeds=[1])
-    configs, labels = basicJob(6, 1)
+    configs, labels = basicJob(6, 1, size=20)
     queueJobs(server, configs, job_name="bkw")
 
 
@@ -363,12 +366,11 @@ def runOnLocalMachine():
 
 def startJobs():
     print("Building on all servers... ")
-
-    build_on_all_servers()
+    # build_on_all_servers()
 
     # Make largeProperJob with notFIRE=True to exclude FIRE
-    def notFIRE_largePropperJob(**kwargs):
-        return largePropperJob(notFIRE=True, **kwargs)
+    def notFIRE_largePropperJob():
+        return largePropperJob(notFIRE=True)
 
     for job in [notFIRE_largePropperJob, size_scaling_job]:
         configs, labels = job()
@@ -393,9 +395,11 @@ def startJobs():
 
 def stopJobs():
     j = JobManager()
-    j.findAndShowSlurmJobs()
+    j.findSlurmJobs()
+    # j.findAndShowSlurmJobs()
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
-    # j.cancel_jobs_on_server(Servers.descartes, 80165)
+    j.cancelAllJobs(force=True, on=Servers.lagrange)
+
     # j.cancel_jobs_on_server(Servers.schwartz, 466525)
     # j.cancel_jobs_on_server(Servers.galois, 559077)
     # j.cancel_jobs_on_server(
@@ -405,15 +409,15 @@ def stopJobs():
     #         654070,
     #     ],
     # )
-    j.cancelAllJobs(force=True)
+    # j.cancelAllJobs(force=True)
     # j.showProcesses()
 
 
 def cleanData():
     dm = DataManager()
     dm.findData()
-    dm.clean_projects_on_servers()
-    # configs, labels = findMinimizationCriteriaJobs()
+    # dm.clean_projects_on_servers()
+    # configs, labels = largePropperJob(notFIRE=True)
     # dm.delete_data_from_configs(configs, dryRun=False)
     # configs, labels = compareWithOldStoppingCriteria()
     # dm.delete_data_from_configs(configs, dryRun=False)

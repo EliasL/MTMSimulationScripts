@@ -169,7 +169,7 @@ class EnergyFunction:
         C_safe = C.copy()
         C_safe[nan_mask] = np.eye(2)
 
-        R = np.array([[np.cos(theta), -np.sin(theta)], [np.sin(theta), np.cos(theta)]])
+        R = Rotation(theta)
         # C_safe = R.T @ C_safe @ R
 
         # Eigen-decomposition of symmetric 2x2 blocks (vectorized)
@@ -832,37 +832,55 @@ def lag_m3(matrix, n=1):
     np.einsum("...ij,...jk->...ik", matrix, multiplier_matrix, out=matrix)
 
 
-# Shear along an angle theta
-def SShear(eps=1, theta=0) -> np.ndarray:
-    if not isinstance(eps, str):
-        c = np.cos(theta)
-        s = np.sin(theta)
+def Rotation(theta=0) -> np.ndarray:
+    c = np.cos(theta)
+    s = np.sin(theta)
+    # Stack last two dims as 2×2
+    return np.stack(
+        [
+            np.stack([c, -s], axis=-1),
+            np.stack([s, c], axis=-1),
+        ],
+        axis=-2,
+    )
 
-        a11 = 1.0 - eps * c * s
-        a12 = eps * c * c
-        a21 = -eps * s * s
-        a22 = 1.0 + eps * c * s
 
-        # Stack last two dims as 2×2
-        return np.stack(
-            [
-                np.stack([a11, a12], axis=-1),
-                np.stack([a21, a22], axis=-1),
-            ],
-            axis=-2,
-        )
-    else:
-        eps = eps.lower()
-        if eps in ["r", "right"]:
-            return SShear(1, 0)
-        elif eps in ["l", "left"]:
-            return SShear(-1, 0)
-        elif eps in ["u", "up"]:
-            return SShear(-1, np.pi / 2)
-        elif eps in ["d", "down"]:
-            return SShear(1, np.pi / 2)
+def SShear(h=1, theta=0, s_conponent=(0, 1)) -> np.ndarray:
+    # --- string convenience interface, unchanged ---
+    if isinstance(h, str):
+        d = h.lower()
+        if d in ["r", "right"]:
+            return SShear(1.0, 0.0)
+        elif d in ["l", "left"]:
+            return SShear(-1.0, 0.0)
+        elif d in ["u", "up"]:
+            return SShear(-1.0, np.pi / 2)
+        elif d in ["d", "down"]:
+            return SShear(1.0, np.pi / 2)
         else:
-            raise ValueError(f"Unkown direction: {eps}")
+            raise ValueError(f"Unknown direction: {h}")
+
+    # --- numeric interface: fully vectorized ---
+    h = np.asarray(h, dtype=float)
+    theta = np.asarray(theta, dtype=float)
+
+    if h.ndim == 1 and theta.ndim == 1:
+        h, theta = np.meshgrid(h, theta, indexing="ij")
+
+    h, theta = np.broadcast_arrays(h, theta)
+
+    shear = np.zeros(h.shape + (2, 2), dtype=float)
+    shear[..., 0, 0] = 1.0
+    shear[..., 1, 1] = 1.0
+    shear[..., *s_conponent] += h
+    if s_conponent == (1, 1):
+        shear[..., 0, 0] = 1 / (1 + h)
+    elif s_conponent == (0, 0):
+        shear[..., 1, 1] = 1 / (1 + h)
+
+    R = Rotation(theta)
+    RT = np.swapaxes(R, -1, -2)
+    return R @ shear @ RT
 
 
 def elastic_reduction(C11, C22, C12, loops=1000):

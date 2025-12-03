@@ -73,30 +73,33 @@ def run_remote_script_with_debug(server_hostname, script_path, silent=False):
 
 def run_remote_script(server_hostname, script_path, silent=False):
     user = getServerUserName(server_hostname)
-    # Establish the SSH connection
     with Connection(host=server_hostname, user=user) as c:
-        # Execute the remote command (your Python script)
-        # Set `hide=True` to suppress real-time output and capture it instead
         result = c.run(
             f"python3 -u {script_path}",
-            hide=True,
-            warn=True,
+            hide=True,  # capture stdout/stderr instead of printing live
+            warn=True,  # don't raise on non-zero exit
         )
 
-        # Output and errors are captured
-        output = result.stdout
-        errors = result.stderr
+    output = result.stdout
+    errors = result.stderr
 
-        # Check the result
-        if result.ok and not silent:
+    if result.ok:
+        if not silent:
             print("Script executed successfully.")
-            print("Output from the script:")
-            print(output)
-        else:
-            print("Script execution failed:")
-            print(errors)
+            if output:
+                print("Output from the script:")
+                print(output)
+    else:
+        if not silent:
+            print(f"Script execution failed (exit code {result.exited}).")
+            if errors:
+                print("stderr:")
+                print(errors)
+            if output:
+                print("stdout:")
+                print(output)
 
-        return output  # Optionally return output for further processing
+    return output
 
 
 output = {}

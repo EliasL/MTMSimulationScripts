@@ -3,7 +3,7 @@ from itertools import groupby
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import shutil
 from .connectToCluster import connectToCluster, Servers, get_server_short_name
-from .runOnCluster import run_remote_script_with_progress
+from .runOnCluster import run_remote_script
 from tabulate import tabulate
 import subprocess
 import os
@@ -39,8 +39,13 @@ class DataManager:
         folders = []
         sizes = []
 
+        if isinstance(lines, list):
+            lines_list = lines
+        else:
+            lines_list = lines.split("\n")
+
         # Process each line (Except the last)
-        for line in lines[:-1]:
+        for line in lines_list[:-1]:
             # Split by tab to separate the path and the size
             parts = line.split("\t")
             if len(parts) == 2:  # Make sure the line is properly formatted
@@ -55,13 +60,11 @@ class DataManager:
             free_space_in_gb = -1
         return folders, sizes, free_space_in_gb
 
-    def find_data_on_server(self, server, pbar_index, silent):
+    def find_data_on_server(self, server, silent):
         remote_script_path = (
             "~/simulation/SimulationScripts/Management/approximateData.py"
         )
-        lines = run_remote_script_with_progress(
-            server, remote_script_path, pbar_index, silent
-        )
+        lines = run_remote_script(server, remote_script_path, silent)
         if len(lines) == 0:
             return None
 
@@ -117,10 +120,8 @@ class DataManager:
         # parallel across all servers plus one to find the data stored locally
         with ThreadPoolExecutor(max_workers=len(Servers.servers) + 1) as executor:
             futures_to_server = {
-                executor.submit(
-                    self.find_data_on_server, server, pbar_index, silent
-                ): server
-                for pbar_index, server in enumerate(Servers.servers)
+                executor.submit(self.find_data_on_server, server, silent): server
+                for server in Servers.servers
             }
             if os.path.isdir("/Volumes/data/MTS2D_output"):
                 futures_to_server[

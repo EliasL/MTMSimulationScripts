@@ -169,68 +169,218 @@ def update_progress(total_files):
         sys.stdout.flush()
 
 
+def delete_double_folders(data_paths, ssh, server):
+    """
+    TEMP / SAFETY VERSION
+    - Looks for remote_folder_name under each data_path
+    - Computes folder sizes
+    - Prints sizes for all existing folders
+    - Shows subfolders of the smallest one
+    - Asks for explicit confirmation before deleting
+    """
+    # Collect existing MTS2D_output dirs and their sizes
+    existing_dirs = []
+
+    def human_readable_size(num_bytes: int) -> str:
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if num_bytes < 1024:
+                return f"{num_bytes:.1f} {unit}"
+            num_bytes /= 1024.0
+        return f"{num_bytes:.1f} PB"
+
+    for dp in data_paths:
+        # Example: /data/user
+        remote_dir = f"/{dp}"
+        # Normalize // -> / a bit
+        while "//" in remote_dir:
+            remote_dir = remote_dir.replace("//", "/")
+
+        # Check if directory exists and get its size in bytes
+        check_and_size_cmd = (
+            f'if [ -d "{remote_dir}" ]; then '
+            f"  du -sb \"{remote_dir}\" 2>/dev/null | awk '{{print $1}}'; "
+            f"else "
+            f'  echo ""; '
+            f"fi"
+        )
+        stdin, stdout, stderr = ssh.exec_command(check_and_size_cmd)
+        out = stdout.read().decode().strip()
+
+        if not out:
+            # Directory does not exist on this data path
+            print(f"[INFO] {server}:{remote_dir} does not exist, skipping.")
+            continue
+
+        try:
+            size_bytes = int(out.splitlines()[0])
+        except ValueError:
+            print(
+                f"[WARN] Could not parse size for {server}:{remote_dir} (output: {out!r}). Skipping."
+            )
+            continue
+
+        existing_dirs.append((remote_dir, size_bytes))
+
+    if len(existing_dirs) < 2:
+        print(
+            "[INFO] delete_double_folders: fewer than two existing "
+            f'"{dp}" folders found on {server}. Nothing to compare.'
+        )
+        return
+
+    # Print sizes of all candidate folders
+    print(f"\n[INFO] Found {len(existing_dirs)} '{dp}' folders on {server}:")
+    for path, size in existing_dirs:
+        print(f"  {path}: {size} bytes ({human_readable_size(size)})")
+
+    # Pick the smallest folder by size
+    existing_dirs.sort(key=lambda x: x[1])
+    smaller_dir, smaller_size = existing_dirs[0]
+
+    print(f"\n[INFO] Smallest folder appears to be: {smaller_dir}")
+    print(f"  Size: {smaller_size} bytes ({human_readable_size(smaller_size)})")
+
+    # List subfolders of the smaller folder
+    list_sub_cmd = (
+        f'cd "{smaller_dir}" 2>/dev/null && '
+        f'ls -d */ 2>/dev/null || echo "(no subfolders or directory not accessible)"'
+    )
+    stdin, stdout, stderr = ssh.exec_command(list_sub_cmd)
+    subfolders = stdout.read().decode().strip()
+
+    print(f"\n[INFO] Subfolders in {smaller_dir}:")
+    print(subfolders if subfolders else "(no subfolders)")
+
+    # Explicit confirmation
+    confirmation = (
+        input(
+            f"\n[CONFIRM] Delete the smaller folder on {server}?\n"
+            f"  Folder : {smaller_dir}\n"
+            f"  Size   : {smaller_size} bytes ({human_readable_size(smaller_size)})\n"
+            f"Type 'yes' to permanently delete this folder: "
+        )
+        .strip()
+        .lower()
+    )
+
+    if confirmation != "yes":
+        print("[INFO] Deletion aborted by user.")
+        return
+
+    # Perform the deletion
+    delete_cmd = f'rm -rf "{smaller_dir}"'
+    print(f"[ACTION] Executing: {delete_cmd}")
+    stdin, stdout, stderr = ssh.exec_command(delete_cmd)
+    err = stderr.read().decode().strip()
+
+    if err:
+        print(f"[WARN] rm -rf reported on {server}:{smaller_dir}:\n{err}")
+    else:
+        print(f"[OK] Deleted {smaller_dir} on {server}.")
+
+
 def get_csv_from_server(server, configs):
     global nr_files
-    if "espci.fr" not in server:
+
+    if server[0] == "/":
         # server is actually not a ssh address, but a local path
         return handleLocalPath(server, configs)
 
     # Connect to the server
     ssh = connectToCluster(server, False)
 
-    # Check if /data2 exists, otherwise use /data
-    stdin, stdout, stderr = ssh.exec_command(
-        "if [ -d /data2 ]; then echo '/data2'; else echo '/data'; fi"
-    )
-    base_dir = stdout.read().strip().decode()
-
     user = getServerUserName(server)
-    data_path = os.path.join(base_dir, user)
+
+    # Discover all base paths (/data and /data2) that contain this user directory
+    discover_cmd = (
+        f"for base in /data /data2; do "
+        f'  if [ -d "$base" ] && [ -d "$base/{user}" ]; then '
+        f"    printf '%s\\n' \"$base/{user}\"; "
+        f"  fi; "
+        f"done"
+    )
+    stdin, stdout, stderr = ssh.exec_command(discover_cmd)
+    data_paths = [
+        line.strip() for line in stdout.read().decode().splitlines() if line.strip()
+    ]
+
+    if not data_paths:
+        raise RuntimeError(
+            f"No data directory found for user '{user}' under /data or /data2 on {server}."
+        )
 
     remote_folder_name = "MTS2D_output"
-
-    # List all folders within the output folder
-    command = f"cd /{data_path}/{remote_folder_name}; ls -d */"
-    stdin, stdout, stderr = ssh.exec_command(command)
-    folders = stdout.read().strip().decode().split("\n")
-    folders = [folder.rstrip("/") for folder in folders]  # Clean up folder names
     names = [config.generate_name(False) for config in configs]
     newPaths = []
-    # This line ensures the MTS2D folder is created
+
+    # Ensure the local output folder exists
     os.makedirs(MACRO_PATH, exist_ok=True)
 
-    # Using ThreadPoolExecutor to download files in parallel
-    with ThreadPoolExecutor(max_workers=7) as executor:
-        future_to_name = {
-            executor.submit(
-                download_file,
-                name,
-                folders,
-                data_path,
-                remote_folder_name,
-                MACRO_PATH,
-                ssh,
-            ): name
-            for name in names
-        }
-        for future in as_completed(future_to_name):
-            result = future.result()
-            if result:
-                newPaths.append(result)
-                with lock:  # Safe update
-                    nr_files += 1
-                update_progress(len(names))
+    if len(data_paths) >= 2:
+        print(f"Searching {data_paths} on {server}.")
 
-    # This fix is needed due to an old bug in the C++ program (fixed now)
-    # so when downloading some data from the server, we need a fix
-    # fix_csv_files(newPaths, use_tqdm=False)
-    # print("Updating headers")
+        # TEMP PART
+        # DANGEROUS DOUBLE CHECK BEFORE MAKING LIVE
+        # IF there are two datapaths on the folder, delete the folder with less data
+        # Print the size of both folders, then the sub folders of the smaller folder
+        # Ask the user if the smaller folder should be deleted
+        # Delete the folder
+        # delete_double_folders(data_paths, ssh, server)
+        return
+        return get_csv_from_server(server, configs)
+
+    # Go through each user directory we found (/data/<user>, /data2/<user>, ...)
+    for data_path in data_paths:
+        # List all folders within the remote MTS2D output folder for this user
+        command = (
+            f"cd /{data_path}/{remote_folder_name} 2>/dev/null && "
+            f"ls -d */ 2>/dev/null || true"
+        )
+        stdin, stdout, stderr = ssh.exec_command(command)
+        raw = stdout.read().strip().decode()
+
+        if not raw:
+            # No output folder or no subfolders for this base path
+            # print(f"No folders found in /{data_path}/{remote_folder_name} on {server}")
+            continue
+
+        folders = [folder.rstrip("/") for folder in raw.split("\n") if folder]
+
+        # Using ThreadPoolExecutor to download files in parallel for this user path
+        with ThreadPoolExecutor(max_workers=7) as executor:
+            future_to_name = {
+                executor.submit(
+                    download_file,
+                    name,
+                    folders,
+                    data_path,
+                    remote_folder_name,
+                    MACRO_PATH,
+                    ssh,
+                    # server + data_path.split("/")[1],
+                ): name
+                for name in names
+            }
+
+            for future in as_completed(future_to_name):
+                result = future.result()
+                if result:
+                    print(f"Found {result.split('/')[-1]} on {server}")
+                    newPaths.append(result)
+                    with lock:  # Safe update
+                        nr_files += 1
+                    # update_progress(len(names))
+
+    # Apply header updates on all new files
     for path in newPaths:
         update_headers_in_file(path)
+
     return newPaths
 
 
-def download_file(name, folders, data_path, remote_folder_name, folder_path, ssh):
+def download_file(
+    name, folders, data_path, remote_folder_name, folder_path, ssh, newName=""
+):
     if name in folders:
         attempts = 0
         max_attempts = 3
@@ -240,7 +390,7 @@ def download_file(name, folders, data_path, remote_folder_name, folder_path, ssh
                 remote_file_path = (
                     f"{data_path}/{remote_folder_name}/{name}/macroData.csv"
                 )
-                local_file_path = os.path.join(folder_path, f"{name}.csv")
+                local_file_path = os.path.join(folder_path, f"{newName}{name}.csv")
                 sftp.get(remote_file_path, local_file_path)
                 sftp.close()
                 return local_file_path
@@ -253,11 +403,6 @@ def download_file(name, folders, data_path, remote_folder_name, folder_path, ssh
                 if attempts >= max_attempts:
                     print(f"Error downloading {name}: {e}")
     return None
-
-
-import os
-import time
-import pandas as pd
 
 
 def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
@@ -439,7 +584,8 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
     print("Searching servers for files...")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
     # get_csv_from_server(Servers.poincare, configs)
-    with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+    nr_threads = 1  # len(Servers.servers)
+    with ThreadPoolExecutor(max_workers=nr_threads) as executor:
         future_to_server = {
             executor.submit(get_csv_from_server, server, remaining_configs): server
             for server in Servers.servers
@@ -448,7 +594,7 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
             server = future_to_server[future]
             with lock:
                 completed_servers += 1  # Increment completed count
-            update_progress(len(remaining_configs))
+            # update_progress(len(remaining_configs))
             try:
                 server_paths = future.result()
                 if server_paths:
