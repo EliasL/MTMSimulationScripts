@@ -1,7 +1,7 @@
 from Plotting.remotePlotting import plotLog, plotLog2, plotEnergy
 from Management import parameterExploring as pe
 from Management.connectToCluster import uploadProject, get_server_short_name
-from Management.runOnCluster import build_on_all_servers
+from Management.runOnCluster import build_on_all_servers, build_on_server
 from runSimulations import run_many_locally, run_locally
 from Management.connectToCluster import Servers
 from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
@@ -10,6 +10,7 @@ from Management.jobs import (
     cyclicLoading,
     fixedBoundaries,
     backwards,
+    umutJob,
     largeAvalanche,
     avalanches,
     bigJob,
@@ -312,8 +313,9 @@ def threadTest():
 
 
 def runOnServer():
-    server = Servers.fourier
-    # uploadProject(server, verbose=True)  # , setup=True)
+    server = Servers.condorcet
+    uploadProject(server, verbose=True)  # , setup=True)
+    build_on_server(server)
     # Choose script to run
     # remote_script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
     # run_remote_script(server, remote_script_path)
@@ -321,7 +323,7 @@ def runOnServer():
     configs, labels = allPlasticEventsJob()
     configs, labels = backwards(nrThreads=20, seeds=[1])
     configs, labels = basicJob(6, 1, size=20)
-    queueJobs(server, configs, job_name="bkw")
+    queueJobs(server, configs, job_name="test")
 
 
 def runReconnectionJob(L=30):
@@ -337,6 +339,7 @@ def runOnLocalMachine():
     # configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
     configs, labels = reconnectionJob(L=300)
     configs, labels = fixedBoundaries(1, 1, L=3)
+    configs, labels = umutJob()
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
     # )
@@ -433,14 +436,14 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    # runOnLocalMachine()
+    runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
     # startJobs()
 
-    plotPropperJob()
+    # plotPropperJob()
     # plotSizeScaling()
     # plotBigJob()
     # threadTest()

@@ -584,6 +584,23 @@ def reconnectionJob(L=100):
     return configs, labels
 
 
+def umutJob():
+    configs, labels = ConfigGenerator.generate(
+        seed=0,
+        rows=100,
+        cols=100,
+        startLoad=0.138,
+        maxLoad=0.3,
+        initialGuessNoise=0.04,
+        nrThreads=4,
+        loadIncrement=1e-5,
+        minimizer="LBFGS",
+        LBFGSEpsf=1e-13,
+        scenario="simpleShear",
+    )
+    return configs, labels
+
+
 def size_scaling_job():
     """
     Generates a job for size scaling tests.

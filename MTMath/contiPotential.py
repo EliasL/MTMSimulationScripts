@@ -263,49 +263,37 @@ class EnergyFunction:
         return sigma
 
     @classmethod
-    def P_from_F(cls, F, beta=-1 / 4, K=4, noise=1):
+    def S_from_C(cls, C, beta=-1 / 4, K=4, noise=1):
         """
-        Compute the first Piola-Kirchhoff stress tensor P from the deformation gradient F.
+        Compute the second Piola-Kirchhoff stress tensor P from the metric stress tensor C.
         """
-        assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
-        C = np.einsum("...ji,...jk->...ik", F, F)
+        assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
+
         C_R = C.copy()  # to be modified in place
         M_R = lagrange_reduction(C_R, returnM=True)
-
-        # C_E, C_R, M_E, M_R = lagrange_reduction_shears_vectorized(
-        #     C, fundamental=True, returnM=True
-        # )
-        # print(np.allclose(C_R, C_R2, equal_nan=True))
-        # print(np.allclose(M_R, M_2, equal_nan=True))
-
-        # Find indices where they differ (excluding equal NaNs)
-        # mask_diff = ~(np.isclose(M_R, M_2, equal_nan=True))
-
-        # Get first differing matrix index
-        # idx = np.argwhere(mask_diff.any(axis=(-1, -2)))
-        # if idx.size > 0:
-        #     i = tuple(idx[0])
-        #     print("First differing 2x2 matrix:")
-        #     print("M_R:")
-        #     print(M_R[i])
-        #     print("M_2:")
-        #     print(M_2[i])
-        #     print("C:", C[i])
-        # else:
-        #     print("All 2x2 matrices are equal (accounting for NaNs).")
-
-        # def mapBack(M, C_R):  # returns M C M^T
-        #     Minv = np.linalg.inv(M)
-        #     return np.swapaxes(Minv, -1, -2) @ C_R @ Minv
-
-        # Which M maps C_R -> C ?
-        # print("M_2 back to C:", np.allclose(C, congruence(M_2, C_R), equal_nan=True))
-        # print("M_R back to C:", np.allclose(C, mapBack(M_R, C_R), equal_nan=True))
 
         sigma = cls.sigma_from_C_R(C_R, beta=beta, K=K, noise=noise)
 
         # Swapaxes is equivalent to transpose for 2D matrices, but works for ND-arrays
-        P = 2 * F @ M_R @ sigma @ M_R.swapaxes(-1, -2)
+        S = 2 * M_R @ sigma @ M_R.swapaxes(-1, -2)
+        return S
+
+    @classmethod
+    def S_from_F(cls, F, beta=-1 / 4, K=4, noise=1):
+        """
+        Compute the second Piola-Kirchhoff stress tensor P from the deformation gradient F.
+        """
+        assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
+        C = np.einsum("...ji,...jk->...ik", F, F)
+        return cls.S_from_C(C, beta=beta, K=K, noise=noise)
+
+    @classmethod
+    def P_from_F(cls, F, beta=-1 / 4, K=4, noise=1):
+        """
+        Compute the first Piola-Kirchhoff stress tensor P from the deformation gradient F.
+        """
+        S = cls.S_from_F(F, beta=beta, K=K, noise=noise)
+        P = F @ S
         return P
 
     @classmethod
@@ -1026,6 +1014,21 @@ def sanityCheck_Piola(verbose=True):
     true_P = np.array([[0.25499, -0.28435], [-0.26254, -0.02723]])
     gamma = 0.801
     check(true_P, gamma)
+
+
+def sanityCheck_LagrangeReduction(C):
+    C_E, C_R, M_E, M_R = lagrange_reduction_shears_vectorized(
+        C, fundamental=True, returnM=True
+    )
+
+    def mapBack(M, C_R):  # returns M C M^T
+        Minv = np.linalg.inv(M)
+        return np.swapaxes(Minv, -1, -2) @ C_R @ Minv
+
+    passed = np.allclose(C, mapBack(M_R, C_R), equal_nan=True)
+    # Which M maps C_R -> C ?
+    print("M_R back to C:", passed)
+    return passed
 
 
 if __name__ == "__main__":

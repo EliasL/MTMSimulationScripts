@@ -128,7 +128,7 @@ class Vector(ROI):
 
         # Calculate the direction vector
         direction = h2 - h1
-        length = np.linalg.norm(direction)
+        length = np.linalg.norm(np.array(direction))
 
         # Define arrowhead parameters
         arrow_size = min(

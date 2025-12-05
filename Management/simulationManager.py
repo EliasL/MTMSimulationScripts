@@ -50,7 +50,7 @@ class SimulationManager:
 
         # I think it is better to always use release
         build_type = "Debug" if self.useProfiling else "Release"
-        self.build_command = f"cd {self.build_folder} && cmake -DCMAKE_BUILD_TYPE={build_type} .. && make"
+        self.build_command = f"cd {self.build_folder} && cmake -DCMAKE_BUILD_TYPE={build_type} .. && make -j4"
 
         # Program path
         self.program_path = self.build_path + "MTS2D"

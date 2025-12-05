@@ -18,7 +18,8 @@ from .LagrangeReduction import (
 from .vectorPair import VectorPair
 from MTMath.plotEnergy import (
     generate_energy_grid,
-    generate_stress_grid,
+    generate_cauchy_stress_grid,
+    generate_piola_stress_grid,
     drawPoincareGrid,
 )
 from MTMath.contiPotential import ContiEnergy, SShear
@@ -75,8 +76,9 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Div
         self.showHistory = False
         self.showStress = True
-        # "det", "trace","-I1", "J2", "sqrtJ2", or "i,j" for components
-        self.stress_mode = "trace"
+        self.stress_type = "PK2"  # "cauchy", "PK1" or "PK2" (PK=Piola-Kirchhoff)
+        # "det", "trace","N1", "J2", "sqrtJ2", or "i,j" for components
+        self.stress_mode = "N1"
         self.stressLim = (-0.2, 0.2)
         self.showCircles = True
         self.showRightOrth = False
@@ -484,6 +486,21 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             degrees = np.degrees(angle)
             self.angle_label.setText(f"Angle (θ): {degrees:.2f}°")
 
+    def _get_or_create_background_image(
+        self, fName, generator_fn, force_generate=False
+    ):
+        # Ensure an image exists on disk at fName and return it as a pg.ImageItem.
+
+        dirpath = os.path.dirname(fName)
+        os.makedirs(dirpath, exist_ok=True)
+
+        if force_generate or not os.path.isfile(fName):
+            generator_fn()
+            if not os.path.isfile(fName):
+                print(f"NOT SAVED: {fName}")
+
+        return self.loadImage(fName)
+
     def drawLagrangeReductionBackground(self):
         # We want to visualize where the lagrange reduction occurs when moving either vector
         # We solve this by creating two heatmaps and changing which heatmap is in front depending on what
@@ -502,23 +519,26 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             for v in ["v1", "v2"]
         ]
 
-        if os.path.isfile(fNames[0]) and os.path.isfile(fNames[1]):
-            LR_heatmapImage1 = self.loadImage(fNames[0])
-            LR_heatmapImage2 = self.loadImage(fNames[1])
-            GV_heatmapImage1 = self.loadImage(fNames[0])
-            GV_heatmapImage2 = self.loadImage(fNames[1])
-        else:
-            LR_heatmapImage1 = lagrange_reduction_visualization(
-                width, height, ppu, v2_is_fixed=True, loops=loops
-            )
-            LR_heatmapImage1.save(fNames[0])
-            LR_heatmapImage2 = lagrange_reduction_visualization(
-                width, height, ppu, v2_is_fixed=False, loops=loops
-            )
-            LR_heatmapImage2.save(fNames[1])
+        def _gen_lr_background(fName, v2_is_fixed):
+            def _inner():
+                img = lagrange_reduction_visualization(
+                    width, height, ppu, v2_is_fixed=v2_is_fixed, loops=loops
+                )
+                img.save(fName)
 
-            GV_heatmapImage1 = self.loadImage(fNames[0])
-            GV_heatmapImage2 = self.loadImage(fNames[1])
+            return _inner
+
+        # Use the shared helper to obtain cached or newly generated images
+        LR_heatmapImage1 = self._get_or_create_background_image(
+            fNames[0], _gen_lr_background(fNames[0], True)
+        )
+        LR_heatmapImage2 = self._get_or_create_background_image(
+            fNames[1], _gen_lr_background(fNames[1], False)
+        )
+
+        # Separate instances for the grid visualization view
+        GV_heatmapImage1 = self.loadImage(fNames[0])
+        GV_heatmapImage2 = self.loadImage(fNames[1])
 
         self.LR_bg1 = self.drawHeatMap(
             LR_heatmapImage1, -10, self.LR_plot, width, height
@@ -583,27 +603,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     @staticmethod
     def compute_stress_scalar_field(stress, mode="det"):
-        """
-        Convert a tensor-valued stress field sigma_ij into a scalar field.
-
-        Parameters
-        ----------
-        stress : ndarray
-            (..., 2, 2) array of stresses.
-        mode : str
-            One of:
-            - "det"         : determinant of sigma
-            - "I1"/"trace"  : trace(sigma)
-            - "-I1"         : sigma_xx - sigma_yy
-            - "J2"          : second invariant of deviatoric stress
-            - "sqrtJ2"      : sqrt(J2) = max shear (in 2D convention)
-            - "(i, j)"      : specific component of sigma
-
-        Returns
-        -------
-        field : ndarray
-            Scalar field with shape stress.shape[:-2].
-        """
         if mode == "det":
             # det over last two axes
             return np.linalg.det(stress)
@@ -611,7 +610,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         elif mode in ("I1", "trace"):
             # trace over last two axes
             return np.trace(stress, axis1=-2, axis2=-1)
-        elif mode in ("-I1", "-trace"):
+        elif mode in ("N1", "-trace"):
             # sigma_xx - sigma_yy
             return stress[..., 0, 0] - stress[..., 1, 1]
 
@@ -641,17 +640,131 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             except Exception:
                 raise ValueError("Unknown stress mode:", mode)
 
+    def generateEnergyBackground(self, ppu, beta, fName, stress_mode, stressLim):
+        from matplotlib import pyplot as plt
+
+        dpi = 400  # any value, just keep it consistent
+        fig = plt.figure(figsize=(ppu / dpi, ppu / dpi), dpi=dpi)
+
+        ax = fig.add_axes([0, 0, 1, 1])
+        ax.set_axis_off()
+
+        # Transparent background so only grid lines are opaque
+        fig.patch.set_alpha(0)
+        ax.set_facecolor((0, 0, 0, 0))
+        drawPoincareGrid(
+            ax,
+            grid_size=ppu,
+            depth=6,
+            c=(0.2, 0.2, 0.2, 0.4),
+            linewidth=ppu / (4 * dpi),
+        )
+
+        if not self.showStress:
+            field = generate_energy_grid(
+                resolution=ppu, beta=beta, K=0, zeroReference=True, eps=1e-2
+            )
+        else:
+            if self.stress_type == "cauchy":
+                stress = generate_cauchy_stress_grid(
+                    resolution=ppu, beta=beta, eps=1e-2
+                )
+            elif self.stress_type == "PK1":
+                stress = generate_piola_stress_grid(
+                    beta=beta, resolution=ppu, second_PK=False, eps=1e-2
+                )
+            elif self.stress_type == "PK2":
+                stress = generate_piola_stress_grid(
+                    beta=beta, resolution=ppu, second_PK=True, eps=1e-2
+                )
+            else:
+                raise ValueError("Unknown stress type:", self.stress_type)
+
+            with np.errstate(invalid="ignore"):
+                field = self.compute_stress_scalar_field(stress, mode=stress_mode)
+                field = np.clip(field, *stressLim)
+
+        ax.imshow(
+            field,
+            origin="lower",
+            cmap="coolwarm",
+        )
+        mappable = ax.images[-1]
+
+        # [left, bottom, width, height] in *figure* coordinates
+        # height = 0.20 -> 20% of the image height
+        cax = fig.add_axes([0.98, 0.02, 0.015, 0.20])
+
+        cb = plt.colorbar(mappable, cax=cax, orientation="vertical")
+
+        # Transparent background
+        cax.set_facecolor((1, 1, 1, 0.0))
+        text_color = "#777777"
+        # White outline
+        cb.outline.set_edgecolor(text_color)
+        for spine in cax.spines.values():
+            spine.set_edgecolor(text_color)
+
+        textSize = 2 * ppu / dpi
+
+        cb.ax.yaxis.tick_left()  # Put ticks + labels on the left
+        cb.ax.yaxis.set_label_position("left")
+
+        cb.ax.tick_params(
+            labelsize=textSize,
+            length=1,
+            width=0.4,
+            color=text_color,
+            left=True,  # ticks on left
+            right=False,
+        )
+
+        for label in cb.ax.get_yticklabels():
+            label.set_ha("right")  # horizontal alignment: pull toward bar
+            label.set_va("center")  # vertical alignment is usually fine
+        cb.outline.set_linewidth(0.2)
+
+        for label in cb.ax.get_yticklabels():
+            label.set_color(text_color)
+
+        # The "×10⁻¹⁰" offset text: gray and small
+        offset_text = cb.ax.yaxis.get_offset_text()
+        offset_text.set_color(text_color)
+        offset_text.set_ha("right")
+        offset_text.set_va("top")
+        offset_text.set_size(textSize)
+
+        # Ensure directory exists and save the figure for caching
+        dirpath = os.path.dirname(fName)
+        os.makedirs(dirpath, exist_ok=True)
+        fig.savefig(
+            fName,
+            dpi=dpi,
+            transparent=True,
+        )
+
+        # Convert the matplotlib figure directly to a pg.ImageItem
+        energyImage = self.fig_to_pg(fig)
+
+        plt.close(fig)
+
+        if os.path.isfile(fName):
+            print(f"Saved to {fName}")
+        else:
+            print("NOT SAVED!")
+        return energyImage
+
     def drawEnergyBackground(
         self,
-        stress_mode="-I1",  # "det", "trace","-I1", "J2", "sqrtJ2", or "i,j" for components
-        stressLim=(-0.2, 0.2),
     ):
         ppu = 2001  # Pixels per unit
         folder = "precomputedEnergyBackgrounds"
 
         # Set quantity name for caching
         if self.showStress:
-            quantity = f"stress_{stress_mode}_clip{stressLim[1]}"
+            quantity = (
+                f"_{self.stress_type}_stress_{self.stress_mode}_clip{self.stressLim[1]}"
+            )
         else:
             quantity = "energy"
 
@@ -663,113 +776,14 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         for shape, beta, opacity in zip(["triangular", "square"], [4, -0.25], [0, 1]):
             fName = f"{SCRIPT_DIR}/{folder}/{ppu}_{shape}_{quantity}_Poincare_LRBackround.png"
 
-            # Check if file exists, if not generate and save
-            if os.path.isfile(fName) and ppu > 500:
-                energyImage = self.loadImage(fName)
-            else:
-                from matplotlib import pyplot as plt
-
-                dpi = 400  # any value, just keep it consistent
-                fig = plt.figure(figsize=(ppu / dpi, ppu / dpi), dpi=dpi)
-
-                ax = fig.add_axes([0, 0, 1, 1])
-                ax.set_axis_off()
-
-                # Transparent background so only grid lines are opaque
-                fig.patch.set_alpha(0)
-                ax.set_facecolor((0, 0, 0, 0))
-                drawPoincareGrid(
-                    ax,
-                    grid_size=ppu,
-                    depth=6,
-                    c=(0.2, 0.2, 0.2, 0.4),
-                    linewidth=ppu / (4 * dpi),
-                )
-
-                if not self.showStress:
-                    field = generate_energy_grid(
-                        resolution=ppu, beta=beta, K=0, zeroReference=True, eps=1e-2
-                    )
-                else:
-                    stress = generate_stress_grid(
-                        resolution=ppu, beta=beta, eps=1e-2
-                    )  # shape (ppu, ppu, 2, 2)
-
-                    with np.errstate(invalid="ignore"):
-                        field = self.compute_stress_scalar_field(
-                            stress, mode=stress_mode
-                        )
-                        field = np.clip(field, *stressLim)
-
-                ax.imshow(
-                    field,
-                    origin="lower",
-                    cmap="coolwarm",
-                )
-                mappable = ax.images[-1]
-
-                # [left, bottom, width, height] in *figure* coordinates
-                # height = 0.20 -> 20% of the image height
-                cax = fig.add_axes([0.98, 0.02, 0.015, 0.20])
-
-                cb = plt.colorbar(mappable, cax=cax, orientation="vertical")
-
-                # Transparent background
-                cax.set_facecolor((1, 1, 1, 0.0))
-                text_color = "#777777"
-                # White outline
-                cb.outline.set_edgecolor(text_color)
-                for spine in cax.spines.values():
-                    spine.set_edgecolor(text_color)
-
-                textSize = 2 * ppu / dpi
-
-                cb.ax.yaxis.tick_left()  # Put ticks + labels on the left
-                cb.ax.yaxis.set_label_position("left")
-
-                cb.ax.tick_params(
-                    labelsize=textSize,
-                    length=1,
-                    width=0.4,
-                    color=text_color,
-                    left=True,  # ticks on left
-                    right=False,
-                )
-
-                for label in cb.ax.get_yticklabels():
-                    label.set_ha("right")  # horizontal alignment: pull toward bar
-                    label.set_va("center")  # vertical alignment is usually fine
-                cb.outline.set_linewidth(0.2)
-
-                for label in cb.ax.get_yticklabels():
-                    label.set_color(text_color)
-
-                # The "×10⁻¹⁰" offset text: gray and small
-                offset_text = cb.ax.yaxis.get_offset_text()
-                offset_text.set_color(text_color)
-                offset_text.set_ha("right")
-                offset_text.set_va("top")
-                offset_text.set_size(textSize)
-
-                # Ensure directory exists
-                dirpath = os.path.dirname(fName)
-                os.makedirs(dirpath, exist_ok=True)
-
-                # Save with matplotlib
-                fig.savefig(
-                    fName,
-                    dpi=dpi,
-                    transparent=True,
-                )
-                plt.close(fig)
-
-                if os.path.isfile(fName):
-                    print(f"Saved to {fName}")
-                else:
-                    print("NOT SAVED!")
-
-                # Load back into pyqtgraph / your format
-                energyImage = self.loadImage(fName)
+            forceGenerate = ppu <= 500  # Always regenerate for small ppu
+            energyImage = self._get_or_create_background_image(
+                fName,
+                lambda: self.generateEnergyBackground(
+                    ppu, beta, fName, self.stress_mode, self.stressLim
+                ),
+                force_generate=forceGenerate,
+            )
 
             # Apply LUT for both cached and newly generated images
             energyImage.setLookupTable(COOLWARM_LUT)
@@ -783,22 +797,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                 f"{shape}Energy",
                 self.drawHeatMap(energyImage, opacity, self.PCS_plot, 1, 1),
             )
-
-        # # Generate angle region image with a different colormap
-        # fName_angle = f"{SCRIPT_DIR}/{folder}/{ppu},angleRegion,LRBackround.png"
-        # if os.path.isfile(fName_angle) and False:
-        #     angleRegionImage = self.loadImage(fName_angle)
-        # else:
-        #     angle_region_data = generate_angle_region(resolution=ppu).transpose()
-        #     angleRegionImage = pg.ImageItem(angle_region_data)
-        #     angleRegionImage.setLookupTable(VIRIDIS_LUT)
-        #     angleRegionImage.save(fName_angle)
-
-        # angleRegionImage.setOpacity(0.5)
-        # self.angleRegionImage = self.drawHeatMap(
-        #     angleRegionImage, 0, self.PCS_plot, 1, 1
-        # )
-        # self.angleRegionImage.setVisible(False)
 
     @staticmethod
     def loadImage(fileName):
@@ -890,45 +888,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         plot.addItem(heatmap)
         return heatmap
 
-    def getFGrid(self, resolution=100):
-        lastUsed = self.GV_VP.lastDragged
-        not_dragged_vector = (
-            self.GV_VP.e2 if lastUsed is self.GV_VP.e1 else self.GV_VP.e1
-        )
-
-        lastUsed = np.array(lastUsed.head.pos())
-        not_dragged_vector_pos = np.array(not_dragged_vector.head.pos())
-        # Extract the current view range from the grid view plot
-        x_range, y_range = self.GV_plot.viewRange()
-
-        # Optionally, adjust resolution based on the view size
-        xResolution = resolution
-        yResolution = int(
-            xResolution * (y_range[1] - y_range[0]) / (x_range[1] - x_range[0])
-        )
-        # We create some offsets to not calculate thing too close to zero
-        # when using nice ranges in the beginning
-        eps = 1 - 0.00001
-        # Create the meshgrid using the extracted ranges
-        x_vals, y_vals = np.meshgrid(
-            np.linspace(x_range[0] * eps, x_range[1], xResolution),
-            np.linspace(y_range[0] * eps, y_range[1], yResolution),
-        )
-        grid_positions = np.stack([x_vals, y_vals], axis=-1)
-        # Check if lastUsed is e1 (first column) or e2 (second column)
-        if lastUsed is self.GV_VP.e1:
-            # First column is variable, second is fixed
-            F_grid = np.zeros((*grid_positions.shape[:-1], 2, 2))
-            F_grid[..., :, 0] = grid_positions  # First column varies with grid
-            F_grid[..., :, 1] = not_dragged_vector_pos  # Second column is fixed
-        else:
-            # First column is fixed, second is variable
-            F_grid = np.zeros((*grid_positions.shape[:-1], 2, 2))
-            F_grid[..., :, 0] = not_dragged_vector_pos  # First column is fixed
-            F_grid[..., :, 1] = grid_positions  # Second column varies with grid
-
-        return F_grid
-
     def updateFEnergyBackground(self):
         self._target_version += 1
         if not self._heatmap_update_pending:
@@ -1004,7 +963,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     def drawBackground(self):
         self.drawLagrangeReductionBackground()
-        self.drawEnergyBackground(self.stress_mode, self.stressLim)
+        self.drawEnergyBackground()
 
     def mouseMove(self, pos):
         for VP in [self.LR_VP, self.GV_VP]:
@@ -1272,151 +1231,35 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Track Home key pressed state for rotation mode
         if event.key() == Qt.Key_Home:
             self.home_held = True
-        shift_held = event.modifiers() & Qt.ShiftModifier  # Check if Shift is held
         self.alt_held = event.modifiers() & Qt.AltModifier  # Check if Alt is held
         self.meta_held = event.modifiers() & Qt.MetaModifier
 
-        if hasattr(self, "VP"):
-            dragged_vector, not_dragged_vector = self.VP.dragging_vector()
-        else:
-            dragged_vector = None
-        if dragged_vector:
-            if event.key() == Qt.Key_X:
-                dragged_vector.moveInY = False
-            else:
-                dragged_vector.moveInY = True
+        # Update axis-locking for the currently dragged vector
+        self._update_dragged_vector_axis_locks(event)
 
-            if event.key() == Qt.Key_Y:
-                dragged_vector.moveInX = False
-            else:
-                dragged_vector.moveInX = True
-
-        # If Home is held, use Left/Right to rotate the basis; Up/Down do nothing
-        if getattr(self, "home_held", False):
-            shift_held_local = event.modifiers() & Qt.ShiftModifier
-            step = (
-                self.rotation_step_large
-                if shift_held_local
-                else self.rotation_step_small
-            )
-
-            if event.key() == Qt.Key_Left:
-                angle = -step  # rotate backwards
-            elif event.key() == Qt.Key_Right:
-                angle = step  # rotate forwards
-            else:
-                return  # Up/Down or other keys do nothing in rotation mode
-
-            c, s = np.cos(angle), np.sin(angle)
-            rot = np.array([[c, -s], [s, c]])
-            # Apply rotation to both vectors (basis transformation)
-            self.applyTransformation(rot)
+        # Rotation mode (Home + Left/Right)
+        if self._handle_rotation_keys(event):
             return
 
-        gamma = None
-        if event.key() == Qt.Key_Y:
-            gamma = -1 if shift_held else -0.1
-        elif event.key() == Qt.Key_U:
-            gamma = 1 if shift_held else 0.1
-        if gamma is not None:
-            # shear = 45 degree angle
-
-            t = np.array(
-                [[1 - 0.5 * gamma, 0.5 * gamma], [-0.5 * gamma, 1 + 0.5 * gamma]]
-            )
-            self.applyTransformation(t)
+        # Shear shortcuts (Y/U, I/O)
+        if self._handle_shear_shortcuts(event):
             return
 
-        if event.key() == Qt.Key_R:
-            for vp in [self.GV_VP, self.LR_VP]:
-                vp.e1.head.setPos(1, 0)
-                vp.e2.head.setPos(0, 1)
-            s = 2
-            self.GV_plot.setRange(xRange=[-s, s], yRange=[-s, s])
+        # View/layout toggles (R, F, P, G)
+        self._handle_view_toggles(event)
 
-        if event.key() == Qt.Key_T:
-            self.triangularEnergy.setOpacity(1)
-            self.squareEnergy.setOpacity(0)
-            self.currentBeta = 4
-        if event.key() == Qt.Key_S:
-            self.triangularEnergy.setOpacity(0)
-            self.squareEnergy.setOpacity(1)
-            self.currentBeta = -0.25
-        if event.key() == Qt.Key_F:
-            self.w_LR.setVisible(not self.w_LR.isVisible())
-        if event.key() == Qt.Key_P:
-            self.w_PCS.setVisible(not self.w_PCS.isVisible())
-        if event.key() == Qt.Key_G:
-            self.w_GV.setVisible(not self.w_GV.isVisible())
-        if event.key() == Qt.Key_C:
-            self.showCircles = not self.showCircles
-        if event.key() == Qt.Key_L:
-            self.elastic_reduced_marker.setVisible(
-                not self.elastic_reduced_marker.isVisible()
-            )
-            self.LR_VP.setVisible(reduced=not self.LR_VP.isVisible(reduced=True))
-            self.GV_VP.setVisible(reduced=not self.GV_VP.isVisible(reduced=True))
-            self.reduced_marker.setVisible(not self.reduced_marker.isVisible())
-        if event.key() == Qt.Key_A:
-            self.angleRegionImage.setVisible(not self.angleRegionImage.isVisible())
-        if event.key() == Qt.Key_V:
-            self.volumetricEnergy = not self.volumetricEnergy
-            self.updateFEnergyBackground()
-            self.updateMarkers()
-        if event.key() == Qt.Key_B:
-            # Check if the ImageItem is currently visible by checking its opacity
-            if self.GV_bg1.opacity() > 0:
-                self.GV_bg1.setOpacity(0)  # Set opacity to 0 to hide it
-                self.GV_bg2.setOpacity(0)  # Set opacity to 0 to hide it
-            else:
-                self.GV_bg1.setOpacity(1)  # Set opacity to 1 to show it
-                self.GV_bg2.setOpacity(1)  # Set opacity to 1 to show it
-        if event.key() == Qt.Key_H:
-            self.showHistory = not self.showHistory
+        # Energy/background-related toggles (T, S, C, L, A, V, B, H)
+        self._handle_energy_and_background_toggles(event)
 
-        # here we want to handle arrow key presses. If the user presses up,
-        # we should apply a simple shear transformation upwards.
-        # If the shift key is down, we should perform an integer shear.
-        # Otherwise, we should set some shear velocity that is applied every frame.
+        # Arrow-key shears (Up/Down/Left/Right)
+        self._handle_arrow_shear(event)
 
-        upShear = np.array([[1, 0], [1, 1]])
-        downShear = np.array([[1, 0], [-1, 1]])
-        leftShear = np.array([[1, -1], [0, 1]])
-        rightShear = np.array([[1, 1], [0, 1]])
-        shearDirection = None
-
-        shearStep = 1 if shift_held else 0.1
-
-        if event.key() == Qt.Key_Up:
-            shearDirection = upShear
-        if event.key() == Qt.Key_Down:
-            shearDirection = downShear
-        if event.key() == Qt.Key_Left:
-            shearDirection = leftShear
-        if event.key() == Qt.Key_Right:
-            shearDirection = rightShear
-
-        if shearDirection is not None:
-            step_adjusted_shear = np.eye(2) + (shearDirection - np.eye(2)) * shearStep
-
-            if shift_held:
-                self.applyTransformation(step_adjusted_shear)  # Integer shear
-            elif shearDirection is not None:
-                self.shearVelocity = step_adjusted_shear  # Continuous shear
-
-        self.updateMarkers()
-        self.LR_plot.update()
-        self.updateGVSpheres()
-        self.updateFEnergyBackground()
+        # Final common updates
+        self._post_keypress_updates()
 
     def keyReleaseEvent(self, event):
-        if event.key() == Qt.Key_X:
-            self.VP.e1.moveInY = True
-            self.VP.e2.moveInY = True
-
-        if event.key() == Qt.Key_Y:
-            self.VP.e1.moveInX = True
-            self.VP.e2.moveInX = True
+        # Reset axis locks for dragged vectors when X/Y are released
+        self._reset_axis_locks_if_needed(event)
 
         if event.key() == Qt.Key_Home:
             self.home_held = False
@@ -1424,12 +1267,216 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.alt_held = event.modifiers() & Qt.AltModifier  # Check if Alt is held
         self.meta_held = event.modifiers() & Qt.MetaModifier
 
+        # Reset continuous shear velocity when any key is released
         self.shearVelocity = np.eye(2)
 
+        self._post_keypress_updates()
+
+    def _update_dragged_vector_axis_locks(self, event):
+        """Update axis lock flags for the currently dragged vector based on X/Y keys."""
+        if hasattr(self, "VP"):
+            dragged_vector, _ = self.VP.dragging_vector()
+        else:
+            dragged_vector = None
+
+        if not dragged_vector:
+            return
+
+        if event.key() == Qt.Key_X:
+            dragged_vector.moveInY = False
+        else:
+            dragged_vector.moveInY = True
+
+        if event.key() == Qt.Key_Y:
+            dragged_vector.moveInX = False
+        else:
+            dragged_vector.moveInX = True
+
+    def _handle_rotation_keys(self, event):
+        """Handle rotation when Home is held and Left/Right are pressed.
+
+        Returns True if the event was handled and no further processing is needed.
+        """
+        if not getattr(self, "home_held", False):
+            return False
+
+        shift_held_local = event.modifiers() & Qt.ShiftModifier
+        step = (
+            self.rotation_step_large if shift_held_local else self.rotation_step_small
+        )
+
+        if event.key() == Qt.Key_Left:
+            angle = -step  # rotate backwards
+        elif event.key() == Qt.Key_Right:
+            angle = step  # rotate forwards
+        else:
+            return False
+
+        c, s = np.cos(angle), np.sin(angle)
+        rot = np.array([[c, -s], [s, c]])
+        self.applyTransformation(rot)
+        return True
+
+    def _handle_shear_shortcuts(self, event):
+        """Handle Y/U and I/O shear shortcuts.
+
+        Returns True if the event was handled and keyPressEvent should return.
+        """
+        shift_held = event.modifiers() & Qt.ShiftModifier
+        gamma = None
+        transform = None
+
+        if event.key() == Qt.Key_Y:
+            gamma = -1 if shift_held else -0.1
+            transform = np.array(
+                [[1 - 0.5 * gamma, 0.5 * gamma], [-0.5 * gamma, 1 + 0.5 * gamma]]
+            )
+        elif event.key() == Qt.Key_U:
+            gamma = 1 if shift_held else 0.1
+            transform = np.array(
+                [[1 - 0.5 * gamma, 0.5 * gamma], [-0.5 * gamma, 1 + 0.5 * gamma]]
+            )
+        elif event.key() == Qt.Key_I:
+            gamma = -1 if shift_held else -0.1
+            transform = np.array([[1 + gamma, 0], [0, 1 / (1 + gamma)]])
+        elif event.key() == Qt.Key_O:
+            gamma = 1 if shift_held else 0.1
+            transform = np.array([[1 + gamma, 0], [0, 1 / (1 + gamma)]])
+
+        if gamma is None:
+            return False
+
+        self.applyTransformation(transform)
+        return True
+
+    def _handle_view_toggles(self, event):
+        """Handle view/layout related toggles (R, F, P, G)."""
+        if event.key() == Qt.Key_R:
+            for vp in [self.GV_VP, self.LR_VP]:
+                vp.e1.head.setPos(1, 0)
+                vp.e2.head.setPos(0, 1)
+            s = 2
+            self.GV_plot.setRange(xRange=[-s, s], yRange=[-s, s])
+            return True
+
+        if event.key() == Qt.Key_F:
+            self.w_LR.setVisible(not self.w_LR.isVisible())
+            return True
+        if event.key() == Qt.Key_P:
+            self.w_PCS.setVisible(not self.w_PCS.isVisible())
+            return True
+        if event.key() == Qt.Key_G:
+            self.w_GV.setVisible(not self.w_GV.isVisible())
+            return True
+
+        return False
+
+    def _handle_energy_and_background_toggles(self, event):
+        """Handle energy/background related toggles (T, S, C, L, A, V, B, H)."""
+        k = event.key()
+
+        if k == Qt.Key_T:
+            self.triangularEnergy.setOpacity(1)
+            self.squareEnergy.setOpacity(0)
+            self.currentBeta = 4
+            return True
+
+        if k == Qt.Key_S:
+            self.triangularEnergy.setOpacity(0)
+            self.squareEnergy.setOpacity(1)
+            self.currentBeta = -0.25
+            return True
+
+        if k == Qt.Key_C:
+            self.showCircles = not self.showCircles
+            return True
+
+        if k == Qt.Key_L:
+            self.elastic_reduced_marker.setVisible(
+                not self.elastic_reduced_marker.isVisible()
+            )
+            self.LR_VP.setVisible(reduced=not self.LR_VP.isVisible(reduced=True))
+            self.GV_VP.setVisible(reduced=not self.GV_VP.isVisible(reduced=True))
+            self.reduced_marker.setVisible(not self.reduced_marker.isVisible())
+            return True
+
+        if k == Qt.Key_A:
+            self.angleRegionImage.setVisible(not self.angleRegionImage.isVisible())
+            return True
+
+        if k == Qt.Key_V:
+            self.volumetricEnergy = not self.volumetricEnergy
+            self.updateFEnergyBackground()
+            self.updateMarkers()
+            return True
+
+        if k == Qt.Key_B:
+            # Toggle GV backgrounds
+            if self.GV_bg1.opacity() > 0:
+                self.GV_bg1.setOpacity(0)
+                self.GV_bg2.setOpacity(0)
+            else:
+                self.GV_bg1.setOpacity(1)
+                self.GV_bg2.setOpacity(1)
+            return True
+
+        if k == Qt.Key_H:
+            self.showHistory = not self.showHistory
+            return True
+
+        return False
+
+    def _handle_arrow_shear(self, event):
+        """Handle arrow-key shear (Up/Down/Left/Right)."""
+        shift_held = event.modifiers() & Qt.ShiftModifier
+
+        upShear = np.array([[1, 0], [1, 1]])
+        downShear = np.array([[1, 0], [-1, 1]])
+        leftShear = np.array([[1, -1], [0, 1]])
+        rightShear = np.array([[1, 1], [0, 1]])
+        shearDirection = None
+
+        if event.key() == Qt.Key_Up:
+            shearDirection = upShear
+        elif event.key() == Qt.Key_Down:
+            shearDirection = downShear
+        elif event.key() == Qt.Key_Left:
+            shearDirection = leftShear
+        elif event.key() == Qt.Key_Right:
+            shearDirection = rightShear
+
+        if shearDirection is None:
+            return False
+
+        shearStep = 1 if shift_held else 0.1
+        step_adjusted_shear = np.eye(2) + (shearDirection - np.eye(2)) * shearStep
+
+        if shift_held:
+            self.applyTransformation(step_adjusted_shear)  # Integer shear
+        else:
+            self.shearVelocity = step_adjusted_shear  # Continuous shear
+
+        return True
+
+    def _post_keypress_updates(self):
+        """Common updates after handling a key press."""
         self.updateMarkers()
         self.LR_plot.update()
         self.updateGVSpheres()
         self.updateFEnergyBackground()
+
+    def _reset_axis_locks_if_needed(self, event):
+        """Reset axis locks on key release of X/Y."""
+        if not hasattr(self, "VP"):
+            return
+
+        if event.key() == Qt.Key_X:
+            self.VP.e1.moveInY = True
+            self.VP.e2.moveInY = True
+
+        if event.key() == Qt.Key_Y:
+            self.VP.e1.moveInX = True
+            self.VP.e2.moveInX = True
 
 
 def orth_theta_ref0(gamma):

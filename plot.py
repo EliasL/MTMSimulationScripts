@@ -30,7 +30,7 @@ from MTMath.poincareTiling import (
     drawRotationExplanationFigs,
     drawRotation2ExplanationFigs,
 )
-from MTMath.plotEnergy import generate_stress_grid, generate_energy_grid
+from MTMath.plotEnergy import generate_cauchy_stress_grid, generate_energy_grid
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     get_csv_files,

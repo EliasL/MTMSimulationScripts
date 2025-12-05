@@ -67,7 +67,7 @@ def plot_energy():
     fig.tight_layout()
 
 
-def plot_forces():
+def plot_Lagrangian_forces():
     strain = np.linspace(0.0, 5, 1000)
     dN_dX = np.array([[-1, -1], [1, 0], [0, 1]])
     dN_dX = np.tile(dN_dX, (len(strain), 1, 1))
@@ -312,9 +312,9 @@ def animate_nodes_and_forces(
 
 
 if __name__ == "__main__":
-    plot_energy()
-    # plot_eulerian_forces()
-    # plot_forces()
+    # plot_energy()
+    plot_eulerian_forces()
+    plot_Lagrangian_forces()
     # animate_nodes_and_forces(
     #     save_path="simple_shear_nodes_forces.mp4",
     #     interval=30,

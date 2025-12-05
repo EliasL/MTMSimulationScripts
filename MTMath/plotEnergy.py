@@ -125,8 +125,15 @@ def generate_energy_grid(beta=-0.25, K=4, energy_lim=[None, 0.37], **kwargs):
     )
 
 
-def generate_stress_grid(beta=-0.25, K=4, **kwargs):
+def generate_cauchy_stress_grid(beta=-0.25, K=4, **kwargs):
     return generate_grid(ContiEnergy.cauchy_from_C, beta=beta, K=K, **kwargs)
+
+
+def generate_piola_stress_grid(beta=-0.25, K=4, second_PK=True, **kwargs):
+    if second_PK:
+        return generate_grid(ContiEnergy.S_from_C, beta=beta, K=K, **kwargs)
+    else:
+        return generate_grid(ContiEnergy.P_from_C, beta=beta, K=K, **kwargs)
 
 
 def generate_grid(
