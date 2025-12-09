@@ -939,6 +939,7 @@ def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True):
         y_labels = {
             "avg_RSS": r"Stress $\langle \sigma \rangle$",
             "avg_energy": r"Energy $\langle E \rangle$",
+            "est_time_remaining": "Estimated time remaining (s)",
         }
         y_name = y_labels.get(Y, Y)
 

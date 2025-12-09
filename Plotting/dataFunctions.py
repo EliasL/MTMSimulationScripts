@@ -57,7 +57,13 @@ class VTUData:
                 f"Cell data field '{field}' has {len(data_list)} blocks; "
                 "VTUData assumes a single cell block."
             )
-        return data_list[0]
+        arr = data_list[0]
+        # meshio typically returns shape (n_cells, n_components) for cell data.
+        # For scalar fields n_components == 1, which gives shape (N, 1).
+        # To make scalar cell data 1D, squeeze a trailing singleton component axis.
+        if arr.ndim > 1 and arr.shape[-1] == 1:
+            arr = arr[..., 0]
+        return arr
 
     def get_nodes(self):
         """Return node coordinates as a NumPy array of shape (n_points, 3)."""

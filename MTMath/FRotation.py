@@ -6,6 +6,7 @@ from matplotlib.widgets import Slider
 
 # --- Define deformation gradient F (you can change this) ---
 F = np.array([[1, 0.5], [0, 1]])
+S = np.array([[1, 0.5], [0, 1]])
 
 # --- Unit circle points in reference configuration ---
 t = np.linspace(0, 2 * np.pi, 400)

@@ -637,7 +637,7 @@ def plotStressFromRealF(
     gamma = np.linspace(0, gamma_lim, nr_gamma)
 
     F = SShear(h=gamma, theta=theta, s_conponent=s_component)
-    stress_type = "pk2"
+    stress_type = "cauchy"
     if stress_type == "cauchy":
         stress = ContiEnergy.cauchy_from_F(F)
     elif stress_type == "pk2":
@@ -651,9 +651,12 @@ def plotStressFromRealF(
     trace = stress[..., 0, 0] + stress[..., 1, 1]
     det = stress[..., 0, 0] * stress[..., 1, 1] - stress[..., 0, 1] * stress[..., 1, 0]
 
-    for val, quantity in zip(
-        [N1, shear_stress, trace, det], ["N1", "shear_stress", "trace", "det"]
-    ):
+    val_q = list(
+        zip([N1, shear_stress, trace, det], ["N1", "shear_stress", "trace", "det"])
+    )
+    val_q = [val_q[2]]
+
+    for val, quantity in val_q:
         val = np.clip(val, *limits)
         ax = drawPoincareGrid(grid_size=grid_size)
         drawF(ax, F, shade=True, shade_values=val, grid_size=grid_size)

@@ -368,7 +368,7 @@ def runOnLocalMachine():
 
 
 def startJobs():
-    print("Building on all servers... ")
+    # print("Building on all servers... ")
     # build_on_all_servers()
 
     # Make largeProperJob with notFIRE=True to exclude FIRE
@@ -419,7 +419,7 @@ def stopJobs():
 def cleanData():
     dm = DataManager()
     dm.findData()
-    # dm.clean_projects_on_servers()
+    dm.clean_projects_on_servers()
     # configs, labels = largePropperJob(notFIRE=True)
     # dm.delete_data_from_configs(configs, dryRun=False)
     # configs, labels = compareWithOldStoppingCriteria()
@@ -436,12 +436,12 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    runOnLocalMachine()
+    # runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
-    # startJobs()
+    startJobs()
 
     # plotPropperJob()
     # plotSizeScaling()

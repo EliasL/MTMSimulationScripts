@@ -76,9 +76,9 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Div
         self.showHistory = False
         self.showStress = True
-        self.stress_type = "PK2"  # "cauchy", "PK1" or "PK2" (PK=Piola-Kirchhoff)
+        self.stress_type = "cauchy"  # "cauchy", "PK1" or "PK2" (PK=Piola-Kirchhoff)
         # "det", "trace","N1", "J2", "sqrtJ2", or "i,j" for components
-        self.stress_mode = "N1"
+        self.stress_mode = "trace"
         self.stressLim = (-0.2, 0.2)
         self.showCircles = True
         self.showRightOrth = False

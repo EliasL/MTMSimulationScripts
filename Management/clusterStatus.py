@@ -22,8 +22,9 @@ class ServerInfo:
 
 def get_server_info(ssh_client):
     # Create a ServerInfo object
+    if ssh_client is None:
+        return None
     si = ServerInfo()
-
     # Execute combined command for cores and node information
     # This returns "jobsRunning\njobsWaiting\nAlocated/Idle/Other/TotalCores"
     command = "squeue -h -t R | wc -l; squeue -h -t PD | wc -l; sinfo -h -o '%C'"
@@ -153,11 +154,7 @@ def display_server_info(server_info):
 
 
 def task(server):
-    try:
-        ssh = connectToCluster(server, False)
-    except Exception as e:
-        print(f"Error connecting to {server}: {e}")
-
+    ssh = connectToCluster(server, False)
     info = get_server_info(ssh)
     return info
 
@@ -165,19 +162,19 @@ def task(server):
 def get_all_server_info(servers=Servers.servers):
     # A dictionary to hold server information, keyed by server
     server_info = {}
+    nr_theads = len(servers)
     # Use ThreadPoolExecutor for threading instead of multiprocessing Pool
-    with ThreadPoolExecutor(max_workers=len(servers)) as executor:
+    with ThreadPoolExecutor(max_workers=nr_theads) as executor:
         # Future to server mapping
         future_to_server = {executor.submit(task, server): server for server in servers}
 
         for future in as_completed(future_to_server):
             server = future_to_server[future]
-            try:
-                info = future.result()  # Get the result from future
-            except Exception as exc:
-                print(f"{server} generated an exception: {exc}")
-                server_info[server] = f"Error: {exc}"
+            info = future.result()  # Get the result from future
+            if info is None:
+                server_info[server] = "Error"
                 continue
+
             info.sName = server
             server_info[server] = info
 

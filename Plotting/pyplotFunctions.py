@@ -461,6 +461,9 @@ def _configure_property_settings(
         norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         backgroundColor = plt.get_cmap(cmap)(0)
 
+    # Ensure field is a 1D array for matplotlib collections
+    field = np.asarray(field).ravel()
+
     # If data does not have a load property, we set it to 0
     if not hasattr(data, "load"):
         data.load = 0

@@ -217,13 +217,14 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         handle_args_and_plot()
     else:
+        p = "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.15,1e-05,1.0PBCt8epsR1e-06s9/macroData.csv"
         plotAll(
             # "/Volumes/data/MTS2D_output/doubleDislocationTest,s100x100l0.0,0.001,4.0NPBCt3epsR1e-06s0/macroData.csv",
-            "/Volumes/data/MTS2D_output/doubleDislocationTest,s100x100l0.0,0.001,4.0NPBCReCONt3meshDiagonalminorepsR1e-06s0/macroData.csv",
+            p,
             makeGIF=False,
             transparent=False,
-            noPlots=False,
-            noVideos=True,
+            noPlots=True,
+            noVideos=False,
             combineVideos=False,
             fps=60,
             seconds_per_unit_shear=2,

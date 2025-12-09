@@ -12,17 +12,22 @@ def get_batch_script(command, job_name, nrThreads, outPath):
         #!/bin/bash
         #SBATCH --job-name={job_name}
         #SBATCH --time=5-00:00:00
-        #SBATCH --ntasks={nrThreads}
+        #SBATCH --nodes=1
+        #SBATCH --ntasks=1
+        #SBATCH --cpus-per-task={nrThreads}
         #SBATCH --output={output_file}
         #SBATCH --error={error_file}
         # Set a high nice value to decrease priority
-        # SBATCH --nice=10000
+        #SBATCH --nice=10000
 
         # Load Modules (Comment out if not needed)
         # module load cmake 
 
-        # Command to run
-        {command}
+        # Set OpenMP threads to match cpus-per-task
+        export OMP_NUM_THREADS={nrThreads}
+
+        # Command to run, bound to cores by SLURM
+        srun --cpu-bind=cores --distribution=block:block {command}
     """).strip()
     return batch_script
 

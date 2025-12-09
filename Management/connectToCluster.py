@@ -15,6 +15,7 @@ class Servers:
     # poincare = "poincare.pmmh-cluster.espci.fr"
     fourier = "fourier.pmmh-cluster.espci.fr"
     descartes = "descartes.pmmh-cluster.espci.fr"
+
     legendre = "legendre.pmmh-cluster.espci.fr"
     duchemin = "duchemin.pmmh-cluster.espci.fr"
     cauchy = "cauchy.pmmh-cluster.espci.fr"
@@ -296,12 +297,19 @@ def connectToCluster(cluster_address=Servers.default, verbose=True):
                 config["hostname"],
                 username=config["user"],
                 sock=proxy_command,
+                banner_timeout=20,
             )
         else:
             # Connect using the private key instead of a password
-            ssh.connect(cluster_address, username=config["user"])
+            ssh.connect(
+                cluster_address,
+                username=config["user"],
+                banner_timeout=20,
+            )
     except Exception as e:
-        raise SSHException(f"Error connecting to {cluster_address}: {e}")
+        print(f"Error connecting to {cluster_address}: {e}")
+        return None
+        # raise SSHException(f"Error connecting to {cluster_address}: {e}")
 
     if verbose:
         print(f"SSH connection established to {cluster_address}.")

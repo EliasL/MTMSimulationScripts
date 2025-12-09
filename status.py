@@ -91,5 +91,6 @@ if __name__ == "__main__":
     else:
         # dm = DataManager()
         # dm.clean_projects_on_servers()
-        disp_jobs()
+        # disp_jobs()
+        disp_servers()
         # run_script()
