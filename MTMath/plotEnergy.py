@@ -1,7 +1,7 @@
 import numpy as np
 
 
-from .contiPotential import ContiEnergy, lagrange_reduction, SShear
+from .contiPotential import ContiEnergy, lagrange_reduction, SShear, F_from_C
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
@@ -140,7 +140,7 @@ def generate_grid(
     function,
     resolution=500,
     zoom=1,
-    lim=[None, 0.37],
+    lim=None,
     return_XY=False,
     poincareDisk=True,
     eps=1e-9,
@@ -169,14 +169,14 @@ def generate_grid(
 
     grid = function(C, **kwargs)
 
-    if lim is None:
-        lim = (np.nanmin(grid), np.nanmax(grid))
-    elif lim[0] is None:
-        lim[0] = np.nanmin(grid)
-    elif lim[1] is None:
-        lim[1] = np.nanmax(grid)
+    if lim is not None:
+        if lim[0] is None:
+            lim[0] = np.nanmin(grid)
+        elif lim[1] is None:
+            lim[1] = np.nanmax(grid)
 
-    grid = np.clip(grid, *lim)
+        grid = np.clip(grid, *lim)
+
     if return_XY:
         # We don't need to have nan in X and Y, only in the energy grid
         X, Y = np.meshgrid(
@@ -511,6 +511,8 @@ def drawC(
         # ensure x and y are numbers (not arrays) and scatter is True
         if isinstance(label, str):
             label = [label]
+            xm = [xm]
+            ym = [ym]
 
         assert len(label) == len(xm), "Number of labels does not match number of points"
 
@@ -586,8 +588,8 @@ def addLabel(
     label,
     label_x=0,
     label_y=0,
-    label_ha="center",
-    label_va="center",
+    label_ha="left",  # left, right, center
+    label_va="bottom",  # top, bottom, center
     label_color="black",
     label_fontsize=16,
     label_bbox=None,
@@ -705,7 +707,7 @@ def getCFundamental(grid_size=200, zoom_val=1, transformation=None, returnMask=F
 
 def getFFundamental(grid_size=200, zoom_val=1, transformation=None, returnMask=False):
     C, r_mask = getCFundamental(grid_size, zoom_val, transformation, returnMask=True)
-    F = ContiEnergy.F_from_C(C)
+    F = F_from_C(C)
     if returnMask:
         return F, r_mask
     return F

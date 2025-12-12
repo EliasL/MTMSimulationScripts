@@ -4,7 +4,7 @@ import numpy as np
 from collections import deque
 from tqdm import tqdm
 from matplotlib import pyplot as plt
-from MTMath.contiPotential import EnergyFunction, Rotation
+from MTMath.contiPotential import EnergyFunction, Rotation, F_from_C
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -52,7 +52,7 @@ def F2C(F):
 
 
 def C2V(C):
-    F = EnergyFunction.F_from_C(C)
+    F = F_from_C(C)
     return F[:, 0], F[:, 1]
 
 

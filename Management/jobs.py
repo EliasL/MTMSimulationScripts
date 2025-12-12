@@ -595,7 +595,7 @@ def umutJob():
         nrThreads=4,
         loadIncrement=1e-5,
         minimizer="LBFGS",
-        LBFGSEpsf=1e-13,
+        LBFGSEpsg=1e-5,
         scenario="simpleShear",
     )
     return configs, labels

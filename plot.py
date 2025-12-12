@@ -17,13 +17,15 @@ from Plotting.makePlots import makePlot, makeSettingComparison
 from MTMath.plotPowerLaw import plot_powerlaw, make_exponent_fit
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
+    tryAllRotations,
+    bug_hunting,
     poincareTiling,
     plotStressFromRealF,
     plotsLotsOfRealFStress,
     calculateSimpleFiniteDifferenceDerivatives,
     calculateShearFiniteDifferenceDerivatives,
     plotShearFiniteDifferenceDerivatives,
-    quadrantIdentification,
+    oldQuadrantIdentification,
     checkPoincareQuadrants,
     drawPoincareGrid,
     drawLeftRightExplanationFigs,
@@ -321,4 +323,6 @@ if __name__ == "__main__":
     # drawRotationExplanationFigs()
     # drawRotation2ExplanationFigs()
     # plotStressFromRealF()
+    # tryAllRotations()
     plotsLotsOfRealFStress()
+    # bug_hunting()

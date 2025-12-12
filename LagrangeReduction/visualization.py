@@ -78,7 +78,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.showStress = True
         self.stress_type = "cauchy"  # "cauchy", "PK1" or "PK2" (PK=Piola-Kirchhoff)
         # "det", "trace","N1", "J2", "sqrtJ2", or "i,j" for components
-        self.stress_mode = "trace"
+        self.stress_mode = "N1"
         self.stressLim = (-0.2, 0.2)
         self.showCircles = True
         self.showRightOrth = False
@@ -662,20 +662,18 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         if not self.showStress:
             field = generate_energy_grid(
-                resolution=ppu, beta=beta, K=0, zeroReference=True, eps=1e-2
+                resolution=ppu, beta=beta, K=4, zeroReference=True
             )
         else:
             if self.stress_type == "cauchy":
-                stress = generate_cauchy_stress_grid(
-                    resolution=ppu, beta=beta, eps=1e-2
-                )
+                stress = generate_cauchy_stress_grid(resolution=ppu, beta=beta)
             elif self.stress_type == "PK1":
                 stress = generate_piola_stress_grid(
-                    beta=beta, resolution=ppu, second_PK=False, eps=1e-2
+                    beta=beta, resolution=ppu, second_PK=False
                 )
             elif self.stress_type == "PK2":
                 stress = generate_piola_stress_grid(
-                    beta=beta, resolution=ppu, second_PK=True, eps=1e-2
+                    beta=beta, resolution=ppu, second_PK=True
                 )
             else:
                 raise ValueError("Unknown stress type:", self.stress_type)
@@ -757,7 +755,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
     def drawEnergyBackground(
         self,
     ):
-        ppu = 2001  # Pixels per unit
+        ppu = 2000  # Pixels per unit
         folder = "precomputedEnergyBackgrounds"
 
         # Set quantity name for caching

@@ -436,12 +436,12 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    # runOnLocalMachine()
+    runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
-    startJobs()
+    # startJobs()
 
     # plotPropperJob()
     # plotSizeScaling()
