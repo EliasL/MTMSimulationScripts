@@ -12,6 +12,7 @@ from Management.jobs import (
     backwards,
     umutTestJob,
     umutJobs,
+    bigUmutJob,
     largeAvalanche,
     avalanches,
     bigJob,
@@ -341,6 +342,7 @@ def runOnLocalMachine():
     configs, labels = reconnectionJob(L=300)
     configs, labels = fixedBoundaries(1, 1, L=3)
     configs, labels = umutTestJob()
+    configs, labels = bigUmutJob()
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
     # )

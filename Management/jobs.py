@@ -601,6 +601,23 @@ def umutTestJob():
     return configs, labels
 
 
+def bigUmutJob():
+    configs, labels = ConfigGenerator.generate(
+        seed=0,
+        rows=500,
+        cols=500,
+        startLoad=0.138,
+        maxLoad=1,
+        initialGuessNoise=0.04,
+        nrThreads=8,
+        loadIncrement=2e-5,
+        minimizer="LBFGS",
+        LBFGSEpsx=1e-5,
+        scenario="simpleShear",
+    )
+    return configs, labels
+
+
 def umutJobs():
     """
     Generates a job for size scaling tests.
