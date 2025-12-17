@@ -257,10 +257,13 @@ def build_on_server(server, uploadOnly=False):
     print(f"{shortName} is ready!")
 
 
-def build_on_all_servers(uploadOnly=False):
+def build_on_all_servers(uploadOnly=False, onlyPrefered=False):
     # This function should start build jobs on all servers, and then wait until
     # a build fails or all builds are completed
-    servers = Servers.servers
+    if onlyPrefered:
+        servers = Servers.preferedServers
+    else:
+        servers = Servers.servers
     with ThreadPoolExecutor(max_workers=len(servers)) as executor:
         # Future to server mapping
         future_to_server = {

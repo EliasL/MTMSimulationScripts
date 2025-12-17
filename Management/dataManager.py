@@ -401,10 +401,12 @@ class DataManager:
 
         return final_grouped_folders
 
-    def clean_projects_on_servers(self, specificServers=None):
+    def clean_projects_on_servers(self, specificServers=None, onlyPrefered=False):
         """
         Deletes the simulation folder in the home directory on all the servers.
         """
+        if onlyPrefered:
+            specificServers = Servers.preferedServers
 
         def clean_folder_on_server(server):
             """

@@ -418,6 +418,18 @@ class ZeroEnergy(EnergyFunction):
         return 0
 
 
+class PieceWiseQuadratic(EnergyFunction):
+    @classmethod
+    # N. Perchikov & L. Truskinovsky, Journal of the Mechanics and Physics of Solids, (2024)
+    def phi(cls, C11, C22, C12, kappa, xi, eta):
+        J = sqrt(C11 * C22 - C12 * C12)
+        return (
+            0.5 * xi * (((C11 - C22) / 2) ** 2)
+            + 0.5 * eta * C12**2
+            + 0.5 * kappa * (J - 1) ** 2
+        )
+
+
 def apply_right_trans(t, A):
     # We apply a matrix multiplication from the right: A@t
     # This is because we are using the right cauchy green stress tensor C

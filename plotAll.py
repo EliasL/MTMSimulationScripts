@@ -93,17 +93,17 @@ def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
             "est_time_remaining",
         ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
             try:
-                if Y == "est_time_remaining":
-                    xlim = [0.16]
-                else:
-                    xlim = None
+                # if Y == "est_time_remaining":
+                #     xlim = [0.16]
+                # else:
+                #     xlim = None
                 makePlot(
                     csvPath,
                     Y=Y,
                     name=subfolderName + f"{Y.replace(' ', '_')}.pdf",
                     legend=True,
                     use_title=True,
-                    xlim=xlim,
+                    # xlim=xlim,
                 )
             except KeyError as e:
                 print(f"{e}")

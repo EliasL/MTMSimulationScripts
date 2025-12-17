@@ -4,6 +4,8 @@ import subprocess
 
 
 def get_batch_script(command, job_name, nrThreads, outPath):
+    assert len(job_name) < 256, "Job name cannot be longer than 256 characters!"
+
     output_file = os.path.join(outPath, f"log-{job_name}.out")
     error_file = os.path.join(outPath, f"err-{job_name}.err")
 
@@ -17,8 +19,6 @@ def get_batch_script(command, job_name, nrThreads, outPath):
         #SBATCH --cpus-per-task={nrThreads}
         #SBATCH --output={output_file}
         #SBATCH --error={error_file}
-        # Set a high nice value to decrease priority
-        #SBATCH --nice=10000
 
         # Load Modules (Comment out if not needed)
         # module load cmake 

@@ -584,7 +584,7 @@ def reconnectionJob(L=100):
     return configs, labels
 
 
-def umutJob():
+def umutTestJob():
     configs, labels = ConfigGenerator.generate(
         seed=0,
         rows=100,
@@ -599,6 +599,38 @@ def umutJob():
         scenario="simpleShear",
     )
     return configs, labels
+
+
+def umutJobs():
+    """
+    Generates a job for size scaling tests.
+    """
+    sizes = [200, 250, 300, 400, 500]
+    nr_samples = [10, 10, 10, 10, 10]
+    nr_threads = [4, 8, 8, 8, 8]
+    sizes.reverse()
+    nr_samples.reverse()
+    nr_threads.reverse()
+    all_configs = []
+    all_labels = []
+    for size, samples, threads in zip(sizes, nr_samples, nr_threads):
+        configs, labels = ConfigGenerator.generate(
+            seed=range(samples),
+            rows=size,
+            cols=size,
+            startLoad=0.138,
+            maxLoad=1.0,
+            loadIncrement=2e-5,
+            nrThreads=threads,
+            minimizer="LBFGS",
+            LBFGSEpsx=1e-6,
+            scenario="simpleShear",
+        )
+        # Append the generated configs and labels to the main lists
+        all_configs.append(configs)
+        all_labels.append(list(map(lambda x: f"L={size}, " + x, labels)))
+
+    return all_configs, all_labels
 
 
 def size_scaling_job():

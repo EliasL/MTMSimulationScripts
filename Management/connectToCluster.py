@@ -44,6 +44,9 @@ class Servers:
         # jeanZay,
     ]
 
+    # These servers get some extra points in priority
+    preferedServers = [legendre, duchemin, cauchy]
+
     # If we want to search all the servers including the local storage, we can do that
     serversAndLocal = servers + [local_path_mac]
 

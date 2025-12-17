@@ -22,7 +22,7 @@ from MTMath.plotEnergy import (
     generate_piola_stress_grid,
     drawPoincareGrid,
 )
-from MTMath.contiPotential import ContiEnergy, SShear
+from MTMath.contiPotential import ContiEnergy, SShear, PieceWiseQuadratic
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -71,15 +71,16 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.currentBeta = -0.25
         self.volumetricEnergy = True
         self.energy_lim = [0, 0.37]
-        self.energyFunc = ContiEnergy  # SuperSimple
-
-        # Div
-        self.showHistory = False
-        self.showStress = True
+        self.energyFunc = PieceWiseQuadratic  # ContiEnergy  # SuperSimple
+        # Stress
+        self.showStress = False
         self.stress_type = "cauchy"  # "cauchy", "PK1" or "PK2" (PK=Piola-Kirchhoff)
         # "det", "trace","N1", "J2", "sqrtJ2", or "i,j" for components
         self.stress_mode = "N1"
         self.stressLim = (-0.2, 0.2)
+
+        # Div
+        self.showHistory = False
         self.showCircles = True
         self.showRightOrth = False
 
@@ -662,18 +663,24 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         if not self.showStress:
             field = generate_energy_grid(
-                resolution=ppu, beta=beta, K=4, zeroReference=True
+                E_func=self.energyFunc,
+                resolution=ppu,
+                beta=beta,
+                K=4,
+                zeroReference=True,
             )
         else:
             if self.stress_type == "cauchy":
-                stress = generate_cauchy_stress_grid(resolution=ppu, beta=beta)
+                stress = generate_cauchy_stress_grid(
+                    E_func=self.energyFunc, resolution=ppu, beta=beta
+                )
             elif self.stress_type == "PK1":
                 stress = generate_piola_stress_grid(
-                    beta=beta, resolution=ppu, second_PK=False
+                    E_func=self.energyFunc, beta=beta, resolution=ppu, second_PK=False
                 )
             elif self.stress_type == "PK2":
                 stress = generate_piola_stress_grid(
-                    beta=beta, resolution=ppu, second_PK=True
+                    E_func=self.energyFunc, beta=beta, resolution=ppu, second_PK=True
                 )
             else:
                 raise ValueError("Unknown stress type:", self.stress_type)
@@ -757,6 +764,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
     ):
         ppu = 2000  # Pixels per unit
         folder = "precomputedEnergyBackgrounds"
+        e_type = self.energyFunc.__name__
 
         # Set quantity name for caching
         if self.showStress:
@@ -772,7 +780,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         # Generate energy images for triangular and square shapes
         for shape, beta, opacity in zip(["triangular", "square"], [4, -0.25], [0, 1]):
-            fName = f"{SCRIPT_DIR}/{folder}/{ppu}_{shape}_{quantity}_Poincare_LRBackround.png"
+            fName = f"{SCRIPT_DIR}/{folder}/{e_type}_{ppu}_{shape}_{quantity}_Poincare_LRBackround.png"
 
             forceGenerate = ppu <= 500  # Always regenerate for small ppu
             energyImage = self._get_or_create_background_image(

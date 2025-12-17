@@ -119,21 +119,25 @@ def generate_poincare_disk(
     return C
 
 
-def generate_energy_grid(beta=-0.25, K=4, energy_lim=[None, 0.37], **kwargs):
+def generate_energy_grid(
+    E_func=ContiEnergy, beta=-0.25, K=4, energy_lim=[None, 0.37], **kwargs
+):
     return generate_grid(
-        ContiEnergy.energy_from_C_in_place, beta=beta, K=K, lim=energy_lim, **kwargs
+        E_func.energy_from_C_in_place, beta=beta, K=K, lim=energy_lim, **kwargs
     )
 
 
-def generate_cauchy_stress_grid(beta=-0.25, K=4, **kwargs):
-    return generate_grid(ContiEnergy.cauchy_from_C, beta=beta, K=K, **kwargs)
+def generate_cauchy_stress_grid(E_func=ContiEnergy, beta=-0.25, K=4, **kwargs):
+    return generate_grid(E_func.cauchy_from_C, beta=beta, K=K, **kwargs)
 
 
-def generate_piola_stress_grid(beta=-0.25, K=4, second_PK=True, **kwargs):
+def generate_piola_stress_grid(
+    E_func=ContiEnergy, beta=-0.25, K=4, second_PK=True, **kwargs
+):
     if second_PK:
-        return generate_grid(ContiEnergy.S_from_C, beta=beta, K=K, **kwargs)
+        return generate_grid(E_func.S_from_C, beta=beta, K=K, **kwargs)
     else:
-        return generate_grid(ContiEnergy.P_from_C, beta=beta, K=K, **kwargs)
+        return generate_grid(E_func.P_from_C, beta=beta, K=K, **kwargs)
 
 
 def generate_grid(
@@ -311,6 +315,7 @@ def drawC(
     shadeColor=None,
     shade_values=None,  # scalar field, same indexing as C
     cmap="coolwarm",  # colormap
+    cbarLims=None,  # colorbar limits when using shade_values
     agg="mean",  # aggregation method when using shade_values
     F=None,  # optional: underlying deformation gradients for debugging
     **kwargs,
@@ -493,6 +498,8 @@ def drawC(
                 interpolation="nearest",
             )
             # Optional: add a colorbar
+            if cbarLims is not None:
+                im.set_clim(*cbarLims)
             plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     else:

@@ -31,7 +31,9 @@ def dictToString(dictionary):
     )
 
 
-def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
+def distributeConfigs(
+    configs, threads_per_seed=1, allowWaiting=False, onlyPrefered=True
+):
     """
     We give each seed its own slurm job and we just fill the entire cluster with
     lots of small jobs with a high nice value so that others can get past if they
@@ -78,6 +80,12 @@ def distributeConfigs(configs, threads_per_seed=1, allowWaiting=False):
         return serverConfigDict
     print("Getting server info... ")
     serverInfo = get_all_server_info()
+
+    if onlyPrefered:
+        names = list(serverInfo.keys())
+        for n in names:
+            if n not in Servers.preferedServers:
+                del serverInfo[n]
 
     # Sort the server information by server name
     for si in sorted(serverInfo.values(), key=lambda x: x.sName):

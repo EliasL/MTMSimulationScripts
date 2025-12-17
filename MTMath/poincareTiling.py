@@ -15,6 +15,7 @@ from .plotEnergy import (
 import numpy as np
 from MTMath.contiPotential import (
     ContiEnergy,
+    PieceWiseQuadratic,
     F_from_C,
     SShear,
     Rotation,
@@ -647,7 +648,7 @@ def plotStressFromRealF(
     theta = np.linspace(0, 1 * np.pi, nr_theta + 1)[:-1]
     nr_theta = len(theta)
     gamma = np.linspace(0, gamma_lim, nr_gamma)
-
+    eFunc = PieceWiseQuadratic  # ContiEnergy
     F, R, R_body = SShear(
         h=gamma,
         theta=theta,
@@ -657,11 +658,11 @@ def plotStressFromRealF(
     )
     stress_type = "quadrant"
     if stress_type == "cauchy":
-        stress = ContiEnergy.cauchy_from_F(F)
+        stress = eFunc.cauchy_from_F(F)
     elif stress_type == "pk2":
-        stress = ContiEnergy.S_from_F(F)
+        stress = eFunc.S_from_F(F)
     elif stress_type == "quadrant":
-        stress = getQuadrant(F)
+        stress = getQuadrant(F, eFunc=eFunc)
     else:
         raise RuntimeError("Unknown stress type")
 
@@ -674,11 +675,24 @@ def plotStressFromRealF(
     kwargs = {}
     if stress_type == "quadrant":
         val_q = zip([stress], ["quadrant"])
-        limits = (0, 3)
+
+        limits = (np.min(stress), 3)
+        if limits[0] < 0:
+            print("Warning: Some pixels have no quadrant assigned")
+        # assert min(limits) >= 0, "Quadrant should be non-negative"
+        assert np.max(stress) <= 3, "Quadrant should be at most 3"
+
         from matplotlib.colors import ListedColormap
 
-        cmap = ListedColormap(plt.cm.tab10.colors[:4])
-        kwargs = {"cmap": cmap, "agg": "max"}
+        nr_Colors = len(range(limits[0], limits[1] + 1))
+        cmap = ListedColormap(plt.cm.Set1.colors[1 : nr_Colors + 1])
+        # To align the integer ticks with the center of the color bars,
+        # we add 0.5 to the limits
+        kwargs = {
+            "cmap": cmap,
+            "agg": "max",
+            "cbarLims": [limits[0] - 0.5, limits[1] + 0.5],
+        }
     else:
         N1 = stress[..., 0, 0] - stress[..., 1, 1]
         shear_stress = stress[..., 0, 1]
@@ -693,7 +707,7 @@ def plotStressFromRealF(
         )
 
         # We don't really care about det and trace anymore
-        val_q = val_q[:2]
+        # val_q = val_q[:2]
 
     for val, quantity in val_q:
         val = np.clip(val, *limits)
@@ -771,87 +785,183 @@ def getQuadrantSimple(F):
             return i
 
 
-def getQuadrant(F: np.ndarray, theta=0.0, rtol=1e-8, atol=1e-10) -> np.ndarray:
-    """
-    Vectorized version of getQuadrant.
+def getSState(F, eFunc=ContiEnergy, tol=1e-15):
+    S = eFunc.S_from_F(F)
+    quadrant_idx = np.full(F.shape[:-2], -1, dtype=int)
+    S1 = S[..., 0, 1]
+    S2 = S[..., 0, 0] - S[..., 1, 1]
 
-    Parameters
-    ----------
-    F : np.ndarray
-        Deformation gradients with shape (..., 2, 2).
-    theta : float, optional
-        Angle passed through to getIdOfF, by default 0.0.
-    rtol, atol : float, optional
-        Tolerances for float comparison in np.isclose.
+    mask1 = (S1 >= 0) & (S2 >= 0)
+    mask2 = (S1 < 0) & (S2 >= 0)
+    mask3 = (S1 >= 0) & (S2 < 0)
+    mask4 = (S1 < 0) & (S2 < 0)
 
-    Returns
-    -------
-    np.ndarray
-        Quadrant indices with shape equal to F.shape[:-2],
-        each entry in {0, 1, 2, 3}.
-    """
+    quadrant_idx[mask1] = 1
+    quadrant_idx[mask2] = 2
+    quadrant_idx[mask3] = 3
+    quadrant_idx[mask4] = 4
+
+    # ---- integer-like F -> state 0 ----
+    F_int_like = np.all(np.abs(F - np.round(F)) < tol, axis=(-2, -1))
+    quadrant_idx[F_int_like] = 0
+
+    # ---- diagonal-only F (off-diagonals ~ 0) -> state 0 ----
+    F_diag_like = (np.abs(F[..., 0, 1]) < tol) & (np.abs(F[..., 1, 0]) < tol)
+
+    # ---- symmetric F -> state 0 ----
+    F_sym = (np.abs(F[..., 0, 1] - F[..., 1, 0]) < tol) & (
+        np.abs(F[..., 0, 0] - F[..., 1, 1]) < tol
+    )
+
+    # Combine the "zero state" conditions
+    zero_state = F_int_like | F_diag_like | F_sym
+    quadrant_idx[zero_state] = 0
+
+    return quadrant_idx
+
+
+def getQuadrant(F: np.ndarray, eFunc=ContiEnergy) -> np.ndarray:
     F = np.asarray(F, dtype=float)
     if F.shape[-2:] != (2, 2):
         raise ValueError("F must have shape (..., 2, 2)")
 
-    if True:  # second piola kirchhoff stress based
-        S = ContiEnergy.S_from_F(F)
-        S1 = S[..., 0, 1]
-        S2 = S[..., 0, 0] - S[..., 1, 1]
-        quadrant_idx = np.full(F.shape[:-2], -1, dtype=int)
-        mask1 = (S1 > 0) & (S2 > 0)
-        mask2 = (S1 < 0) & (S2 > 0)
-        mask3 = (S1 > 0) & (S2 < 0)
-        mask4 = (S1 < 0) & (S2 < 0)
-        quadrant_idx[mask1] = 0
-        quadrant_idx[mask2] = 1
-        quadrant_idx[mask3] = 2
-        quadrant_idx[mask4] = 3
-        return quadrant_idx
-
-    # 1) Lagrange-reduce F (already vectorized, in-place)
     F_r = F.copy()
     lagrange_reduction_F(F_r)
 
-    # 2) ID of the original F
+    ref_state = getSState(F, eFunc=eFunc)  # shape (...,) or (..., a, b, ...)
 
-    stress_id = getIdOfF(F, theta=theta)  # shape (..., 2)
-
-    # 3) Build symmetry matrices
     m1 = np.array([[1.0, 0.0], [0.0, -1.0]], dtype=float)
     m2 = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=float)
 
-    # 4) Generate the 4 candidates (all vectorized)
     F_candidate1 = F_r
     F_candidate2 = np.einsum("...ij,jk->...ik", F_r, m1)
     F_candidate3 = np.einsum("...ij,jk->...ik", F_r, m2)
     F_candidate4 = np.einsum("...ij,jk->...ik", F_candidate3, m1)
+    # F_candidate1 = F_r
+    # F_candidate2 = np.einsum("ij,...jk,kl->...il", m1, F_r, m1)
+    # F_candidate3 = np.einsum("ij,...jk,kl->...il", m2, F_r, m2)
+    # F_candidate4 = np.einsum("ij,...jk,kl->...il", m1, F_candidate3, m1)
 
-    # Stack candidates along a new leading axis: (4, ..., 2, 2)
     F_candidates = np.stack(
         (F_candidate1, F_candidate2, F_candidate3, F_candidate4), axis=0
-    )
+    )  # (4, ..., 2, 2)
 
-    # 5) Compute IDs for all candidates at once: shape (4, ..., 2)
-    cand_ids = getIdOfF(F_candidates, theta=theta)
+    cand_states = getSState(
+        F_candidates, eFunc=eFunc
+    )  # shape (4, ...,) or (4, ..., a, b, ...)
 
-    # 6) Compare candidate IDs to original stress_id (broadcasted)
-    #    cand_ids: (4, ..., 2), stress_id: (..., 2)
-    #    -> equality: (4, ..., 2), then all along last axis -> (4, ...)
-    matches = np.all(np.isclose(cand_ids, stress_id, rtol=rtol, atol=atol), axis=-1)
+    notZero = ref_state != 0  # (...,)
 
-    # 7) Take argmax over candidate axis -> indices in {0,1,2,3}
-    quadrant_idx = np.argmax(matches, axis=0)  # shape (...,)
+    eq = cand_states == ref_state[None, ...]  # (4, ..., [state...])
 
-    # 8) Verify that each F matched exactly one candidate
-    if not np.all(np.sum(matches, axis=0) == 1):
+    batch_ndim = F.ndim - 2
+    matches = np.all(eq, axis=tuple(range(1 + batch_ndim, eq.ndim)))  # (4, ...)
+
+    # Ignore integer-only reference states: forbid matches there
+    matches &= notZero[None, ...]  # (4, ...)
+
+    num_matches = np.sum(matches, axis=0)  # (...,)
+
+    # print(num_matches[57])
+    # print(cand_states[:, 57])
+    # print(ref_state[57])
+
+    if np.any(num_matches > 1):
         print("Ambiguous quadrant identification for some F")
-        # show which ones are ambiguous
-        ambiguous = np.where(np.sum(matches, axis=0) != 1)
-        # print("Indices of ambiguous F:", ambiguous)
-        # print("Corresponding F values:", F[ambiguous])
-        # raise RuntimeError("Ambiguous quadrant identification for some F")
+        ambiguous = np.where(num_matches > 1)  # tuple of index arrays
+        n_amb = ambiguous[0].size
+        print("Number of ambiguous cases:", n_amb)
 
+        # pick the middle ambiguous case
+        amb_list = list(zip(*ambiguous))  # list of index tuples
+        idx = amb_list[n_amb // 2]  # one index tuple
+
+        print("Ambiguous index:", idx)
+        print("F at idx:")
+        print(F[idx])
+        print("Ref state:")
+        print(ref_state[idx])
+        print("Candidates:")
+        print(cand_states[:, *idx])
+
+    quadrant_idx = np.argmax(matches, axis=0)
+
+    # Do not treat integer-only / zeroStates as failures or ambiguities.
+    # They are explicitly labeled as 0 by getSState.
+    quadrant_idx[~notZero] = 0
+
+    # Only consider "no match" among non-zero reference states.
+    noMatches = (num_matches == 0) & notZero
+    quadrant_idx[noMatches] = -1
+
+    if np.any(noMatches):
+        for idx in zip(*np.where(noMatches)):
+            print("No match at index:", idx)
+            print("Reference state:")
+            print(ref_state[idx])
+            print("Candidate states:")
+            print(cand_states[(slice(None),) + idx])
+            print("F")
+            print(F[idx])
+
+    return quadrant_idx
+
+
+def getQuadrant2(F):
+    F_r = F.copy()
+    lagrange_reduction_F(F_r)
+
+    m1 = np.array([[1.0, 0.0], [0.0, -1.0]], dtype=float)
+    m2 = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=float)
+
+    F_candidate1 = F_r
+    F_candidate2 = np.einsum("ij,...jk,kl->...il", m1, F_r, m1)
+    F_candidate3 = np.einsum("ij,...jk,kl->...il", m2, F_r, m2)
+    F_candidate4 = np.einsum("ij,...jk,kl->...il", m1, F_candidate3, m1)
+
+    F_candidates = np.stack(
+        (F_candidate1, F_candidate2, F_candidate3, F_candidate4), axis=0
+    )  # (4, ..., 2, 2)
+
+    oStress = ContiEnergy.cauchy_from_F(F)  # (..., S, S)
+    cStress = ContiEnergy.cauchy_from_F(F_candidates)  # (4, ..., S, S)
+
+    # Compare whole SxS tensors, not individual entries
+    matches = np.all(
+        np.isclose(cStress, oStress[None, ...], rtol=1e-7, atol=1e-9), axis=(-2, -1)
+    )  # (4, ...)
+
+    num_matches = np.sum(matches, axis=0)  # (...,)
+    if np.any(num_matches > 1):
+        print("Ambiguous quadrant identification for some F")
+        ambiguous = np.where(num_matches > 1)  # tuple of index arrays
+        n_amb = ambiguous[0].size
+        print("Number of ambiguous cases:", n_amb)
+
+        # pick the middle ambiguous case
+        amb_list = list(zip(*ambiguous))  # list of index tuples
+        idx = amb_list[n_amb // 2]  # one index tuple
+
+        print("Ambiguous index:", idx)
+        print("F at idx:")
+        print(F[idx])
+        print("Original stress:")
+        print(oStress[idx])
+        print("Candidates:")
+        print(cStress[:, *idx])
+
+    quadrant_idx = np.argmax(matches, axis=0)
+    noMatches = num_matches == 0
+    quadrant_idx[noMatches] = -1
+    if np.any(noMatches):
+        for idx in zip(*np.where(noMatches)):
+            print("No match at index:", idx)
+            print("Reference state:")
+            print(oStress[idx])
+            print("Candidate states:")
+            print(cStress[(slice(None),) + idx])
+            print("F")
+            print(F[idx])
     return quadrant_idx
 
 
@@ -863,7 +973,7 @@ def getIdOfF(F: np.ndarray, theta=0) -> np.ndarray:
     RT = np.swapaxes(R, -1, -2)
     s = np.einsum("...ij,...jk,...kl->...il", RT, s, R)
     shear = s[..., 0, 1]
-    N1 = s[..., 0, 0] - s[..., 1, 1]
+    N1 = (s[..., 0, 0] - s[..., 1, 1]) / 2
     return np.stack((shear, N1), axis=-1)
 
 
@@ -875,7 +985,7 @@ def printRot(A, name=""):
 
 def tryAllRotations(
     grid_size: int = 200,
-    angle_max: float = 0.9 * np.pi,
+    angle_max: float = 0.999 * np.pi,
     n_theta: int = int(1e6),
     first_tolerance: float = 1e-4,
     second_tolerance: float = 1e-3,
@@ -894,9 +1004,9 @@ def tryAllRotations(
     prepPoincareFig(ax=ax)
     ax = drawPoincareGrid(ax=ax, grid_size=grid_size)
     F = (
-        SShear(1.4, s_conponent=(0, 1))
-        @ SShear(1.3, s_conponent=(1, 0))
-        @ SShear(0.0, s_conponent=(0, 1))
+        SShear(1.6, s_conponent=(0, 1))
+        # @ SShear(1.3, s_conponent=(1, 0))
+        # @ SShear(0.0, s_conponent=(0, 1))
     )
     # Fs = np.array(
     #     [
@@ -916,6 +1026,7 @@ def tryAllRotations(
     reduced_C = C.copy()
     M = lagrange_reduction(reduced_C, returnM=True)
     F_reduced = F @ M
+    # F_reduced = F_from_C(reduced_C)
 
     printRot(F_reduced, "Reduced F")
     printRot(M, "Reduction matrix M")
@@ -931,6 +1042,21 @@ def tryAllRotations(
     F_candidate3 = F_reduced @ m2
     F_candidate4 = F_candidate3 @ m1
 
+    F_candidate1 = F_reduced
+    F_candidate2 = Rotation(np.pi / 4).T @ F_reduced @ Rotation(np.pi / 4)
+    F_candidate3 = Rotation(np.pi / 4) @ F_reduced @ Rotation(np.pi / 4).T
+    F_candidate4 = Rotation(np.pi / 4) @ F_candidate3 @ Rotation(np.pi / 4).T
+
+    F_candidate1 = F_reduced
+    F_candidate2 = m1 @ F_reduced @ m1
+    F_candidate3 = m2 @ F_reduced @ m2
+    F_candidate4 = m1 @ F_candidate3 @ m1
+
+    # F_candidate1 = F_reduced
+    # F_candidate2 = F_reduced @ Rotation(np.pi / 4)
+    # F_candidate3 = F_reduced @ Rotation(np.pi / 4).T
+    # F_candidate4 = F_candidate3 @ Rotation(np.pi / 4).T
+
     F_candidates = [F_candidate1, F_candidate2, F_candidate3, F_candidate4]
     for f in F_candidates:
         print("ID:", getIdOfF(f))
@@ -944,12 +1070,14 @@ def tryAllRotations(
             grid_size=grid_size,
             scatter=True,
             s=40,
-            c="green",
+            c="green" if np.linalg.det(F_cand) > 0 else "red",
+            label=rf"$\tilde{{\mathbf{{F}}}}_{i}$",
+            label_va="top",
         )
 
     # ID of the original F
     solution_id = np.array(getIdOfF(F), dtype=float)
-    right_ax.plot(solution_id[0], solution_id[1], "bo", label="Solution ID")
+    right_ax.plot(solution_id[0], solution_id[1], "bo", label=r"$\mathbf{F}$")
     print(f"Solution IDs: {solution_id}")
 
     # Angle sampling and precomputed rotation matrices
@@ -971,7 +1099,8 @@ def tryAllRotations(
             markersize=1,
             linewidth=(i + 1) * 3 - 2,  # thicker line/marker edge
             zorder=-(len(F_candidates) + i),  # ensure later lines are drawn on top
-            label=f"F {i}",
+            label=rf"$\tilde{{\mathbf{{F}}}}_{i}$",
+            # use default colors
         )
         # First tolerance: equality of IDs
         diff = np.abs(candidate_ids - solution_id)
@@ -1009,8 +1138,6 @@ def tryAllRotations(
             )
 
             matches.append((F_cand, angle, cand_id, i))
-    if matches:
-        best = np.min(match_angles)
 
     # Plot original C in blue
     drawC(
@@ -1034,8 +1161,9 @@ def tryAllRotations(
             np.array([C_cand]),
             grid_size=grid_size,
             scatter=True,
-            s=100 if angle == best else 50,
-            label=f"{cand_nr}: {angle * 180 / np.pi:.2f}",
+            s=100 if np.isclose(0, angle) else 30,
+            label=rf"$\tilde{{\mathbf{{F}}}}_{cand_nr}$"
+            + f": {angle * 180 / np.pi:.2f}",
             label_va="top",
             c=c,
         )
@@ -1049,7 +1177,7 @@ def tryAllRotations(
     # equal aspect
     right_ax.set_aspect("equal")
     right_ax.set_xlabel(r"$\sigma_{12}$")
-    right_ax.set_ylabel(r"$N1=\sigma_{11} - \sigma_{22}$")
+    right_ax.set_ylabel(r"$N1=(\sigma_{11} - \sigma_{22})/2$")
     plt.tight_layout()
 
     # Theta space diagnostics

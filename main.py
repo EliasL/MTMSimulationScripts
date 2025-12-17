@@ -10,7 +10,8 @@ from Management.jobs import (
     cyclicLoading,
     fixedBoundaries,
     backwards,
-    umutJob,
+    umutTestJob,
+    umutJobs,
     largeAvalanche,
     avalanches,
     bigJob,
@@ -339,7 +340,7 @@ def runOnLocalMachine():
     # configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
     configs, labels = reconnectionJob(L=300)
     configs, labels = fixedBoundaries(1, 1, L=3)
-    configs, labels = umutJob()
+    configs, labels = umutTestJob()
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
     # )
@@ -363,19 +364,19 @@ def runOnLocalMachine():
 
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=3)
-    run_locally(configs[0], resume=False)  # , dump=dump)
+    run_locally(configs[0], resume=True)  # , dump=dump)
     # run_many_locally(configs, taskNames=labels, resume=False)
 
 
 def startJobs():
     # print("Building on all servers... ")
-    # build_on_all_servers()
+    build_on_all_servers(onlyPrefered=ONLYPREFERED)
 
     # Make largeProperJob with notFIRE=True to exclude FIRE
     def notFIRE_largePropperJob():
         return largePropperJob(notFIRE=True)
 
-    for job in [notFIRE_largePropperJob, size_scaling_job]:
+    for job in [umutJobs]:  # [notFIRE_largePropperJob, size_scaling_job]:
         configs, labels = job()
 
         # Normalize to batches so we handle both a single list of configs
@@ -387,7 +388,9 @@ def startJobs():
 
         for c, l in batches:
             print("Distributing jobs and searching for already existing folders...")
-            servers_confs = distributeConfigs(c, c[0].nrThreads, allowWaiting=True)
+            servers_confs = distributeConfigs(
+                c, c[0].nrThreads, allowWaiting=True, onlyPrefered=ONLYPREFERED
+            )
             for server, confs in servers_confs.items():
                 print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
                 if confs:
@@ -419,7 +422,7 @@ def stopJobs():
 def cleanData():
     dm = DataManager()
     dm.findData()
-    dm.clean_projects_on_servers()
+    dm.clean_projects_on_servers(onlyPrefered=ONLYPREFERED)
     # configs, labels = largePropperJob(notFIRE=True)
     # dm.delete_data_from_configs(configs, dryRun=False)
     # configs, labels = compareWithOldStoppingCriteria()
@@ -427,6 +430,7 @@ def cleanData():
 
 
 if __name__ == "__main__":
+    ONLYPREFERED = True
     # build_on_all_servers()
     # 150x150 64 threads -> 23 days
     # 150x150 32 threads -> 22 days

@@ -6,6 +6,7 @@ import os
 import sys
 import platform
 import glob
+import re
 
 
 # Add Management to sys.path (used to import files)
@@ -64,6 +65,12 @@ class SimulationManager:
             self.simulation_command = f"LD_PRELOAD=/usr/lib/gcc/x86_64-linux-gnu/7/libasan.so valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes {self.simulation_command}"
 
     def runSimulation(self, build=True, resumeIfPossible=True, silent=False):
+        if self.taskIsRunning():
+            print(
+                "Simulation is already running. Stop the simulation before running again."
+            )
+            return -1
+
         if build:
             self.build()
 
@@ -151,11 +158,16 @@ class SimulationManager:
         return duration
 
     def findDumpFile(self, index=0, name=None):
-        """
-        Find the dump file in the specified folder by name or by index after sorting by creation date.
+        """Find a dump file.
 
-        :param index: Index of the file to retrieve after sorting by creation date (default newest).
-        :param name: Name of the dump file to find. If specified, index is ignored.
+        Priority:
+        1) If `name` is provided, return the first file whose basename contains `name`.
+        2) Otherwise, sort by *largest load value* parsed from the filename (descending).
+           The load value is expected after `_l`, e.g. `dump_l0.17.xml.gz`.
+           If multiple files have the same load, the newest (mtime) wins.
+
+        :param index: Index of the file to retrieve after sorting (default best match).
+        :param name: Substring of the dump file to find. If specified, `index` is ignored.
         :return: Path to the dump file.
         """
 
@@ -165,30 +177,140 @@ class SimulationManager:
 
         # Check if a specific file name is given
         if name:
-            # Search for the file with the given name
             for file in glob.glob(os.path.join(dumpFolderPath, "*")):
                 if name in os.path.basename(file):
                     return file
             raise FileNotFoundError(f"No file named {name} found in {dumpFolderPath}")
 
-        # If no specific file name is given, sort files by creation time
         files = list(
             filter(os.path.isfile, glob.iglob(os.path.join(dumpFolderPath, "*")))
         )
-        files.sort(
-            key=os.path.getmtime, reverse=True
-        )  # Sort files by modification time, newest first
 
-        # Return the file at the specified index
+        def _parse_load_value(path):
+            """Extract load value from filenames like `dump_l0.17.xml.gz`.
+
+            Returns None if no load value can be parsed.
+            """
+            base = os.path.basename(path)
+            m = re.search(r"_l(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)", base)
+            if m is None:
+                return None
+            try:
+                return float(m.group(1))
+            except ValueError:
+                return None
+
+        # Sort by load (descending), then by modification time (descending)
+        def _sort_key(path):
+            load = _parse_load_value(path)
+            # Unparseable loads go last
+            load_key = float("-inf") if load is None else load
+            return (load_key, os.path.getmtime(path))
+
+        files.sort(key=_sort_key, reverse=True)
+
         try:
             return files[index]
         except IndexError:
             if len(files) == 0:
                 raise Warning("No dumps found.")
-            else:
-                raise IndexError(
-                    f"No file at index {index}. Only {len(files)} files available in {dumpFolderPath}."
-                )
+            raise IndexError(
+                f"No file at index {index}. Only {len(files)} files available in {dumpFolderPath}."
+            )
+
+    def taskIsRunning(self):
+        target_cmd = " ".join(self.simulation_command.split())
+
+        system = platform.system()
+
+        if system == "Linux":
+            return self._taskIsRunning_linux(target_cmd)
+        elif system == "Darwin":
+            return self._taskIsRunning_macos(target_cmd)
+        else:
+            raise NotImplementedError(f"Unsupported OS: {system}")
+
+    def matchCommandToSimulation(self, cmd: str, target_cmd: str | None = None) -> bool:
+        """Return True if `cmd` looks like an MTS2D process for this SimulationManager.
+
+        Matching strategy:
+        - Accept an exact full-command match when possible (fast-path).
+        - Otherwise, accept a match if the simulation's unique name (conf stem / subfolder)
+          appears anywhere in the command line. This works for both fresh runs (-c ... .conf)
+          and resume runs (-d .../dumps/dump_*.xml[.gz]).
+        - Also handle wrapper commands (valgrind/LD_PRELOAD) by not requiring the command
+          to start with the executable path.
+        """
+        if not cmd:
+            return False
+
+        cmd_norm = " ".join(cmd.split())
+
+        # Fast path: exact command match (when available / not wrapped)
+        if target_cmd is not None:
+            target_norm = " ".join(target_cmd.split())
+            if cmd_norm == target_norm:
+                return True
+
+        # Primary signature: the simulation name appears in both the .conf filename
+        # and the output subfolder for resumed runs.
+        sig = (self.subfolderName or "").strip()
+        if not sig:
+            return False
+
+        return sig in cmd_norm
+
+    def _taskIsRunning_linux(self, target_cmd):
+        uid = os.getuid()
+
+        for pid in os.listdir("/proc"):
+            if not pid.isdigit():
+                continue
+            try:
+                proc_path = f"/proc/{pid}"
+                if os.stat(proc_path).st_uid != uid:
+                    continue
+
+                with open(f"{proc_path}/cmdline", "rb") as f:
+                    raw = f.read()
+                    if not raw:
+                        continue
+
+                cmd = raw.replace(b"\x00", b" ").decode().strip()
+                cmd = " ".join(cmd.split())
+
+                if self.matchCommandToSimulation(cmd, target_cmd=target_cmd):
+                    return True
+
+            except (FileNotFoundError, PermissionError):
+                continue
+
+        return False
+
+    def _taskIsRunning_macos(self, target_cmd):
+        uid = os.getuid()
+
+        ps = subprocess.run(
+            ["ps", "-axo", "uid=,command="],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+        for line in ps.stdout.splitlines():
+            try:
+                proc_uid, cmd = line.strip().split(None, 1)
+            except ValueError:
+                continue
+
+            if int(proc_uid) != uid:
+                continue
+
+            cmd = " ".join(cmd.split())
+            if self.matchCommandToSimulation(cmd, target_cmd=target_cmd):
+                return True
+
+        return False
 
     def clean(self):
         # Print a message to indicate the cleaning process has started
@@ -251,6 +373,10 @@ class SimulationManager:
 
 # The reason why this is so complicated is that if we simply use .readline(), it
 # will not flush properly for lines that should be overwritten using \r.
+# NOTE: The previous implementation could deadlock because stderr was piped but not
+# drained while we were reading stdout. If stderr fills its OS buffer (common when
+# compilers emit warnings), the child process blocks and the build appears to hang.
+# We avoid this by merging stderr into stdout.
 def run_command(command, echo=True, taskName=None):
     if taskName is None:
         taskName = ""
@@ -265,42 +391,27 @@ def run_command(command, echo=True, taskName=None):
         command,
         shell=True,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        # executable="/bin/bash",  # Use bash instead of default /bin/sh
+        stderr=subprocess.STDOUT,
         env=os.environ,
+        text=True,
+        bufsize=1,
+        universal_newlines=True,
     )
 
-    # Buffer to store the output until we hit a line ending
-    output_buffer = bytearray()
-
+    output_buffer = []
     while True:
-        # Read one byte at a time
-        byte = process.stdout.read(1)
-        if byte:
-            # Append the byte to the buffer
-            output_buffer += byte
-
-            # If the byte is a line ending, decode and print the buffer
-            if byte in (b"\n", b"\r"):
-                # Decode the buffer and print it with self.name as a prefix
-                print(
-                    f"{taskName} {output_buffer.decode('utf-8', errors='replace')}",
-                    end="",
-                )
-                # Clear the buffer
+        ch = process.stdout.read(1) if process.stdout is not None else ""
+        if ch:
+            output_buffer.append(ch)
+            if ch in ("\n", "\r"):
+                print(f"{taskName} {''.join(output_buffer)}", end="", flush=True)
                 output_buffer.clear()
         else:
             if process.poll() is not None:
                 break
 
-    # Output any remaining bytes in the buffer after the process has ended
     if output_buffer:
-        print(f"{taskName} {output_buffer.decode('utf-8', errors='replace')}", end="")
-
-    # Check for any errors
-    err = process.stderr.read().decode("utf-8")
-    if err:
-        print(f"{taskName} Error:", err)
+        print(f"{taskName} {''.join(output_buffer)}", end="", flush=True)
 
     return process.returncode
 
