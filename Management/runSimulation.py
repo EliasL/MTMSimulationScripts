@@ -1,5 +1,7 @@
 from .simulationManager import SimulationManager
-from .configGenerator import SimulationConfig
+from .configGenerator import SimulationConfig, ConfigGenerator
+import ast
+import sys
 
 
 def run_locally(
@@ -22,18 +24,40 @@ def run_locally(
         manager.plot()
 
 
+def parse_args():
+    # Skip the first argument (script path)
+    args = sys.argv[1:]
+    kwargs = {}
+
+    for arg in args:
+        if "=" in arg:
+            key, value = arg.split("=", 1)
+            try:
+                # Try to evaluate the value (e.g., for lists, numbers)
+                value = ast.literal_eval(value)
+            except (ValueError, SyntaxError):
+                # If it fails, keep it as a string
+                pass
+            kwargs[key] = value
+
+    return kwargs
+
+
 if __name__ == "__main__":
-    config = SimulationConfig(
-        rows=16,
-        cols=16,
-        startLoad=0.0,
-        nrThreads=4,
-        loadIncrement=1e-5,
-        maxLoad=1.0,
-        LBFGSEpsg=1e-10,
-        QDSD=0.0,
-        usingPBC="false",
-        minimizer="LBFGS",
-        scenario="simpleShearFixedBoundary",
-    )
-    run_locally(config)
+    kwargs = parse_args()
+    if len(kwargs) == 0:
+        kwargs = {
+            "seed": 0,
+            "minimizer": ["CG"],
+            "rows": 16,
+            "cols": 16,
+            "eps": 1e-5,
+            "LBFGSEpsg": 1e-5,
+            "CGEpsg": 1e-2,
+            "loadIncrement": 1e-6,
+        }
+
+    confKwargs, runKwargs = ConfigGenerator.splitKwargs(kwargs)
+
+    (configs, labels) = ConfigGenerator.generate(**confKwargs)
+    run_locally(configs, taskNames=labels, **runKwargs)

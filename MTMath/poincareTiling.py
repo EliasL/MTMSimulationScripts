@@ -789,7 +789,7 @@ def getSState(F, eFunc=ContiEnergy, tol=1e-15):
     S = eFunc.S_from_F(F)
     quadrant_idx = np.full(F.shape[:-2], -1, dtype=int)
     S1 = S[..., 0, 1]
-    S2 = S[..., 0, 0] - S[..., 1, 1]
+    S2 = (S[..., 0, 0] - S[..., 1, 1]) / 2
 
     mask1 = (S1 >= 0) & (S2 >= 0)
     mask2 = (S1 < 0) & (S2 >= 0)

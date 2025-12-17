@@ -1,10 +1,8 @@
 from Management.simulationManager import SimulationManager
 from Management.configGenerator import ConfigGenerator, SimulationConfig
-from Management.runSimulation import run_locally
-import ast
-import sys
+from Management.runSimulation import run_locally, parse_args
+
 import concurrent.futures
-import functools
 
 
 def task(config, **kwargs):
@@ -37,25 +35,6 @@ def run_many_locally(configs, taskNames=None, **kwargs):
 
         # Run the tasks in parallel with corresponding names
         executor.map(task_with_name, configs, taskNames)
-
-
-def parse_args():
-    # Skip the first argument (script path)
-    args = sys.argv[1:]
-    kwargs = {}
-
-    for arg in args:
-        if "=" in arg:
-            key, value = arg.split("=", 1)
-            try:
-                # Try to evaluate the value (e.g., for lists, numbers)
-                value = ast.literal_eval(value)
-            except (ValueError, SyntaxError):
-                # If it fails, keep it as a string
-                pass
-            kwargs[key] = value
-
-    return kwargs
 
 
 if __name__ == "__main__":

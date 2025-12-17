@@ -73,10 +73,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.energy_lim = [0, 0.37]
         self.energyFunc = PieceWiseQuadratic  # ContiEnergy  # SuperSimple
         # Stress
-        self.showStress = False
-        self.stress_type = "cauchy"  # "cauchy", "PK1" or "PK2" (PK=Piola-Kirchhoff)
+        self.showStress = True
+        self.stress_type = "PK2"  # "cauchy", "PK1" or "PK2" (PK=Piola-Kirchhoff)
         # "det", "trace","N1", "J2", "sqrtJ2", or "i,j" for components
-        self.stress_mode = "N1"
+        self.stress_mode = "0,1"
         self.stressLim = (-0.2, 0.2)
 
         # Div
@@ -612,8 +612,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             # trace over last two axes
             return np.trace(stress, axis1=-2, axis2=-1)
         elif mode in ("N1", "-trace"):
-            # sigma_xx - sigma_yy
-            return stress[..., 0, 0] - stress[..., 1, 1]
+            # (sigma_xx - sigma_yy)/2
+            return (stress[..., 0, 0] - stress[..., 1, 1]) / 2
 
         elif mode in ("J2", "sqrtJ2"):
             # mean (hydrostatic) stress in 2D: (sigma_xx + sigma_yy) / 2
