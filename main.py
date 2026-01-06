@@ -324,8 +324,8 @@ def runOnServer():
 
     configs, labels = allPlasticEventsJob()
     configs, labels = backwards(nrThreads=20, seeds=[1])
-    configs, labels = basicJob(6, 1, size=20)
-    queueJobs(server, configs, job_name="test")
+    configs, labels = basicJob(3, 1, size=20)
+    queueJobs(server, configs, resume=True, jobCopies=20)
 
 
 def runReconnectionJob(L=30):
@@ -372,13 +372,14 @@ def runOnLocalMachine():
 
 def startJobs():
     # print("Building on all servers... ")
-    build_on_all_servers(onlyPrefered=ONLYPREFERED)
+    # build_on_all_servers(onlyPrefered=ONLYPREFERED)
 
     # Make largeProperJob with notFIRE=True to exclude FIRE
     def notFIRE_largePropperJob():
         return largePropperJob(notFIRE=True)
 
-    for job in [umutJobs]:  # [notFIRE_largePropperJob, size_scaling_job]:
+    # for job in [notFIRE_largePropperJob, size_scaling_job]:
+    for job in [umutJobs]:
         configs, labels = job()
 
         # Normalize to batches so we handle both a single list of configs
@@ -397,7 +398,7 @@ def startJobs():
                 print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
                 if confs:
                     # Queue jobs (uncomment to actually submit)
-                    queueJobs(server, confs, job_name="opt", stopExsistingJobs=False)
+                    queueJobs(server, confs, build=False, jobCopies=20)
                     pass
 
 
@@ -433,7 +434,7 @@ def cleanData():
 
 if __name__ == "__main__":
     ONLYPREFERED = True
-    # build_on_all_servers()
+    build_on_all_servers(onlyPrefered=ONLYPREFERED)
     # 150x150 64 threads -> 23 days
     # 150x150 32 threads -> 22 days
     # 150x150 16 threads -> 16 days
@@ -442,12 +443,12 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    runOnLocalMachine()
+    # runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
-    # startJobs()
+    startJobs()
 
     # plotPropperJob()
     # plotSizeScaling()

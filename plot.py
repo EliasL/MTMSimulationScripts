@@ -52,11 +52,11 @@ from tqdm import tqdm
 def plotPropperJob():
     nrThreads = 3
     nrSeeds = 40
-    configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
-    # configs, labels = largePropperJob(group_by_seeds=True, FIREOnly=True)
+    # configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
+    configs, labels = largePropperJob(group_by_seeds=True)  # , FIREOnly=True)
     # xlim = [0.25, 0.55]
-    # for confs, labs in zip(configs, labels):
-    #     plotEnergy(confs, labels=labs)
+    for confs, labs in zip(configs, labels):
+        plotEnergy(confs, labels=labs)
     # plotLog(
     #     configs,
     #     labels=labels,
@@ -303,7 +303,7 @@ if __name__ == "__main__":
     # plotEnergyRegion()
     # plotSampleRuns()
     # plotLongJob()
-    # plotPropperJob()
+    plotPropperJob()
 
     # debugPlotAll()
     # energyField()
@@ -324,5 +324,5 @@ if __name__ == "__main__":
     # drawRotation2ExplanationFigs()
     # plotStressFromRealF()
     # tryAllRotations()
-    plotsLotsOfRealFStress()
+    # plotsLotsOfRealFStress("pk2", reduced=True)
     # bug_hunting()

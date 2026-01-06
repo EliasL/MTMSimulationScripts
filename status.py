@@ -92,5 +92,6 @@ if __name__ == "__main__":
         # dm = DataManager()
         # dm.clean_projects_on_servers()
         # disp_jobs()
-        disp_servers()
-        # run_script()
+        # disp_servers()
+        # This is where you create a terminal with all three displayed
+        run_script()

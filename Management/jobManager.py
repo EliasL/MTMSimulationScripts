@@ -206,8 +206,8 @@ class JobManager:
         stdin, stdout, stderr = ssh.exec_command(command)
         stdout_lines = stdout.read().decode("utf-8").strip().split("\n")
 
+        s = get_server_short_name(server)
         if "CMakeFiles" in stdout_lines[0]:
-            s = get_server_short_name(server)
             ssh.close()  # Ensure the connection is closed after use
             return [f"{s}:\n  Building..."]
 
@@ -232,8 +232,8 @@ class JobManager:
                         random.uniform(1, 3)
                     )  # Random delay to prevent synchronized reconnection attempts
                     # print(f"Attempt {attempts} failed for {server}: {e}")
-
             print(f"Error processing {line}: {e}")
+            return f"{s}:\n {e}"
 
         # Use ThreadPoolExecutor to process lines in parallel
         with ThreadPoolExecutor(max_workers=7) as executor:
@@ -345,10 +345,15 @@ class JobManager:
             table = []
 
             for process in self.processes:
+                if process is None:
+                    row = ["N/A", "Error", "Error", "0%", "0", "N/A"]
+                    table.append(row)
+                    continue
                 if isinstance(process, str):
                     row = ["N/A", "Building", process.split(":")[0], "0%", "0", "N/A"]
                     table.append(row)
                     continue
+
                 server_short_name = get_server_short_name(process.server)
                 if process.timeEstimation == "N/A":
                     run_time = "N/A"

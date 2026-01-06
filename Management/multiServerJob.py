@@ -138,9 +138,16 @@ def distributeConfigs(
         )
 
 
-def queueJobs(server, configs, job_name="el", stopExsistingJobs=True, **kwargs):
+def queueJobs(
+    server, configs, job_names=None, stopExsistingJobs=False, jobCopies=1, **kwargs
+):
     """
+    jobCopies starts the same job multiple times. (Jobs with the same name wait
+    for eachother. If a cluster has a max time that is smaller than the time your
+    job needs, this is a way to effectively multiply the max time)
+
     Kwargs:
+    jobCopies=1,
     resume=True,
     dump=None,
     plot=False,
@@ -157,6 +164,8 @@ def queueJobs(server, configs, job_name="el", stopExsistingJobs=True, **kwargs):
         configs = [configs]
 
     commands = [confToCommand(conf, **kwargs) for conf in configs]
+    if job_names is None:
+        job_names = [conf.name for conf in configs]
 
     full_pre_command = (
         pre_command
@@ -164,7 +173,8 @@ def queueJobs(server, configs, job_name="el", stopExsistingJobs=True, **kwargs):
         + str(
             {
                 '"commands"': str(commands).replace('"', "\u203d"),
-                '"job_name"': f'"{job_name}"',
+                '"job_names"': str(job_names).replace('"', "\u203d"),
+                '"jobCopies"': jobCopies,
             }
         )
     )

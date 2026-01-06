@@ -766,6 +766,15 @@ def lagrange_reduction_F(F, loops=1000, returnM=False):
         return M
 
 
+def get_LR_M(C=None, F=None):
+    assert (C is None and F is not None) or (C is not None and F is None), "Only C or F"
+    if C is None:
+        C_r = F.swapaxes(-1, -2) @ F
+    else:
+        C_r = C.copy()
+    return lagrange_reduction(C_r, returnM=True)
+
+
 def flip(matrix, row, col):
     matrix[..., row, col] *= -1
 

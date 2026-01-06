@@ -186,7 +186,7 @@ def basicJob(
         # remesh=1,
         # temp
         # energyDropThreshold=1e-10,
-        logDuringMinimization=1,
+        # logDuringMinimization=1,
     )
     return configs, labels
 
@@ -607,7 +607,7 @@ def bigUmutJob():
         rows=500,
         cols=500,
         startLoad=0.138,
-        maxLoad=1,
+        maxLoad=1.0,
         initialGuessNoise=0.04,
         nrThreads=8,
         loadIncrement=2e-5,

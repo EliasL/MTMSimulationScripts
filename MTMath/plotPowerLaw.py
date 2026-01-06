@@ -771,6 +771,12 @@ def find_best_xmin(
     in the exponents. We make sure the p-value is larger than min_p. If the
     p-value is close to the min_p limit, we need to increaes the accuracy.
     """
+
+    path_name = make_path_name(data_info)
+    title = make_title(data_info)
+
+    print(f"Testing xmins for {title}")
+
     test_dists = explore_xmin(
         drops,
         min_xmin,
@@ -828,8 +834,6 @@ def find_best_xmin(
         test_dists.extend(new_dists)
 
     # Plot p and exponent
-    path_name = make_path_name(data_info)
-    title = make_title(data_info)
     plot_dists_over_xmin(
         test_dists, best_dist, PLOTPATH + f"{path_name}_xMins.pdf", title=title
     )
@@ -970,6 +974,10 @@ def make_exponent_fit(
 ):
     fig, ax = plt.subplots()
     drops, data_info = get_energy_drops(csvPaths, strainLim=strainLim, debug=debug)
+    if drops.size == 0:
+        # No energy drops in strain region
+        print(f"No energy drops in {strainLim} strain region: {data_info}")
+        return
 
     # find best xmin
     dist = find_best_xmin(

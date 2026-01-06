@@ -42,26 +42,24 @@ def get_threads_from_command(command):
     return int(command.split(f" {key}=")[1].split(" ")[0])
 
 
-def queue_local_jobs(commands, job_name, useQueueSystem=True):
+def queue_local_jobs(
+    commands, job_names, useSingletons=True, useQueueSystem=True, jobCopies=1
+):
     base_path = "~/simulation/MTS2D/"
     # Expand the user's home directory and check if the path exists
     base_path = os.path.expanduser(base_path)
-    outPath = os.path.join(base_path, "JobOutput")
-    error_file = os.path.join(outPath, f"err-{job_name}.err")
 
     # Ensure the base path exists
     if not os.path.exists(base_path):
         raise Exception(f"The directory {base_path} does not exist.")
 
-    # Ensure the JobOutput directory exists
-    os.makedirs(outPath, exist_ok=True)
+    for command, job_name in zip(commands, job_names):
+        outPath = os.path.join(base_path, f"{job_name}")
+        batch_script_path = os.path.join(outPath, f"{job_name}.sh")
 
-    # Truncate the error file to clear old errors
-    open(error_file, "w").close()
+        # Ensure the JobOutput directory exists
+        os.makedirs(outPath, exist_ok=True)
 
-    batch_script_path = os.path.join(outPath, f"{job_name}.sh")
-
-    for command in commands:
         nrThreads = get_threads_from_command(command)
         batch_script = get_batch_script(command, job_name, nrThreads, outPath)
 
@@ -71,10 +69,33 @@ def queue_local_jobs(commands, job_name, useQueueSystem=True):
 
         if useQueueSystem:
             # Run the batch script locally using subprocess
-            result = subprocess.run(["sbatch", batch_script_path])
+            cmd = ["sbatch"]
+            if useSingletons:
+                cmd.append("--dependency=singleton")
+            cmd.append(batch_script_path)
+
+            assert jobCopies < 1001, "That's too many jobs..."
+
+            # First submission: show output normally
+            result = subprocess.run(cmd)
             if result.returncode != 0:
-                print(f"Batch script execution failed: {result.stderr}")
+                print("Batch script execution failed")
                 return None
+
+            # Remaining submissions: suppress output
+            for _ in range(jobCopies - 1):
+                result = subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                if result.returncode != 0:
+                    print("Batch script execution failed during duplicate submission")
+                    return None
+
+            if jobCopies > 1:
+                print(f"Submitted {jobCopies - 1} duplicates.")
+
         else:
             print("Warning! Running processes outside of the SLURM queue system!")
             print("Make sure you have the permission of Sylvain.")

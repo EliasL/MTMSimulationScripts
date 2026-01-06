@@ -60,4 +60,6 @@ if __name__ == "__main__":
     confKwargs, runKwargs = ConfigGenerator.splitKwargs(kwargs)
 
     (configs, labels) = ConfigGenerator.generate(**confKwargs)
-    run_locally(configs, taskNames=labels, **runKwargs)
+    assert len(configs) == 1
+    config = configs[0]
+    run_locally(config, **runKwargs)

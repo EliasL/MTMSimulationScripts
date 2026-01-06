@@ -34,7 +34,7 @@ class SimulationConfig:
         self.minimizer = "LBFGS"  # FIRE / LBFGS / CG
         self.epsR = 1e-20  # stopping criteria - Residual foce
         # - LBFGS
-        self.LBFGSNrCorrections = 3  # nr correction vector paris, variable m in A Limited Memory Algorithm for Bound Constrained Optimization
+        self.LBFGSNrCorrections = 3  # nr correction vector paris
         self.LBFGSScale = 1.0
         self.LBFGSEpsg = 1e-15
         self.LBFGSEpsf = 0.0

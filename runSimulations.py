@@ -12,7 +12,7 @@ def task(config, **kwargs):
     run_locally(config, **kwargs)
 
 
-def run_many_locally(configs, taskNames=None, **kwargs):
+def run_many_locally(configs, taskNames=None, build=False, **kwargs):
     # Ensure taskNames is a list of correct length
     if taskNames is None:
         taskNames = [None] * len(configs)
@@ -21,8 +21,10 @@ def run_many_locally(configs, taskNames=None, **kwargs):
         raise ValueError("Length of taskNames must match length of configs")
 
     # First build the project once so each task does not have to build it
-    manager = SimulationManager(SimulationConfig())
-    manager.build()
+    if build:
+        manager = SimulationManager(SimulationConfig())
+        manager.build()
+    # This makes sure that the run_locally function tells the manager to not build
     kwargs["build"] = False
 
     # Use ThreadPoolExecutor to run the task on different threads

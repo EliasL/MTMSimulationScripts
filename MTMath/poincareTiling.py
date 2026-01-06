@@ -24,6 +24,7 @@ from MTMath.contiPotential import (
     unRotate_by_F,
     lagrange_reduction,
     lagrange_reduction_F,
+    get_LR_M,
     sanityCheck_LagrangeReduction,
 )
 import os
@@ -644,6 +645,8 @@ def plotStressFromRealF(
     gamma_lim=3,
     limits=(-0.2, 0.2),
     s_component=(0, 0),
+    stress_type="cauchy",
+    reduced=False,
 ):
     theta = np.linspace(0, 1 * np.pi, nr_theta + 1)[:-1]
     nr_theta = len(theta)
@@ -656,15 +659,21 @@ def plotStressFromRealF(
         returnR=True,
         getBodyRotation=True,
     )
-    stress_type = "quadrant"
     if stress_type == "cauchy":
         stress = eFunc.cauchy_from_F(F)
     elif stress_type == "pk2":
         stress = eFunc.S_from_F(F)
     elif stress_type == "quadrant":
-        stress = getQuadrant(F, eFunc=eFunc)
+        # stress = getQuadrant(F, eFunc=eFunc)
+        # stress = getQuadrant2(F, eFunc=eFunc)
+        stress = getQuadrantSylvain(F.swapaxes(-1, -2) @ F, eFunc=eFunc)
     else:
-        raise RuntimeError("Unknown stress type")
+        raise RuntimeError(f"Unknown stress type: {stress_type}")
+
+    if reduced:
+        M = get_LR_M(F=F)
+        Minv = np.linalg.inv(M)
+        stress = Minv @ stress @ Minv.swapaxes(-1, -2)
 
     # stress = unRotate_by_F(F, stress)
     # R = R_body
@@ -713,19 +722,21 @@ def plotStressFromRealF(
         val = np.clip(val, *limits)
         ax = drawPoincareGrid(grid_size=grid_size)
         drawF(ax, F, shade=True, shade_values=val, grid_size=grid_size, **kwargs)
-        path = f"Plots/RealF{stress_type}Stress/{quantity}/{stress_type}Stress_from_realF_{quantity}_t{nr_theta}_g{nr_gamma}_{gamma_lim}_q{grid_size}_S{'_'.join(map(str, s_component))}.pdf"
-        os.makedirs(f"Plots/RealF{stress_type}Stress/{quantity}", exist_ok=True)
+        path = f"Plots/RealF{stress_type}Stress/{quantity}/"
+        reducedTag = "reduced" if reduced else ""
+        name = f"{reducedTag}{stress_type}Stress_from_realF_{quantity}_t{nr_theta}_g{nr_gamma}_{gamma_lim}_q{grid_size}_S{'_'.join(map(str, s_component))}.pdf"
+        os.makedirs(path, exist_ok=True)
         plt.savefig(
-            path,
+            path + name,
             dpi=300,
             bbox_inches="tight",
         )
-        print(f"Fig saved to {path}")
+        print(f"Fig saved to {path + name}")
         # plt.show()
     return ax
 
 
-def plotsLotsOfRealFStress():
+def plotsLotsOfRealFStress(stress_type="cauchy", reduced=False):
     for s_component in [(0, 0), (1, 0), (0, 1), (1, 1)]:
         grid_size = 1000
         nr_theta = int(grid_size * np.pi)
@@ -736,7 +747,11 @@ def plotsLotsOfRealFStress():
             gamma_lim=3,
             limits=(-0.2, 0.2),
             s_component=s_component,
+            stress_type=stress_type,
+            reduced=reduced,
         )
+        if stress_type == "pk2":
+            return
 
 
 def bug_hunting():
@@ -963,6 +978,60 @@ def getQuadrant2(F):
             print("F")
             print(F[idx])
     return quadrant_idx
+
+
+def getQuadrantSylvain(C, eFunc=ContiEnergy):
+    # Step 1: Gauss/Lagrange reduction to D
+    C0 = C.copy()
+    m0 = lagrange_reduction(C0, returnM=True)
+    m0Inv = np.linalg.inv(m0)
+
+    # Second PK stress from original C
+    S = eFunc.S_from_C(C)
+
+    # Step 2: transport stress to reduced basis: S0 = m0^{-1} S m0^{-T}
+    S0 = m0Inv @ S @ m0Inv.swapaxes(-1, -2)
+
+    # Initialize Q as identity in every batch entry
+    Q = np.zeros_like(C0)
+    Q[..., 0, 0] = 1.0
+    Q[..., 1, 1] = 1.0
+
+    Qnr = np.zeros(C0.shape[:-2], dtype=int)
+
+    N = np.diag((1, -1))
+    P = np.array([[0, 1], [1, 0]])
+
+    # ---- Step 3: Fix the shear sign using N if needed ----
+    # Work with S0, as in the note
+    S1 = S0.copy()
+
+    mask1 = S1[..., 0, 1] < 0  # (S0)12 < 0
+    if np.any(mask1):
+        # Q1 = N on those entries
+        Q[mask1] = Q[mask1] @ N
+        # Update S1 = N^{-1} S0 N^{-T} = N S0 N (since N is its own inverse)
+        S1[mask1] = N @ S1[mask1] @ N
+        Qnr[mask1] += 1
+
+    # ---- Step 4: Order the normal components using P if needed ----
+    # Now we must look at S1, not S0
+    mask2 = S1[..., 0, 0] > S1[..., 1, 1]  # (S1)11 > (S1)22
+    if np.any(mask2):
+        Q[mask2] = Q[mask2] @ P
+        # S2 = P^{-1} S1 P^{-T} = P S1 P
+        S1[mask2] = P @ S1[mask2] @ P
+        Qnr[mask2] += 2
+
+    # For these Q (products of N and P), Q^{-1} = Q^T
+    QInv = Q.swapaxes(-1, -2)
+
+    # Central representatives (if/when you want them)
+    S_s = QInv @ S0 @ QInv.swapaxes(-1, -2)  # = Q^T S0 Q
+    C_s = QInv @ C0 @ Q  # = Q^T C0 Q
+
+    # return C_s, S_s
+    return Qnr
 
 
 # Vectorized version of getIDOfF for batch arrays of F
