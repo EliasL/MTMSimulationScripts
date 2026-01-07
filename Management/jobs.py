@@ -1,4 +1,4 @@
-from .configGenerator import ConfigGenerator
+from .configGenerator import ConfigGenerator, SimulationConfig
 
 
 def LBFGSconfs(nrThreads, nrSeeds):
@@ -584,7 +584,7 @@ def reconnectionJob(L=100):
     return configs, labels
 
 
-def umutTestJob():
+def umutTestJob(group_by_seeds=False):
     configs, labels = ConfigGenerator.generate(
         seed=0,
         rows=100,
@@ -597,11 +597,12 @@ def umutTestJob():
         minimizer="LBFGS",
         LBFGSEpsg=1e-5,
         scenario="simpleShear",
+        group_by_seeds=group_by_seeds,
     )
     return configs, labels
 
 
-def bigUmutJob():
+def bigUmutJob(group_by_seeds=False):
     configs, labels = ConfigGenerator.generate(
         seed=0,
         rows=500,
@@ -614,6 +615,7 @@ def bigUmutJob():
         minimizer="LBFGS",
         LBFGSEpsx=1e-5,
         scenario="simpleShear",
+        group_by_seeds=group_by_seeds,
     )
     return configs, labels
 

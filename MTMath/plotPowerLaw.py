@@ -4,10 +4,11 @@ from matplotlib import pyplot as plt
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from matplotlib import cm, colors
-import powerlaw
 from tqdm import tqdm
 from scipy.optimize import curve_fit
-from .powerlaw_lite import Truncated_Power_Law, Power_Law, Distribution
+
+# from .powerlaw_lite import Truncated_Power_Law, Power_Law, Distribution
+from powerlaw import Fit, Distribution, Truncated_Power_Law
 from concurrent.futures import ProcessPoolExecutor
 import functools
 import os
@@ -217,7 +218,7 @@ def getHist(data):
 def plot_data_pdf(
     ax,
     data,
-    label="Binned PDF of energy drops",
+    label=None,
     edgecolor="black",
     alpha=1,
     color=None,
@@ -233,6 +234,13 @@ def plot_data_pdf(
         edgecolor = ax._get_lines.get_next_color()
 
     bin_centers, hist_vals = getHist(data)
+
+    if label is None:
+        if data.size < 1e4:
+            nrDrops = data.size
+        else:
+            nrDrops = f"{data.size:.1e}"
+        label = f"Binned PDF of {nrDrops} energy drops"
 
     # Plot as points
     plot_kwargs = {
@@ -445,7 +453,8 @@ def make_path_name(data_info):
     if data_info is None:
         return "unkown"
     strainLim = data_info["strainLim"]
-    path_name = f"{data_info['minimizer']}_s{strainLim[0]:.2f}-{strainLim[1]:.2f}_samples{data_info['nrSimulations']}"
+    L = data_info["L"]
+    path_name = f"{L}x{L}{data_info['minimizer']}_s{strainLim[0]:.2f}-{strainLim[1]:.2f}_{data_info['nrSimulations']}samples"
     return path_name
 
 
@@ -476,7 +485,7 @@ def plot_data_and_dist(
             xmax,
             color="gray",
             alpha=0.2,
-            label="Fit region",
+            label=rf"Fit region. $\alpha={dist.alpha:.2f}, \lambda={dist.Lambda:.2e}$",
         )
 
     ax.legend()
@@ -753,6 +762,44 @@ def explore_xmin(
     return test_dists
 
 
+def choose_best_dist(dists, p_criteria):
+    # Prefer the *first* local maximum in p(xmin) that also satisfies the
+    # p-threshold criterion. This tends to pick the start of a good plateau
+    # rather than the global maximum which can occur at very large xmin.
+    p_new = np.array([d.p for d in dists], dtype=float)
+
+    # Sort by xmin to make local-max detection meaningful
+    order = np.argsort([d.xmin for d in dists])
+    new_dists_sorted = [dists[i] for i in order]
+    p_sorted = p_new[order]
+
+    # Find first local maximum (including endpoints as candidate maxima)
+    # that is above the first_p_criteria threshold.
+    candidate_idx_sorted = None
+    for j in range(len(p_sorted)):
+        if not np.isfinite(p_sorted[j]) or p_sorted[j] < p_criteria:
+            continue
+        left_ok = (j == 0) or (
+            np.isfinite(p_sorted[j - 1]) and p_sorted[j] >= p_sorted[j - 1]
+        )
+        right_ok = (j == len(p_sorted) - 1) or (
+            np.isfinite(p_sorted[j + 1]) and p_sorted[j] >= p_sorted[j + 1]
+        )
+        if left_ok and right_ok:
+            candidate_idx_sorted = j
+            break
+
+    if candidate_idx_sorted is not None:
+        best_dist = new_dists_sorted[candidate_idx_sorted]
+    else:
+        # Fallback: choose the global maximum p-value
+        # idx = int(np.argmax([d.p for d in new_dists]))
+        # best_dist = new_dists[idx]
+        idx = int(np.nanargmax(p_sorted))
+        best_dist = new_dists_sorted[idx]
+    return best_dist
+
+
 def find_best_xmin(
     drops,
     debug=False,
@@ -765,14 +812,15 @@ def find_best_xmin(
     max_accuracy=0.01,
     DistType: Distribution = Truncated_Power_Law,
     data_info=None,
+    plotName=None,
 ):
     """
     We scan many possible xmin values. We try to identify a plateau region
     in the exponents. We make sure the p-value is larger than min_p. If the
     p-value is close to the min_p limit, we need to increaes the accuracy.
     """
-
-    path_name = make_path_name(data_info)
+    if plotName is None:
+        plotName = make_path_name(data_info)
     title = make_title(data_info)
 
     print(f"Testing xmins for {title}")
@@ -828,14 +876,18 @@ def find_best_xmin(
             debug,
             xmax,
         )
-        idx = int(np.argmax([d.p for d in new_dists]))
-        best_dist = new_dists[idx]
-
         test_dists.extend(new_dists)
+
+        best_dist = choose_best_dist(new_dists, first_p_criteria)
+
+        # In order to be confident about our final answer we do a more precice check
+        best_dist.evaluate_fit(drops, confidence=max_accuracy, parallel=not debug)
+
+    fit = powerlaw.Fit(drops, xmin_distribution="truncated_power_law")
 
     # Plot p and exponent
     plot_dists_over_xmin(
-        test_dists, best_dist, PLOTPATH + f"{path_name}_xMins.pdf", title=title
+        test_dists, best_dist, PLOTPATH + f"{plotName}_xMins.pdf", title=title, fit=fit
     )
 
     return best_dist
@@ -873,7 +925,14 @@ def make_exponent_map():
         make_debug_plot(xmins, strainLim=strainLim)
 
 
-def plot_dists_over_xmin(dists, best_dist=None, savePath=None, title=None):
+def plot_dists_over_xmin(
+    dists,
+    best_dist=None,
+    savePath=None,
+    title=None,
+    xminName=r"$E_{\mathrm{min}}$",
+    fit=None,
+):
     """
     Plot KS p-value and exponent (with std error bars) versus xmin.
     """
@@ -883,10 +942,10 @@ def plot_dists_over_xmin(dists, best_dist=None, savePath=None, title=None):
     p_stds = np.array([d.p_std for d in dists], dtype=float)
     alphas = np.array([d.alpha for d in dists], dtype=float)
     alpha_stds = np.array([d.alpha_std for d in dists], dtype=float)
-
     # Colors assigned per axis (consistent with Matplotlib defaults)
     c_p = "tab:blue"  # left axis (p-values)
     c_a = "tab:orange"  # right axis (alpha)
+    c_fit = "tab:red"
 
     fig, ax1 = plt.subplots()
     ax1.set_xscale("log")
@@ -922,6 +981,18 @@ def plot_dists_over_xmin(dists, best_dist=None, savePath=None, title=None):
     ax1.spines["left"].set_color(c_p)
     ax1.set_ylim(0, 1)
 
+    if fit:
+        ax1.plot(
+            fit.xmins,
+            fit.Ds,
+            marker="o",
+            linestyle="-",
+            linewidth=1.8,
+            label="fit KS",
+            color=c_fit,
+            zorder=3,
+        )
+
     # --- Right axis: alpha (+ error bars) ---
     ax2 = ax1.twinx()
     alpha_err = ax2.errorbar(
@@ -950,7 +1021,7 @@ def plot_dists_over_xmin(dists, best_dist=None, savePath=None, title=None):
             color="red",
             linestyle="--",
             linewidth=1.2,
-            label=f"Best xmin: {best_dist.xmin:.2e}",
+            label=f"Best {xminName}: {best_dist.xmin:.2e}",
             zorder=-1,
             alpha=0.5,
         )
@@ -983,6 +1054,7 @@ def make_exponent_fit(
     dist = find_best_xmin(
         drops, DistType=DistType, debug=debug, xmax=xmax, data_info=data_info
     )
+
     title = make_title(data_info, dist)
     pathName = make_path_name(data_info)
     plot_data_and_dist(drops, dist, ax, title=title)

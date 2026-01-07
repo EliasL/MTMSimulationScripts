@@ -97,26 +97,26 @@ plt.title("Power-law distributed data and estimated exponents")
 plt.legend()
 plt.show()
 
-# # Plot PDF of the data and fitted power-law
-# plt.figure(figsize=(8, 6))
-# fig_pdf = fit.plot_pdf(marker="o", linestyle="None", label="Empirical PDF")
-# # fit.power_law.plot_pdf(
-# #     label=f"Powerlaw Fit (alpha={alpha_powerlaw:.3f})", linestyle="dashed"
-# # )
-
-# plt.plot(
-#     x_fit,
-#     (alpha_powerlaw - 1)
-#     / xmin_estimated
-#     * (x_fit / xmin_estimated) ** (-alpha_powerlaw),
-#     label=f"Powerlaw Fit (alpha={alpha_powerlaw:.3f})",
-#     linestyle="dashed",
+# Plot PDF of the data and fitted power-law
+plt.figure(figsize=(8, 6))
+fig_pdf = fit.plot_pdf(marker="o", linestyle="None", label="Empirical PDF")
+# fit.power_law.plot_pdf(
+#     label=f"Powerlaw Fit (alpha={alpha_powerlaw:.3f})", linestyle="dashed"
 # )
 
-# plt.xscale("log")
-# plt.yscale("log")
-# plt.xlabel("x")
-# plt.ylabel("PDF")
-# plt.title("Power-law distributed data PDF and estimated exponents")
-# plt.legend()
-# plt.show()
+plt.plot(
+    x_fit,
+    (alpha_powerlaw - 1)
+    / xmin_estimated
+    * (x_fit / xmin_estimated) ** (-alpha_powerlaw),
+    label=f"Powerlaw Fit (alpha={alpha_powerlaw:.3f})",
+    linestyle="dashed",
+)
+
+plt.xscale("log")
+plt.yscale("log")
+plt.xlabel("x")
+plt.ylabel("PDF")
+plt.title("Power-law distributed data PDF and estimated exponents")
+plt.legend()
+plt.show()

@@ -2,6 +2,7 @@ from Management.jobs import (
     smallJob,
     basicJob,
     allPlasticEventsJob,
+    bigUmutJob,
     propperJob,
     largePropperJob,
     avalanches,
@@ -14,7 +15,8 @@ from Management.jobs import (
 
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
-from MTMath.plotPowerLaw import plot_powerlaw, make_exponent_fit
+from MTMath.powerlaw_mixed_test import testCombinedDists
+from MTMath.plotPowerLaw import make_exponent_fit
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
     tryAllRotations,
@@ -54,7 +56,10 @@ def plotPropperJob():
     nrSeeds = 40
     # configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
     configs, labels = largePropperJob(group_by_seeds=True)  # , FIREOnly=True)
+    configs, labels = bigUmutJob(group_by_seeds=True)
     # xlim = [0.25, 0.55]
+    startLoad = configs[0][0].startLoad
+    maxLoad = configs[0][0].maxLoad
     for confs, labs in zip(configs, labels):
         plotEnergy(confs, labels=labs)
     # plotLog(
@@ -68,26 +73,27 @@ def plotPropperJob():
     for paths in paths_minimizers:
         make_exponent_fit(
             csvPaths=paths,
-            strainLim=[0.7, 1.0],
+            strainLim=[0.7, maxLoad],
             # debug=True,
             # xmax=1e-4,
             show=False,
         )
         make_exponent_fit(
             csvPaths=paths,
-            strainLim=[0.15, 0.4],
+            strainLim=[startLoad, 0.4],
             # debug=True,
             # xmax=1e-4,
             show=False,
         )
         make_exponent_fit(
             csvPaths=paths,
-            strainLim=[0.15, 1.0],
+            strainLim=[startLoad, 1.0],
             # debug=True,
             show=False,
             # xmax=1e-4,
         )
 
+    # from MTMath.plotPowerLaw import plot_powerlaw  # import locally if re-enabling the block below
     # plot_powerlaw(
     #     paths,
     #     alg_labels=labs,
@@ -303,7 +309,7 @@ if __name__ == "__main__":
     # plotEnergyRegion()
     # plotSampleRuns()
     # plotLongJob()
-    plotPropperJob()
+    # plotPropperJob()
 
     # debugPlotAll()
     # energyField()
@@ -326,3 +332,4 @@ if __name__ == "__main__":
     # tryAllRotations()
     # plotsLotsOfRealFStress("pk2", reduced=True)
     # bug_hunting()
+    testCombinedDists()
