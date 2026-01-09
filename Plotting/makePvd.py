@@ -5,7 +5,7 @@ from pathlib import Path
 
 def create_collection(
     folder_path,
-    destination="..",
+    destination: (str | Path) = "..",
     collection_name="collection",
     extension=".vtu",
     skipBadStop=True,

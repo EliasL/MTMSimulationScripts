@@ -464,6 +464,8 @@ def get_custom_configs(scenario="large"):
             # scenario="simpleShearPeriodicBoundary")
             scenario="cyclicSimpleShear",
         )
+    else:
+        raise RuntimeError(f"No scenario found for {scenario}")
 
 
 if __name__ == "__main__":

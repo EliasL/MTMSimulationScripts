@@ -304,7 +304,7 @@ def drawC(
     C=None,
     grid_size=200,
     zoom=1,
-    c="black",
+    c: (str | None) = "black",
     linestyle="-",
     linewidth=0.6,
     transformation=None,
@@ -349,8 +349,8 @@ def drawC(
                 arrowstyle="-|>", mutation_scale=20, color=c, linewidth=linewidth
             ),
         )
-        xm = [(x_plot[0] + x_plot[1]) / 2]
-        ym = [(y_plot[0] + y_plot[1]) / 2]
+        xm = (x_plot[0] + x_plot[1]) / 2
+        ym = (y_plot[0] + y_plot[1]) / 2
     elif shade:
         # --- convert all valid points to pixel indices ---
         xv = x_plot[valid]

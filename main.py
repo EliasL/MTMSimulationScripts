@@ -107,7 +107,7 @@ def benchmark():
 
 
 def reconnectingBenchmark():
-    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection=True)
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection="edgeFlip")
     run_locally(configs[0], resume=False)
     """
         - Config File: /Users/eliaslundheim/work/PhD/MTS2D/build-release/simpleShear,s50x50l0.15,1e-05,1.0PBCReCONt3LBFGSEpsx1e-06s0.conf
@@ -407,7 +407,8 @@ def stopJobs():
     j.findSlurmJobs()
     # j.findAndShowSlurmJobs()
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
-    j.cancelAllJobs(force=True, on=Servers.lagrange)
+    # j.cancelJobsByNameSubstring("500x500", force=True)
+    # j.cancelAllJobs(force=True, on=Servers.lagrange)
 
     # j.cancel_jobs_on_server(Servers.schwartz, 466525)
     # j.cancel_jobs_on_server(Servers.galois, 559077)
@@ -434,7 +435,7 @@ def cleanData():
 
 if __name__ == "__main__":
     ONLYPREFERED = True
-    build_on_all_servers(onlyPrefered=ONLYPREFERED)
+    # build_on_all_servers(onlyPrefered=ONLYPREFERED)
     # 150x150 64 threads -> 23 days
     # 150x150 32 threads -> 22 days
     # 150x150 16 threads -> 16 days
@@ -448,7 +449,7 @@ if __name__ == "__main__":
 
     # stopJobs()
     # cleanData()
-    startJobs()
+    # startJobs()
 
     # plotPropperJob()
     # plotSizeScaling()

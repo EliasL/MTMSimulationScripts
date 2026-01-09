@@ -1,5 +1,3 @@
 */__pycache__
-.joblib_cache
-venv
 media
-.venv
+.*

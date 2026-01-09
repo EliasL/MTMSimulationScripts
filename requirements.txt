@@ -15,7 +15,7 @@ fabric
 opencv-python
 imageio[ffmpeg]
 meshio
-powerlaw
+powerlaw >= 2.0
 simplification
 debugpy
 PyQt5

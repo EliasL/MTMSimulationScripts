@@ -1,5 +1,10 @@
 from sympy import symbols, diff, sqrt, log, lambdify, ccode, cse, simplify, Rational
 import numpy as np
+from typing import TypeAlias
+from numpy.typing import ArrayLike
+
+Array: TypeAlias = ArrayLike | int | float
+Array_Str: TypeAlias = Array | str
 
 
 # The following class is a bit messy, with all the static methods and class methods.
@@ -19,6 +24,11 @@ class EnergyFunction:
     _DIV_DIV_PHI_SYMBOLIC = None
 
     @classmethod
+    def phi(cls, *args, **kwargs):
+        raise RuntimeError("Phi must be implemented")
+        return None
+
+    @classmethod
     def _initialize_phi(cls):
         """Compute and cache the potential function _PHI."""
         if cls._PHI is None:
@@ -26,6 +36,7 @@ class EnergyFunction:
                 cls._C11, cls._C22, cls._C12, cls._BETA, cls._K, cls._NOISE
             )
             cls._PHI = lambdify(cls._PHI_ARGS, cls._PHI_SYMBOLIC)
+        assert cls._PHI is not None
 
     @classmethod
     def _initialize_div_phi(cls):
@@ -47,6 +58,7 @@ class EnergyFunction:
         """Compute and cache the second derivatives of _PHI."""
         if cls._DIV_DIV_PHI is None:
             cls._initialize_div_phi()  # Ensure first derivatives are initialized
+            assert cls._DIV_PHI_SYMBOLIC is not None
             first_derivatives = cls._DIV_PHI_SYMBOLIC
             second_derivatives = {
                 "dPhi_dC11_dC11": diff(first_derivatives["dPhi_dC11"], cls._C11),
@@ -81,23 +93,23 @@ class EnergyFunction:
     @classmethod
     def ground_state_energy(cls, beta=-1 / 4, K=4, noise=1):
         """Caches and returns the ground state energy."""
-        if cls._PHI is None:
-            cls._initialize_phi()
+        cls._initialize_phi()
+        assert cls._PHI is not None
         return cls._PHI(1, 1, 0, beta, K, noise)
 
     @classmethod
     def energy_from_simple_shear(cls, shear, beta=-1 / 4, K=4, noise=1):
         """Caches and returns the ground state energy."""
-        if cls._PHI is None:
-            cls._initialize_phi()
+        cls._initialize_phi()
+        assert cls._PHI is not None
         return cls._PHI(1, 1 + shear**2, shear, beta, K, noise)
 
     @classmethod
     def energy_from_reduced_C_components(
         cls, C11, C22, C12, beta=-1 / 4, K=4, noise=1, zeroReference=True
     ):
-        if cls._PHI is None:
-            cls._initialize_phi()
+        cls._initialize_phi()
+        assert cls._PHI is not None
         energy = cls._PHI(C11, C22, C12, beta, K, noise)
 
         # Subtract ground state energy
@@ -179,8 +191,8 @@ class EnergyFunction:
     @classmethod
     def sigma_from_C_R(cls, C_R, beta=-1 / 4, K=4, noise=1):
         assert C_R.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
-        if cls._DIV_PHI is None:
-            cls._initialize_div_phi()
+        cls._initialize_div_phi()
+        assert cls._DIV_PHI is not None
         C_11, C_22, C_12 = C_R[..., 0, 0], C_R[..., 1, 1], C_R[..., 0, 1]
         dPhi_dC11 = cls._DIV_PHI["dPhi_dC11"](C_11, C_22, C_12, beta, K, noise)
         dPhi_dC22 = cls._DIV_PHI["dPhi_dC22"](C_11, C_22, C_12, beta, K, noise)
@@ -706,11 +718,116 @@ def lagrange_reduction_shears_vectorized(
     return C_E, C_R
 
 
+def new_lagrange_reduction(C, *, max_iter=64, tol=1e-12, returnM=True):
+    """
+    SL(2,Z) Lagrange (Gauss) reduction for 2x2 SPD symmetric matrices (Gram matrices).
+
+    Returns C_R and (optionally) an integer unimodular matrix M (det=1) such that:
+        C_R = M.T @ C @ M
+
+    Parameters
+    ----------
+    C : array_like, shape (..., 2, 2)
+    max_iter : int
+    tol : float
+    return_M : bool
+
+    Returns
+    -------
+    C_R : ndarray, shape (..., 2, 2), float64
+    M   : ndarray, shape (..., 2, 2), int64   (if return_M=True)
+    """
+    addedList = False
+    if C.shape == (2, 2):
+        C = np.asarray([C])
+        addedList = True
+    if C.shape[-2:] != (2, 2):
+        raise ValueError(f"Expected shape (..., 2, 2), got {C.shape}")
+
+    # Symmetrize defensively
+    C = 0.5 * (C + np.swapaxes(C, -1, -2))
+
+    a = C[..., 0, 0].astype(np.float64, copy=False)
+    b = C[..., 0, 1].astype(np.float64, copy=False)
+    c = C[..., 1, 1].astype(np.float64, copy=False)
+
+    # Track the cumulative right-action M so that current (a,b,c) equals M.T C0 M
+    if returnM:
+        batch_shape = C.shape[:-2]
+        M00 = np.ones(batch_shape, dtype=np.int64)
+        M01 = np.zeros(batch_shape, dtype=np.int64)
+        M10 = np.zeros(batch_shape, dtype=np.int64)
+        M11 = np.ones(batch_shape, dtype=np.int64)
+
+    def nearest_int(x):
+        # round half away from zero
+        return np.where(x >= 0.0, np.floor(x + 0.5), np.ceil(x - 0.5)).astype(np.int64)
+
+    for _ in range(max_iter):
+        # ---- Shear: T_m = [[1,0],[-m,1]], choose m = round(b/a)
+        m = nearest_int(b / a)
+
+        # Update C <- T_m^T C T_m
+        b0 = b
+        b = b0 - m * a
+        c = c - 2.0 * m * b0 + (m * m) * a
+
+        # Update M <- M @ T_m  (integer, det=1)
+        if returnM:
+            # [[M00,M01],[M10,M11]] @ [[1,0],[-m,1]] = [[M00 - m*M01, M01],[M10 - m*M11, M11]]
+            M00 = M00 - m * M01
+            M10 = M10 - m * M11
+
+        # ---- Rotate/swap: R = [[0,-1],[1,0]] (det=1), enforce a <= c and tie-break b >= 0 if a==c
+        swap = (a > c + tol) | ((np.abs(a - c) <= tol) & (b < -tol))
+        if np.any(swap):
+            a_s = a[swap].copy()
+            a[swap] = c[swap]
+            c[swap] = a_s
+            b[swap] = -b[swap]
+
+            if returnM:
+                # M <- M @ R, where [[p,q],[r,s]] -> [[q, -p],[s, -r]]
+                p = M00[swap].copy()
+                q = M01[swap].copy()
+                r = M10[swap].copy()
+                s = M11[swap].copy()
+                M00[swap] = q
+                M01[swap] = -p
+                M10[swap] = s
+                M11[swap] = -r
+
+        # Stopping criteria
+        cond1 = np.abs(b) <= 0.5 * a + tol
+        cond2 = a <= c + tol
+        cond3 = (np.abs(a - c) > tol) | (b >= -tol)
+        if np.all(cond1 & cond2 & cond3):
+            break
+
+    C_R = np.empty_like(C, dtype=np.float64)
+    C_R[..., 0, 0] = a
+    C_R[..., 0, 1] = b
+    C_R[..., 1, 0] = b
+    C_R[..., 1, 1] = c
+
+    if addedList:
+        C_R = C_R[0]
+    C = C_R
+
+    M = np.empty(C.shape, dtype=np.int64)
+    M[..., 0, 0] = M00
+    M[..., 0, 1] = M01
+    M[..., 1, 0] = M10
+    M[..., 1, 1] = M11
+    return M
+
+
 def lagrange_reduction(C, loops=1000, returnM=False):
     """
     Modifies C in place to its Lagrange-reduced form.
     """
     assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
+    assert np.all(C[..., 1, 0] == C[..., 0, 1]), "C must be symetric"
 
     # Extract views (no copy) from the promoted array
     C11, C22, C12 = C[..., 0, 0], C[..., 1, 1], C[..., 0, 1]
@@ -799,7 +916,7 @@ def lag_m3(matrix, n=1):
     np.einsum("...ij,...jk->...ik", matrix, multiplier_matrix, out=matrix)
 
 
-def Rotation(theta=0) -> np.ndarray:
+def Rotation(theta: (float | np.ndarray) = 0.0) -> np.ndarray:
     c = np.cos(theta)
     s = np.sin(theta)
     # Stack last two dims as 2×2
@@ -813,7 +930,11 @@ def Rotation(theta=0) -> np.ndarray:
 
 
 def SShear(
-    h=1, theta=0.0, s_conponent=(0, 1), returnR=False, getBodyRotation=False
+    h: Array_Str = 1.0,
+    theta: Array = 0.0,
+    s_conponent=(0, 1),
+    returnR=False,
+    getBodyRotation=False,
 ) -> np.ndarray:
     # --- string convenience interface, unchanged ---
     if isinstance(h, str):

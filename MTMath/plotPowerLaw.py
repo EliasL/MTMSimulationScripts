@@ -3,14 +3,9 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-from matplotlib import cm, colors
-from tqdm import tqdm
-from scipy.optimize import curve_fit
+from .evaluatePowerlawFit import Fit, Truncated_Power_Law
+from powerlaw import Distribution
 
-# from .powerlaw_lite import Truncated_Power_Law, Power_Law, Distribution
-from powerlaw import Fit, Distribution, Truncated_Power_Law
-from concurrent.futures import ProcessPoolExecutor
-import functools
 import os
 import glob
 
@@ -284,9 +279,9 @@ def plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf, color="red"):
 
 
 # --- Helper for annotating KS distance on PDF plot ---
-def annotate_ks_distance_pdf(ax, x_D, D_val, color="red"):
+def annotate_ks_distance_pdf(ax, xmin, D_val, color="red"):
     ax.axvline(
-        x_D,
+        xmin,
         color=color,
         linestyle="--",
         linewidth=1.2,
@@ -296,10 +291,9 @@ def annotate_ks_distance_pdf(ax, x_D, D_val, color="red"):
     )
 
 
-def plot_dist_pdf(
+def plot_fit_pdf(
     ax,
-    data,
-    dist,
+    fit: Fit,
     title=None,
     color=None,
     alpha=1,
@@ -307,22 +301,27 @@ def plot_dist_pdf(
     pre_label=None,
     add_ks_marker=False,
 ):
+    dist = dist_from_fit(fit)
+    data = fit.data_original
+    data.sort()
     # Plot
-
-    tail_frac = (data >= dist.xmin).mean()
+    tail_frac = (data >= fit.xmin).mean()
     bins_for_model = np.unique(data)
     # scale down to match full-data density
-    pdf_model = dist.pdf(bins_for_model) * tail_frac
+    f = dist._pdf_base_function(data)
+    C = dist._pdf_continuous_normalizer
+    likelihoods = f * C * tail_frac
+
     ax.plot(
         bins_for_model,
-        pdf_model,
+        likelihoods,
         label=(pre_label or "") + pretty_text(dist.name),
         color=color,
         alpha=alpha,
         linestyle=linestyle,
     )
     if add_ks_marker:
-        annotate_ks_distance_pdf(ax, dist.D_x, dist.D)
+        annotate_ks_distance_pdf(ax, fit.xmin, dist.D)
 
     ax.set_xscale("log")
     ax.set_yscale("log")
@@ -413,9 +412,9 @@ def get_drops_in_windows(
     return drops_in_windows, windows, centers
 
 
-def make_title_from_dist(dist: Distribution):
-    title = rf"$E_{{\mathrm{{min}}}}$={dist.xmin:.2e}"
-
+def make_title_from_fit(fit: Fit):
+    title = rf"$E_{{\mathrm{{min}}}}$={fit.xmin:.2e}"
+    dist = dist_from_fit(fit)
     # add first parameter (assume greek variable name)
     title += rf" $\{dist.parameter1_name}={dist.parameter1:.2f}$"
 
@@ -424,8 +423,8 @@ def make_title_from_dist(dist: Distribution):
     except AttributeError:
         pass
 
-    if dist.p is not None:
-        title += f" p: {dist.p:.2f}"
+    if hasattr(fit, "p") and fit.p is not None:
+        title += f" p: {fit.p:.2f}"
     return title
 
 
@@ -438,14 +437,14 @@ def make_title_from_data_info(data_info):
     return title
 
 
-def make_title(data_info=None, dist=None):
+def make_title(data_info=None, fit: Fit = None):
     title = ""
     if data_info:
         title += make_title_from_data_info(data_info)
-    if dist:
+    if fit:
         if data_info:
             title += " "
-        title += make_title_from_dist(dist)
+        title += make_title_from_fit(fit)
     return title
 
 
@@ -458,9 +457,8 @@ def make_path_name(data_info):
     return path_name
 
 
-def plot_data_and_dist(
-    data,
-    dist,
+def plot_data_and_fit(
+    fit: Fit,
     ax=None,
     title="",
     color=None,
@@ -469,192 +467,29 @@ def plot_data_and_dist(
     if ax is None:
         fig, ax = plt.subplots()
 
-    plot_data_pdf(ax, data)
+    plot_data_pdf(ax, fit.data_original)
 
     # plot the fit
     if addFit:
-        plot_dist_pdf(ax, data, dist, color=color)
+        plot_fit_pdf(ax, fit, color=color)
 
         # Add shaded fit region with formula in label
-        if dist.xmax is None:
-            xmax = max(data)
+        if fit.xmax is None:
+            xmax = max(fit.data_original)
         else:
-            xmax = dist.xmax
+            xmax = fit.xmax
+        dist = dist_from_fit(fit)
         ax.axvspan(
-            dist.xmin,
+            fit.xmin,
             xmax,
             color="gray",
             alpha=0.2,
-            label=rf"Fit region. $\alpha={dist.alpha:.2f}, \lambda={dist.Lambda:.2e}$",
+            label=rf"Fit region. $\alpha={dist.alpha:.2f}, \lambda=$ {dist.Lambda:.2e}",
         )
 
     ax.legend()
     ax.set_title(title)
     return ax
-
-
-def get_window_power_law_exponents(
-    xmin=-np.inf,
-    dist=Truncated_Power_Law,
-    syntheticData=False,
-    syntheticExponent=1.0,
-    **kwargs,
-):
-    """
-    We slide this window over the data and plot the power law fit for each window.
-    """
-    drops_in_windows, windows, centers = get_drops_in_windows(**kwargs)
-    dists = []
-    ps = []
-    debug = kwargs.get("debug", False)
-    for drops, strainLim in zip(drops_in_windows, windows):
-        dist = dist(drops, xmin=xmin)
-        dists.append(dist)
-        dist.evaluate_fit()
-        ps.append(dist.p)
-
-        if debug:
-            debug_fig, debug_ax = plt.subplots()
-            title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}"
-
-            plot_data_and_dist(drops, dist, debug_ax, title)
-            debug_fig.tight_layout()
-            debug_fig.show()
-            # Save debug window power law plot
-            filename = f"{PLOTPATH}window_strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}_xmin_{xmin:.2e}{OUTPUTTYPE}"
-            debug_fig.savefig(filename)
-            # to save memory, close the figure
-            plt.close(debug_fig)
-
-    # plot the exponents against the window centers
-    exponents = [dist.alpha for dist in dists]
-
-    return centers, exponents, ps
-
-
-def worker_get_exponents(xmin, kwargs):
-    import numpy as np
-
-    seed = int((np.log10(xmin) * 1e6) % (2**32))  # Stable and unique
-    np.random.seed(seed)
-    return get_window_power_law_exponents(xmin=xmin, **kwargs)
-
-
-def get_power_law_surface(xmins=None, **kwargs):
-    # If we debug, we don't use multiprocessing
-    if kwargs.get("debug", False):
-        exponent_xmin_surface, p = [], []
-        for xmin in tqdm(xmins):
-            centers, exponents, p_ = get_window_power_law_exponents(xmin=xmin, **kwargs)
-            exponent_xmin_surface.append(exponents)
-            p.append(p_)
-        return centers, np.array(exponent_xmin_surface), np.array(p)
-    else:
-        # Do the first call without the pool
-        # centers, exponents, p = get_window_power_law_exponents(xmin=xmins[0], **kwargs)
-        # Pre-bind kwargs using functools.partial
-        with ProcessPoolExecutor() as executor:
-            bound_worker = functools.partial(worker_get_exponents, kwargs=kwargs)
-            results = list(tqdm(executor.map(bound_worker, xmins), total=len(xmins)))
-
-        centers = results[0][0]  # All share same centers
-        exponent_xmin_surface = np.array([r[1] for r in results])
-        p = np.array([r[2] for r in results])
-        return centers, exponent_xmin_surface, p
-
-
-def plot_power_law_map(
-    csvPath=None,
-    xmins=None,
-    df=None,
-    strainLim=[-np.inf, np.inf],
-    window_steps=20,
-    window_width=0.4,
-    debug=False,
-    use_confidence_color=False,
-    syntheticData=False,
-    syntheticExponent=1.0,
-):
-    """
-    Takes a csvPath or an already loaded file as a pandas dataframe (df)
-    """
-
-    # convert exponents to numpy array
-    centers, exponent_xmin_surface, p = get_power_law_surface(
-        csvPath=csvPath,
-        xmins=xmins,
-        df=df,
-        strainLim=strainLim,
-        steps=window_steps,
-        window_width=window_width,
-        debug=debug,
-        syntheticData=syntheticData,
-        syntheticExponent=syntheticExponent,
-    )
-
-    # Now we can plot a surface of the exponents on the z axis, centers on the x axis, and xmins on the y axis
-    fig = plt.figure()
-    if use_confidence_color:
-        ax = fig.add_subplot(projection="3d")
-        ax.set_zlabel(r"$\alpha$ (Exponent)")
-    else:
-        ax = fig.add_subplot()
-
-    ax.set_xlabel("Strain window center")
-    ax.set_ylabel(r"$\log_{10}(\Delta E_{\mathrm{min}})$")  # Changed label
-
-    figType = "p" if use_confidence_color else "exp"
-
-    # Choose plotting logic based on confidence‐color flag
-    if use_confidence_color:
-        # use p to color the surface
-        facecolors = cm.viridis(p)  # Use colormap for p values
-
-        X, Y = np.meshgrid(centers, np.log10(xmins))
-        ax.plot_surface(
-            X,
-            Y,
-            exponent_xmin_surface,
-            facecolors=facecolors,
-            shade=False,
-            antialiased=False,
-        )
-        # Add colorbar for p values
-        norm = colors.Normalize(vmin=np.nanmin(p), vmax=np.nanmax(p))
-        sm = cm.ScalarMappable(cmap="viridis", norm=norm)
-        sm.set_array([])
-        cbar = fig.colorbar(sm, ax=ax, pad=0.1, aspect=10)
-        cbar.set_label(r"$p$")
-
-    else:
-        X, Y = np.meshgrid(centers, np.log10(xmins))
-        pcm = ax.pcolormesh(
-            X,
-            Y,
-            exponent_xmin_surface,
-            shading="auto",
-            cmap="viridis",
-            norm=colors.Normalize(
-                vmin=np.nanmin(exponent_xmin_surface),
-                vmax=np.nanmax(exponent_xmin_surface),
-            ),
-        )
-        fig.colorbar(pcm, ax=ax, pad=0.1, aspect=10, label=r"$\alpha$")
-
-    fig.tight_layout()
-    # Save final power law surface plot
-    syntheticTag = "synthetic_" if syntheticData else ""
-    filename = (
-        f"{PLOTPATH}{syntheticTag}power_law_surface_"
-        f"strain_{strainLim[0]:.2f}_{strainLim[1]:.2f}_"
-        f"xmin_{xmins[0]:.2e}_{xmins[-1]:.2e}_"
-        f"steps_{window_steps}_width_{window_width:.2f}_"
-        f"{figType}{OUTPUTTYPE}"
-    )
-    if not debug:
-        # No need to save 3x3 map
-        fig.savefig(filename, dpi=300)
-    plt.show()
 
 
 def make_debug_plot(xmins, strainLim=None):
@@ -704,10 +539,10 @@ def plot_ks_distance(drops, xmin, dist_name="truncated_power_law"):
     Plot the empirical CCDF vs the fitted CCDF and visually show the KS distance (D).
     """
     # Fit the distribution
-    fit = powerlaw.Fit(drops, xmin=xmin)
-    dist = getattr(fit, dist_name)
+    fitObj = Fit(drops, xmin=xmin)
+    dist = getattr(fitObj, dist_name)
     # Get the ECDF and model CCDF
-    data = fit.data
+    data = fitObj.data
     sorted_data = np.sort(data[data >= xmin])
     ecdf = 1.0 - np.arange(1, len(sorted_data) + 1) / len(sorted_data)
 
@@ -731,308 +566,73 @@ def plot_ks_distance(drops, xmin, dist_name="truncated_power_law"):
     # plt.show()
 
 
-def explore_xmin(
-    drops,
-    min_xmin=None,
-    max_xmin=None,
-    nr_evaluation=10,
-    confidence=0.1,
-    DistType=Truncated_Power_Law,
-    debug=False,
-    xmax=None,
-):
-    if min_xmin is None:
-        min_xmin = min(drops)
-    if max_xmin is None:
-        max_xmin = max(drops)
-    # The last xmin usually have too few datapoints to be interesting,
-    # so we remove the few last xmin, but make sure to still have
-    # the correct number of evaluations
-    remove_nr = int(nr_evaluation * 0.2)
-    xmin_values = np.logspace(
-        np.log10(min_xmin), np.log10(max_xmin), nr_evaluation + remove_nr
-    )[:-remove_nr]
-
-    test_dists = []
-    for i, trial_xmin in enumerate(xmin_values):
-        print(f"xmin:{trial_xmin:.2e}: {i + 1}/{len(xmin_values)}")
-        dist = DistType(data=drops, xmin=trial_xmin, xmax=xmax)
-        dist.evaluate_fit(drops, confidence=confidence, parallel=not debug)
-        test_dists.append(dist)
-    return test_dists
+def dist_from_fit(fit: Fit) -> Distribution:
+    dist = getattr(fit, fit.xmin_distribution.name)
+    return dist
 
 
-def choose_best_dist(dists, p_criteria):
-    # Prefer the *first* local maximum in p(xmin) that also satisfies the
-    # p-threshold criterion. This tends to pick the start of a good plateau
-    # rather than the global maximum which can occur at very large xmin.
-    p_new = np.array([d.p for d in dists], dtype=float)
+def _get_cache_path(cache_dir, data, extra_string=""):
+    import os
+    import hashlib
+    from numpy import asarray
 
-    # Sort by xmin to make local-max detection meaningful
-    order = np.argsort([d.xmin for d in dists])
-    new_dists_sorted = [dists[i] for i in order]
-    p_sorted = p_new[order]
+    # Creates a unique filename based on data and an optional extra string
 
-    # Find first local maximum (including endpoints as candidate maxima)
-    # that is above the first_p_criteria threshold.
-    candidate_idx_sorted = None
-    for j in range(len(p_sorted)):
-        if not np.isfinite(p_sorted[j]) or p_sorted[j] < p_criteria:
-            continue
-        left_ok = (j == 0) or (
-            np.isfinite(p_sorted[j - 1]) and p_sorted[j] >= p_sorted[j - 1]
-        )
-        right_ok = (j == len(p_sorted) - 1) or (
-            np.isfinite(p_sorted[j + 1]) and p_sorted[j] >= p_sorted[j + 1]
-        )
-        if left_ok and right_ok:
-            candidate_idx_sorted = j
-            break
-
-    if candidate_idx_sorted is not None:
-        best_dist = new_dists_sorted[candidate_idx_sorted]
-    else:
-        # Fallback: choose the global maximum p-value
-        # idx = int(np.argmax([d.p for d in new_dists]))
-        # best_dist = new_dists[idx]
-        idx = int(np.nanargmax(p_sorted))
-        best_dist = new_dists_sorted[idx]
-    return best_dist
+    data_bytes = asarray(data).tobytes()
+    h = hashlib.sha1()
+    h.update(data_bytes)
+    data_sig = h.hexdigest() + extra_string
+    cache_name = hashlib.sha1(data_sig.encode("utf-8")).hexdigest() + ".json"
+    os.makedirs(cache_dir, exist_ok=True)
+    cache_path = os.path.join(cache_dir, cache_name)
+    return cache_path
 
 
-def find_best_xmin(
-    drops,
-    debug=False,
-    min_xmin=None,
-    max_xmin=None,
-    xmax=None,
-    min_p=0.1,
-    nr_evaluation=20,
-    start_accuracy=0.05,
-    max_accuracy=0.01,
-    DistType: Distribution = Truncated_Power_Law,
-    data_info=None,
-    plotName=None,
-):
+def make_fit(
+    data,
+    xmin_range: tuple = None,
+    distType: Distribution = Truncated_Power_Law,
+    use_cache=True,
+    cache_dir: str = ".xmin_values",
+) -> Fit:
     """
-    We scan many possible xmin values. We try to identify a plateau region
-    in the exponents. We make sure the p-value is larger than min_p. If the
-    p-value is close to the min_p limit, we need to increaes the accuracy.
+    This is a wrapper for the Fit function. Finding xmin takes a long
+    time, so we save the results locally and use a precomputed xmin if available.
     """
-    if plotName is None:
-        plotName = make_path_name(data_info)
-    title = make_title(data_info)
 
-    print(f"Testing xmins for {title}")
+    # --- try cache
+    cache_path = None
+    if use_cache:
+        import os
+        import json
 
-    test_dists = explore_xmin(
-        drops,
-        min_xmin,
-        max_xmin,
-        nr_evaluation,
-        start_accuracy,
-        DistType,
-        debug,
-        xmax=xmax,
-    )
+        cache_path = _get_cache_path(cache_dir, data, distType.name)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path) as f:
+                    cache = json.load(f)
+                    xmin_range = cache["xmin"]
+                    # xmin_range is no longer a tuple, but a single values
+                    # That means that the fit will be much faster
 
-    # We now have a rough sample on possible xmin values
-    exponents = [d.alpha for d in test_dists]
-    p_values = [d.p for d in test_dists]
-    xmins = [d.xmin for d in test_dists]
+            except Exception as e:
+                # fall through to recompute if loading fails
+                print(e)
 
-    first_p_criteria = min_p / 2
+    # If xmin_range is a tuple, Fit will search for a good xmin, but if we
+    # have loaded a precomputed xmin, it will be much faster
+    fitObj = Fit(data, xmin=xmin_range, xmin_distribution=distType.name)
 
-    # Vectorize for robust indexing and easy neighborhood expansion
-    x = np.array(xmins, dtype=float)
-    p = np.array(p_values, dtype=float)
+    # save xmin if the file does not exsist
+    if use_cache and cache_path is not None and not os.path.exists(cache_path):
+        try:
+            with open(cache_path, "w") as f:
+                json.dump({"xmin": fitObj.xmin}, f, indent=4)
+        except Exception as e:
+            # don't fail the computation if saving fails
+            print(e)
 
-    if not np.isfinite(p).any() or p.max() < first_p_criteria:
-        print("No pure power law found.")
-        best_dist = test_dists[0]
-    else:
-        # Identify contiguous region where p > threshold-start_accuracy
-        valid_idx = np.flatnonzero(p > first_p_criteria - start_accuracy)
-        i_min, i_max = valid_idx[0], valid_idx[-1]
-
-        # Expand the search window by one neighbor on each side when available
-        i0 = max(0, i_min - 1)
-        i1 = min(len(x) - 1, i_max + 1)
-        new_min_xmin = x[i0]
-        new_max_xmin = x[i1]
-
-        # remove dists that we are about to replace
-        test_dists = [
-            d for d in test_dists if d.xmin < new_min_xmin or d.xmin > new_max_xmin
-        ]
-
-        new_dists = explore_xmin(
-            drops,
-            new_min_xmin,
-            new_max_xmin,
-            nr_evaluation,
-            start_accuracy / 2,
-            DistType,
-            debug,
-            xmax,
-        )
-        test_dists.extend(new_dists)
-
-        best_dist = choose_best_dist(new_dists, first_p_criteria)
-
-        # In order to be confident about our final answer we do a more precice check
-        best_dist.evaluate_fit(drops, confidence=max_accuracy, parallel=not debug)
-
-    fit = powerlaw.Fit(drops, xmin_distribution="truncated_power_law")
-
-    # Plot p and exponent
-    plot_dists_over_xmin(
-        test_dists, best_dist, PLOTPATH + f"{plotName}_xMins.pdf", title=title, fit=fit
-    )
-
-    return best_dist
-
-
-def make_exponent_map():
-    # User parameters
-    res = 10
-    debug = True
-    synthetic = False
-    if debug:
-        res = 3
-        synthetic = False
-    csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-    csvPath = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
-
-    df = pd.read_csv(csvPath)
-    xmins = np.logspace(-6.5, -5, num=res, base=10)
-    strainLim = [0.3, 3]
-    window_steps = res
-    window_width = 0.5
-    plot_power_law_map(
-        df=df,
-        strainLim=strainLim,
-        xmins=xmins,
-        window_steps=window_steps,
-        window_width=window_width,
-        debug=debug,
-        use_confidence_color=True,
-        syntheticData=synthetic,
-        syntheticExponent=1,
-    )
-
-    if debug:
-        make_debug_plot(xmins, strainLim=strainLim)
-
-
-def plot_dists_over_xmin(
-    dists,
-    best_dist=None,
-    savePath=None,
-    title=None,
-    xminName=r"$E_{\mathrm{min}}$",
-    fit=None,
-):
-    """
-    Plot KS p-value and exponent (with std error bars) versus xmin.
-    """
-    dists.sort(key=lambda d: d.xmin)
-    x = np.array([d.xmin for d in dists], dtype=float)
-    pvals = np.array([d.p for d in dists], dtype=float)
-    p_stds = np.array([d.p_std for d in dists], dtype=float)
-    alphas = np.array([d.alpha for d in dists], dtype=float)
-    alpha_stds = np.array([d.alpha_std for d in dists], dtype=float)
-    # Colors assigned per axis (consistent with Matplotlib defaults)
-    c_p = "tab:blue"  # left axis (p-values)
-    c_a = "tab:orange"  # right axis (alpha)
-    c_fit = "tab:red"
-
-    fig, ax1 = plt.subplots()
-    ax1.set_xscale("log")
-
-    # --- Left axis: p-values ---
-    p_line = ax1.errorbar(
-        x,
-        pvals,
-        yerr=p_stds,
-        marker="o",
-        linestyle="-",
-        linewidth=1.8,
-        markersize=5,
-        label="KS p-value",
-        color=c_p,
-        elinewidth=1.0,
-        capsize=3,
-        capthick=1.0,
-        zorder=3,
-    )
-    thr_line = ax1.axhline(
-        0.10,
-        linestyle="--",
-        linewidth=1.0,
-        color=c_p,
-        alpha=0.5,
-        label="p = 0.10 threshold",
-        zorder=2,
-    )
-    ax1.set_xlabel(r"$E_{\mathrm{min}}$")
-    ax1.set_ylabel("KS p-value", color=c_p)
-    ax1.tick_params(axis="y", colors=c_p)
-    ax1.spines["left"].set_color(c_p)
-    ax1.set_ylim(0, 1)
-
-    if fit:
-        ax1.plot(
-            fit.xmins,
-            fit.Ds,
-            marker="o",
-            linestyle="-",
-            linewidth=1.8,
-            label="fit KS",
-            color=c_fit,
-            zorder=3,
-        )
-
-    # --- Right axis: alpha (+ error bars) ---
-    ax2 = ax1.twinx()
-    alpha_err = ax2.errorbar(
-        x,
-        alphas,
-        yerr=alpha_stds,
-        marker="s",
-        linestyle="-",
-        linewidth=1.8,
-        markersize=5,
-        label=r"Exponent $\alpha$",
-        color=c_a,
-        ecolor=c_a,
-        elinewidth=1.0,
-        capsize=3,
-        capthick=1.0,
-        zorder=4,
-    )
-    ax2.set_ylabel(r"Exponent $\alpha$", color=c_a)
-    ax2.tick_params(axis="y", colors=c_a)
-    ax2.spines["right"].set_color(c_a)
-
-    if best_dist:
-        best_line = ax1.axvline(
-            best_dist.xmin,
-            color="red",
-            linestyle="--",
-            linewidth=1.2,
-            label=f"Best {xminName}: {best_dist.xmin:.2e}",
-            zorder=-1,
-            alpha=0.5,
-        )
-
-    ax1.legend(handles=[p_line, thr_line, alpha_err, best_line], loc="upper left")
-    fig.tight_layout()
-    ax1.set_title(title)
-
-    if savePath:
-        fig.savefig(savePath, format="pdf", bbox_inches="tight")
-        print(f"Saved figure to {savePath}")
+    return fitObj
 
 
 def make_exponent_fit(
@@ -1040,8 +640,9 @@ def make_exponent_fit(
     strainLim=[0.15, 1.0],
     debug=False,
     DistType: Distribution = Truncated_Power_Law,
-    xmax=None,
+    xmin_range=(1e-7, 1e-5),
     show=True,
+    evaluate=True,
 ):
     fig, ax = plt.subplots()
     drops, data_info = get_energy_drops(csvPaths, strainLim=strainLim, debug=debug)
@@ -1051,13 +652,14 @@ def make_exponent_fit(
         return
 
     # find best xmin
-    dist = find_best_xmin(
-        drops, DistType=DistType, debug=debug, xmax=xmax, data_info=data_info
-    )
+    fit = make_fit(drops, xmin_range=xmin_range, distType=DistType)
 
-    title = make_title(data_info, dist)
+    if evaluate:
+        p, mean_exp, exp_std = fit.evaluate_fit(parallel=True)
+
+    title = make_title(data_info, fit)
     pathName = make_path_name(data_info)
-    plot_data_and_dist(drops, dist, ax, title=title)
+    plot_data_and_fit(fit, ax, title=title)
 
     filename = f"{PLOTPATH}{pathName}.pdf"
     fig.savefig(filename, format="pdf", bbox_inches="tight")
@@ -1084,7 +686,7 @@ def plot_powerlaw(
     algorithms_paths,
     alg_labels=None,
     strainLim=[0.15, 0.4],
-    xmin=1e-4,
+    xmin=None,
     debug=False,
     show=False,
     evaluate=True,
@@ -1110,9 +712,9 @@ def plot_powerlaw(
             print(f"No valid drops found for {label} in strain range {strainLim}.")
             continue
 
-        dist = DistType(data=all_drops, xmin=xmin)
+        fit = make_fit(data=all_drops, xmin=xmin)
 
-        title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}, $\alpha=${dist.alpha:.2f}"
+        title = rf"$\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f},  $E_{{\mathrm{{min}}}}$={xmin:.2e}, $\alpha=${fit.alpha:.2f}"
         attribute = get_attribute(labels[0])
         title = attribute + " " + title
         if attribute in MINIMIZER_COLORS:
@@ -1121,23 +723,24 @@ def plot_powerlaw(
             color = "black"
 
         if evaluate:
-            p, mean_exp, exp_std = dist.evaluate_fit(all_drops, parallel=True)
+            p, mean_exp, exp_std = fit.evaluate_fit(all_drops, parallel=True)
 
-            rating = ["bad", "poor", "good", "excellent"]
-            scores = [0.05, 0.1, 0.3]
-            for threshold, r in zip(scores, rating):
-                if p < threshold:
+            thresholds = [0.05, 0.1, 0.3, float("inf")]
+            ratings = ["bad", "poor", "good", "excellent"]
+
+            # Set r
+            for t, r in zip(thresholds, ratings):
+                if p < t:
                     break
-            else:
-                r = rating[-1]
+
             print(f"Number of drops: {len(all_drops)}")
             print(
-                f"{attribute}: P value: {p:.2f} ({r}), exp: {dist.alpha}, std: {exp_std}"
+                f"{attribute}: P value: {p:.2f} ({r}), exp: {fit.alpha}, std: {exp_std}"
             )
 
-        plot_data_and_dist(
+        plot_data_and_fit(
             all_drops,
-            dist,
+            fit,
             ax,
             title,
             color=color,
@@ -1170,8 +773,6 @@ def plot_powerlaw(
 
 
 if __name__ == "__main__":
-    import powerlaw
-
     # csvPath = "/Volumes/data/MTS2D_output/unfixed_simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/macroData.csv"
     strainLim = [0.65, 1.0]
     paths = [

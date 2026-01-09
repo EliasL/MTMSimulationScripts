@@ -1,4 +1,3 @@
 {
-    "python.defaultInterpreterPath": "/Users/eliaslundheim/work/PhD/SimulationScripts/.venv/bin/python",
-    "python.REPL.enableREPLSmartSend": false
+    "python.defaultInterpreterPath": "/Users/eliaslundheim/work/PhD/SimulationScripts/.venv/bin/python"
 }

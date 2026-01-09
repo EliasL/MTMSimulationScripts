@@ -14,6 +14,7 @@ from .plotEnergy import (
 )
 import numpy as np
 from MTMath.contiPotential import (
+    EnergyFunction,
     ContiEnergy,
     PieceWiseQuadratic,
     F_from_C,
@@ -980,7 +981,7 @@ def getQuadrant2(F):
     return quadrant_idx
 
 
-def getQuadrantSylvain(C, eFunc=ContiEnergy):
+def getQuadrantSylvain(C, eFunc: type[EnergyFunction] = ContiEnergy):
     # Step 1: Gauss/Lagrange reduction to D
     C0 = C.copy()
     m0 = lagrange_reduction(C0, returnM=True)
@@ -1035,7 +1036,7 @@ def getQuadrantSylvain(C, eFunc=ContiEnergy):
 
 
 # Vectorized version of getIDOfF for batch arrays of F
-def getIdOfF(F: np.ndarray, theta=0) -> np.ndarray:
+def getIdOfF(F: np.ndarray, theta: np.ndarray = np.array(0)) -> np.ndarray:
     s = ContiEnergy.cauchy_from_F(F)
     # s = ContiEnergy.S_from_F(F)
     R = Rotation(theta)
@@ -1259,3 +1260,236 @@ def tryAllRotations(
     plt.savefig(path)
     print(f"Fig saved to {path}")
     plt.show()
+
+
+def elasticReductionBFS(
+    C0: np.ndarray | None = None,
+    *,
+    max_depth: int = 5,
+    grid_size: int = 250,
+    eFunc: type[EnergyFunction] = ContiEnergy,
+    show: bool = False,
+    show_dead_ends=False,
+    name="",
+):
+    # -------------------------
+    # Input / defaults
+    # -------------------------
+    if C0 is None:
+        F0 = SShear(1.3) @ SShear(0.9, s_conponent=(1, 0))
+        C0 = F0.T @ F0
+
+    C0 = np.asarray(C0, dtype=float)
+    if C0.shape != (2, 2):
+        raise ValueError("C0 must be a (2,2) array")
+
+    def M_upper(k: int) -> np.ndarray:
+        return np.array([[1.0, float(k)], [0.0, 1.0]], dtype=float)
+
+    def M_lower(k: int) -> np.ndarray:
+        return np.array([[1.0, 0.0], [float(k), 1.0]], dtype=float)
+
+    moves: list[tuple[str, np.ndarray]] = [
+        ("U+", M_upper(+1)),
+        ("U-", M_upper(-1)),
+        ("L+", M_lower(+1)),
+        ("L-", M_lower(-1)),
+    ]
+
+    def inv_move(move_label):
+        match move_label:
+            case "U+":
+                return "U-"
+            case "U-":
+                return "U+"
+            case "L+":
+                return "L-"
+            case "L-":
+                return "L+"
+            case _:
+                raise ValueError(f"Invalid move label {move_label}")
+
+    def is_fundamentail_domain(C: np.ndarray) -> bool:
+        if C[0, 1] < 0:
+            return False
+        if C[1, 1] < C[0, 0]:
+            return False
+        if 2 * C[0, 1] > C[0, 0]:
+            return False
+        return True
+
+    def is_elastic(C: np.ndarray) -> bool:
+        m1 = np.array([[1, 0], [0, -1]])
+        m2 = np.array([[0, 1], [1, 0]])
+        trans = [np.eye(2), m1, m2, m1 @ m2]
+        for t in trans:
+            if is_fundamentail_domain(t.T @ C @ t):
+                return True
+        return False
+
+    def stress_signature(C: np.ndarray) -> tuple[int, int]:
+        S = eFunc.S_from_C(np.asarray(C, dtype=float))
+        shear = float(S[0, 1])
+        n1 = float((S[0, 0] - S[1, 1]) / 2.0)
+        # Map near-zero to 0 to avoid noisy sign flips.
+        sgn = lambda x: 0 if abs(x) <= 1e-14 else (1 if x > 0 else -1)
+        return (sgn(shear), sgn(n1))
+
+    ref_sig = stress_signature(C0)
+
+    std_color, e_color, eMatch_color = "gray", "red", "green"
+    # Each node stores: C, parent_index, move_label_from_parent, first_move
+    nodes: list[dict] = []
+    nodes.append(
+        {
+            "C": C0,
+            "parent": None,
+            "move": None,
+            "first": None,
+            "depth": 0,
+            "color": std_color,
+        }
+    )
+
+    def backPropogateColor(node, color):
+        # Colors have priority std_color<e_color<eMatch_color
+        if node["color"] == eMatch_color:
+            return
+        if node["color"] == e_color and color != eMatch_color:
+            return
+
+        node["color"] = color
+        if node["parent"] is not None:
+            backPropogateColor(nodes[node["parent"]], color)
+
+    from collections import deque
+
+    q = deque([0])
+
+    while q:
+        idx = q.popleft()
+        C = nodes[idx]["C"]
+        depth = nodes[idx]["depth"]
+
+        if depth >= max_depth:
+            continue
+
+        for move_label, M in moves:
+            if nodes[idx]["move"] == inv_move(move_label):
+                # we don't move directly back from where we came
+                continue
+            Cn = congruence(C, M)
+
+            first = nodes[idx]["first"]
+            first = move_label if first is None else first
+
+            nidx = len(nodes)
+            inEDomain = is_elastic(Cn)
+            nodes.append(
+                {
+                    "C": Cn,
+                    "parent": idx,
+                    "move": move_label,
+                    "first": first,
+                    "depth": depth + 1,
+                    "inEDomain": inEDomain,
+                    "color": std_color,
+                }
+            )
+            if not inEDomain:
+                q.append(nidx)
+            else:
+                if stress_signature(Cn) == ref_sig:
+                    backPropogateColor(nodes[-1], "green")
+                else:
+                    backPropogateColor(nodes[-1], "red")
+
+    # -------------------------
+    # Plot
+    # -------------------------
+    ax = drawPoincareGrid(grid_size=grid_size)
+
+    # Helper to plot a path as a polyline in the disk
+    def plot_line(
+        Cs: np.ndarray,
+        *,
+        linestyle: str = "-",
+        linewidth: float = 2.0,
+        c=None,
+        label="",
+    ):
+        drawC(
+            ax,
+            Cs,
+            grid_size=grid_size,
+            linewidth=linewidth,
+            linestyle=linestyle,
+            c=c,
+            arrow=True,
+            label=label,
+        )
+
+    def plotPaths(nodes):
+        for node in nodes:
+            if node["parent"] is None:
+                continue
+            parent = nodes[node["parent"]]
+
+            color = std_color
+            linestyle = "-."
+
+            if node["color"] == parent["color"] or parent["color"] == eMatch_color:
+                color = node["color"]
+
+            if color != std_color:
+                linestyle = "-"
+            if color == std_color and not show_dead_ends:
+                continue
+
+            plot_line(
+                np.array([parent["C"], node["C"]]),
+                c=color,
+                linestyle=linestyle,
+                label=str(node["depth"]),
+            )
+
+    plotPaths(nodes)
+
+    # Mark start
+    drawC(
+        ax,
+        np.array([C0]),
+        grid_size=grid_size,
+        scatter=True,
+        s=40,
+        c=None,
+        zorder=6,
+    )
+
+    plt.tight_layout()
+    with_ends = "_with_deads" if show_dead_ends else ""
+    out_path = f"Plots/{name}ElasticReduction_d{max_depth}{with_ends}.pdf"
+
+    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+
+    plt.savefig(out_path, dpi=300, bbox_inches="tight")
+    print(f"Saved plot to {out_path}")
+    if show:
+        plt.show()
+    else:
+        plt.close()
+
+
+def elasticReductionPlots():
+    F0 = SShear(1.3) @ SShear(0.9, s_conponent=(1, 0))
+    C0 = F0.T @ F0
+
+    F1 = SShear(1.3) @ SShear(0.4, s_conponent=(1, 0))
+    C1 = F1.T @ F1
+
+    for C, name in zip([C0, C1], ["far", "close"]):
+        for depth in range(1, 6):
+            showDeadEnds = depth < 3
+            elasticReductionBFS(
+                C, max_depth=depth, show_dead_ends=showDeadEnds, name=name
+            )

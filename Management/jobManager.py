@@ -270,7 +270,7 @@ class JobManager:
         # Function for finding job position in queue
         estimate_jobs_ahead = None
         for user in self.users:
-            command = f'squeue -u {user} -h -o "%A %T %C %l %L %M %D %R"'
+            command = f'squeue -u {user} -h -o "%A %j %T %C %l %L %M %D %R"'
             stdin, stdout, stderr = ssh.exec_command(command)
             stdout_lines = stdout.read().decode("utf-8").strip().split("\n")
             # Filter out empty lines and split each line into fields
@@ -280,13 +280,14 @@ class JobManager:
                     job_details = {
                         "server": server,
                         "job_id": fields[0],
-                        "state": fields[1],
-                        "cpus": fields[2],
-                        "time_limit": fields[3],
-                        "time_left": fields[4],
-                        "elapsed": fields[5],
-                        "nodes": fields[6],
-                        "node_list": fields[7],
+                        "job_name": fields[1],
+                        "state": fields[2],
+                        "cpus": fields[3],
+                        "time_limit": fields[4],
+                        "time_left": fields[5],
+                        "elapsed": fields[6],
+                        "nodes": fields[7],
+                        "node_list": fields[8],
                     }
                     # Check if there is a point in getting the queue position
                     if job_details["state"] == "PENDING":
@@ -400,6 +401,7 @@ class JobManager:
             headers = [
                 "Server",
                 "Job ID",
+                "Job Name",
                 "State",
                 "CPUs",
                 # "Time Limit",
@@ -415,6 +417,7 @@ class JobManager:
                 row = [
                     get_server_short_name(job["server"]),
                     job["job_id"],
+                    job.get("job_name", ""),
                     state,
                     job["cpus"],
                     # job["time_limit"],
@@ -644,6 +647,113 @@ class JobManager:
                 f"Stopping {len(pids)} jobs on {get_server_short_name(server)} that are already running."
             )
             self.kill_processes(server, pids, verbal=False)
+
+    def cancelJobsByNameSubstring(
+        self,
+        substring: str,
+        *,
+        force=False,
+        on=None,
+        case_sensitive=False,
+        dryRun=False,
+    ):
+        """Cancel Slurm jobs whose job name contains `substring`.
+
+        Notes
+        -----
+        - Requires that `self.slurmJobs` has been populated (this method refreshes it).
+        - Match is done on the Slurm job name (%j), not your simulation config name.
+
+        Args
+        ----
+        substring:
+            Substring to match in the job name.
+        force:
+            If True, cancel without prompting.
+        on:
+            None (all servers), a single server name, or an iterable of server names.
+        case_sensitive:
+            If False (default), match is case-insensitive.
+        """
+
+        if not substring:
+            print("ERROR: substring must be non-empty")
+            return
+
+        if not self.slurmJobs:
+            print("No jobs found. Did you run findSlurmJobs?")
+            return
+
+        def _matches_server(server, on):
+            if on is None:
+                return True
+            if isinstance(on, str):
+                return server == on
+            return server in on
+
+        needle = substring if case_sensitive else substring.lower()
+
+        # Group matches by server.
+        jobs_by_server = {}
+        for job in self.slurmJobs:
+            if not _matches_server(job.get("server"), on):
+                continue
+
+            name = str(job.get("job_name", ""))
+            hay = name if case_sensitive else name.lower()
+            if needle in hay:
+                jobs_by_server.setdefault(job["server"], []).append(job["job_id"])
+
+        if not jobs_by_server:
+            print(f"No jobs matched substring '{substring}'.")
+            return
+
+        # Show what will be canceled.
+        matched = [
+            {
+                "server": get_server_short_name(j["server"]),
+                "job_id": j["job_id"],
+                "job_name": j.get("job_name", ""),
+                "state": j.get("state", ""),
+            }
+            for j in self.slurmJobs
+            if j.get("server") in jobs_by_server
+            and (
+                needle
+                in (
+                    str(j.get("job_name", ""))
+                    if case_sensitive
+                    else str(j.get("job_name", "")).lower()
+                )
+            )
+        ]
+        print("### MATCHED JOBS ###")
+        print(
+            tabulate(
+                matched,
+                headers={
+                    "server": "Server",
+                    "job_id": "Job ID",
+                    "job_name": "Job Name",
+                    "state": "State",
+                },
+                tablefmt="grid",
+            )
+        )
+
+        if not force:
+            print(
+                f"Cancel ALL matched jobs containing '{substring}'? (Total: {sum(len(v) for v in jobs_by_server.values())})"
+            )
+            if input("yes/no: ") != "yes":
+                print("Aborted.")
+                return
+        if dryRun:
+            print("Dry run, not canceling...")
+        else:
+            # Cancel per server.
+            for server, job_ids in jobs_by_server.items():
+                self.cancel_jobs_on_server(server, job_ids, force=True)
 
 
 if __name__ == "__main__":

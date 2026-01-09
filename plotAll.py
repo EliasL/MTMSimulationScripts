@@ -14,14 +14,14 @@ from Management.configGenerator import SimulationConfig, ConfigGenerator
 from matplotlib import pyplot as plt
 
 
-def plotAll(unkownFile=None, noVideos=False, noPlots=False, **kwargs):
-    # File can be either a .conf, .pvd or .csv file
+def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
+    # unkownFile can be either a .conf, .pvd or .csv file
     conf, csvPath, pvdFile = None, None, None
     X = "load"
     ylog = False
     subfolderName = "unkown_"
 
-    if unkownFile is not None:
+    if unkownFile != "":
         if unkownFile.endswith(".conf"):
             conf = SimulationConfig(unkownFile)
         elif unkownFile.endswith(".pvd"):

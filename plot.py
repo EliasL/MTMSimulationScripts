@@ -1,6 +1,5 @@
 from Management.jobs import (
     smallJob,
-    basicJob,
     allPlasticEventsJob,
     bigUmutJob,
     propperJob,
@@ -8,6 +7,7 @@ from Management.jobs import (
     avalanches,
     findMinimizationCriteriaJobs,
     compareWithOldStoppingCriteria,
+    basicJob,
     showMinimizationCriteriaJobs,
     reconnectionTest,
 )
@@ -19,6 +19,7 @@ from MTMath.powerlaw_mixed_test import testCombinedDists
 from MTMath.plotPowerLaw import make_exponent_fit
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
+    elasticReductionPlots,
     tryAllRotations,
     bug_hunting,
     poincareTiling,
@@ -186,10 +187,9 @@ def plotThreadTest():
 
 
 def debugPlotAll():
-    outputPath = findOutputPath()
     # config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
     config = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0/config.conf"
-    plotAll(config, outputPath, makeGIF=False, transparent=False, noVideos=False)
+    plotAll(config, makeGIF=False, transparent=False, noVideos=False)
 
 
 def plotAvalanches():
@@ -332,4 +332,5 @@ if __name__ == "__main__":
     # tryAllRotations()
     # plotsLotsOfRealFStress("pk2", reduced=True)
     # bug_hunting()
-    testCombinedDists()
+    # testCombinedDists()
+    elasticReductionPlots()
