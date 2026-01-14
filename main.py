@@ -13,6 +13,7 @@ from Management.jobs import (
     umutTestJob,
     umutJobs,
     bigUmutJob,
+    bigUmutJobWithEliasStop,
     largeAvalanche,
     avalanches,
     bigJob,
@@ -334,6 +335,7 @@ def runReconnectionJob(L=30):
 
 
 def runOnLocalMachine():
+    return
     configs, labels = propperJob(3, nrSeeds=10, size=200, group_by_seeds=False)
     # configs, labels = allPlasticEventsJob()
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
@@ -343,6 +345,7 @@ def runOnLocalMachine():
     configs, labels = fixedBoundaries(1, 1, L=3)
     configs, labels = umutTestJob()
     configs, labels = bigUmutJob()
+    configs, labels = bigUmutJobWithEliasStop()
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
     # )
@@ -444,7 +447,7 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    # runOnLocalMachine()
+    #runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()

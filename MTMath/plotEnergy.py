@@ -1,7 +1,7 @@
 import numpy as np
 
 
-from .contiPotential import ContiEnergy, lagrange_reduction, SShear, F_from_C
+from .contiPotential import EnergyFunction, ContiEnergy, lagrange_reduction, SShear, F_from_C
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
@@ -120,19 +120,19 @@ def generate_poincare_disk(
 
 
 def generate_energy_grid(
-    E_func=ContiEnergy, beta=-0.25, K=4, energy_lim=[None, 0.37], **kwargs
+    E_func=EnergyFunction, beta=-0.25, K=4, energy_lim=[None, 0.37], **kwargs
 ):
     return generate_grid(
         E_func.energy_from_C_in_place, beta=beta, K=K, lim=energy_lim, **kwargs
     )
 
 
-def generate_cauchy_stress_grid(E_func=ContiEnergy, beta=-0.25, K=4, **kwargs):
+def generate_cauchy_stress_grid(E_func=EnergyFunction, beta=-0.25, K=4, **kwargs):
     return generate_grid(E_func.cauchy_from_C, beta=beta, K=K, **kwargs)
 
 
 def generate_piola_stress_grid(
-    E_func=ContiEnergy, beta=-0.25, K=4, second_PK=True, **kwargs
+    E_func=EnergyFunction, beta=-0.25, K=4, second_PK=True, **kwargs
 ):
     if second_PK:
         return generate_grid(E_func.S_from_C, beta=beta, K=K, **kwargs)

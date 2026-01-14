@@ -17,12 +17,13 @@ from .LagrangeReduction import (
 )
 from .vectorPair import VectorPair
 from MTMath.plotEnergy import (
+    generate_grid,
     generate_energy_grid,
     generate_cauchy_stress_grid,
     generate_piola_stress_grid,
     drawPoincareGrid,
 )
-from MTMath.contiPotential import ContiEnergy, SShear, PieceWiseQuadratic
+from MTMath.contiPotential import ContiEnergy, SShear, PieceWiseQuadratic, elastic_domain_quadrant, elastic_reduction
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -71,13 +72,16 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.currentBeta = -0.25
         self.volumetricEnergy = True
         self.energy_lim = [0, 0.37]
-        self.energyFunc = PieceWiseQuadratic  # ContiEnergy  # SuperSimple
+        self.energyFunc = ContiEnergy #PieceWiseQuadratic  # ContiEnergy  # SuperSimple
         # Stress
-        self.showStress = True
+        self.showStress = False
         self.stress_type = "PK2"  # "cauchy", "PK1" or "PK2" (PK=Piola-Kirchhoff)
         # "det", "trace","N1", "J2", "sqrtJ2", or "i,j" for components
         self.stress_mode = "0,1"
         self.stressLim = (-0.2, 0.2)
+        # Elastic reduction
+        self.showElasticReduction=True
+        assert not(self.showStress and self.showElasticReduction), "Only show one"
 
         # Div
         self.showHistory = False
@@ -502,60 +506,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         return self.loadImage(fName)
 
-    def drawLagrangeReductionBackground(self):
-        # We want to visualize where the lagrange reduction occurs when moving either vector
-        # We solve this by creating two heatmaps and changing which heatmap is in front depending on what
-        # vector was moved last.
-
-        # Dimensions of the data
-        ppu = 1200  # Pixels per unit
-        width, height = (
-            4,
-            4,
-        )  # Does not work with different width height for some reason
-        loops = 10
-        folder = "precomputedLagrangeBackgrounds"
-        fNames = [
-            f"{SCRIPT_DIR}/{folder}/{width},{height},{ppu},{loops},{v},LRBackround.png"
-            for v in ["v1", "v2"]
-        ]
-
-        def _gen_lr_background(fName, v2_is_fixed):
-            def _inner():
-                img = lagrange_reduction_visualization(
-                    width, height, ppu, v2_is_fixed=v2_is_fixed, loops=loops
-                )
-                img.save(fName)
-
-            return _inner
-
-        # Use the shared helper to obtain cached or newly generated images
-        LR_heatmapImage1 = self._get_or_create_background_image(
-            fNames[0], _gen_lr_background(fNames[0], True)
-        )
-        LR_heatmapImage2 = self._get_or_create_background_image(
-            fNames[1], _gen_lr_background(fNames[1], False)
-        )
-
-        # Separate instances for the grid visualization view
-        GV_heatmapImage1 = self.loadImage(fNames[0])
-        GV_heatmapImage2 = self.loadImage(fNames[1])
-
-        self.LR_bg1 = self.drawHeatMap(
-            LR_heatmapImage1, -10, self.LR_plot, width, height
-        )
-        self.LR_bg2 = self.drawHeatMap(
-            LR_heatmapImage2, -1, self.LR_plot, width, height
-        )
-
-        self.GV_bg1 = self.drawHeatMap(
-            GV_heatmapImage1, -10, self.GV_plot, width, height
-        )
-        self.GV_bg2 = self.drawHeatMap(
-            GV_heatmapImage2, -1, self.GV_plot, width, height
-        )
-        self.GV_bg1.setOpacity(0)  # Set opacity to 0 to hide it
-        self.GV_bg2.setOpacity(0)  # Set opacity to 0 to hide it
 
     @staticmethod
     def fig_to_pg(fig):
@@ -661,15 +611,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             linewidth=ppu / (4 * dpi),
         )
 
-        if not self.showStress:
-            field = generate_energy_grid(
-                E_func=self.energyFunc,
-                resolution=ppu,
-                beta=beta,
-                K=4,
-                zeroReference=True,
-            )
-        else:
+        if self.showStress:
+           
             if self.stress_type == "cauchy":
                 stress = generate_cauchy_stress_grid(
                     E_func=self.energyFunc, resolution=ppu, beta=beta
@@ -688,7 +631,19 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             with np.errstate(invalid="ignore"):
                 field = self.compute_stress_scalar_field(stress, mode=stress_mode)
                 field = np.clip(field, *stressLim)
-
+        elif self.showElasticReduction:
+            def CToQuadrant(C):
+                C_R = elastic_reduction(C, loops=100)
+                return elastic_domain_quadrant(C_R)
+            field = generate_grid(function=CToQuadrant,resolution=ppu)
+        else:
+            field = generate_energy_grid(
+                E_func=self.energyFunc,
+                resolution=ppu,
+                beta=beta,
+                K=4,
+                zeroReference=True,
+            )
         ax.imshow(
             field,
             origin="lower",
@@ -769,10 +724,12 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Set quantity name for caching
         if self.showStress:
             quantity = (
-                f"_{self.stress_type}_stress_{self.stress_mode}_clip{self.stressLim[1]}"
+                f"{e_type}_{self.stress_type}_stress_{self.stress_mode}_clip{self.stressLim[1]}"
             )
+        elif self.showElasticReduction:
+            quantity="elasticReduction"
         else:
-            quantity = "energy"
+            quantity = e_type
 
         self.triangularEnergy = None
         self.squareEnergy = None
@@ -780,9 +737,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         # Generate energy images for triangular and square shapes
         for shape, beta, opacity in zip(["triangular", "square"], [4, -0.25], [0, 1]):
-            fName = f"{SCRIPT_DIR}/{folder}/{e_type}_{ppu}_{shape}_{quantity}_Poincare_LRBackround.png"
+            fName = f"{SCRIPT_DIR}/{folder}/{quantity}_{ppu}_{shape}_Poincare_LRBackround.png"
 
-            forceGenerate = ppu <= 500  # Always regenerate for small ppu
+            forceGenerate = ppu <= 500
+
             energyImage = self._get_or_create_background_image(
                 fName,
                 lambda: self.generateEnergyBackground(
@@ -806,6 +764,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
     @staticmethod
     def loadImage(fileName):
+        assert os.path.isfile(fileName), "File not found"
         img = QImage(fileName)
 
         if img.format() != QImage.Format_RGBA8888:
@@ -968,7 +927,6 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         heatmap.setLevels(self.energy_lim)
 
     def drawBackground(self):
-        self.drawLagrangeReductionBackground()
         self.drawEnergyBackground()
 
     def mouseMove(self, pos):
@@ -1212,7 +1170,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
                     width=3,
                 )
             else:
-                history = [F2C(F @ M(j)) for j in vals]
+                history = [M(j).T @ F2C(F)@M(j) for j in vals]
                 self.drawHistory(
                     history,
                     color=c,

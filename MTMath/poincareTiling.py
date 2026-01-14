@@ -1362,6 +1362,15 @@ def elasticReductionBFS(
         if node["parent"] is not None:
             backPropogateColor(nodes[node["parent"]], color)
 
+    def sqrtm_2x2(C):
+        a, b = C[0,0], C[0,1]
+        d = C[1,1]
+        tr = a + d
+        det = a*d - b*b
+        s = np.sqrt(det)
+        t = np.sqrt(tr + 2*s)
+        return (C + s*np.eye(2)) / t
+
     from collections import deque
 
     q = deque([0])
@@ -1379,6 +1388,7 @@ def elasticReductionBFS(
                 # we don't move directly back from where we came
                 continue
             Cn = congruence(C, M)
+            #Cn = sqrtm_2x2(C)@ M.T@M@sqrtm_2x2(C) 
 
             first = nodes[idx]["first"]
             first = move_label if first is None else first
@@ -1493,3 +1503,7 @@ def elasticReductionPlots():
             elasticReductionBFS(
                 C, max_depth=depth, show_dead_ends=showDeadEnds, name=name
             )
+
+
+def elasticExpansion(targetC):
+    

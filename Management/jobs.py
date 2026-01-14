@@ -619,6 +619,23 @@ def bigUmutJob(group_by_seeds=False):
     )
     return configs, labels
 
+def bigUmutJobWithEliasStop(group_by_seeds=False):
+    configs, labels = ConfigGenerator.generate(
+        seed=0,
+        rows=500,
+        cols=500,
+        startLoad=0.138,
+        maxLoad=1.0,
+        initialGuessNoise=0.04,
+        nrThreads=8,
+        loadIncrement=2e-5,
+        minimizer="LBFGS",
+        epsR=1e-5,
+        scenario="simpleShear",
+        group_by_seeds=group_by_seeds,
+    )
+    return configs, labels
+
 
 def umutJobs():
     """

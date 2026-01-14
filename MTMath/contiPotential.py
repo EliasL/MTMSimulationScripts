@@ -1,7 +1,7 @@
 from sympy import symbols, diff, sqrt, log, lambdify, ccode, cse, simplify, Rational
 import numpy as np
 from typing import TypeAlias
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 Array: TypeAlias = ArrayLike | int | float
 Array_Str: TypeAlias = Array | str
@@ -450,6 +450,7 @@ def apply_right_trans(t, A):
     # If we were applying changes from the left, we need to have access to F:
     # F_=tF => C_=F^Tt^TtF. Here, unlike when applying changes from the right,
     # the changes appear "inside" C_, so we can't apply them.
+    # This explination is not accurate...
     return np.einsum("...ij,...jk->...ik", A, t)
 
 
@@ -517,317 +518,12 @@ def lagrange_reduction_components(C11, C22, C12, loops=1000, returnM=False):
         return M
 
 
-def lagrange_reduction_shears_vectorized(
-    C, loops=64, eps=1e-12, fundamental=False, return_ops=False, returnM=False
-):
-    """
-    Vectorized Lagrange/Gauss reduction using only shears:
-      H(n): S = [[1, n],[0,1]]  -> C' = S^T C S,  F' = F S
-      V(n): S = [[1, 0],[n,1]]  -> C' = S^T C S,  F' = F S
-
-    Parameters
-    ----------
-    C : ndarray, shape (..., 2, 2), symmetric blocks [[a,b],[b,c]]
-    loops : int, max iterations
-    eps : float, tolerance for near-zero denominators and convergence
-    fundamental : bool, if True snap to fundamental domain (b>=0, a<=c)
-    return_ops : bool, if True return op codes per iter: 0 none, odd=H( n ), even=V( n )
-    returnM : bool, if True also return right-multiplication matrices:
-              m_E for C_E; and if fundamental, m_R for C_R
-
-    Returns
-    -------
-    C_E : ndarray (...,2,2)  # after shear-only reduction
-    [C_R] : if fundamental True
-    [ops] : if return_ops True, int8 array (..., loops)
-    [m_E] : if returnM True
-    [m_R] : if returnM and fundamental True
-    """
-    C = np.asarray(C)
-    if C.shape[-2:] != (2, 2):
-        raise ValueError("C must have shape (..., 2, 2)")
-
-    # Work on copies (preserve input)
-    a = C[..., 0, 0].astype(float).copy()
-    b = C[..., 0, 1].astype(float).copy()
-    c = C[..., 1, 1].astype(float).copy()
-
-    # Track ops if requested
-    ops = None
-    if return_ops:
-        ops = np.zeros(a.shape + (loops,), dtype=np.int8)
-
-    # Track right-multiplication matrices m (for F' = F m)
-    m = None
-    if returnM:
-        # identity grid matching the batch shape
-        m = np.zeros(a.shape + (2, 2), dtype=float)
-        m[..., 0, 0] = 1.0
-        m[..., 1, 1] = 1.0
-
-    # --- helpers that update (a,b,c) and, if requested, m ---
-    def apply_H(a, b, c, n_full, mask, nan_mask=None):
-        # Only update indices not in nan_mask
-        if not np.any(mask):
-            return
-        if nan_mask is not None:
-            mask = mask & (~nan_mask)
-        n = n_full[mask]
-        if n.size == 0:
-            return
-        b_old = b[mask].copy()
-        a_m = a[mask]
-        # C update
-        b[mask] = b_old + n * a_m
-        c[mask] = c[mask] + (2.0 * n) * b_old + (n * n) * a_m  # a unchanged
-        # m update: m <- m @ H(n) = [[1,n],[0,1]]
-        if m is not None:
-            pm = m[mask, 0, 0]
-            qm = m[mask, 0, 1]
-            rm = m[mask, 1, 0]
-            sm = m[mask, 1, 1]
-            m[mask, 0, 0] = pm + qm * n
-            m[mask, 0, 1] = qm
-            m[mask, 1, 0] = rm + sm * n
-            m[mask, 1, 1] = sm
-
-    def apply_V(a, b, c, n_full, mask, nan_mask=None):
-        # Only update indices not in nan_mask
-        if not np.any(mask):
-            return
-        if nan_mask is not None:
-            mask = mask & (~nan_mask)
-        n = n_full[mask]
-        if n.size == 0:
-            return
-        b_old = b[mask].copy()
-        c_m = c[mask]
-        # C update
-        b[mask] = b_old + n * c_m
-        a[mask] = a[mask] + (2.0 * n) * b_old + (n * n) * c_m  # c unchanged
-        # m update: m <- m @ V(n) = [[1,0],[n,1]]
-        if m is not None:
-            pm = m[mask, 0, 0]
-            qm = m[mask, 0, 1]
-            rm = m[mask, 1, 0]
-            sm = m[mask, 1, 1]
-            m[mask, 0, 0] = pm
-            m[mask, 0, 1] = qm + pm * n
-            m[mask, 1, 0] = rm
-            m[mask, 1, 1] = sm + rm * n
-
-    # --- main loop ---
-    for t in range(loops):
-        # Ignore entries with any NaN component
-        nan_mask = np.isnan(a) | np.isnan(b) | np.isnan(c)
-        reduced = np.abs(2.0 * b) <= np.minimum(a, c) + eps
-        active = (~reduced) & (~nan_mask)
-        if not np.any(active):
-            break
-
-        use_H = active & (a <= c + eps)
-        use_V = active & ~use_H
-
-        # H step (full-shaped nH to avoid flattening)
-        if np.any(use_H):
-            # compute rounded integers only where use_H, keep full shape
-            ratioH = np.zeros_like(b, dtype=float)
-            np.divide(b, a, out=ratioH, where=use_H & np.isfinite(a))
-            nH = -np.rint(ratioH).astype(int)
-            mask = use_H & (nH != 0)
-            apply_H(a, b, c, nH, mask, nan_mask=nan_mask)
-            if return_ops:
-                ops[..., t][mask] = nH[mask] * 2 + 1  # odd for H
-
-        # V step (full-shaped nV to avoid flattening)
-        if np.any(use_V):
-            ratioV = np.zeros_like(b, dtype=float)
-            np.divide(b, c, out=ratioV, where=use_V & np.isfinite(c))
-            nV = -np.rint(ratioV).astype(int)
-            mask = use_V & (nV != 0)
-            apply_V(a, b, c, nV, mask, nan_mask=nan_mask)
-            if return_ops:
-                ops[..., t][mask] = nV[mask] * 2  # even for V
-
-    # Assemble shear-reduced (elastic) result
-    C_E = np.empty_like(C, dtype=float)
-    C_E[..., 0, 0] = a
-    C_E[..., 0, 1] = b
-    C_E[..., 1, 0] = b
-    C_E[..., 1, 1] = c
-    # Restore NaN in all positions where any input was NaN
-    nan_mask = np.isnan(C[..., 0, 0]) | np.isnan(C[..., 0, 1]) | np.isnan(C[..., 1, 1])
-    if np.any(nan_mask):
-        C_E[nan_mask, :, :] = np.nan
-        if returnM:
-            m[nan_mask, :, :] = np.nan
-
-    # early returns if no fundamental snapping needed
-    if not fundamental:
-        if return_ops and returnM:
-            return C_E, ops, m  # m_E
-        if return_ops:
-            return C_E, ops
-        if returnM:
-            return C_E, m
-        return C_E
-
-    # --- snap to fundamental domain (non-shear) ---
-    # b>=0 via D = diag(1,-1) when b<0; a<=c via swap P
-    b1 = np.where(b < 0, -b, b)
-    a1 = a
-    c1 = c
-    swap = c1 < a1
-    a2 = np.where(swap, c1, a1)
-    c2 = np.where(swap, a1, c1)
-    b2 = b1
-
-    C_R = np.empty_like(C, dtype=float)
-    C_R[..., 0, 0] = a2
-    C_R[..., 0, 1] = b2
-    C_R[..., 1, 0] = b2
-    C_R[..., 1, 1] = c2
-    # Restore NaN in all positions where any input was NaN
-    if np.any(nan_mask):
-        C_R[nan_mask, :, :] = np.nan
-
-    if returnM:
-        # Build m_R by applying the same orthogonal post-ops on the right
-        m_R = m.copy()
-        # D on entries where b<0
-        neg_mask = b < 0
-        if np.any(neg_mask):
-            # m <- m @ D, D = diag(1,-1)
-            m_R[neg_mask, 0, 1] *= -1.0
-            m_R[neg_mask, 1, 1] *= -1.0
-        # P (swap) on entries where a and c were swapped
-        if np.any(swap):
-            # m <- m @ P, P swaps columns: [*,*] * [[0,1],[1,0]] swaps col0<->col1
-            m_tmp0 = m_R[swap, :, 0].copy()
-            m_R[swap, :, 0] = m_R[swap, :, 1]
-            m_R[swap, :, 1] = m_tmp0
-        # Restore NaN in all positions where any input was NaN
-        if np.any(nan_mask):
-            m_R[nan_mask, :, :] = np.nan
-        if return_ops:
-            return C_E, C_R, ops, m, m_R
-        return C_E, C_R, m, m_R
-
-    if return_ops:
-        return C_E, C_R, ops
-    return C_E, C_R
-
-
-def new_lagrange_reduction(C, *, max_iter=64, tol=1e-12, returnM=True):
-    """
-    SL(2,Z) Lagrange (Gauss) reduction for 2x2 SPD symmetric matrices (Gram matrices).
-
-    Returns C_R and (optionally) an integer unimodular matrix M (det=1) such that:
-        C_R = M.T @ C @ M
-
-    Parameters
-    ----------
-    C : array_like, shape (..., 2, 2)
-    max_iter : int
-    tol : float
-    return_M : bool
-
-    Returns
-    -------
-    C_R : ndarray, shape (..., 2, 2), float64
-    M   : ndarray, shape (..., 2, 2), int64   (if return_M=True)
-    """
-    addedList = False
-    if C.shape == (2, 2):
-        C = np.asarray([C])
-        addedList = True
-    if C.shape[-2:] != (2, 2):
-        raise ValueError(f"Expected shape (..., 2, 2), got {C.shape}")
-
-    # Symmetrize defensively
-    C = 0.5 * (C + np.swapaxes(C, -1, -2))
-
-    a = C[..., 0, 0].astype(np.float64, copy=False)
-    b = C[..., 0, 1].astype(np.float64, copy=False)
-    c = C[..., 1, 1].astype(np.float64, copy=False)
-
-    # Track the cumulative right-action M so that current (a,b,c) equals M.T C0 M
-    if returnM:
-        batch_shape = C.shape[:-2]
-        M00 = np.ones(batch_shape, dtype=np.int64)
-        M01 = np.zeros(batch_shape, dtype=np.int64)
-        M10 = np.zeros(batch_shape, dtype=np.int64)
-        M11 = np.ones(batch_shape, dtype=np.int64)
-
-    def nearest_int(x):
-        # round half away from zero
-        return np.where(x >= 0.0, np.floor(x + 0.5), np.ceil(x - 0.5)).astype(np.int64)
-
-    for _ in range(max_iter):
-        # ---- Shear: T_m = [[1,0],[-m,1]], choose m = round(b/a)
-        m = nearest_int(b / a)
-
-        # Update C <- T_m^T C T_m
-        b0 = b
-        b = b0 - m * a
-        c = c - 2.0 * m * b0 + (m * m) * a
-
-        # Update M <- M @ T_m  (integer, det=1)
-        if returnM:
-            # [[M00,M01],[M10,M11]] @ [[1,0],[-m,1]] = [[M00 - m*M01, M01],[M10 - m*M11, M11]]
-            M00 = M00 - m * M01
-            M10 = M10 - m * M11
-
-        # ---- Rotate/swap: R = [[0,-1],[1,0]] (det=1), enforce a <= c and tie-break b >= 0 if a==c
-        swap = (a > c + tol) | ((np.abs(a - c) <= tol) & (b < -tol))
-        if np.any(swap):
-            a_s = a[swap].copy()
-            a[swap] = c[swap]
-            c[swap] = a_s
-            b[swap] = -b[swap]
-
-            if returnM:
-                # M <- M @ R, where [[p,q],[r,s]] -> [[q, -p],[s, -r]]
-                p = M00[swap].copy()
-                q = M01[swap].copy()
-                r = M10[swap].copy()
-                s = M11[swap].copy()
-                M00[swap] = q
-                M01[swap] = -p
-                M10[swap] = s
-                M11[swap] = -r
-
-        # Stopping criteria
-        cond1 = np.abs(b) <= 0.5 * a + tol
-        cond2 = a <= c + tol
-        cond3 = (np.abs(a - c) > tol) | (b >= -tol)
-        if np.all(cond1 & cond2 & cond3):
-            break
-
-    C_R = np.empty_like(C, dtype=np.float64)
-    C_R[..., 0, 0] = a
-    C_R[..., 0, 1] = b
-    C_R[..., 1, 0] = b
-    C_R[..., 1, 1] = c
-
-    if addedList:
-        C_R = C_R[0]
-    C = C_R
-
-    M = np.empty(C.shape, dtype=np.int64)
-    M[..., 0, 0] = M00
-    M[..., 0, 1] = M01
-    M[..., 1, 0] = M10
-    M[..., 1, 1] = M11
-    return M
-
-
 def lagrange_reduction(C, loops=1000, returnM=False):
     """
     Modifies C in place to its Lagrange-reduced form.
     """
     assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
-    assert np.all(C[..., 1, 0] == C[..., 0, 1]), "C must be symetric"
+    assert np.allclose(C[..., 1, 0], C[..., 0, 1], equal_nan=True), "C must be symetric"
 
     # Extract views (no copy) from the promoted array
     C11, C22, C12 = C[..., 0, 0], C[..., 1, 1], C[..., 0, 1]
@@ -1164,51 +860,162 @@ def F_from_C(C, theta=np.pi / 3):
 
     return F
 
+def in_elastic_domain(C11, C22, C12)->NDArray[np.bool_]:
+    """Return True where (C11, C22, C12) lies in the elastic domain.
 
-def elastic_reduction(C11, C22, C12, loops=1000):
+    Minimal checks:
+      - min(C11, C22) > 0
+      - |C12| <= 0.5 * min(C11, C22)
+
+    Works with scalars or NumPy arrays (broadcasting). For array inputs, returns
+    a boolean array with the broadcasted shape.
     """
-    We transform the reduced C an extra time with m1 or m2 such that the number
-    of m1 and m2 transformations is even. We also make sure to transform first
+    C11a = np.asarray(C11)
+    C22a = np.asarray(C22)
+    C12a = np.asarray(C12)
+
+    Cmin = np.minimum(C11a, C22a)
+    inside = (Cmin > 0) & (np.abs(C12a) <= 0.5 * Cmin)
+    return inside
+
+def elastic_domain_quadrant(C) -> NDArray[np.int_]:
+    """Return elastic-domain quadrant label (0..3), or -1 if outside.
+
+    Quadrants:
+      0: C11>0, C11<=C22,  0 <= C12 <= 0.5*C11
+      1: C11>0, C11<=C22, -0.5*C11 <= C12 <  0
+      2: C22>0, C22<=C11,  0 <= C12 <= 0.5*C22
+      3: C22>0, C22<=C11, -0.5*C22 <= C12 <  0
+
+    Boundary convention: C12 == 0 goes to the non-negative side (0 or 2).
+    Works with scalars or NumPy arrays (broadcasting). For array inputs, returns
+    an integer array with the broadcasted shape.
     """
-    # We create a mask of false everywhere
-    odd_swaps_C11 = C11 != C11
-    odd_flips_C12 = C12 != C12
-    for i in range(loops):
-        mask1 = C12 < 0
-        C12[mask1] *= -1
+    assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
+    assert np.allclose(C[..., 1, 0], C[..., 0, 1], equal_nan=True), "C must be symetric"
 
-        # Stores the last change made to C12
-        odd_flips_C12 = np.logical_xor(odd_flips_C12, mask1)
+    C11a = np.asarray(C[..., 0,0])
+    C22a = np.asarray(C[..., 1,1])
+    C12a = np.asarray(C[..., 0,1])
 
-        mask2 = C22 < C11
-        # Swap operation
-        C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
 
-        # Stores the last change made to C11 and C22
-        odd_swaps_C11 = np.logical_xor(odd_swaps_C11, mask2)
+    q0 = (C11a > 0) & (C11a <= C22a) & (C12a >= 0) & (C12a <= 0.5 * C11a)
+    q1 = (C11a > 0) & (C11a <= C22a) & (C12a < 0) & (C12a >= -0.5 * C11a)
+    q2 = (C22a > 0) & (C22a <= C11a) & (C12a >= 0) & (C12a <= 0.5 * C22a)
+    q3 = (C22a > 0) & (C22a <= C11a) & (C12a < 0) & (C12a >= -0.5 * C22a)
 
-        mask3 = 2 * C12 > C11
-        # Stop the loop if no changes are made
-        if not np.any(mask1 | mask2 | mask3):
+    labels = np.full(C11a.shape, np.nan)
+    labels[q0] = 0
+    labels[q1] = 1
+    labels[q2] = 2
+    labels[q3] = 3
+
+    return labels
+
+def elastic_reduction_components(C11, C22, C12, loops=1000):
+    """Vectorized elastic reduction of symmetric 2x2 C via component updates.
+
+    Parameters
+    ----------
+    C11, C22, C12 : array_like
+        Components of symmetric C = [[C11, C12],[C12, C22]].
+        Can be scalars or NumPy arrays; will be broadcast to a common shape.
+    loops : int
+        Max iterations.
+
+    Returns
+    -------
+    C11r, C22r, C12r : ndarray or scalars
+        Reduced components. (Scalar in -> scalar out, array in -> array out.)
+    """
+    C11a = np.asarray(C11, dtype=float)
+    C22a = np.asarray(C22, dtype=float)
+    C12a = np.asarray(C12, dtype=float)
+
+    C11b, C22b, C12b = np.broadcast_arrays(C11a, C22a, C12a)
+
+    # Work on copies to avoid surprising in-place effects for views
+    a = C11b.copy()
+    b = C22b.copy()
+    c = C12b.copy()
+
+    def _in_elastic(a_, b_, c_):
+        Cmin = np.minimum(a_, b_)
+        return (Cmin >= 0) & (np.abs(c_) <= 0.5 * Cmin)
+    done= False
+    for _ in range(loops):
+        inside = _in_elastic(a, b, c)
+        active = ~inside
+        if not np.any(active):
+            done=True
             break
-        else:
-            C22[mask3] += C11[mask3] - 2 * C12[mask3]
-            C12[mask3] -= C11[mask3]
 
-        if i + 1 == loops:
-            raise (RuntimeError("Not enough loops"))
+        use_U = active & (a < b)
+        use_V = active & ~use_U  # includes a >= b
 
-    # Now we want to undo the m1 and m2 transformations (Which is the same as
-    # doing them again)
+        # m = sign(-c/a) or sign(-c/b), but avoid divide-by-zero / NaNs
+        mU = np.zeros_like(a)
+        mV = np.zeros_like(a)
 
-    C12[odd_flips_C12] *= -1
-    C11[odd_swaps_C11], C22[odd_swaps_C11] = (
-        C22[odd_swaps_C11].copy(),
-        C11[odd_swaps_C11].copy(),
-    )
+        if np.any(use_U):
+            denom = np.where(a == 0, 1.0, a)
+            mU = np.sign(-c / denom)
+            mU = np.where(np.isfinite(mU), mU, 0.0)
 
-    return C11, C22, C12
+        if np.any(use_V):
+            denom = np.where(b == 0, 1.0, b)
+            mV = np.sign(-c / denom)
+            mV = np.where(np.isfinite(mV), mV, 0.0)
 
+        # --- Apply U_m where selected: W = [[1,m],[0,1]] ---
+        # a' = a
+        # c' = c + m*a
+        # b' = b + 2*m*c + m^2*a
+        if np.any(use_U):
+            m = mU
+            c_new = c + m * a
+            b_new = b + 2.0 * m * c + (m * m) * a
+
+            c = np.where(use_U, c_new, c)
+            b = np.where(use_U, b_new, b)
+            # a unchanged for U
+
+        # --- Apply V_m where selected: W = [[1,0],[m,1]] ---
+        # b' = b
+        # c' = c + m*b
+        # a' = a + 2*m*c + m^2*b
+        if np.any(use_V):
+            m = mV
+            c_new = c + m * b
+            a_new = a + 2.0 * m * c + (m * m) * b
+
+            c = np.where(use_V, c_new, c)
+            a = np.where(use_V, a_new, a)
+            # b unchanged for V
+    
+    if not done:
+        print("Warning! Not enough loops in elastic reduction!")
+    # Preserve scalar return type when inputs are scalars
+    if a.shape == ():
+        return float(a), float(b), float(c)
+    return a, b, c
+
+def elastic_reduction(C, loops=1000):
+    assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
+    assert np.allclose(C[..., 1, 0], C[..., 0, 1], equal_nan=True), "C must be symetric"
+
+    # Extract views (no copy) from the promoted array
+    C11, C22, C12 = C[..., 0, 0], C[..., 1, 1], C[..., 0, 1]
+
+    # Call function (which modifies arrays in-place and returns M if requested)
+    C11, C22, C12 =elastic_reduction_components(C11, C22, C12, loops=loops)
+
+    C[..., 0, 0]=C11
+    C[..., 1, 1]=C22
+    C[..., 0, 1]=C12
+    C[..., 1, 0]=C12
+
+    return C
 
 def generate_cpp_code(expressions_dict):
     expressions = list(expressions_dict.values())
@@ -1380,10 +1187,7 @@ def sanityCheck_LagrangeReduction(C):
     test = M.T @ C @ M
     assert np.allclose(test, C_reduced), "Lagrange reduction failed sanity check"
 
-    # TODO:
-    C_E, C_R, M_E, M_R = lagrange_reduction_shears_vectorized(
-        C, fundamental=True, returnM=True
-    )
+
 
     def mapBack(M, C_R):  # returns M C M^T
         Minv = np.linalg.inv(M)
@@ -1394,9 +1198,17 @@ def sanityCheck_LagrangeReduction(C):
     print("M_R back to C:", passed)
     return passed
 
+def debug_elastic_reduction():
+    F = np.array([[1,1],[0,1]])
+    C = F.T@F
+    C_R = elastic_reduction(C)
+    print(C)
+    print(C_R)
+
+
 
 if __name__ == "__main__":
-    debug_symbolic_cauchy_trace()
+    #debug_symbolic_cauchy_trace()
     # sanityCheck_Piola()
     # # Get symbolic expressions from ContiEnergy
     # phi_func, div_phi_dict, div_div_phi_dict = ContiEnergy.symbolic_potential()
@@ -1415,3 +1227,5 @@ if __name__ == "__main__":
 
     # print("Stress function:\n", stress_code)
     # print(ContiEnergy.ground_state_energy())
+
+    debug_elastic_reduction()
