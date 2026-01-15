@@ -1,7 +1,7 @@
 import numpy as np
 
 
-from .contiPotential import EnergyFunction, ContiEnergy, lagrange_reduction, SShear, F_from_C
+from .energyFunction import EnergyFunction, ContiEnergy, lagrange_reduction, SShear, F_from_C
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
@@ -211,6 +211,7 @@ def C2PoincareDisk(C, transformation=None, eps=1e-12):
     Supports a single 2x2 or a batch of shape (..., 2, 2).
     Returns x, y
     """
+    C = np.asarray(C)
     C = transformC(C, transformation)
 
     a = C[..., 0, 0]
@@ -349,8 +350,8 @@ def drawC(
                 arrowstyle="-|>", mutation_scale=20, color=c, linewidth=linewidth
             ),
         )
-        xm = (x_plot[0] + x_plot[1]) / 2
-        ym = (y_plot[0] + y_plot[1]) / 2
+        xm = [(x_plot[0] + x_plot[1]) / 2]
+        ym = [(y_plot[0] + y_plot[1]) / 2]
     elif shade:
         # --- convert all valid points to pixel indices ---
         xv = x_plot[valid]
@@ -518,10 +519,10 @@ def drawC(
         # ensure x and y are numbers (not arrays) and scatter is True
         if isinstance(label, str):
             label = [label]
-            xm = [xm]
-            ym = [ym]
+            xm = np.asarray(xm)
+            ym = np.asarray(ym)
 
-        assert len(label) == len(xm), "Number of labels does not match number of points"
+        assert len(label) == xm.size, "Number of labels does not match number of points"
 
         for x, y, lab in zip(xm, ym, label):
             addLabel(ax, x, y, lab, **kwargs)
@@ -1412,7 +1413,7 @@ def plotEnergyField(
         )
 
 
-def prepPoincareFig(grid_size=200, zoom=1, ax=None):
+def prepPoincareFig(grid_size=200, zoom=1, ax=None, withGrid=True):
     # Zoom does not always work properly. Be careful
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 6))
@@ -1431,6 +1432,14 @@ def prepPoincareFig(grid_size=200, zoom=1, ax=None):
     )
     ax.add_patch(circle)
 
+    if withGrid:
+        drawPoincareGrid(
+            ax,
+            grid_size=grid_size,
+            zoom=zoom,
+            c="gray",
+        )
+
     ax.set_xticks(
         np.linspace(0, grid_size, 5),
         np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
@@ -1448,7 +1457,7 @@ def prepPoincareFig(grid_size=200, zoom=1, ax=None):
 def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation="none"):
     # Make plot of fundamental domain
     if ax is None:
-        fig, ax = prepPoincareFig(grid_size=grid_size)
+        fig, ax = prepPoincareFig(grid_size=grid_size, withGrid=False)
     zoom = 1
 
     drawPoincareGrid(
@@ -1525,13 +1534,6 @@ def plotPoincareCTiling(
         fig, ax = prepPoincareFig(grid_size=grid_size)
     zoom = 1
 
-    drawPoincareGrid(
-        ax,
-        grid_size=grid_size,
-        zoom=zoom,
-        depth=6,
-        c="gray",
-    )
     Fs, labels = generateShearTransformations(depth=depth, leftApplied=leftApplied)
 
     swap = np.array([[0, 1], [1, 0]], dtype=int)  # col1 <- col1 + col2
@@ -1611,15 +1613,8 @@ def plotPoincareFTiling(
     # Make plot of fundamental domain
     if ax is None:
         fig, ax = prepPoincareFig(grid_size=grid_size)
-    zoom = 1
 
-    drawPoincareGrid(
-        ax,
-        grid_size=grid_size,
-        zoom=zoom,
-        depth=6,
-        c="gray",
-    )
+
     Fs, labels = generateShearTransformations(depth=depth, leftApplied=leftApplied)
 
     F = getFFundamental(grid_size=int(grid_size * extra_grid))
@@ -1660,15 +1655,6 @@ def plotPoincarePointMapping(
     # Make plot of fundamental domain
     if ax is None:
         fig, ax = prepPoincareFig(grid_size=grid_size)
-    zoom = 1
-
-    drawPoincareGrid(
-        ax,
-        grid_size=grid_size,
-        zoom=zoom,
-        depth=6,
-        c="gray",
-    )
 
     swap = np.array([[0, 1], [1, 0]], dtype=int)  # col1 <- col1 + col2
     flip = np.array([[-1, 0], [0, 1]], dtype=int)  # col1 <- col1 - col2
@@ -1683,7 +1669,6 @@ def plotPoincarePointMapping(
             ax,
             point,
             grid_size=grid_size,
-            zoom=zoom,
             scatter=True,
             c=c,
             s=size,
@@ -1698,7 +1683,6 @@ def plotPoincarePointMapping(
             ax,
             points,
             grid_size=grid_size,
-            zoom=zoom,
             arrow=True,
             c=c,
             label=label,

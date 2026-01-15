@@ -20,7 +20,7 @@ from MTMath.plotEnergy import (
 )
 from Management.jobs import propperJob
 
-from MTMath.contiPotential import ContiEnergy
+from MTMath.energyFunction import ContiEnergy
 from .makePlots import makePlot, makeLogPlotComparison
 from .remotePlotting import get_csv_files
 from .dataFunctions import get_data_from_name, VTUData, CArrsToMat, get_previous_data

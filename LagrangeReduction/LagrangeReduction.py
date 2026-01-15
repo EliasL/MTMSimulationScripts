@@ -4,7 +4,7 @@ import numpy as np
 from collections import deque
 from tqdm import tqdm
 from matplotlib import pyplot as plt
-from MTMath.contiPotential import EnergyFunction, Rotation, F_from_C
+from MTMath.energyFunction import EnergyFunction, rotation, F_from_C
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -294,7 +294,7 @@ def align_matrix(F, align_to="x"):
     theta = target_angle - angle
 
     # Rotation matrix
-    R = Rotation(theta)
+    R = rotation(theta)
 
     # Apply rotation
     FR = R @ F

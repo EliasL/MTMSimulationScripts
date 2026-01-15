@@ -1,4 +1,4 @@
-from contiPotential import SuperSimple
+from MTMath.energyFunction import SuperSimple
 import sympy as sp
 import re
 

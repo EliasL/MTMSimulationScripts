@@ -1,6 +1,6 @@
 import numpy as np
 from SymbolicFEM import FEM
-from contiPotential import ContiEnergy
+from MTMath.energyFunction import ContiEnergy
 from matplotlib import pyplot as plt
 import sympy as sp
 

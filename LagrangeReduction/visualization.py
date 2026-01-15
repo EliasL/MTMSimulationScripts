@@ -23,7 +23,8 @@ from MTMath.plotEnergy import (
     generate_piola_stress_grid,
     drawPoincareGrid,
 )
-from MTMath.contiPotential import ContiEnergy, SShear, PieceWiseQuadratic, elastic_domain_quadrant, elastic_reduction
+from MTMath.energyFunction import ContiEnergy, SShear, PieceWiseQuadratic
+from MTMath.reduction import elastic_domain_quadrant, elastic_reduction
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -634,7 +635,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         elif self.showElasticReduction:
             def CToQuadrant(C):
                 C_R = elastic_reduction(C, loops=100)
-                return elastic_domain_quadrant(C_R)
+                #TODO replace -1 with nan
+                return elastic_domain_quadrant(C_R).replace()
             field = generate_grid(function=CToQuadrant,resolution=ppu)
         else:
             field = generate_energy_grid(

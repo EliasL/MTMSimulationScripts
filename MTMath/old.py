@@ -1,6 +1,6 @@
 import sympy as sp
 import re
-from contiPotential import ContiEnergy
+from MTMath.energyFunction import ContiEnergy
 
 # Retrieve the symbolic expressions from your potential function.
 phi, div_phi, div_div_phi = ContiEnergy.symbolic_potential()

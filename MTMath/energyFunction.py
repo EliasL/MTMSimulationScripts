@@ -1,7 +1,8 @@
-from sympy import symbols, diff, sqrt, log, lambdify, ccode, cse, simplify, Rational
+from sympy import symbols, diff, sqrt, log, lambdify, ccode, cse, simplify, Rational, S
 import numpy as np
 from typing import TypeAlias
-from numpy.typing import ArrayLike, NDArray
+from numpy.typing import ArrayLike
+from .reduction import lagrange_reduction, lagrange_reduction_components
 
 Array: TypeAlias = ArrayLike | int | float
 Array_Str: TypeAlias = Array | str
@@ -132,7 +133,7 @@ class EnergyFunction:
     ):
         # Reduce using Lagrange reduction
         # C is reduced!
-        lagrange_reduction(C, loops=loops)
+        C, M = lagrange_reduction(C, loops=loops)
         return cls.energy_from_reduced_C(C, beta, K, noise, zeroReference)
 
     @classmethod
@@ -147,7 +148,7 @@ class EnergyFunction:
         zeroReference=True,
         loops=1000,
     ):
-        lagrange_reduction_components(C11, C22, C12, loops=loops)
+        C11, C22, C12, M = lagrange_reduction_components(C11, C22, C12, loops=loops)
         return cls.energy_from_reduced_C_components(
             C11, C22, C12, beta, K, noise, zeroReference
         )
@@ -213,8 +214,7 @@ class EnergyFunction:
         """
         assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
 
-        C_R = C.copy()  # to be modified in place
-        M_R = lagrange_reduction(C_R, returnM=True)
+        C_R , M_R = lagrange_reduction(C)
 
         sigma = cls.sigma_from_C_R(C_R, beta=beta, K=K, noise=noise)
 
@@ -252,7 +252,7 @@ class EnergyFunction:
         P = cls.P_from_F(F, beta=beta, K=K, noise=noise)
 
         # Compute det(F) robustly and check physicality using the shared helper
-        _, J = _assert_physical_det(F, "cauchy_from_F", return_J=True)
+        _, J = _assert_physical_det(F, "cauchy_from_F")
 
         # σ = (1/J) * P * F^T
         FT = F.swapaxes(-1, -2)
@@ -438,181 +438,62 @@ class PieceWiseQuadratic(EnergyFunction):
         return (
             0.5 * xi * (((C11 - C22) / 2) ** 2)
             + 0.5 * eta * C12**2
-            + 0.5 * kappa * (J - 1) ** 2
+            + 0.5 * kappa * (J - S.One) ** 2
         )
 
-
-def apply_right_trans(t, A):
-    # We apply a matrix multiplication from the right: A@t
-    # This is because we are using the right cauchy green stress tensor C
-    # So C=F^TF, so when we apply something to F, we need to do it from
-    # the right, so that F'=Ft => C' = t^TF^TFt = t^TCt.
-    # If we were applying changes from the left, we need to have access to F:
-    # F_=tF => C_=F^Tt^TtF. Here, unlike when applying changes from the right,
-    # the changes appear "inside" C_, so we can't apply them.
-    # This explination is not accurate...
-    return np.einsum("...ij,...jk->...ik", A, t)
-
-
-def lagrange_reduction_components(C11, C22, C12, loops=1000, returnM=False):
+def F_from_C(C):
     """
-    Lagrange reduction of (C11, C22, C12) in place.
-    If returnMs is True, returns an array M of right-multiplication matrices such that
-    the reduced C = M.T @ C @ M for each entry.
+    Given C = F^T F (right Cauchy–Green tensor), this function returns
+    the unique symmetric positive-definite tensor U such that
+        U^T U = C,
     """
-    if returnM:
-        # Initialize M as identity matrices everywhere, shape (...,2,2)
-        M = np.zeros(C11.shape + (2, 2), dtype=float)
-        M[..., 0, 0] = 1.0
-        M[..., 1, 1] = 1.0
-
-        # Define the three right-multiplication matrices
-        m1 = np.array([[1, 0], [0, -1]], dtype=float)
-        m2 = np.array([[0, 1], [1, 0]], dtype=float)
-        m3 = np.array([[1, -1], [0, 1]], dtype=float)
-
-    for i in range(loops):
-        mask1 = C12 < 0
-        # m1 (flip) operation
-        C12[mask1] *= -1
-        if returnM:
-            M_mask = M[mask1]
-            if M_mask.shape[0] > 0:
-                # Right-multiply: M <- M @ m1
-                M[mask1] = apply_right_trans(m1, M_mask)
-
-        mask2 = C22 < C11
-        # m2 (swap) operation
-        C11[mask2], C22[mask2] = C22[mask2].copy(), C11[mask2].copy()
-        if returnM:
-            M_mask = M[mask2]
-            if M_mask.shape[0] > 0:
-                M[mask2] = apply_right_trans(m2, M_mask)
-
-        mask3 = 2 * C12 > C11
-        # Stop the loop if no changes are made
-        if not np.any(mask1 | mask2 | mask3):
-            break
-
-        # m3 operation
-        C22[mask3] += C11[mask3] - 2 * C12[mask3]
-        C12[mask3] -= C11[mask3]
-        if returnM:
-            M_mask = M[mask3]
-            if M_mask.shape[0] > 0:
-                M[mask3] = apply_right_trans(m3, M_mask)
-
-        if i + 1 == loops and loops > 200:
-            print("Warning: Not enough lagrange reduction loops")
-
-            # print example of non-reduced C
-            index = np.where(mask1 | mask2 | mask3)
-            print("Indices of non-reduced C:", index)
-            print(
-                f"Example of non-reduced C: C11={C11[index][0]}, C22={C22[index][0]}, C12={C12[index][0]}"
-            )
-
-            # raise (RuntimeError("Not reduced"))
-    # Modifies in place
-    if returnM:
-        return M
-
-
-def lagrange_reduction(C, loops=1000, returnM=False):
-    """
-    Modifies C in place to its Lagrange-reduced form.
-    """
+    C = np.asarray(C)
     assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
-    assert np.allclose(C[..., 1, 0], C[..., 0, 1], equal_nan=True), "C must be symetric"
 
-    # Extract views (no copy) from the promoted array
-    C11, C22, C12 = C[..., 0, 0], C[..., 1, 1], C[..., 0, 1]
+    # Track NaNs to reinsert later
+    nan_mask = np.isnan(C).any(axis=(-1, -2))
 
-    # Call function (which modifies arrays in-place and returns M if requested)
-    M = lagrange_reduction_components(C11, C22, C12, loops=loops, returnM=returnM)
+    # Create a safe copy where NaN blocks are replaced with identity
+    C_safe = C.copy()
+    C_safe[nan_mask] = np.eye(2)
 
-    # Explicitly enforce symmetry
-    C[..., 1, 0] = C[..., 0, 1]
+    # Eigen-decomposition of symmetric 2x2 blocks (vectorized)
+    # C = Q diag(λ) Q^T
+    evals, evecs = np.linalg.eigh(C_safe)
 
-    if returnM:
-        return M
-    # When returnM is False we just modify C in place and return None
+    # # Suppose for 2×2 block we want to swap index 0 and 1
+    # idx = np.array([1, 0])  # swap first ↔ second
 
+    # # Permute eigenvalues and eigenvectors accordingly
+    # evals = evals[..., idx]
+    # evecs = evecs[..., :, idx]
 
-def lagrange_reduction_F(F, loops=1000, returnM=False):
-    """
-    Lagrange reduction acting on F in place.
-    We use lagrange reduction on C=F^T F to get the unimodular matrices M,
-    then apply F <- F M.
-    """
-    F = np.asarray(F, dtype=float)
-    if F.shape[-2:] != (2, 2):
-        raise ValueError("F must have shape (..., 2, 2)")
+    # Reconstruct C from its eigen-decomposition: C = Q Λ Q^T
+    # Multiply columns of Q by the eigenvalues
+    C_recon = (evecs * evals[..., None, :]) @ evecs.swapaxes(-1, -2)
 
-    # Columns of F are e1, e2
-    e1 = F[..., :, 0]
-    e2 = F[..., :, 1]
+    # Check reconstruction (with numerical tolerance)
+    assert np.allclose(C_safe, C_recon), "Not able to reconstruct!"
 
-    # Components of C = F^T F
-    C11 = np.einsum("...i,...i->...", e1, e1)
-    C22 = np.einsum("...i,...i->...", e2, e2)
-    C12 = np.einsum("...i,...i->...", e1, e2)
+    # Check positive semi-definiteness
+    assert np.all(evals >= 0), "Negative Eigen values"
+    sqrt_evals = np.sqrt(evals)
 
-    if isinstance(C11, float):
-        # Scalar case: promote to 1-element arrays for lagrange_reduction_components
-        C11 = np.array([C11])
-        C22 = np.array([C22])
-        C12 = np.array([C12])
+    # Build diag(sqrt(λ)) as a matrix with the same broadcast shape as C
+    sqrt_diag = np.zeros_like(C, dtype=float)
+    sqrt_diag[..., 0, 0] = sqrt_evals[..., 0]
+    sqrt_diag[..., 1, 1] = sqrt_evals[..., 1]
 
-    # Run your existing Lagrange reduction on the components, but ask for M
-    M = lagrange_reduction_components(C11, C22, C12, loops=loops, returnM=True)
+    # U = Q diag(sqrt(λ)) Q^T
+    F = evecs @ sqrt_diag @ evecs.swapaxes(-1, -2)
+    # F = R.T @ F @ R
+    # Restore NaNs where original C had NaNs
+    if np.any(nan_mask):
+        F[nan_mask, :, :] = np.nan
 
-    if M.shape[0] == 1 and F.shape == (2, 2):
-        M = M[0, :, :]
-    assert M.shape == F.shape, "M must have shape matching F"
+    return F
 
-    # Apply the accumulated unimodular matrices to F from the right:
-    # F_reduced = F @ M  (vectorized over the leading dimensions)
-    F[...] = np.einsum("...ij,...jk->...ik", F, M)
-
-    if returnM:
-        return M
-
-
-def get_LR_M(C=None, F=None):
-    assert (C is None and F is not None) or (C is not None and F is None), "Only C or F"
-    if C is None:
-        C_r = F.swapaxes(-1, -2) @ F
-    else:
-        C_r = C.copy()
-    return lagrange_reduction(C_r, returnM=True)
-
-
-def flip(matrix, row, col):
-    matrix[..., row, col] *= -1
-
-
-def lag_m1(matrix):
-    flip(matrix, 0, 1)
-    flip(matrix, 1, 1)
-
-
-def lag_m2(matrix):
-    # swap columns only
-    c0 = matrix[..., :, 0].copy()
-    matrix[..., :, 0] = matrix[..., :, 1]
-    matrix[..., :, 1] = c0
-
-
-# applies m3 n times
-def lag_m3(matrix, n=1):
-    # https://www.wolframalpha.com/input?i=%7B%7B1%2C+-1%7D%2C+%7B0%2C+1%7D%7D%5En
-    multiplier_matrix = np.array([[1, -n], [0, 1]])
-    # Perform matrix multiplication on the last two axes
-    np.einsum("...ij,...jk->...ik", matrix, multiplier_matrix, out=matrix)
-
-
-def Rotation(theta: (float | np.ndarray) = 0.0) -> np.ndarray:
+def rotation(theta: (float | np.ndarray) = 0.0) -> np.ndarray:
     c = np.cos(theta)
     s = np.sin(theta)
     # Stack last two dims as 2×2
@@ -625,26 +506,33 @@ def Rotation(theta: (float | np.ndarray) = 0.0) -> np.ndarray:
     )
 
 
-def SShear(
+def _sshear_direction_to_params(h: str) -> tuple[float, float]:
+    """Map a string direction to (h, theta)."""
+    d = h.lower()
+    if d in ["r", "right"]:
+        return 1.0, 0.0
+    elif d in ["l", "left"]:
+        return -1.0, 0.0
+    elif d in ["u", "up"]:
+        return -1.0, np.pi / 2
+    elif d in ["d", "down"]:
+        return 1.0, np.pi / 2
+    else:
+        raise ValueError(f"Unknown direction: {h}")
+
+
+def _SShear_core(
     h: Array_Str = 1.0,
     theta: Array = 0.0,
     s_conponent=(0, 1),
-    returnR=False,
-    getBodyRotation=False,
-) -> np.ndarray:
-    # --- string convenience interface, unchanged ---
+    *,
+    compute_R_body: bool = False,
+):
+    # --- string convenience interface ---
     if isinstance(h, str):
-        d = h.lower()
-        if d in ["r", "right"]:
-            return SShear(1.0, 0.0)
-        elif d in ["l", "left"]:
-            return SShear(-1.0, 0.0)
-        elif d in ["u", "up"]:
-            return SShear(-1.0, np.pi / 2)
-        elif d in ["d", "down"]:
-            return SShear(1.0, np.pi / 2)
-        else:
-            raise ValueError(f"Unknown direction: {h}")
+        h_num, theta_num = _sshear_direction_to_params(h)
+        h = h_num
+        theta = theta_num
 
     # --- numeric interface: fully vectorized ---
     h = np.asarray(h, dtype=float)
@@ -664,20 +552,47 @@ def SShear(
     elif s_conponent == (0, 0):
         shear[..., 1, 1] = 1 / (1 + h)
 
-    if getBodyRotation:
-        R_body = get_rotation(shear)
+    R_body = get_rotation(shear) if compute_R_body else None
 
-    R = Rotation(theta)
-    RT = np.swapaxes(R, -1, -2)
+    R = rotation(theta)
+    RT = R.swapaxes(-1, -2)
     rotShear = R @ shear @ RT
 
-    if returnR:
-        if getBodyRotation:
-            return rotShear, R, R_body
-        return rotShear, R
-    if getBodyRotation:
-        return rotShear, R_body
+    return rotShear, R, R_body
+
+
+def SShear(
+    h: Array_Str = 1.0,
+    theta: Array = 0.0,
+    s_conponent=(0, 1),
+) -> np.ndarray:
+    """Return only the rotated shear tensor (backward-compatible default)."""
+    rotShear, _, _ = _SShear_core(h=h, theta=theta, s_conponent=s_conponent)
     return rotShear
+
+
+def SShear_with_R(
+    h: Array_Str = 1.0,
+    theta: Array = 0.0,
+    s_conponent=(0, 1),
+):
+    """Return (rotShear, R), where R is the imposed rigid rotation Rotation(theta)."""
+    rotShear, R, _ = _SShear_core(
+        h=h, theta=theta, s_conponent=s_conponent
+    )
+    return rotShear, R
+
+
+def SShear_with_R_body(
+    h: Array_Str = 1.0,
+    theta: Array = 0.0,
+    s_conponent=(0, 1),
+):
+    rotShear, R, R_body = _SShear_core(
+        h=h, theta=theta, s_conponent=s_conponent, compute_R_body=True
+    )
+    assert R_body is not None
+    return rotShear, R, R_body
 
 
 def _nan_mask_and_det2x2(M: np.ndarray):
@@ -694,14 +609,13 @@ def _nan_mask_and_det2x2(M: np.ndarray):
     return nan_mask, J
 
 
-def _assert_physical_det(M: np.ndarray, context: str, return_J: bool = False):
+def _assert_physical_det(M: np.ndarray, context: str):
     """Check det(M) > 0 where defined; raise if non-physical."""
     nan_mask, J = _nan_mask_and_det2x2(M)
     if np.any((J < 0) & ~np.isnan(J)):
         print(f"Warning! {context}: encountered det < 0 (non-physical).")
-    if return_J:
-        return nan_mask, J
-    return nan_mask
+    return nan_mask, J
+
 
 
 def get_rotation(F):
@@ -742,280 +656,7 @@ def get_rotation(F):
     return R
 
 
-def unRotate_by_F(F, A, reverseDirection=False):
-    """Un-rotate a 2x2 tensor A using the rotation part of F.
 
-    Given the polar decomposition F = R U obtained via SVD, this
-    function returns A' = R^T A R, i.e. the components of A in the
-    co-rotated frame defined by R.
-    """
-    F = np.asarray(F)
-    A = np.asarray(A)
-
-    assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
-    assert A.shape[-2:] == (2, 2), "A must have shape (..., 2, 2)"
-    assert F.shape == A.shape, "F and A must have the same shape"
-
-    # Physicality + NaN mask in one place
-    nan_mask = _assert_physical_det(F, "unRotate_by_F")
-
-    R = get_rotation(F)
-    if reverseDirection:
-        R = np.swapaxes(R, -1, -2)
-
-    RT = np.swapaxes(R, -1, -2)
-    A_unrot = np.einsum("...ij,...jk,...kl->...il", RT, A, R)
-
-    if np.any(nan_mask):
-        A_unrot[nan_mask] = np.nan
-
-    return A_unrot
-
-
-def remove_rotation(F):
-    """Remove rotation from a 2x2 tensor A using polar decomposition.
-
-    Interpreting A as a deformation gradient F, with polar
-    decomposition F = R U, this returns the stretch-like part
-    """
-    F = np.asarray(F)
-    assert F.shape[-2:] == (2, 2), "A must have shape (..., 2, 2)"
-
-    nan_mask = _assert_physical_det(F, "remove_rotation")
-
-    R = get_rotation(F)
-    RT = np.swapaxes(R, -1, -2)
-    U = np.einsum("...ij,...jk->...ik", RT, F)
-
-    if np.any(nan_mask):
-        U[nan_mask] = np.nan
-
-    return U
-
-
-def F_from_C(C, theta=np.pi / 3):
-    """
-    Return the symmetric positive-definite square root of C.
-
-    Given C = F^T F (right Cauchy–Green tensor), this function returns
-    the unique symmetric positive-definite tensor U such that
-
-        U^T U = C,
-
-    i.e. the right stretch U in the polar decomposition F = R U.
-
-    Optionally, you can choose a rotation theta
-
-    Note:
-        From C alone the rotation R is not identifiable; only U is.
-        The `upper` argument is kept only for backward compatibility
-        and is ignored.
-    """
-    C = np.asarray(C)
-    assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
-
-    # Track NaNs to reinsert later
-    nan_mask = np.isnan(C).any(axis=(-1, -2))
-
-    # Create a safe copy where NaN blocks are replaced with identity
-    C_safe = C.copy()
-    C_safe[nan_mask] = np.eye(2)
-
-    R = Rotation(theta)
-    # C_safe = R.T @ C_safe @ R
-
-    # Eigen-decomposition of symmetric 2x2 blocks (vectorized)
-    # C = Q diag(λ) Q^T
-    evals, evecs = np.linalg.eigh(C_safe)
-
-    # # Suppose for 2×2 block we want to swap index 0 and 1
-    # idx = np.array([1, 0])  # swap first ↔ second
-
-    # # Permute eigenvalues and eigenvectors accordingly
-    # evals = evals[..., idx]
-    # evecs = evecs[..., :, idx]
-
-    # Reconstruct C from its eigen-decomposition: C = Q Λ Q^T
-    # Multiply columns of Q by the eigenvalues
-    C_recon = (evecs * evals[..., None, :]) @ evecs.swapaxes(-1, -2)
-
-    # Check reconstruction (with numerical tolerance)
-    assert np.allclose(C_safe, C_recon), "Not able to reconstruct!"
-
-    # Check positive semi-definiteness
-    assert np.all(evals >= 0), "Negative Eigen values"
-    sqrt_evals = np.sqrt(evals)
-
-    # Build diag(sqrt(λ)) as a matrix with the same broadcast shape as C
-    sqrt_diag = np.zeros_like(C, dtype=float)
-    sqrt_diag[..., 0, 0] = sqrt_evals[..., 0]
-    sqrt_diag[..., 1, 1] = sqrt_evals[..., 1]
-
-    # U = Q diag(sqrt(λ)) Q^T
-    F = evecs @ sqrt_diag @ evecs.swapaxes(-1, -2)
-    # F = R.T @ F @ R
-    # Restore NaNs where original C had NaNs
-    if np.any(nan_mask):
-        F[nan_mask, :, :] = np.nan
-
-    return F
-
-def in_elastic_domain(C11, C22, C12)->NDArray[np.bool_]:
-    """Return True where (C11, C22, C12) lies in the elastic domain.
-
-    Minimal checks:
-      - min(C11, C22) > 0
-      - |C12| <= 0.5 * min(C11, C22)
-
-    Works with scalars or NumPy arrays (broadcasting). For array inputs, returns
-    a boolean array with the broadcasted shape.
-    """
-    C11a = np.asarray(C11)
-    C22a = np.asarray(C22)
-    C12a = np.asarray(C12)
-
-    Cmin = np.minimum(C11a, C22a)
-    inside = (Cmin > 0) & (np.abs(C12a) <= 0.5 * Cmin)
-    return inside
-
-def elastic_domain_quadrant(C) -> NDArray[np.int_]:
-    """Return elastic-domain quadrant label (0..3), or -1 if outside.
-
-    Quadrants:
-      0: C11>0, C11<=C22,  0 <= C12 <= 0.5*C11
-      1: C11>0, C11<=C22, -0.5*C11 <= C12 <  0
-      2: C22>0, C22<=C11,  0 <= C12 <= 0.5*C22
-      3: C22>0, C22<=C11, -0.5*C22 <= C12 <  0
-
-    Boundary convention: C12 == 0 goes to the non-negative side (0 or 2).
-    Works with scalars or NumPy arrays (broadcasting). For array inputs, returns
-    an integer array with the broadcasted shape.
-    """
-    assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
-    assert np.allclose(C[..., 1, 0], C[..., 0, 1], equal_nan=True), "C must be symetric"
-
-    C11a = np.asarray(C[..., 0,0])
-    C22a = np.asarray(C[..., 1,1])
-    C12a = np.asarray(C[..., 0,1])
-
-
-    q0 = (C11a > 0) & (C11a <= C22a) & (C12a >= 0) & (C12a <= 0.5 * C11a)
-    q1 = (C11a > 0) & (C11a <= C22a) & (C12a < 0) & (C12a >= -0.5 * C11a)
-    q2 = (C22a > 0) & (C22a <= C11a) & (C12a >= 0) & (C12a <= 0.5 * C22a)
-    q3 = (C22a > 0) & (C22a <= C11a) & (C12a < 0) & (C12a >= -0.5 * C22a)
-
-    labels = np.full(C11a.shape, np.nan)
-    labels[q0] = 0
-    labels[q1] = 1
-    labels[q2] = 2
-    labels[q3] = 3
-
-    return labels
-
-def elastic_reduction_components(C11, C22, C12, loops=1000):
-    """Vectorized elastic reduction of symmetric 2x2 C via component updates.
-
-    Parameters
-    ----------
-    C11, C22, C12 : array_like
-        Components of symmetric C = [[C11, C12],[C12, C22]].
-        Can be scalars or NumPy arrays; will be broadcast to a common shape.
-    loops : int
-        Max iterations.
-
-    Returns
-    -------
-    C11r, C22r, C12r : ndarray or scalars
-        Reduced components. (Scalar in -> scalar out, array in -> array out.)
-    """
-    C11a = np.asarray(C11, dtype=float)
-    C22a = np.asarray(C22, dtype=float)
-    C12a = np.asarray(C12, dtype=float)
-
-    C11b, C22b, C12b = np.broadcast_arrays(C11a, C22a, C12a)
-
-    # Work on copies to avoid surprising in-place effects for views
-    a = C11b.copy()
-    b = C22b.copy()
-    c = C12b.copy()
-
-    def _in_elastic(a_, b_, c_):
-        Cmin = np.minimum(a_, b_)
-        return (Cmin >= 0) & (np.abs(c_) <= 0.5 * Cmin)
-    done= False
-    for _ in range(loops):
-        inside = _in_elastic(a, b, c)
-        active = ~inside
-        if not np.any(active):
-            done=True
-            break
-
-        use_U = active & (a < b)
-        use_V = active & ~use_U  # includes a >= b
-
-        # m = sign(-c/a) or sign(-c/b), but avoid divide-by-zero / NaNs
-        mU = np.zeros_like(a)
-        mV = np.zeros_like(a)
-
-        if np.any(use_U):
-            denom = np.where(a == 0, 1.0, a)
-            mU = np.sign(-c / denom)
-            mU = np.where(np.isfinite(mU), mU, 0.0)
-
-        if np.any(use_V):
-            denom = np.where(b == 0, 1.0, b)
-            mV = np.sign(-c / denom)
-            mV = np.where(np.isfinite(mV), mV, 0.0)
-
-        # --- Apply U_m where selected: W = [[1,m],[0,1]] ---
-        # a' = a
-        # c' = c + m*a
-        # b' = b + 2*m*c + m^2*a
-        if np.any(use_U):
-            m = mU
-            c_new = c + m * a
-            b_new = b + 2.0 * m * c + (m * m) * a
-
-            c = np.where(use_U, c_new, c)
-            b = np.where(use_U, b_new, b)
-            # a unchanged for U
-
-        # --- Apply V_m where selected: W = [[1,0],[m,1]] ---
-        # b' = b
-        # c' = c + m*b
-        # a' = a + 2*m*c + m^2*b
-        if np.any(use_V):
-            m = mV
-            c_new = c + m * b
-            a_new = a + 2.0 * m * c + (m * m) * b
-
-            c = np.where(use_V, c_new, c)
-            a = np.where(use_V, a_new, a)
-            # b unchanged for V
-    
-    if not done:
-        print("Warning! Not enough loops in elastic reduction!")
-    # Preserve scalar return type when inputs are scalars
-    if a.shape == ():
-        return float(a), float(b), float(c)
-    return a, b, c
-
-def elastic_reduction(C, loops=1000):
-    assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
-    assert np.allclose(C[..., 1, 0], C[..., 0, 1], equal_nan=True), "C must be symetric"
-
-    # Extract views (no copy) from the promoted array
-    C11, C22, C12 = C[..., 0, 0], C[..., 1, 1], C[..., 0, 1]
-
-    # Call function (which modifies arrays in-place and returns M if requested)
-    C11, C22, C12 =elastic_reduction_components(C11, C22, C12, loops=loops)
-
-    C[..., 0, 0]=C11
-    C[..., 1, 1]=C22
-    C[..., 0, 1]=C12
-    C[..., 1, 0]=C12
-
-    return C
 
 def generate_cpp_code(expressions_dict):
     expressions = list(expressions_dict.values())
@@ -1080,7 +721,6 @@ def debug_symbolic_cauchy_trace():
     det(F) = 1 and noise = 1 the trace is exactly zero, i.e. the
     isochoric part is deviatoric and all trace is volumetric.
     """
-    from sympy import symbols, simplify
 
     # Symbols for principal stretches
     a, b = symbols("a b", positive=True)
@@ -1101,8 +741,8 @@ def debug_symbolic_cauchy_trace():
     dPhi_dC22 = diff(phi_sym, C22)
     # dPhi_dC12 is not required for the trace in the diagonal case
 
-    S11 = 2 * dPhi_dC11
-    S22 = 2 * dPhi_dC22
+    S11 = S(2) * dPhi_dC11
+    S22 = S(2) * dPhi_dC22
 
     # Specialize to C = diag(a^2, b^2), C12 = 0
     subs_diag = {C11: a**2, C22: b**2, C12: 0}
@@ -1181,33 +821,11 @@ def sanityCheck_Piola(verbose=True):
     check(true_P, gamma)
 
 
-def sanityCheck_LagrangeReduction(C):
-    C_reduced = C.copy()
-    M = lagrange_reduction(C_reduced, returnM=True)
-    test = M.T @ C @ M
-    assert np.allclose(test, C_reduced), "Lagrange reduction failed sanity check"
-
-
-
-    def mapBack(M, C_R):  # returns M C M^T
-        Minv = np.linalg.inv(M)
-        return np.swapaxes(Minv, -1, -2) @ C_R @ Minv
-
-    passed = np.allclose(C, mapBack(M_R, C_R), equal_nan=True)
-    # Which M maps C_R -> C ?
-    print("M_R back to C:", passed)
-    return passed
-
-def debug_elastic_reduction():
-    F = np.array([[1,1],[0,1]])
-    C = F.T@F
-    C_R = elastic_reduction(C)
-    print(C)
-    print(C_R)
 
 
 
 if __name__ == "__main__":
+    pass
     #debug_symbolic_cauchy_trace()
     # sanityCheck_Piola()
     # # Get symbolic expressions from ContiEnergy
@@ -1227,5 +845,3 @@ if __name__ == "__main__":
 
     # print("Stress function:\n", stress_code)
     # print(ContiEnergy.ground_state_energy())
-
-    debug_elastic_reduction()

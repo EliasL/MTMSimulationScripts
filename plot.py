@@ -35,6 +35,7 @@ from MTMath.poincareTiling import (
     drawRotationExplanationFigs,
     drawRotation2ExplanationFigs,
 )
+from MTMath.decomposeElasticPlastic import showDecomposition
 from MTMath.plotEnergy import generate_cauchy_stress_grid, generate_energy_grid
 from plotAll import plotAll
 from Plotting.remotePlotting import (
@@ -333,4 +334,5 @@ if __name__ == "__main__":
     # plotsLotsOfRealFStress("pk2", reduced=True)
     # bug_hunting()
     # testCombinedDists()
-    elasticReductionPlots()
+    #elasticReductionPlots()
+    showDecomposition()

@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
 from .plotEnergy import (
     plotPoincarePointMapping,
     plotPoincareCTiling,
@@ -13,21 +14,16 @@ from .plotEnergy import (
     drawCircles,
 )
 import numpy as np
-from MTMath.contiPotential import (
+from MTMath.energyFunction import (
     EnergyFunction,
     ContiEnergy,
     PieceWiseQuadratic,
-    F_from_C,
     SShear,
-    Rotation,
-    remove_rotation,
+    rotation,
     get_rotation,
-    unRotate_by_F,
     lagrange_reduction,
-    lagrange_reduction_F,
-    get_LR_M,
-    sanityCheck_LagrangeReduction,
 )
+from .reduction import lagrange_reduction_F
 import os
 import string
 
@@ -256,7 +252,6 @@ def plotShearFiniteDifferenceDerivatives():
     print(f"Saved plot to: {path}")
     # plt.show()
     plt.close()
-    from MTMath.plotEnergy import drawPoincareGrid, drawC, Circle
 
     fig, ax = plt.subplots(figsize=(6, 6))
     grid_size = 200
@@ -653,12 +648,10 @@ def plotStressFromRealF(
     nr_theta = len(theta)
     gamma = np.linspace(0, gamma_lim, nr_gamma)
     eFunc = PieceWiseQuadratic  # ContiEnergy
-    F, R, R_body = SShear(
+    F = SShear(
         h=gamma,
         theta=theta,
-        s_conponent=s_component,
-        returnR=True,
-        getBodyRotation=True,
+        s_conponent=s_component
     )
     if stress_type == "cauchy":
         stress = eFunc.cauchy_from_F(F)
@@ -672,7 +665,7 @@ def plotStressFromRealF(
         raise RuntimeError(f"Unknown stress type: {stress_type}")
 
     if reduced:
-        M = get_LR_M(F=F)
+        _, M = lagrange_reduction_F(F)
         Minv = np.linalg.inv(M)
         stress = Minv @ stress @ Minv.swapaxes(-1, -2)
 
@@ -983,8 +976,8 @@ def getQuadrant2(F):
 
 def getQuadrantSylvain(C, eFunc: type[EnergyFunction] = ContiEnergy):
     # Step 1: Gauss/Lagrange reduction to D
-    C0 = C.copy()
-    m0 = lagrange_reduction(C0, returnM=True)
+
+    C0, m0 = lagrange_reduction(C)
     m0Inv = np.linalg.inv(m0)
 
     # Second PK stress from original C
@@ -1039,7 +1032,7 @@ def getQuadrantSylvain(C, eFunc: type[EnergyFunction] = ContiEnergy):
 def getIdOfF(F: np.ndarray, theta: np.ndarray = np.array(0)) -> np.ndarray:
     s = ContiEnergy.cauchy_from_F(F)
     # s = ContiEnergy.S_from_F(F)
-    R = Rotation(theta)
+    R = rotation(theta)
     RT = np.swapaxes(R, -1, -2)
     s = np.einsum("...ij,...jk,...kl->...il", RT, s, R)
     shear = s[..., 0, 1]
@@ -1093,8 +1086,7 @@ def tryAllRotations(
     C = F.T @ F
     print("Original F:\n", F)
     printRot(F, "Original F")
-    reduced_C = C.copy()
-    M = lagrange_reduction(reduced_C, returnM=True)
+    reduced_C, M = lagrange_reduction(C)
     F_reduced = F @ M
     # F_reduced = F_from_C(reduced_C)
 
@@ -1113,9 +1105,9 @@ def tryAllRotations(
     F_candidate4 = F_candidate3 @ m1
 
     F_candidate1 = F_reduced
-    F_candidate2 = Rotation(np.pi / 4).T @ F_reduced @ Rotation(np.pi / 4)
-    F_candidate3 = Rotation(np.pi / 4) @ F_reduced @ Rotation(np.pi / 4).T
-    F_candidate4 = Rotation(np.pi / 4) @ F_candidate3 @ Rotation(np.pi / 4).T
+    F_candidate2 = rotation(np.pi / 4).T @ F_reduced @ rotation(np.pi / 4)
+    F_candidate3 = rotation(np.pi / 4) @ F_reduced @ rotation(np.pi / 4).T
+    F_candidate4 = rotation(np.pi / 4) @ F_candidate3 @ rotation(np.pi / 4).T
 
     F_candidate1 = F_reduced
     F_candidate2 = m1 @ F_reduced @ m1
@@ -1504,6 +1496,3 @@ def elasticReductionPlots():
                 C, max_depth=depth, show_dead_ends=showDeadEnds, name=name
             )
 
-
-def elasticExpansion(targetC):
-    

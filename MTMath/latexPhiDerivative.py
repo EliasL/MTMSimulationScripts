@@ -1,6 +1,6 @@
 import sympy as sp
 import re
-from contiPotential import ContiEnergy, SuperSimple
+from MTMath.energyFunction import ContiEnergy, SuperSimple
 
 
 class SymbolicFEM:

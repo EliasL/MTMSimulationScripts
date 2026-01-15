@@ -2,7 +2,7 @@ import manim as M
 from manim import WHITE, BLUE, GREEN, YELLOW, DEGREES
 import numpy as np
 
-from contiPotential import numeric_conti_potential
+from MTMath.energyFunction import numeric_conti_potential
 
 phi, _, _ = numeric_conti_potential()
 

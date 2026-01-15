@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize
 
-from contiPotential import ContiEnergy
+from MTMath.energyFunction import ContiEnergy
 from tqdm import tqdm
 import multiprocessing as mp
 
