@@ -1037,13 +1037,13 @@ def get_previous_energy_and_rss(macro_data, current_line, X="load"):
 
 
 def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
-    print(f"Processing {kwargs['fileName']} video.")
+    print(f"Processing {kwargs['fileName']} video meta data...")
     # Calculate global axis limits and energy range
     macro_data = kwargs["macro_data"]
     if macro_data:
         axis_limits = get_axis_limits(macro_data)
         e_lims = get_energy_range(vtu_files, macro_data)
-        # e_lims[1] = min(e_lims[1], 0.2)
+        e_lims[1] = min(e_lims[1], 0.3)  # optional custom limit
         avgEnergy, avgRSS, delAvgEnergy, delAvgRSS, delx, macroDataRowIndex = (
             get_corresponding_energy_and_rss(vtu_files, macro_data, X)
         )
@@ -1091,6 +1091,7 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
         for i in range(len(vtu_files))
     ]
 
+    print(f"Processing {kwargs['fileName']} video frames...")
     # Use line below to debug with first item in kwargs_list
     image_paths = process_frame(kwargs_list[0])
 

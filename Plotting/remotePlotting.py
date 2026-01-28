@@ -59,7 +59,8 @@ OLD_TO_NEW_KEYS = {
 }
 
 
-def update_headers_in_file(csv_path):
+def unused_update_headers_in_file(csv_path):
+    print("don't use. Use the one in updateCSV.py")
     df = pd.read_csv(csv_path)
 
     rename_dict = {
@@ -372,8 +373,8 @@ def get_csv_from_server(server, configs):
                     # update_progress(len(names))
 
     # Apply header updates on all new files
-    for path in newPaths:
-        update_headers_in_file(path)
+    # for path in newPaths:
+    #    unused_update_headers_in_file(path)
 
     return newPaths
 
@@ -1022,8 +1023,14 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
     if kwargs.get("colors") == "minimizer":
         base_colors = {"LBFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
         kwargs["colors"] = to_rgba(base_colors[configs[0].minimizer], alpha=0.2)
-    if kwargs.get("legend") is None:
+    if len(labels) == len(paths):
+        kwargs["legend"] = labels
+    elif kwargs.get("legend") is None:
         kwargs["legend"] = name
+
+    if isinstance(paths, list) and isinstance(paths[0], list):
+        paths = [p for p_list in paths for p in p_list]
+        labels = [l for l_list in labels for l in l_list]
 
     fig, ax = makePlot(
         paths,
@@ -1071,7 +1078,7 @@ def plotLog2(config_groups, labels, **kwargs):
 
 if __name__ == "__main__":
     seeds = range(0, 60)
-    configs = ConfigGenerator.generate_over_seeds(
+    paths = ConfigGenerator.generate_over_seeds(
         seeds,
         rows=60,
         cols=60,

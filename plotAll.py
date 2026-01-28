@@ -3,6 +3,7 @@ from Plotting.makePlots import makePlot, makeItterationsPlot
 from Plotting.settings import settings
 from Plotting.dataFunctions import parse_pvd_file, get_data_from_name
 from Plotting.makePvd import create_collection
+from Plotting.remotePlotting import get_csv_files
 
 import os
 from pathlib import Path
@@ -15,49 +16,40 @@ from matplotlib import pyplot as plt
 
 
 def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
-    # unkownFile can be either a .conf, .pvd or .csv file
-    conf, csvPath, pvdFile = None, None, None
     X = "load"
     ylog = False
-    subfolderName = "unkown_"
 
-    if unkownFile != "":
-        if unkownFile.endswith(".conf"):
-            conf = SimulationConfig(unkownFile)
-        elif unkownFile.endswith(".pvd"):
-            pvdFile = unkownFile
-        elif unkownFile.endswith(".csv"):
-            csvPath = unkownFile
+    if isinstance(unkownFile, list):
+        csvPath, labels = get_csv_files(
+            unkownFile, useOldFiles=False, forceUpdate=False
+        )
+        if kwargs.get("labels"):
+            labels = kwargs["labels"]
+        name = kwargs.get("name", "noName") + "_"
+        path = Path(csvPath[0]).parent
+    else:
+        # unkownFile can be either a .conf, .pvd or .csv file
+        conf, csvPath, pvdFile = None, None, None
+        subfolderName = "unkown_"
 
-    path = Path(unkownFile).parent
-    # Try to find other files
-    if os.path.isfile(path / (settings["MACRODATANAME"] + ".csv")):
-        csvPath = str(path / (settings["MACRODATANAME"] + ".csv"))
+        if unkownFile != "":
+            if unkownFile.endswith(".conf"):
+                conf = SimulationConfig(unkownFile)
+            elif unkownFile.endswith(".pvd"):
+                pvdFile = unkownFile
+            elif unkownFile.endswith(".csv"):
+                csvPath = unkownFile
 
-    if os.path.isfile(path / settings["CONFIGNAME"]):
-        conf = SimulationConfig(path / settings["CONFIGNAME"])
-        subfolderName = conf.name
+        path = Path(unkownFile).parent
+        # Try to find other files
+        if os.path.isfile(path / (settings["MACRODATANAME"] + ".csv")):
+            csvPath = str(path / (settings["MACRODATANAME"] + ".csv"))
 
-    if os.path.isfile(path / (settings["COLLECTIONNAME"] + ".pvd")):
-        pvdFile = str(path / (settings["COLLECTIONNAME"] + ".pvd"))
-        vtu_files = parse_pvd_file(path, pvdFile)
-        first = get_data_from_name(vtu_files[0])
-        subfolderName = first["name"]
-        if "minStep" in first:
-            X = "nr_func_evals"
-            ylog = True
+        if os.path.isfile(path / settings["CONFIGNAME"]):
+            conf = SimulationConfig(path / settings["CONFIGNAME"])
+            subfolderName = conf.name
 
-    # if there is no pvd file, we can create one if we find some vtu files
-    if pvdFile is None:
-        # check if there are any vtu files
-        vtu_files = list(path.glob("*.vtu"))
-        dataPath = path
-        if len(vtu_files) == 0:
-            # try data folder too
-            vtu_files = list(path.glob(settings["DATAFOLDERPATH"] + "/*.vtu"))
-            dataPath = path / settings["DATAFOLDERPATH"]
-        if len(vtu_files) > 0:
-            create_collection(dataPath, path, settings["COLLECTIONNAME"])
+        if os.path.isfile(path / (settings["COLLECTIONNAME"] + ".pvd")):
             pvdFile = str(path / (settings["COLLECTIONNAME"] + ".pvd"))
             vtu_files = parse_pvd_file(path, pvdFile)
             first = get_data_from_name(vtu_files[0])
@@ -66,25 +58,59 @@ def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
                 X = "nr_func_evals"
                 ylog = True
 
+        # if there is no pvd file, we can create one if we find some vtu files
+        if pvdFile is None:
+            # check if there are any vtu files
+            vtu_files = list(path.glob("*.vtu"))
+            dataPath = path
+            if len(vtu_files) == 0:
+                # try data folder too
+                vtu_files = list(path.glob(settings["DATAFOLDERPATH"] + "/*.vtu"))
+                dataPath = path / settings["DATAFOLDERPATH"]
+            if len(vtu_files) > 0:
+                create_collection(dataPath, path, settings["COLLECTIONNAME"])
+                pvdFile = str(path / (settings["COLLECTIONNAME"] + ".pvd"))
+                vtu_files = parse_pvd_file(path, pvdFile)
+                first = get_data_from_name(vtu_files[0])
+                subfolderName = first["name"]
+                if "minStep" in first:
+                    X = "nr_func_evals"
+                    ylog = True
+
+        name = subfolderName
+        labels = None
+
     print(f"Plotting at {path}")
     if not noPlots and csvPath is not None:
-        from Plotting.remotePlotting import update_headers_in_file
-
-        update_headers_in_file(csvPath)
         makePlot(
             csvPath,
-            name=subfolderName + "_energy.pdf",
+            name=name + "_energy.pdf",
             X=X,
             Y="avg_energy",
             ylog=ylog,
+            labels=labels,
+            legend=True,
         )
-        makePlot(
-            csvPath,
-            name=subfolderName + "_stress.pdf",
-            X=X,
-            Y="avg_RSS",
-            # xlim=[0, 1],
-        )
+        try:
+            makePlot(
+                csvPath,
+                name=name + "_stress.pdf",
+                X=X,
+                Y="avg_sigmaxy",
+                legend=True,
+                labels=labels,
+                # xlim=[0, 1],
+            )
+        except KeyError as e:
+            makePlot(
+                csvPath,
+                name=name + "_stress.pdf",
+                X=X,
+                Y="avg_Pxy",
+                legend=True,
+                labels=labels,
+                # xlim=[0, 1],
+            )
 
         for Y in [
             "minimization_time",
@@ -100,9 +126,10 @@ def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
                 makePlot(
                     csvPath,
                     Y=Y,
-                    name=subfolderName + f"{Y.replace(' ', '_')}.pdf",
+                    name=name + f"{Y.replace(' ', '_')}.pdf",
                     legend=True,
                     use_title=True,
+                    labels=labels,
                     # xlim=xlim,
                 )
             except KeyError as e:
@@ -111,14 +138,15 @@ def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
         if X == "nr_func_evals":
             makePlot(
                 csvPath,
-                name=subfolderName + "_maxForce.pdf",
+                name=name + "_maxForce.pdf",
                 ylog=ylog,
                 X=X,
                 Y="max_force",
+                labels=labels,
             )
         # makePlot(
         #     csvPath,
-        #     name=subfolderName + "subract_stress.pdf",
+        #     name=name + "subract_stress.pdf",
         #     Y="avg_RSS",
         #     xlim=[0, 1],
         #     subtract="/Volumes/data/MTS2D_output/singleDislocationTest,s10x10l0.0,0.001,4.0NPBCt3meshDiagonalminorepsR1e-06s0/macroData.csv",
@@ -126,7 +154,7 @@ def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
         # if conf is not None:
         #     makePlot(
         #         csvPath,
-        #         name=subfolderName + "_stress+.pdf",
+        #         name=name + "_stress+.pdf",
         #         Y="avg_RSS",
         #         add_images=True,
         #         image_pos=[
@@ -139,7 +167,7 @@ def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
         # Close all plt plots
         plt.close("all")
 
-    # makeItterationsPlot(path+macroData, subfolderName+"_itterations.pdf")
+    # makeItterationsPlot(path+macroData, name+"_itterations.pdf")
     if not noVideos and pvdFile is not None:
         makeAnimations(path, X=X, **kwargs)
 
@@ -223,8 +251,8 @@ if __name__ == "__main__":
             p,
             makeGIF=False,
             transparent=False,
-            noPlots=True,
-            noVideos=False,
+            noPlots=False,
+            noVideos=True,
             combineVideos=False,
             fps=60,
             seconds_per_unit_shear=2,

@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch, Polygon
 from matplotlib.colors import ListedColormap
-from .plotEnergy import plotPoincareDisk, C2PoincareDisk
+from .plotEnergy import plotPoincareDisk, C2Plane
 from matplotlib.colors import BoundaryNorm
 
 
@@ -356,7 +356,7 @@ class DraggableTriangulation:
         pts = []
         for i, j, k, origin, a, b, centroid in self.element_vectors():
             G = self.gram_matrix(a, b)
-            x, y = C2PoincareDisk(G, "triangular")
+            x, y = C2Plane(G, "triangular")
             zoom = 1
             x = x * zoom * self.grid_size / 2 + self.grid_size / 2
             y = y * zoom * self.grid_size / 2 + self.grid_size / 2

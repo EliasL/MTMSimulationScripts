@@ -14,9 +14,26 @@ from simplification.cutil import simplify_coords_vwp
 from tqdm import tqdm
 from pathlib import Path
 from .dataFunctions import get_data_from_name
+from Management.updateCSV import update_df_header
 from collections import defaultdict
 
 # in Plotting/makePlots.py
+
+
+def safePath(path):
+    safe_path = (
+        path.replace(" ", "_")
+        .replace("$", "")
+        .replace("\\", "")
+        .replace("{", "")
+        .replace("}", "")
+        .replace(":", "")
+        .replace("__", "_")
+        .replace("_-_", "-")
+        .replace("mathrm", "")
+        .replace(".00", "")
+    )
+    return safe_path
 
 
 def enable_strict_runtimewarnings():
@@ -1019,6 +1036,7 @@ def makePlot(
         if X is None:
             breakpoint
         df = pd.read_csv(csv_file_path)
+        df = update_df_header(df)
         # If it is a string, we assume it is a time that we can convert to seconds
         if isinstance(df[Y][0], str):
             df[Y] = durations_to_seconds(df[Y])
@@ -1172,7 +1190,7 @@ def makePlot(
     ]
 
     # Set the legend with the filtered handles and labels
-    if legend and isinstance(legend, bool):
+    if legend and not isinstance(legend, str):
         ax.legend(line_handles, line_labels, loc=legend_loc)
 
     elif isinstance(legend, str):
@@ -1211,6 +1229,7 @@ def makePlot(
         fig.tight_layout()
 
         figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
+        figPath = safePath(figPath)
         fig.savefig(figPath)
         print(f'Plot saved at: "{figPath}"')
     if show:
@@ -1383,11 +1402,15 @@ def makeAverageComparisonPlot(
     if Y == "avg_energy":
         y_name = r"Energy $\langle E \rangle$"
         if name == "":
-            name = "avg_energy"
-    elif Y == "avg_RSS":
-        y_name = r"Stress $\langle \sigma \rangle$"
+            name = "Avg energy"
+    elif Y == "avg_sigmaxy":
+        y_name = r"Stress $\langle \sigma_{12} \rangle$"
         if name == "":
-            name = "Avg stress"
+            name = "Avg Cauchy shear stress"
+    elif Y == "avg_Pxy":
+        y_name = r"Stress $\langle P_{12} \rangle$"
+        if name == "":
+            name = "Avg Piola shear stress"
     elif "time" in Y:
         y_name = "Seconds"
         name = Y

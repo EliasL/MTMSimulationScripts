@@ -1,7 +1,9 @@
 from Management.jobs import (
+    stopConditionJob,
     smallJob,
     allPlasticEventsJob,
     bigUmutJob,
+    bigUmutJobWithEliasStop,
     propperJob,
     largePropperJob,
     avalanches,
@@ -15,8 +17,8 @@ from Management.jobs import (
 
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
-from MTMath.powerlaw_mixed_test import testCombinedDists
-from MTMath.plotPowerLaw import make_exponent_fit
+from MTMath.powerlaw_mixed_test import testCombinedDists, grid_compare_xmin
+from MTMath.plotPowerLaw import make_exponent_fit, plot_powerlaw
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
     elasticReductionPlots,
@@ -39,6 +41,7 @@ from MTMath.decomposeElasticPlastic import showDecomposition
 from MTMath.plotEnergy import generate_cauchy_stress_grid, generate_energy_grid
 from plotAll import plotAll
 from Plotting.remotePlotting import (
+    plotLog2,
     get_csv_files,
     plotEnergy,
     stressPlotWithImages,
@@ -297,6 +300,33 @@ def plotReconnectionJob():
     plotEnergy(configs, labels=labels, legend=True)
 
 
+def compareStop():
+    # Compare using Epsx or EpsR to stop
+    c1, l1 = bigUmutJob()
+    c2, l2 = bigUmutJobWithEliasStop()
+    # plotEnergy(configs=c1 + c2, labels=["Epsx=1e-5", "EpsR=1e-5"])
+
+    configs, labels = stopConditionJob()
+    # plotEnergy(configs=configs, labels=labels)
+    plotAll(configs, noVideos=True, labels=labels, name="compareStop")
+
+
+def plotLogAnalasys():
+    configs, labels = bigUmutJob(group_by_seeds=True)
+
+    # # Powerlaw
+    # plotEnergy(configs, labels=labels)
+    # # Find split
+    fast_xmin = True
+    plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
+    # plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
+
+    p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
+    lab = [["umut"]]
+    # plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
+    # plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
+
+
 if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
@@ -334,5 +364,8 @@ if __name__ == "__main__":
     # plotsLotsOfRealFStress("pk2", reduced=True)
     # bug_hunting()
     # testCombinedDists()
-    #elasticReductionPlots()
-    showDecomposition()
+    # elasticReductionPlots()
+    # showDecomposition()
+    # compareStop()
+    # plotLogAnalasys()
+    grid_compare_xmin()

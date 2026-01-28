@@ -282,8 +282,6 @@ def elastic_reduction(C, loops=1000):
     return C_out, M
 
 
-
-
     ########
 
 

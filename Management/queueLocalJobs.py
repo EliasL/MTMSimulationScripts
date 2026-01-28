@@ -17,8 +17,8 @@ def get_batch_script(command, job_name, nrThreads, outPath):
         #SBATCH --nodes=1
         #SBATCH --ntasks=1
         #SBATCH --cpus-per-task={nrThreads}
-        #SBATCH --output={output_file}
-        #SBATCH --error={error_file}
+        #SBATCH --output={output_file}.tmp
+        #SBATCH --error={error_file}.tmp
 
         # Load Modules (Comment out if not needed)
         # module load cmake 
@@ -28,6 +28,11 @@ def get_batch_script(command, job_name, nrThreads, outPath):
 
         # Command to run, bound to cores by SLURM
         srun --cpu-bind=cores --distribution=block:block {command}
+
+        # Append SLURM output to persistent log files
+        cat {output_file}.tmp >> {output_file}
+        cat {error_file}.tmp >> {error_file}
+        rm -f {output_file}.tmp {error_file}.tmp
     """).strip()
     return batch_script
 

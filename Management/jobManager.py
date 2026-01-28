@@ -45,6 +45,8 @@ def calculate_percentage_completed(runtime_str, estimated_remaining_str):
 
     total_time = runtime + estimated_remaining
     percentage_completed = (runtime / total_time) * 100
+    if percentage_completed == 100:
+        print("hi")
     return percentage_completed
 
 
@@ -634,19 +636,11 @@ class JobManager:
             if verbal:
                 print(f"Process {pid} on {server} has been terminated.")
 
-    def cancelJobs(self, configsToStop):
-        processesToKill = {}
-        for configToStop in configsToStop:
-            for p in self.processes:
-                if configToStop.name == p.name:
-                    if p.server not in processesToKill.keys():
-                        processesToKill[p.server] = []
-                    processesToKill[p.server].append(p.p_id)
-        for server, pids in processesToKill.items():
-            print(
-                f"Stopping {len(pids)} jobs on {get_server_short_name(server)} that are already running."
+    def cancelJobs(self, configsToStop: list[SimulationConfig], dryRun=False):
+        for conf in configsToStop:
+            self.cancelJobsByNameSubstring(
+                conf.name, case_sensitive=True, dryRun=dryRun
             )
-            self.kill_processes(server, pids, verbal=False)
 
     def cancelJobsByNameSubstring(
         self,

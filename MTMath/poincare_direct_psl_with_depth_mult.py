@@ -52,10 +52,6 @@ S    = np.array([[0, -1],[1,  0]], dtype=int)
 U, Uinv = T, Tinv
 V    = np.array([[1, 0],[1, 1]], dtype=int)
 Vinv = np.array([[1, 0],[-1, 1]], dtype=int)
-def U_m(m:int):
-    return np.array([[1,  m],[0,  1]], dtype=int)
-def V_m(m:int):
-    return np.array([[1,  0],[m,  1]], dtype=int)
 
 
 def pick_generators(kind: str) -> List[np.ndarray]:
@@ -92,6 +88,24 @@ def psl_bfs_words_with_depth(depth_max: int, gens: List[np.ndarray]) -> List[Tup
 
 # ---------- Geometry of the four central quadrants ----------
 
+
+def label_and_depth_direct_psl(C: np.ndarray, words_with_depth: List[Tuple[np.ndarray,int]]) -> Tuple[int, int]:
+    """
+    Minimal reduction: scan words in BFS order; the first hit gives the quadrant label
+    and minimal word length (depth).
+    """
+    for W, d in words_with_depth:
+        Cw = W.T @ C @ W
+        for lab in (0,1,2,3):
+            if in_quadrant_geom(Cw, lab):
+                return lab, d
+    return -1, -1
+
+def U_m(m:int):
+    return np.array([[1,  m],[0,  1]], dtype=int)
+def V_m(m:int):
+    return np.array([[1,  0],[m,  1]], dtype=int)
+
 def in_quadrant_geom(C: np.ndarray, label: int, tol: float = 1e-12) -> bool:
     """
     Test if C lies in one of four central 'quadrants' defined by linear constraints
@@ -108,36 +122,24 @@ def in_quadrant_geom(C: np.ndarray, label: int, tol: float = 1e-12) -> bool:
     if label == 3:
         return (C22 > tol) and (C22 <= C11 + tol) and (C12 <=  tol) and (C12 >= -0.5*C22 - tol)
     return False
-
-def label_and_depth_direct_psl(C: np.ndarray, words_with_depth: List[Tuple[np.ndarray,int]]) -> Tuple[int, int]:
+def elasticReduction(C: np.ndarray) -> Tuple[np.ndarray, int, int]:
     """
     Minimal reduction: scan words in BFS order; the first hit gives the quadrant label
     and minimal word length (depth).
     """
-    for W, d in words_with_depth:
-        Cw = W.T @ C @ W
-        for lab in (0,1,2,3):
-            if in_quadrant_geom(Cw, lab):
-                return lab, d
-    return -1, -1
-
-def label_and_depth_elias(C: np.ndarray) -> Tuple[int, int]:
-    """
-    Minimal reduction: scan words in BFS order; the first hit gives the quadrant label
-    and minimal word length (depth).
-    """
-    max_depth=10
+    max_depth=100
     C = C.copy()
     for d in range(0,max_depth+1):
         for lab in (0,1,2,3):
+            # Is C in elastic domain?
             if in_quadrant_geom(C, lab):
-                return lab, d
+                return C, lab, d
         if C[0,0]<C[1,1]:
             W = U_m(np.sign(-C[0,1]/C[0,0]))
         else:
             W = V_m(np.sign(-C[0,1]/C[1,1]))
         C = W.T@C@W
-    return -1, -1
+    return C, -1, -1
 
 def multiplicity_at_min_depth(C: np.ndarray, words_with_depth: List[Tuple[np.ndarray,int]]) -> Tuple[int, int]:
     """

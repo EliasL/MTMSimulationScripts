@@ -202,6 +202,15 @@ def generate_angle_region(resolution=500, zoom=1):
     return region
 
 
+def C2Plane(C,plane='LogEuclideanPlane', transformation=None, eps=1e-12):
+    match plane:
+        case 'PoincareDisk':
+            return C2PoincareDisk(C, transformation=transformation, eps=eps)
+        case 'LogEuclideanPlane':
+            return C2LogEuclideanPlane(C, transformation=transformation, eps=eps)
+        case _:
+            raise ValueError(f"No such transformation: {plane}")    
+
 def C2PoincareDisk(C, transformation=None, eps=1e-12):
     """
     Map a symmetric 2x2 matrix C to (x, y) on the Poincaré disk by:
@@ -236,6 +245,43 @@ def C2PoincareDisk(C, transformation=None, eps=1e-12):
     t = 1.0 / (2.0 + c11 + c22)
     x = t * (c11 - c22)
     y = 2 * t * c12
+
+    return x, y
+
+def C2LogEuclideanPlane(C, transformation=None, eps=1e-12):
+    """
+    Map symmetric 2x2 C to a *flat* (Euclidean) plane via the matrix logarithm:
+      (i)  normalize C so det(C)=1 (if det>0),
+      (ii) compute L = log(C_hat) (symmetric, trace 0),
+      (iii) return planar coordinates from L.
+
+    Supports a single 2x2 or a batch of shape (..., 2, 2).
+    Returns x, y
+    """
+    C = np.asarray(C)
+    C = transformC(C, transformation)
+
+    a = C[..., 0, 0]
+    b = C[..., 0, 1]
+    c = C[..., 1, 1]
+
+    det = a * c - b * b
+    valid = det > eps
+
+    scale = np.empty_like(det, dtype=float)
+    scale[valid] = np.sqrt(det[valid])
+    scale[~valid] = np.nan
+    C_hat = C / scale[..., None, None]  # det(C_hat)=1 where valid
+
+    # --- Flat-plane projection via log(C_hat) using symmetric eigendecomp ---
+    w, V = np.linalg.eigh(C_hat)           # w: (..., 2), V: (..., 2, 2)
+    # Guard: log requires positive eigenvalues (SPD); invalid entries become nan anyway
+    logw = np.log(w)
+    L = V @ (logw[..., None] * np.swapaxes(V, -2, -1))  # V diag(logw) V^T
+
+    # L is symmetric, trace ~ 0 when det=1
+    x = L[..., 0, 0]
+    y = L[..., 0, 1]  # off-diagonal
 
     return x, y
 
@@ -324,7 +370,7 @@ def drawC(
     if ax is None:
         fig, ax = prepPoincareFig(grid_size=grid_size, zoom=zoom)
 
-    x, y = C2PoincareDisk(C, transformation=transformation)
+    x, y = C2Plane(C, transformation=transformation)
 
     valid = np.isfinite(x) & np.isfinite(y)
     if not np.any(valid):
@@ -627,7 +673,7 @@ def drawCScatter(
     zoom=1,
     transformation=None,
 ):
-    x, y = C2PoincareDisk(C, transformation)
+    x, y = C2Plane(C, transformation)
     # Filter out invalid points
     mask = np.isfinite(x) & np.isfinite(y)
     x = x[mask]

@@ -7,9 +7,11 @@ from Management.connectToCluster import Servers
 from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
 from Management.dataManager import DataManager
 from Management.jobs import (
+    loadStepJob,
     cyclicLoading,
     fixedBoundaries,
     backwards,
+    stopConditionJob,
     umutTestJob,
     umutJobs,
     bigUmutJob,
@@ -169,18 +171,17 @@ def plotBigJob():
         labels=labels,
         strainLim=strainLim,
         # show=True,
-        debug=True,
+        # debug=True,
     )
     strainLim = [0.5, 1.0]
     # strainLim = [0.6, 1.0]
     # strainLim = [0.7, 1.0]
     plotLog2(
         configs,
-        xmin=1e-5,
         labels=labels,
         strainLim=strainLim,
         # show=True,
-        debug=True,
+        # debug=True,
     )
 
 
@@ -316,17 +317,20 @@ def threadTest():
 
 
 def runOnServer():
-    server = Servers.condorcet
+    configs, labels = stopConditionJob()
+    stopJobs(configs)
+
+    server = Servers.lagrange
     uploadProject(server, verbose=True)  # , setup=True)
     build_on_server(server)
     # Choose script to run
     # remote_script_path = "~/simulation/SimulationScripts/Management/runSimulation.py"
     # run_remote_script(server, remote_script_path)
 
-    configs, labels = allPlasticEventsJob()
-    configs, labels = backwards(nrThreads=20, seeds=[1])
-    configs, labels = basicJob(3, 1, size=20)
-    queueJobs(server, configs, resume=True, jobCopies=20)
+    # configs, labels = allPlasticEventsJob()
+    # configs, labels = backwards(nrThreads=20, seeds=[1])
+    # configs, labels = basicJob(3, 1, size=20)
+    queueJobs(server, configs, resume=False, jobCopies=1)
 
 
 def runReconnectionJob(L=30):
@@ -341,11 +345,12 @@ def runOnLocalMachine():
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
     # configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
-    configs, labels = reconnectionJob(L=300)
-    configs, labels = fixedBoundaries(1, 1, L=3)
-    configs, labels = umutTestJob()
-    configs, labels = bigUmutJob()
-    configs, labels = bigUmutJobWithEliasStop()
+    # configs, labels = reconnectionJob(L=300)
+    # configs, labels = fixedBoundaries(1, 1, L=3)
+    # configs, labels = umutTestJob()
+    # configs, labels = bigUmutJob()
+    # configs, labels = bigUmutJobWithEliasStop()
+    configs, labels = loadStepJob()
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
     # )
@@ -369,8 +374,8 @@ def runOnLocalMachine():
 
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=3)
-    run_locally(configs[0], resume=True)  # , dump=dump)
-    # run_many_locally(configs, taskNames=labels, resume=False)
+    # run_locally(configs[0], resume=True)  # , dump=dump)
+    run_many_locally(configs, taskNames=labels, resume=True)
 
 
 def startJobs():
@@ -405,9 +410,10 @@ def startJobs():
                     pass
 
 
-def stopJobs():
+def stopJobs(configs):
     j = JobManager()
     j.findSlurmJobs()
+    j.cancelJobs(configs, dryRun=False)
     # j.findAndShowSlurmJobs()
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
     # j.cancelJobsByNameSubstring("500x500", force=True)
@@ -447,7 +453,7 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    #runOnLocalMachine()
+    runOnLocalMachine()
     # plotSizeJob()
 
     # stopJobs()
@@ -457,6 +463,7 @@ if __name__ == "__main__":
     # plotPropperJob()
     # plotSizeScaling()
     # plotBigJob()
+    # stopConditionJob()
     # threadTest()
     # reconnectingBenchmark()
     # benchmark()

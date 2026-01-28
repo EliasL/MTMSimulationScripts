@@ -510,8 +510,7 @@ def doubleDislocationTest(
         usingPBC="false",
         seed=seeds,
         group_by_seeds=False,
-        rows=L,
-        cols=L,
+        L=L,
         startLoad=0.0,
         maxLoad=4.0,
         loadIncrement=1e-3,
@@ -536,8 +535,7 @@ def singleDislocationTest(
         usingPBC="false",
         seed=seeds,
         group_by_seeds=False,
-        rows=L,
-        cols=L,
+        L=L,
         startLoad=0.0,
         maxLoad=1.0,
         loadIncrement=1e-3,
@@ -553,8 +551,7 @@ def singleDislocationTest(
 def remeshTest(diagonal="major"):
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",
-        rows=3,
-        cols=3,
+        L=3,
         meshDiagonal=diagonal,
         startLoad=0.0,
         maxLoad=1.0,
@@ -568,8 +565,7 @@ def remeshTest(diagonal="major"):
 def reconnectionJob(L=100):
     configs, labels = ConfigGenerator.generate(
         usingPBC="true",
-        rows=L,
-        cols=L,
+        L=L,
         meshDiagonal="major",
         reconnectionMethod="edgeFlip",
         epsR=1e-5,
@@ -587,8 +583,7 @@ def reconnectionJob(L=100):
 def umutTestJob(group_by_seeds=False):
     configs, labels = ConfigGenerator.generate(
         seed=0,
-        rows=100,
-        cols=100,
+        L=100,
         startLoad=0.138,
         maxLoad=0.3,
         initialGuessNoise=0.04,
@@ -602,39 +597,49 @@ def umutTestJob(group_by_seeds=False):
     return configs, labels
 
 
-def bigUmutJob(group_by_seeds=False):
+def umutJob(L, loadIncrement=2e-5, EliasStop=False, group_by_seeds=False):
+    if EliasStop:
+        stop = {"epsR": 1e-5}
+    else:
+        stop = {"LBFGSEpsx": 1e-5}
     configs, labels = ConfigGenerator.generate(
         seed=0,
-        rows=500,
-        cols=500,
+        L=L,
         startLoad=0.138,
         maxLoad=1.0,
         initialGuessNoise=0.04,
         nrThreads=8,
-        loadIncrement=2e-5,
+        loadIncrement=loadIncrement,
         minimizer="LBFGS",
-        LBFGSEpsx=1e-5,
         scenario="simpleShear",
         group_by_seeds=group_by_seeds,
+        **stop,
     )
     return configs, labels
 
+
+def bigUmutJob(group_by_seeds=False):
+    return umutJob(500, False, group_by_seeds)
+
+
 def bigUmutJobWithEliasStop(group_by_seeds=False):
-    configs, labels = ConfigGenerator.generate(
-        seed=0,
-        rows=500,
-        cols=500,
-        startLoad=0.138,
-        maxLoad=1.0,
-        initialGuessNoise=0.04,
-        nrThreads=8,
-        loadIncrement=2e-5,
-        minimizer="LBFGS",
-        epsR=1e-5,
-        scenario="simpleShear",
-        group_by_seeds=group_by_seeds,
+    return umutJob(500, True, group_by_seeds)
+
+
+def stopConditionJob():
+    c1, l1 = umutJob([200, 100])
+    c2, l2 = umutJob([200, 100], True)
+    c = c1 + c2
+    labs = list(map(lambda lab: f"epsX=1e-5, {lab}", l1)) + list(
+        map(lambda lab: f"epsR=1e-5, {lab}", l2)
     )
-    return configs, labels
+    return c, labs
+
+
+def loadStepJob(group_by_seeds=False):
+    return umutJob(
+        L=150, loadIncrement=[5e-6, 1e-5, 2e-5, 4e-5], group_by_seeds=group_by_seeds
+    )
 
 
 def umutJobs():

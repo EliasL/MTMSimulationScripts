@@ -1,10 +1,41 @@
 import powerlaw
-from powerlaw import Distribution, trim_to_range, bisect_map
+from powerlaw import Distribution, trim_to_range, bisect_map, SUPPORTED_DISTRIBUTIONS
 from powerlaw import Truncated_Power_Law as Original_Truncated_Power_Law
 import numpy as np
+from scipy import special
+from numpy import nan
+
+# For checking how many processes are available
+import os
+
+# For parallelization
+import multiprocessing
+
+# So we can ignore this warning while fitting xmin
+from scipy.optimize import OptimizeWarning
+import warnings
+from tqdm import tqdm
+
+"""
+Currently just templated; doesn't work yet.
+
+Whether to enable parallelization for certain heavy calculations, eg. 
+fitting the xmin value.
+"""
+PARALLEL_ENABLE = False
+"""
+Currently just templated; doesn't work yet.
+
+This is the number of cores that the library should leave free when doing
+certain heavy calculations. For example, if you have 8 cores, and this is
+set to 2, then the processing would use (up to) 6 cores.
+"""
+PARALLEL_UNUSED_CORES = 2
 
 
 # Let me know if there is a simpler way to get the xmin_distribution with fit values
+
+
 def dist_from_fit(fit: powerlaw.Fit) -> Distribution:
     dist = getattr(fit, fit.xmin_distribution.name)
     return dist
@@ -241,83 +272,229 @@ class Truncated_Power_Law(Original_Truncated_Power_Law):
 
         return r
 
-    def _generate_random_continuous(self, r, max_size=1e8):
+    def _generate_random_continuous(self, r, max_size=1e8, forceGeneration=False):
         """
-        Unbiased batched rejection sampler for
-            f(x) ∝ x^(-alpha) * exp(-Lambda * x), x >= xmin.
+        Generate samples from the cutoff power-law:
 
-        Strategy
-        --------
-        - If alpha < 1: use the exact inverse-CDF sampler (same as before).
-        - Else: propose in batches from xmin + Exp(scale=1/Lambda), accept with
-        a(x) = (xmin / x)^alpha. We *adaptively* size each batch using an
-        online estimate of the acceptance rate, and finally take the first
-        size accepted samples in (proposal) arrival order.
+            f(x) ∝ x^(-alpha) * exp(-Lambda * x),    x >= xmin
+        where Lambda = 1/lambda in your earlier notation.
 
-        Notes
-        -----
-        - Taking the *first N accepted* is distribution-preserving (no bias),
-        because acceptance decisions are i.i.d. Bernoulli given the proposals,
-        and selection is independent of sample values.
-        - Do **not** sort or otherwise pick accepted samples by value.
+        This implementation is a hybrid rejection sampler that dynamically chooses
+        between two *mathematically equivalent* proposal–acceptance factorizations
+        of the same target density, using a small pilot run to estimate efficiency.
+
+        The target density factorizes as
+            f(x) ∝ [x^(-alpha)] * [exp(-Lambda * x)].
+        Each branch samples one factor exactly and applies the other as a rejection
+        probability.
+
+        (A) "Weak-cutoff" proposal (Pareto):
+            Propose g(x) ∝ x^(-alpha) on [xmin, ∞), accept with exp(-Lambda*x).
+            - Efficient when the exponential cutoff is weak (xmin*Lambda << 1,
+            equivalently lambda >> xmin), because exp(-Lambda*x) ≈ 1 over most
+            of the probability mass.
+
+        (B) "Strong-cutoff" proposal (Shifted exponential):
+            Propose q(x) = xmin + Exp(scale=1/Lambda), accept with (xmin/x)^alpha.
+            - Efficient when the exponential cutoff is strong (xmin*Lambda ≳ 1,
+            equivalently lambda ≲ xmin), because proposals concentrate near xmin,
+            where (xmin/x)^alpha ≈ 1.
+
+        Crucially, both branches produce *exact samples from the same density*
+        f(x) ∝ x^(-alpha) exp(-Lambda x). The "weak" vs "strong" cutoff distinction
+        affects only rejection efficiency, not the sampled distribution.
+
+        Notes on correctness:
+        - Both branches are standard rejection samplers.
+        - The density of accepted samples is proportional to
+            proposal(x) × acceptance(x) ∝ x^(-alpha) exp(-Lambda x)
+        in either branch.
+        - Filling the output array in proposal arrival order is unbiased because
+        proposals and accept/reject decisions are i.i.d.; we simply keep the
+        first N accepted samples.
+
+        Performance:
+        - Preallocates output and fills in vectorized batches.
+        - Avoids Python lists, which are a major bottleneck at large N.
         """
-        # Heavy tail ⇒ inverse-CDF path is faster/numerically stable.
-        if self.alpha < 1:
+
+        import numpy as np
+
+        size = len(r)
+        if size == 0:
+            return np.asarray([], dtype=float)
+
+        alpha = float(self.alpha)
+        xmin = float(self.xmin)
+        Lam = float(self.Lambda)
+
+        if not (xmin > 0.0 and Lam > 0.0):
+            raise ValueError("Require xmin > 0 and Lambda > 0.")
+
+        rng = self.rng
+        finfo = np.finfo(float)
+
+        # --- Case 1: alpha < 1 -> exact inverse-CDF route (your original logic) ---
+        # This path avoids rejection issues and is typically fastest/stablest for alpha < 1.
+        if alpha < 1.0:
             from scipy.special import gammainc, gammaincinv
 
-            k = 1.0 - self.alpha
-            theta = 1.0 / self.Lambda
-
-            Fmin = gammainc(k, self.xmin / theta)
-            u = Fmin + (1.0 - Fmin) * r
+            k = 1.0 - alpha
+            theta = 1.0 / Lam
+            # If U ~ Uniform(0,1), conditional on X>=xmin:
+            #   Fmin = P(Gamma(k,theta) <= xmin) = gammainc(k, xmin/theta)
+            #   then sample U' = Fmin + (1-Fmin)*U and invert.
+            Fmin = gammainc(k, xmin / theta)
+            u = Fmin + (1.0 - Fmin) * np.asarray(r, dtype=float)
             y = gammaincinv(k, u)
-            x = theta * y
-            return x
+            return theta * y
 
-        accepted = []
-        size = len(r)
+        # --- Rejection-sampling utilities (vectorized, preallocated fill) ---
+
+        def _fill_from_pareto(out, filled, need, batch):
+            """
+            Propose from Pareto tail g(x) ∝ x^(-alpha), x>=xmin, and accept with exp(-Lam*x).
+
+            Inverse-CDF for Pareto with exponent alpha:
+                X = xmin * (1-U)^(-1/(alpha-1)), U ~ Uniform(0,1)
+            """
+            # Draw U in (0,1); clamp away from exactly 1.0 to avoid inf
+            u = rng.random(batch)
+            u = np.minimum(u, 1.0 - finfo.eps)
+
+            # Pareto proposal
+            x = xmin * (1.0 - u) ** (-1.0 / (alpha - 1.0))
+
+            # Accept with probability exp(-Lam*x)
+            # Use log test for stability: log(V) < -Lam*x
+            logv = np.log(rng.random(batch))
+            mask = logv < (-Lam * x)
+
+            k = int(mask.sum())
+            if k:
+                take = min(k, need)
+                out[filled : filled + take] = x[mask][:take]
+                filled += take
+                need -= take
+            return filled, need
+
+        def _fill_from_shifted_exp(out, filled, need, batch):
+            """
+            Propose from shifted exponential q(x) = xmin + Exp(rate=Lam),
+            and accept with (xmin/x)^alpha.
+
+            Since (xmin/x)^alpha ∈ (0,1], a log-test is stable:
+                log(V) < alpha*(log(xmin) - log(x))
+            """
+            # Shifted exponential proposal
+            x = xmin + rng.exponential(scale=1.0 / Lam, size=batch)
+
+            # Accept with probability (xmin/x)^alpha using logs
+            logv = np.log(rng.random(batch))
+            loga = alpha * (np.log(xmin) - np.log(x))
+            mask = logv < loga
+
+            k = int(mask.sum())
+            if k:
+                take = min(k, need)
+                out[filled : filled + take] = x[mask][:take]
+                filled += take
+                need -= take
+            return filled, need
+
+        # --- Dynamic choice: estimate acceptance of both proposals via a small pilot ---
+        # We do a cheap pilot to estimate acceptance rates r1, r2 for THIS (alpha,xmin,Lam).
+        # This is more robust than a fixed threshold on z=xmin*Lam because acceptance depends on alpha too.
+        max_size = int(max_size)
+        pilot = 2048 if size >= 2048 else max(256, size)
+        pilot = min(pilot, max_size)
+
+        # Estimate acceptance for Pareto proposal
+        u = rng.random(pilot)
+        u = np.minimum(u, 1.0 - finfo.eps)
+        x_p = xmin * (1.0 - u) ** (-1.0 / (alpha - 1.0))
+        # acceptance prob is exp(-Lam*x); average gives acceptance rate estimate
+        r_pareto = float(np.mean(np.exp(-Lam * x_p)))
+
+        # Estimate acceptance for shifted exponential proposal
+        x_e = xmin + rng.exponential(scale=1.0 / Lam, size=pilot)
+        r_exp = float(np.mean((xmin / x_e) ** alpha))
+
+        # Pick the better proposal (higher acceptance => fewer proposals per accepted sample)
+        use_pareto = r_pareto >= r_exp
+
+        # --- Main fill loop (vectorized, preallocated) ---
+        out = np.empty(size, dtype=float)
+        filled = 0
         need = size
 
-        # Start with a conservative acceptance-rate guess to avoid too-small batches.
-        # We'll update this estimate on the fly.
-        # Heuristic: acceptance ≈ (xmin*Lambda) / (xmin*Lambda + alpha)
-        r_est = (self.xmin * self.Lambda) / (self.xmin * self.Lambda + self.alpha)
-        from numpy import ceil, log, asarray
+        # Batch sizing:
+        # For rejection sampling, expected proposals ~ need / acc_rate.
+        # We overshoot slightly to reduce loop iterations.
+        acc = r_pareto if use_pareto else r_exp
+        # Avoid division by zero if acc is extremely tiny
+        acc = max(acc, 1e-12)
+        overshoot = 1.25
 
         while need > 0:
-            # Over-propose by 1/r_est with a overshoot factor
-            overshoot = 1.5
-            n_prop = max(32, int(ceil(overshoot * need / r_est)))
-            if n_prop / max_size > 10000:
-                # If n_prop is much larger than the largest size we can
+            # Propose enough to likely fill most of what's left
+            batch = int(np.ceil(overshoot * need / acc))
+            if batch > 1000 * max_size and not forceGeneration:
+                # If batch is much larger than the largest size we can
                 # work with, we give up.
                 print("Warning! Cannot generate distribution!")
                 return None
-            n_prop = min(n_prop, int(max_size))
+            batch = max(1024, batch)  # keep batches large for vectorization
+            batch = min(batch, max_size)  # cap memory usage
 
-            # Proposals from the exponential tail anchored at xmin
-            prop = self.xmin + self.rng.exponential(
-                scale=1.0 / self.Lambda, size=n_prop
+            if use_pareto:
+                filled, need = _fill_from_pareto(out, filled, need, batch)
+            else:
+                filled, need = _fill_from_shifted_exp(out, filled, need, batch)
+
+        return out
+
+    def _cdf_base_function(self, x):
+        x = np.asarray(x, dtype=np.float64)
+        s = 1.0 - float(self.alpha)
+        lam = float(self.Lambda)
+        z = lam * x
+
+        # If z can be negative, you must decide what "valid" means for your model.
+        # This enforces the usual domain z >= 0.
+        if np.any(z < 0):
+            raise ValueError(
+                "Lambda*x must be nonnegative for real-valued incomplete gamma."
             )
 
-            # Accept with probability (xmin / x)^alpha
-            # Using log-space for numerical stability
-            log_u = log(self.rng.random(n_prop))
-            log_prop = self.alpha * (log(self.xmin) - log(prop))
-            mask = log_u < log_prop
+        # Shift s upward until positive
+        if s <= 0:
+            n = int(np.ceil(-s)) + 1  # ensures s+n > 0
+            sp = s + n
+        else:
+            n = 0
+            sp = s
 
-            # Append in *arrival order* to preserve unbiasedness
-            if mask.any():
-                accepted.extend(prop[mask])
+        # Compute Γ(sp, z) using regularized upper * Γ(sp)
+        G = special.gammaincc(sp, z) * special.gamma(sp)
 
-            # Update remaining count
-            got = len(accepted)
-            need = size - got
+        # Shift back down n times: Γ(s+k, z) -> Γ(s+k-1, z)
+        # Γ(t-1, z) = (Γ(t, z) - z^(t-1) e^{-z}) / (t-1)
+        for k in range(n, 0, -1):
+            t_minus_1 = s + (k - 1)
 
-        # Take the first N accepted in arrival order (clip any extra)
-        if len(accepted) > size:
-            accepted = accepted[:size]
-        return asarray(accepted, dtype=float)
+            # compute z^(t_minus_1) * exp(-z) in a numerically safer way
+            # for z==0, log(z)=-inf; handle separately
+            term = np.zeros_like(z)
+            mask = z > 0
+            term[mask] = np.exp(t_minus_1 * np.log(z[mask]) - z[mask])
+            # if z==0:
+            # z^(t_minus_1) is 0 if t_minus_1>0, inf if t_minus_1<0 (divergence); leave as 0 here.
+
+            G = (G - term) / t_minus_1
+
+        cdf = 1.0 - G / (lam**s)
+        return cdf
 
 
 class Fit(powerlaw.Fit):
@@ -337,29 +514,320 @@ class Fit(powerlaw.Fit):
         xmin_distance="D",
         xmin_distribution="power_law",
         verbose=1,
+        fast_xmin=False,
     ):
-        super().__init__(
-            data,
-            discrete,
-            xmin,
-            xmax,
-            fit_method,
-            estimate_discrete,
-            discrete_normalization,
-            sigma_threshold,
-            initial_parameters,
-            parameter_ranges,
-            parameter_constraints,
-            xmin_distance,
-            xmin_distribution,
-            verbose,
+        self.fast_xmin = fast_xmin
+        # The upstream powerlaw fit can emit OptimizeWarning/UserWarning during init.
+        # Suppress them here so callers don't need to wrap every Fit construction.
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=OptimizeWarning)
+            warnings.filterwarnings("ignore", category=UserWarning)
+
+            # We need to replace the old truncated power law with our new one so we use
+            # the faster generator
+            SUPPORTED_DISTRIBUTIONS["truncated_power_law"] = Truncated_Power_Law
+            super().__init__(
+                data,
+                discrete,
+                xmin,
+                xmax,
+                fit_method,
+                estimate_discrete,
+                discrete_normalization,
+                sigma_threshold,
+                initial_parameters,
+                parameter_ranges,
+                parameter_constraints,
+                xmin_distance,
+                xmin_distribution,
+                verbose,
+            )
+
+    def find_xmin(
+        self,
+        xmin_distance=None,
+        use_fast_search=None,
+        retain_factor=3.0,
+    ):
+        # This function will be called if xmin is None, and we will already
+        # have a defined xmin_range from __init__
+
+        if use_fast_search is None:
+            use_fast_search = self.fast_xmin
+
+        # Grab the indices of possible xmin values
+        possible_ind = np.where(
+            (self.data >= np.min(self.xmin_range))
+            & (self.data < np.max(self.xmin_range))
         )
-        # We need to replace the old truncated power law with our new one so we use
-        # the faster generator
-        self.supported_distributions["truncated_power_law"] = Truncated_Power_Law
+        possible_xmin = self.data[possible_ind]
+
+        # Take unique values
+        possible_xmin, possible_ind = np.unique(possible_xmin, return_index=True)
+
+        # Don't look at last xmin, as that's also the xmax
+        possible_xmin = possible_xmin[:-1]
+        possible_ind = possible_ind[:-1]
+
+        # Originally, we just used every single datapoint as a possible
+        # xmin value, but this probably *way* oversamples the values we
+        # actually need to test. An alternative, which is much faster, is
+        # to just generate evenly spaced values.
+
+        # 10% of the number of datapoints sounds good. And note that we
+        # only generate bins up into the 3rd to last point so we always
+        # have enough points to calculate distance metrics.
+        # DEBUG
+        # max_bin_value = np.sort(possible_xmin)[-3]
+        # possible_xmin = np.logspace(np.log10(np.min(self.data)), np.log10(max_bin_value), len(self.data) // 10)[:-5]
+
+        # If not provided here, take the value from the constructor
+        if xmin_distance is None:
+            xmin_distance = self.xmin_distance
+
+        if len(possible_xmin) < 2:
+            warnings.warn(
+                "Less than 2 unique data values for fitting xmin! Returning nans."
+            )
+            self.xmin = nan
+            self.D = nan
+            self.V = nan
+            self.Asquare = nan
+            self.Kappa = nan
+            self.alpha = nan
+            self.sigma = nan
+            self.n_tail = nan
+            setattr(self, xmin_distance + "s", np.array([nan]))
+            self.noise_flag = True
+
+            return self.xmin
+
+        parameter_names = list(getattr(self.xmin_distribution, "parameter_names", []))
+        num_params = len(parameter_names)
+        num_xmin = len(possible_xmin)
+
+        def _coerce_param_list(params):
+            if not num_params:
+                return None
+            if params is None:
+                return None
+            if isinstance(params, dict):
+                return [params.get(p, nan) for p in parameter_names]
+            try:
+                seq = list(params)
+            except TypeError:
+                return None
+            if len(seq) == num_params:
+                return seq
+            return None
+
+        # Reuse the previous xmin's fitted parameters as the next initial guess.
+        prev_params = _coerce_param_list(getattr(self, "initial_parameters", None))
+
+        def fit_function(xmin):
+            nonlocal prev_params
+            # Generate a distribution with the current values of xmin
+            pl = self.xmin_distribution(
+                xmin=xmin,
+                xmax=self.xmax,
+                discrete=self.discrete,
+                fit_method=self.fit_method,
+                data=self.data,
+                parameters=prev_params,
+                parameter_ranges=self.parameter_ranges,
+                parameter_constraints=self.parameter_constraints,
+                parent_Fit=self,
+                estimate_discrete=self.estimate_discrete,
+                verbose=0,
+            )
+            param_vals = [getattr(pl, p, nan) for p in parameter_names]
+            if num_params and np.isfinite(param_vals).any():
+                prev_params = param_vals
+            return (
+                getattr(pl, xmin_distance),  # D
+                param_vals,
+                (pl.in_range() and not pl.noise_flag),
+            )
+
+        # The original documentation states that it is desired to hold onto
+        # the xmin fitting data (below) because the user may want to
+        # explore if there are multiple possible fits for a single dataset.
+        # That being said, I think it is a little confusing to have these
+        # variables directly available as properties of this class. I
+        # propose a better alternative is to have them contained in a
+        # dictionary called xmin_fitting_results.
+        distances = np.full(num_xmin, np.nan, dtype=float)
+        parameters = np.full((num_xmin, num_params), np.nan, dtype=float)
+        # Used to be called in_ranges
+        valid_fits = np.zeros(num_xmin, dtype=bool)
+
+        # Track which indices have been evaluated
+        evaluated = np.zeros(num_xmin, dtype=bool)
+
+        def _eval_index(i: int) -> float:
+            distances[i], params_i, valid_fits[i] = fit_function(possible_xmin[i])
+            if num_params:
+                parameters[i, :] = np.asarray(params_i, dtype=float)
+            evaluated[i] = True
+            return distances[i]
+
+        def _nearest_true(arr, start):
+            "Find closest true indexes"
+            right = np.flatnonzero(arr[start:])
+            left = np.flatnonzero(arr[:start])
+
+            right_idx = start + right[0] if right.size else None
+            left_idx = left[-1] if left.size else None
+
+            return left_idx, right_idx
+
+        def _estimate_val(i) -> float | None:
+            L, R = _nearest_true(evaluated, i)
+            if L is None or R is None:
+                return None
+            if not (np.isfinite(distances[L]) and np.isfinite(distances[R])):
+                return None
+            t = (i - L) / (R - L)
+            return (1 - t) * distances[L] + t * distances[R]
+
+        if not use_fast_search:
+            # --- Exhaustive evaluation over all candidate xmins (original behavior)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=OptimizeWarning)
+                warnings.filterwarnings("ignore", category=UserWarning)
+
+                iterator = (
+                    tqdm(range(num_xmin), desc="Fitting xmin")
+                    if self.verbose
+                    else range(num_xmin)
+                )
+                for i in iterator:
+                    _eval_index(int(i))
+        else:
+            # Strategy:
+            # Pass over xmin with a certain stepsize
+            # Only evaluate if the linear approximation from known values is
+            # within the retain factor times the smallest found value
+            # Once you are at the end, choose a smaller step size
+            iteration = 0
+            max_iterations = int(np.ceil(np.log2(num_xmin / np.log2(num_xmin))))
+            current_best = np.inf
+            previous_best = np.inf
+
+            def _should_prune(est: float | None) -> bool:
+                # If we can't estimate, do not prune.
+                if est is None or not np.isfinite(est):
+                    return False
+                return est >= previous_best * retain_factor  # prune when clearly worse
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=OptimizeWarning)
+                warnings.filterwarnings("ignore", category=UserWarning)
+
+                while True:
+                    iteration += 1
+                    step_size = int(
+                        np.ceil(num_xmin / (np.log2(num_xmin) * 2**iteration))
+                    )
+
+                    if self.verbose:
+                        print(f"Pass nr: {iteration}/{max_iterations}")
+
+                    for i in tqdm(
+                        range(0, num_xmin, step_size),
+                        disable=not self.verbose,
+                    ):
+                        if evaluated[i]:
+                            continue
+
+                        est = _estimate_val(i)
+                        if _should_prune(est):
+                            continue
+
+                        d = _eval_index(i)
+                        if np.isfinite(d) and d < current_best:
+                            current_best = d
+
+                    previous_best = current_best
+                    if step_size == 1:
+                        break
+            if self.verbose:
+                print(
+                    f"This was {num_xmin / np.sum(evaluated):.0f} times faster than a full search!"
+                )
+                print(
+                    "Note that the best xmin might not have been found. Set Fit.fast_xmin=False to do a full search."
+                )
+
+        # Only consider evaluated candidates; the objective is discrete and may be
+        # expensive to compute everywhere.
+        good_indices = evaluated & valid_fits
+
+        # If we have a threshold, throw out any candidates that exceed it
+        if self.sigma_threshold and "sigma" in parameter_names:
+            sigma_idx = parameter_names.index("sigma")
+            sigmas = parameters[:, sigma_idx]
+            good_indices = good_indices & (sigmas < self.sigma_threshold)
+
+        # If we have no good values, the fit failed
+        if not good_indices.any():
+            # We still continue though
+            self.noise_flag = True
+            # Choose the best among evaluated candidates
+            masked_distances = np.ma.masked_array(distances, mask=~evaluated)
+            min_index = int(masked_distances.argmin())
+
+        else:
+            # Otherwise, we take the lowest distance that is a good index
+            masked_distances = np.ma.masked_array(distances, mask=~good_indices)
+            min_index = masked_distances.argmin()
+            self.noise_flag = False
+
+        if self.noise_flag:
+            # I've set this to be a warning as it is more in the spirit of
+            # the previous code, though it's worth discussing if it should
+            # instead just be an error.
+            warnings.warn("No valid values for xmin found.")
+
+        # Set the Fit's xmin to the optimal xmin
+        self.xmin = possible_xmin[min_index]
+        setattr(self, xmin_distance, distances[min_index])
+        if num_params:
+            best_params = parameters[min_index, :]
+            for k, v in zip(parameter_names, best_params):
+                setattr(self, k, v)
+        # Backwards compatibility for callers expecting alpha/sigma attributes.
+        if "alpha" in parameter_names:
+            self.alpha = parameters[min_index, parameter_names.index("alpha")]
+        if "sigma" in parameter_names:
+            self.sigma = parameters[min_index, parameter_names.index("sigma")]
+
+        # Save the fitting information to a dictionary (make JSON-serializable)
+        xmin_fitting_results = {
+            "distances": distances.tolist(),
+            "xmins": possible_xmin.tolist(),
+            "valid_fits": valid_fits.tolist(),
+            "parameter_names": parameter_names,
+            "parameters": parameters.tolist(),
+        }
+        # Optional compatibility fields if the parameters exist.
+        if "alpha" in parameter_names:
+            xmin_fitting_results["alphas"] = parameters[
+                :, parameter_names.index("alpha")
+            ].tolist()
+        if "sigma" in parameter_names:
+            xmin_fitting_results["sigmas"] = parameters[
+                :, parameter_names.index("sigma")
+            ].tolist()
+        self.xmin_fitting_results = xmin_fitting_results
+
+        # Update the fitting CDF given the new xmin, in case other objects, like
+        # Distributions, want to use it for fitting (like if they do KS fitting)
+        self.fitting_cdf_bins, self.fitting_cdf = self.cdf()
+
+        return self.xmin
 
     def _get_cache_path(self, cache_dir, data, nr_sets):
-        import os
         import hashlib
         from numpy import asarray
 
@@ -383,10 +851,19 @@ class Fit(powerlaw.Fit):
         return cache_path
 
     @staticmethod
-    def _fit_on_sample(sample, dist: Distribution, xmin, xmax, discrete, fit_method):
-        m = dist(
-            data=sample, xmin=xmin, xmax=xmax, discrete=discrete, fit_method=fit_method
-        )
+    def _fit_on_sample(
+        sample, dist: type[Distribution], xmin, xmax, discrete, fit_method
+    ):
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=OptimizeWarning)
+            warnings.filterwarnings("ignore", category=UserWarning)
+            m = dist(
+                data=sample,
+                xmin=xmin,
+                xmax=xmax,
+                discrete=discrete,
+                fit_method=fit_method,
+            )
         return m.D, getattr(m, m.parameter1_name)
 
     def evaluate_fit(
@@ -396,6 +873,7 @@ class Fit(powerlaw.Fit):
         parallel=True,
         use_cache=True,
         cache_dir=".eval_cache",
+        tqdmDesc="",
     ):
         """
         Evaluate fit, optionally parallel, and cache computed scalars on disk via JSON.
@@ -451,8 +929,6 @@ class Fit(powerlaw.Fit):
         # Get distribution (Let me know if there is a better way to do this)
         dist = dist_from_fit(self)
         # --- no (usable) cache: compute
-        # We add a print statement here since this generation can be slow
-        print("Generating synthetic data...")
         synthetic_data = dist.generate_random(len(data) * nr_sets)
         if synthetic_data is None:
             print("Fit not evaluated.")
@@ -461,41 +937,49 @@ class Fit(powerlaw.Fit):
             # keep both mean and std; fix the original overwrite bug
             self.alpha_mean = 0
             self.alpha_std = 0
-            return self.p, self.alpha_mean, self.alpha_std
-
-        synthetic_sets = array_split(synthetic_data, nr_sets)
-
-        worker = partial(
-            self._fit_on_sample,
-            dist=self.xmin_distribution,
-            xmin=self.xmin,
-            xmax=self.xmax,
-            discrete=self.discrete,
-            fit_method=self.fit_method,
-        )
-
-        if parallel:
-            from concurrent.futures import ProcessPoolExecutor
-
-            with ProcessPoolExecutor() as ex:
-                results = list(
-                    tqdm(ex.map(worker, synthetic_sets), total=len(synthetic_sets))
-                )
-
+            # If you don't want non results to be saved, return here
+            # return self.p, self.alpha_mean, self.alpha_std
         else:
-            results = [worker(s) for s in tqdm(synthetic_sets)]
+            synthetic_sets = array_split(synthetic_data, nr_sets)
 
-        # --- aggregate results
-        D_vals, alpha_vals = zip(*results)
-        # ensure vectorized compare
-        dist = dist_from_fit(self)
-        self.p = mean(asarray(D_vals) >= dist.D)
+            worker = partial(
+                self._fit_on_sample,
+                dist=self.xmin_distribution,
+                xmin=self.xmin,
+                xmax=self.xmax,
+                discrete=self.discrete,
+                fit_method=self.fit_method,
+            )
 
-        # keep both mean and std; fix the original overwrite bug
-        self.alpha_mean = mean(alpha_vals)
-        self.alpha_std = std(alpha_vals)
-        # a conservative bound for p-uncertainty (optional; keep if you use it elsewhere)
-        self.p_std = confidence
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=OptimizeWarning)
+                warnings.filterwarnings("ignore", category=UserWarning)
+                if parallel:
+                    from concurrent.futures import ProcessPoolExecutor
+
+                    with ProcessPoolExecutor() as ex:
+                        results = list(
+                            tqdm(
+                                ex.map(worker, synthetic_sets),
+                                total=len(synthetic_sets),
+                                desc=tqdmDesc,
+                            )
+                        )
+
+                else:
+                    results = [worker(s) for s in synthetic_sets]
+
+            # --- aggregate results
+            D_vals, alpha_vals = zip(*results)
+            # ensure vectorized compare
+            dist = dist_from_fit(self)
+            self.p = mean(asarray(D_vals) >= dist.D)
+
+            # keep both mean and std; fix the original overwrite bug
+            self.alpha_mean = mean(alpha_vals)
+            self.alpha_std = std(alpha_vals)
+            # a conservative bound for p-uncertainty (optional; keep if you use it elsewhere)
+            self.p_std = confidence
 
         # --- save computed scalars if requested (atomic JSON write)
         if use_cache and cache_path is not None:
