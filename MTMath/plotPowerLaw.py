@@ -121,6 +121,7 @@ def get_energy_drops(
     data_info["nrSimulations"] = len(csvPaths)
     data_info["strainLim"] = strainLim
     data_info["L"] = get_system_size(csvPaths)
+    data_info["label"] = label
 
     if debug:
         # Only debug first seed when using labels
@@ -228,8 +229,6 @@ def getHist(data):
     bin_edges = np.power(10, log_edges)[::-1]  # Reverse to make it ascending
 
     # Compute the histogram for the tail (density=True → area under PDF = 1)
-    # To make the fit more easily align with the data plot, we normalize
-    # to density manually with the bin centers. Technically slightly incorrect.
     hist_vals, edges = np.histogram(data, bins=bin_edges, density=True)
     bin_centers = np.sqrt(edges[:-1] * edges[1:])
     return bin_centers, hist_vals
@@ -490,7 +489,7 @@ def make_title_from_data_info(data_info):
     L = data_info["L"]
     n = data_info["nrSimulations"]
     samples_string = f"{n} sample{'s' if n != 1 else ''}"
-    title = rf"{data_info['minimizer']} {L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f}"
+    title = rf"{data_info['minimizer']} {L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f} ({data_info['label']})"
     return title
 
 
@@ -516,6 +515,7 @@ def plot_data_and_fit(
     addFit=True,
     save=True,
     extraPath="",
+    show=False,
 ):
     if ax is None:
         fig, ax = plt.subplots()
@@ -544,6 +544,9 @@ def plot_data_and_fit(
     if title == "" and data_info is not None:
         title = make_title(data_info)
     ax.set_title(title)
+
+    if show:
+        plt.show()
     if save:
         # Save the figure as PDF using the title as filename
         safe_title = (
@@ -831,32 +834,139 @@ def find_best_xmin(
     return best_fit
 
 
-def find_start_of_plastic_events(paths, labels, postRegime, data_info):
-    for paths, labels in zip(paths, labels):
-        if len(labels) < len(paths):
-            labels = labels + [""] * (len(paths) - len(labels))
-        elif len(labels) > len(paths):
-            labels = labels[: len(paths)]
-        all_data = None
-        for path, label in zip(paths, labels):
-            df = pd.read_csv(path)
-            df = update_df_header(df)
-            if strainLim == "auto":
-                gamma_max_stress = findPrePostSplit(df=df)
-                if postRegime:
-                    strainLim = [gamma_max_stress + 1e-2, df["load"].max()]
-                else:
-                    strainLim = [df["load"].min(), gamma_max_stress - 1e-4]
-            if data_info is None:
-                _, data_info = get_energy_drops(paths, strainLim=strainLim, debug=debug)
-            drops, _, _ = get_drops_in_windows(
-                path, df=df, strainLim=strainLim, debug=debug, label=label
-            )
-            if all_data is None:
-                all_data = df
+def find_start_of_plastic_events(
+    paths, postRegime, data_info, debug=False, binsPerDecade=5
+):
+    all_data = None
+    strainLim = None
+    if data_info is not None:
+        strainLim = data_info.get("strainLim", None)
 
-        # After the loop
-        all_drops = np.concatenate(all_drops)
+    for path in paths:
+        df = pd.read_csv(path)
+        df = update_df_header(df)
+        if strainLim is None or strainLim == "auto":
+            gamma_max_stress = findPrePostSplit(df=df)
+            if postRegime:
+                strainLim = [gamma_max_stress + 1e-2, df["load"].max()]
+            else:
+                strainLim = [df["load"].min(), gamma_max_stress - 1e-4]
+        df = df[(df["load"] > strainLim[0]) & (df["load"] < strainLim[1])]
+        if all_data is None:
+            all_data = df
+        else:
+            all_data = pd.concat([all_data, df], ignore_index=True)
+
+    if all_data is None or all_data.empty:
+        print("No data found for plastic event analysis.")
+        return None
+    # The plan is to look at the nr_plastic_deformations associated with each
+    # drop, and make histogram of the number of plastic deformations associated
+    # with each drop size
+
+    if "avg_e_change_from_init" in all_data:
+        diffs = all_data["avg_e_change_from_init"]
+    else:
+        raise RuntimeError("Avoid using old data")
+        if "avg_energy_change" not in df:
+            # Add 0 in the beginning
+            diffs = np.insert(np.diff(df["avg_energy"]), 0, 0)
+        else:
+            diffs = df["avg_energy_change"]
+
+    if "Iteration" in all_data:
+        # This is umut data, so he has already flipped his drops
+        diffs = -diffs
+
+    strain = all_data["load"]
+    lim_mask = (strain > strainLim[0]) & (strain < strainLim[1])
+    drop_mask = diffs < 0
+    mask = drop_mask & lim_mask
+    drops = (-diffs[mask]).to_numpy()
+    if "nr_plastic_deformations" in all_data:
+        plastics = all_data["nr_plastic_deformations"][mask].to_numpy()
+    else:
+        raise KeyError("nr_plastic_deformations column not found.")
+
+    xmin_peak = None
+    drops_pos = drops[drops > 0]
+    if drops_pos.size > 0:
+        decades = np.log10(drops_pos.max()) - np.log10(drops_pos.min())
+        nr_bins = max(1, int(np.ceil(decades * binsPerDecade)))
+        bins = np.logspace(
+            np.log10(drops_pos.min()), np.log10(drops_pos.max()), nr_bins + 1
+        )
+        weights = plastics[drops > 0]
+        bin_sums, _ = np.histogram(drops_pos, bins=bins, weights=weights)
+        bin_density, _ = np.histogram(
+            drops_pos, bins=bins, weights=weights, density=True
+        )
+        bin_centers = np.sqrt(bins[:-1] * bins[1:])
+        if len(bin_sums) >= 3:
+            for i in range(1, len(bin_sums) - 1):
+                if bin_sums[i] >= bin_sums[i - 1] and bin_sums[i] >= bin_sums[i + 1]:
+                    xmin_peak = bin_centers[i]
+                    break
+
+    if debug:
+        fig, ax1 = plt.subplots(1, 1, figsize=(6.4, 4.2))
+        ax2 = ax1.twinx()
+        c_pdf = "tab:blue"
+        c_plastic = "tab:orange"
+        plot_data_pdf(ax1, drops)
+        ax1.set_title("Energy drop PDF and plastic events")
+        ax1.set_xlabel(r"$-\Delta \langle E \rangle$")
+        ax1.set_ylabel(r"$p(-\Delta \langle E \rangle)$", color=c_pdf)
+        ax1.tick_params(axis="y", colors=c_pdf)
+        ax1.spines["left"].set_color(c_pdf)
+        ax1.set_xscale("log")
+
+        if drops_pos.size > 0:
+            ax2.plot(
+                bin_centers,
+                bin_density,
+                marker="o",
+                linestyle="-",
+                color=c_plastic,
+                label="Plastic-event density (weighted by drop size bins)",
+            )
+            if xmin_peak is not None:
+                ax1.axvline(
+                    xmin_peak,
+                    color="black",
+                    linestyle="--",
+                    linewidth=1.2,
+                    alpha=0.6,
+                )
+            ax2.set_xscale("log")
+            ax2.set_ylabel(
+                "Plastic-event density vs drop size (weighted)", color=c_plastic
+            )
+            ax2.tick_params(axis="y", colors=c_plastic)
+            ax2.spines["right"].set_color(c_plastic)
+        else:
+            ax2.set_ylabel(
+                "Plastic-event density vs drop size (weighted)", color=c_plastic
+            )
+
+        # Keep ax1 legend above ax2 plot elements
+        ax2.set_zorder(0)
+        ax1.set_zorder(1)
+        ax1.patch.set_visible(False)
+        handles1, labels1 = ax1.get_legend_handles_labels()
+        handles2, labels2 = ax2.get_legend_handles_labels()
+        legend = ax1.legend(handles1 + handles2, labels1 + labels2, loc="best")
+        legend.set_zorder(10)
+
+        fig.tight_layout()
+        title = make_title_from_data_info(data_info) if data_info else "plastic_events"
+        safe_title = safePath(title)
+        filename = f"{PLOTPATH}debug/{safe_title}_plastic_events.pdf"
+        fig.savefig(filename, dpi=300)
+        print(f"Saved figure to {filename}")
+        plt.close(fig)
+
+    return xmin_peak
 
 
 def dist_from_fit(fit: Fit) -> type[Distribution]:
@@ -888,6 +998,7 @@ def make_fit(
     use_cache=True,
     cache_dir: str = ".xmin_values",
     fast_xmin=False,
+    xmin_accuracy=1.0,
 ) -> Fit:
     """
     This is a wrapper for the Fit function. Finding xmin takes a long
@@ -903,7 +1014,7 @@ def make_fit(
 
         xmin_fitting_results = None
         cache_path = _get_cache_path(
-            cache_dir, data, distType.name + f"{xmin_range}{fast_xmin}"
+            cache_dir, data, distType.name + f"{xmin_range}{fast_xmin}{xmin_accuracy}"
         )
         cache_path_json = cache_path
         cache_path_gz = cache_path + ".gz"
@@ -929,6 +1040,7 @@ def make_fit(
         xmin=xmin_range,
         xmin_distribution=distType.name,
         fast_xmin=fast_xmin,
+        xmin_accuracy=xmin_accuracy,
     )
     if xmin_fitting_results:
         fitObj.xmin_fitting_results = xmin_fitting_results
@@ -1287,6 +1399,7 @@ def plot_powerlaw(
     save=True,
     addFit=True,
     fast_xmin=True,
+    xmin_accuracy=1.0,
     csvPaths=None,
 ):
     if group_paths is None and csvPaths is not None:
@@ -1347,11 +1460,15 @@ def plot_powerlaw(
                 else:
                     strainLim = [df["load"].min(), gamma_max_stress - 1e-4]
             if data_info is None:
-                _, data_info = get_energy_drops(paths, strainLim=strainLim, debug=debug)
+                _, data_info = get_energy_drops(
+                    paths, strainLim=strainLim, debug=debug, label=label
+                )
             drops, _, _ = get_drops_in_windows(
                 path, df=df, strainLim=strainLim, debug=debug, label=label
             )
             all_drops.extend(drops)  # drops is a list of arrays
+
+        find_start_of_plastic_events(paths, postRegime, data_info, debug=True)
 
         # After the loop
         all_drops = np.concatenate(all_drops)
@@ -1370,6 +1487,7 @@ def plot_powerlaw(
             xmin_range=xmin_range,
             distType=distType,
             fast_xmin=fast_xmin,
+            xmin_accuracy=xmin_accuracy,
         )
 
         best_fit = find_best_xmin(
@@ -1416,17 +1534,14 @@ def plot_powerlaw(
         title = make_title(data_info=data_info, fit=fit)
         if attribute:
             title = attribute + " " + title
-        ax = plot_data_and_fit(
+        plot_data_and_fit(
             fit,
             title=title,
             color=color,
             addFit=addFit,
             save=save,
+            show=show,
         )
-
-        if show:
-            plt.show()
-        plt.close(ax.figure)
 
 
 if __name__ == "__main__":

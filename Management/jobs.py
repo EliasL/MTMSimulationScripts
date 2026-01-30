@@ -619,16 +619,16 @@ def umutJob(L, loadIncrement=2e-5, EliasStop=False, group_by_seeds=False):
 
 
 def bigUmutJob(group_by_seeds=False):
-    return umutJob(500, False, group_by_seeds)
+    return umutJob(500, EliasStop=False, group_by_seeds=group_by_seeds)
 
 
 def bigUmutJobWithEliasStop(group_by_seeds=False):
-    return umutJob(500, True, group_by_seeds)
+    return umutJob(500, EliasStop=True, group_by_seeds=group_by_seeds)
 
 
 def stopConditionJob():
     c1, l1 = umutJob([200, 100])
-    c2, l2 = umutJob([200, 100], True)
+    c2, l2 = umutJob([200, 100], EliasStop=True)
     c = c1 + c2
     labs = list(map(lambda lab: f"epsX=1e-5, {lab}", l1)) + list(
         map(lambda lab: f"epsR=1e-5, {lab}", l2)

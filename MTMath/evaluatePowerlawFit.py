@@ -34,6 +34,55 @@ PARALLEL_UNUSED_CORES = 2
 
 
 # Let me know if there is a simpler way to get the xmin_distribution with fit values
+_EDGE_WARN_RE = r"Fitted parameters are very close to the edge of parameter ranges.*"
+_INIT_GUESS_WARN_RE = r"Initial guess is not within the specified bounds"
+
+
+def _suppress_powerlaw_warnings():
+    warnings.filterwarnings("ignore", category=OptimizeWarning)
+    warnings.filterwarnings("ignore", category=UserWarning)
+    warnings.filterwarnings(
+        "ignore",
+        message=_EDGE_WARN_RE,
+        category=UserWarning,
+        module=r"powerlaw\.distributions",
+    )
+    warnings.filterwarnings(
+        "ignore",
+        message=_INIT_GUESS_WARN_RE,
+        category=OptimizeWarning,
+        module=r"powerlaw\.distributions",
+    )
+
+
+def _upper_incomplete_gamma(a, x):
+    """
+    Compute Γ(a, x) for real a (including a<=0) using recurrence.
+    Requires x > 0.
+    """
+    x = np.asarray(x, dtype=float)
+    if np.any(x <= 0.0):
+        raise ValueError("Need x>0 for Γ(a,x).")
+
+    if np.isclose(a, np.round(a), atol=1e-12) and (np.round(a) <= 0):
+        n = int(round(1.0 - a))
+        return (x**a) * special.expn(n, x)
+
+    if a > 0.0:
+        return special.gamma(a) * special.gammaincc(a, x)
+
+    k = int(np.floor(-a)) + 1
+    ap = a + k
+    G = special.gamma(ap) * special.gammaincc(ap, x)
+
+    t = ap
+    logx = np.log(x)
+    for _ in range(k):
+        term = np.exp((t - 1.0) * logx - x)
+        G = (G - term) / (t - 1.0)
+        t -= 1.0
+
+    return G
 
 
 def dist_from_fit(fit: powerlaw.Fit) -> Distribution:
@@ -459,40 +508,10 @@ class Truncated_Power_Law(Original_Truncated_Power_Law):
         s = 1.0 - float(self.alpha)
         lam = float(self.Lambda)
         z = lam * x
+        if np.any(z <= 0):
+            raise ValueError("Lambda*x must be positive for real-valued Γ(a,x).")
 
-        # If z can be negative, you must decide what "valid" means for your model.
-        # This enforces the usual domain z >= 0.
-        if np.any(z < 0):
-            raise ValueError(
-                "Lambda*x must be nonnegative for real-valued incomplete gamma."
-            )
-
-        # Shift s upward until positive
-        if s <= 0:
-            n = int(np.ceil(-s)) + 1  # ensures s+n > 0
-            sp = s + n
-        else:
-            n = 0
-            sp = s
-
-        # Compute Γ(sp, z) using regularized upper * Γ(sp)
-        G = special.gammaincc(sp, z) * special.gamma(sp)
-
-        # Shift back down n times: Γ(s+k, z) -> Γ(s+k-1, z)
-        # Γ(t-1, z) = (Γ(t, z) - z^(t-1) e^{-z}) / (t-1)
-        for k in range(n, 0, -1):
-            t_minus_1 = s + (k - 1)
-
-            # compute z^(t_minus_1) * exp(-z) in a numerically safer way
-            # for z==0, log(z)=-inf; handle separately
-            term = np.zeros_like(z)
-            mask = z > 0
-            term[mask] = np.exp(t_minus_1 * np.log(z[mask]) - z[mask])
-            # if z==0:
-            # z^(t_minus_1) is 0 if t_minus_1>0, inf if t_minus_1<0 (divergence); leave as 0 here.
-
-            G = (G - term) / t_minus_1
-
+        G = _upper_incomplete_gamma(s, z)
         cdf = 1.0 - G / (lam**s)
         return cdf
 
@@ -515,13 +534,14 @@ class Fit(powerlaw.Fit):
         xmin_distribution="power_law",
         verbose=1,
         fast_xmin=False,
+        xmin_accuracy=1,
     ):
         self.fast_xmin = fast_xmin
+        self.xmin_accuracy = xmin_accuracy
         # The upstream powerlaw fit can emit OptimizeWarning/UserWarning during init.
         # Suppress them here so callers don't need to wrap every Fit construction.
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=OptimizeWarning)
-            warnings.filterwarnings("ignore", category=UserWarning)
+            _suppress_powerlaw_warnings()
 
             # We need to replace the old truncated power law with our new one so we use
             # the faster generator
@@ -547,6 +567,7 @@ class Fit(powerlaw.Fit):
         self,
         xmin_distance=None,
         use_fast_search=None,
+        xmin_accuracy=None,
         retain_factor=3.0,
     ):
         # This function will be called if xmin is None, and we will already
@@ -554,6 +575,11 @@ class Fit(powerlaw.Fit):
 
         if use_fast_search is None:
             use_fast_search = self.fast_xmin
+        if xmin_accuracy is None:
+            xmin_accuracy = self.xmin_accuracy
+        if xmin_accuracy <= 0:
+            raise ValueError("xmin_accuracy must be > 0.")
+        xmin_accuracy = min(1.0, float(xmin_accuracy))
 
         # Grab the indices of possible xmin values
         possible_ind = np.where(
@@ -693,8 +719,7 @@ class Fit(powerlaw.Fit):
         if not use_fast_search:
             # --- Exhaustive evaluation over all candidate xmins (original behavior)
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=OptimizeWarning)
-                warnings.filterwarnings("ignore", category=UserWarning)
+                _suppress_powerlaw_warnings()
 
                 iterator = (
                     tqdm(range(num_xmin), desc="Fitting xmin")
@@ -710,7 +735,10 @@ class Fit(powerlaw.Fit):
             # within the retain factor times the smallest found value
             # Once you are at the end, choose a smaller step size
             iteration = 0
-            max_iterations = int(np.ceil(np.log2(num_xmin / np.log2(num_xmin))))
+            min_step = max(1, int(round(1.0 / xmin_accuracy)))
+            max_iterations = int(
+                np.ceil(np.log2(num_xmin / (np.log2(num_xmin) * min_step)))
+            )
             current_best = np.inf
             previous_best = np.inf
 
@@ -721,8 +749,7 @@ class Fit(powerlaw.Fit):
                 return est >= previous_best * retain_factor  # prune when clearly worse
 
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=OptimizeWarning)
-                warnings.filterwarnings("ignore", category=UserWarning)
+                _suppress_powerlaw_warnings()
 
                 while True:
                     iteration += 1
@@ -749,7 +776,7 @@ class Fit(powerlaw.Fit):
                             current_best = d
 
                     previous_best = current_best
-                    if step_size == 1:
+                    if step_size <= min_step:
                         break
             if self.verbose:
                 print(
@@ -855,8 +882,7 @@ class Fit(powerlaw.Fit):
         sample, dist: type[Distribution], xmin, xmax, discrete, fit_method
     ):
         with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=OptimizeWarning)
-            warnings.filterwarnings("ignore", category=UserWarning)
+            _suppress_powerlaw_warnings()
             m = dist(
                 data=sample,
                 xmin=xmin,
@@ -952,8 +978,7 @@ class Fit(powerlaw.Fit):
             )
 
             with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=OptimizeWarning)
-                warnings.filterwarnings("ignore", category=UserWarning)
+                _suppress_powerlaw_warnings()
                 if parallel:
                     from concurrent.futures import ProcessPoolExecutor
 

@@ -1,4 +1,5 @@
 from Management.jobs import (
+    loadStepJob,
     stopConditionJob,
     smallJob,
     allPlasticEventsJob,
@@ -17,7 +18,7 @@ from Management.jobs import (
 
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
-from MTMath.powerlaw_mixed_test import testCombinedDists, grid_compare_xmin
+from MTMath.powerlaw_mixed_test import testDist, grid_compare_xmin, testSamplePiecewise
 from MTMath.plotPowerLaw import make_exponent_fit, plot_powerlaw
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
@@ -311,6 +312,16 @@ def compareStop():
     plotAll(configs, noVideos=True, labels=labels, name="compareStop")
 
 
+def compareStep():
+    # Compare using Epsx or EpsR to stop
+    c, l = loadStepJob(group_by_seeds=True)
+    fast_xmin = True
+    xmin_accuracy = 0.1
+    plotLog2(
+        c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
+    )
+
+
 def plotLogAnalasys():
     configs, labels = bigUmutJob(group_by_seeds=True)
 
@@ -363,9 +374,11 @@ if __name__ == "__main__":
     # tryAllRotations()
     # plotsLotsOfRealFStress("pk2", reduced=True)
     # bug_hunting()
-    # testCombinedDists()
     # elasticReductionPlots()
     # showDecomposition()
     # compareStop()
+    compareStep()
     # plotLogAnalasys()
-    grid_compare_xmin()
+    # grid_compare_xmin()
+    # testDist()
+    # testSamplePiecewise()

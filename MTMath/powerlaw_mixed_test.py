@@ -12,33 +12,28 @@ from .evaluatePowerlawFit import Truncated_Power_Law
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import colors as mcolors
-from scipy.special import gamma, gammaincc
+from scipy.special import gamma, gammaincc, expn
 
 
 # Generate synthetic power-law distributed data
 def generate_truncated_powerlaw_data(n, alpha, Lambda, xmin):
     dist = Truncated_Power_Law(xmin=xmin, alpha=alpha, Lambda=Lambda)
-    return dist.generate_random(size=n)
+    return np.array(dist.generate_random(size=n))
 
 
 # Generate power-law avalanche data
-def generate_powerlaw_avalanche_data(alpha, size=5000, xmin=1e-8):
-    increments = np.random.normal(xmin, xmin, size=size)  # Small incremental increases
+def generate_powerlaw_avalanche_data(
+    alpha, size=5000, xmin=1e-8, lognormal_sigma=1.0, Lambda=1e4
+):
+    # Positive background increments with a softer transition than a uniform draw.
+    logNormalDrops = np.random.lognormal(
+        mean=np.log(xmin * 1e-1),
+        sigma=lognormal_sigma,
+        size=int(size / 2),
+    )
 
-    # Randomly select drop points
-    drop_mask = np.random.uniform(size=size) > 0.7  # 40% chance of a drop
-    Lambda = 1e4
-    drops = generate_truncated_powerlaw_data(drop_mask.sum(), alpha, Lambda, xmin)
-    # Apply drops
-    assert drops is not None
-    increments[drop_mask] = -drops
-    return increments
-
-
-def get_only_drops(data):
-    drop_mask = data < 0
-    drops = -data[drop_mask]
-    return drops
+    drops = generate_truncated_powerlaw_data(size - int(size / 2), alpha, Lambda, xmin)
+    return np.concatenate((logNormalDrops, drops))
 
 
 def _sample_trunc_powerlaw(n, beta, xlow, xmin, rng):
@@ -54,14 +49,53 @@ def _sample_cutoff_powerlaw_fast(n, alpha, lam, xmin, rng):
     return dist.generate_random(size=n, rng=rng)
 
 
+def _upper_incomplete_gamma(a, x):
+    """
+    Compute Γ(a, x) for real a (including a<=0) using recurrence.
+    Requires x > 0.
+    """
+    x = np.asarray(x, dtype=float)
+    if np.any(x <= 0.0):
+        raise ValueError("Need x>0 for Γ(a,x).")
+
+    if np.isclose(a, np.round(a), atol=1e-12) and (np.round(a) <= 0):
+        n = int(round(1.0 - a))
+        return (x**a) * expn(n, x)
+
+    if a > 0.0:
+        return gamma(a) * gammaincc(a, x)
+
+    k = int(np.floor(-a)) + 1
+    ap = a + k
+    G = gamma(ap) * gammaincc(ap, x)
+
+    t = ap
+    logx = np.log(x)
+    for _ in range(k):
+        term = np.exp((t - 1.0) * logx - x)
+        G = (G - term) / (t - 1.0)
+        t -= 1.0
+    return G
+
+
 def _Z_tail(alpha, lam, xmin):
     s = 1.0 - alpha
-    x = xmin / lam
-    z = (lam ** (1.0 - alpha)) * gamma(s) * gammaincc(s, x)
-    return abs(z)
+    z = np.asarray(xmin, dtype=float) / lam
+    G = _upper_incomplete_gamma(s, z)
+    return (lam ** (1.0 - alpha)) * G
 
 
-def sample_piecewise(n, A, B, beta, alpha, lam, xmin, xlow=None, rng=None):
+def sample_piecewise(
+    n,
+    A,
+    B,
+    beta,
+    alpha,
+    lam,
+    xmin,
+    xlow=None,
+    rng=None,
+):
     """
     Sample from:
       0 < x < xmin:  f(x) ∝ A*x^{-beta} + B*xmin^{-alpha}*exp(-xmin/lam)
@@ -80,22 +114,30 @@ def sample_piecewise(n, A, B, beta, alpha, lam, xmin, xlow=None, rng=None):
         raise ValueError("A and B must be nonnegative.")
     if not (-alpha * 2 < beta < 3.0 * alpha):
         raise ValueError("Require -alpha < beta < 3*alpha.")
-
     if xlow is None:
-        xlow = xmin * 1e-12
+        xlow = 1e-10
     if not (np.isfinite(xlow) and 0 < xlow < xmin):
         raise ValueError("Need 0 < xlow < xmin.")
 
+    # I_beta is the (unnormalized) integral of x^{-beta} over [xlow, xmin]
+    # for the left-side truncated power-law component.
     if np.isclose(beta, 1.0):
         I_beta = np.log(xmin / xlow)
     else:
         I_beta = (xmin ** (1.0 - beta) - xlow ** (1.0 - beta)) / (1.0 - beta)
+    # Enforce continuity at xmin by setting the left-side scale A
+    # so that A * xmin^{-beta} = B * xmin^{-alpha} * exp(-xmin/lam)
+    A = B * (xmin ** (beta - alpha)) * np.exp(-xmin / lam)
+
+    # M_P: total mass of the left power-law component (scaled by A)
     M_P = A * I_beta
 
-    c = (xmin ** (-alpha)) * np.exp(-xmin / lam)
-    M_U = B * c * (xmin - xlow)
+    # No uniform plateau on the left; only a pure truncated power law.
+    M_U = 0.0
 
+    # Zt is the tail normalization integral over [xmin, ∞) for x^{-alpha} exp(-x/lam)
     Zt = _Z_tail(alpha, lam, xmin)
+    # M_T: total mass of the right cutoff-power-law tail (scaled by B)
     M_T = B * Zt
 
     M_total = M_P + M_U + M_T
@@ -113,16 +155,7 @@ def sample_piecewise(n, A, B, beta, alpha, lam, xmin, xlow=None, rng=None):
     n_tail = n - n_left
 
     if n_left > 0:
-        u2 = rng.random(n_left)
-        is_pow = u2 < w_pow_left
-        n_pow = int(is_pow.sum())
-        n_uni = n_left - n_pow
-        left = np.empty(n_left, dtype=float)
-        if n_pow > 0:
-            left[is_pow] = _sample_trunc_powerlaw(n_pow, beta, xlow, xmin, rng)
-        if n_uni > 0:
-            left[~is_pow] = xlow + (xmin - xlow) * rng.random(n_uni)
-        x[is_left] = left
+        x[is_left] = _sample_trunc_powerlaw(n_left, beta, xlow, xmin, rng)
 
     if n_tail > 0:
         x[~is_left] = _sample_cutoff_powerlaw_fast(n_tail, alpha, lam, xmin, rng)
@@ -144,12 +177,13 @@ def sample_piecewise(n, A, B, beta, alpha, lam, xmin, xlow=None, rng=None):
 def grid_compare_xmin(
     alphas=None,
     xmins=None,
-    n=4000,
+    n=5000,
     Lambda=1e4,
     A=1.0,
     B=1.0,
-    beta=0.5,
+    beta=1.5,
     xlow=None,
+    seed=0,
     rng=None,
     xmin_range=None,
     fast_xmin=True,
@@ -161,23 +195,24 @@ def grid_compare_xmin(
     xmin2: find_best_xmin(...).xmin
     """
     if alphas is None:
-        alphas = np.linspace(1.05, 1.8, 6)
+        alphas = np.linspace(1.05, 3, 6)
     if xmins is None:
-        xmins = np.logspace(-9, -6, 6)
+        xmins = np.logspace(-9, -3, 6)
     if rng is None:
-        rng = np.random.default_rng()
+        rng = np.random.default_rng(seed)
 
     xmin1_grid = np.full((len(alphas), len(xmins)), np.nan, dtype=float)
     xmin2_grid = np.full_like(xmin1_grid, np.nan)
     alpha1_grid = np.full_like(xmin1_grid, np.nan)
     alpha2_grid = np.full_like(xmin1_grid, np.nan)
+    alpha2std_grid = np.full_like(xmin1_grid, np.nan)
     lambda1_grid = np.full_like(xmin1_grid, np.nan)
     lambda2_grid = np.full_like(xmin1_grid, np.nan)
 
     for i, alpha in enumerate(alphas):
         for j, xmin_true in enumerate(xmins):
             data_info = {
-                "customTitle": rf"Synthetic: $\alpha={alpha}, \lambda={Lambda}, E_{{\mathrm{{min}}}}={xmin_true}$"
+                "customTitle": rf"Synthetic: $\alpha={alpha:.2}, \lambda={Lambda:.0e}, E_{{\mathrm{{min}}}}={xmin_true:.2e}$"
             }
 
             drops, _ = sample_piecewise(
@@ -191,12 +226,16 @@ def grid_compare_xmin(
                 xlow=xlow,
                 rng=rng,
             )
+            # drops = generate_powerlaw_avalanche_data(alpha, xmin=xmin_true, size=n)
+
             drops = np.asarray(drops, dtype=float)
             drops = drops[np.isfinite(drops)]
             if drops.size < 10:
                 continue
 
-            fit1 = make_fit(drops, xmin_range=xmin_range, fast_xmin=fast_xmin)
+            fit1 = make_fit(
+                drops, xmin_range=xmin_range, fast_xmin=fast_xmin, xmin_accuracy=0.1
+            )
             xmin1_grid[i, j] = float(fit1.xmin)
             alpha1_grid[i, j] = getattr(dist_from_fit(fit1), "alpha", np.nan)
             lambda1_grid[i, j] = getattr(dist_from_fit(fit1), "Lambda", np.nan)
@@ -212,84 +251,67 @@ def grid_compare_xmin(
             plot_data_and_fit(fit2, data_info=data_info)
             xmin2_grid[i, j] = float(fit2.xmin)
             alpha2_grid[i, j] = getattr(dist_from_fit(fit2), "alpha", np.nan)
+            alpha2std_grid[i, j] = getattr(fit2, "alpha_std", np.nan)
             lambda2_grid[i, j] = getattr(dist_from_fit(fit2), "Lambda", np.nan)
 
-    xmin_min = np.nanmin([xmin1_grid.min(), xmin2_grid.min()])
-    xmin_max = np.nanmax([xmin1_grid.max(), xmin2_grid.max()])
-
-    dx1_grid = xmin1_grid - np.array(xmins)[None, :]
-    dx2_grid = xmin2_grid - np.array(xmins)[None, :]
+    xmins_arr = np.array(xmins, dtype=float)[None, :]
+    xmin1_factor = xmin1_grid / xmins_arr
+    xmin2_factor = xmin2_grid / xmins_arr
     da1_grid = alpha1_grid - np.array(alphas)[:, None]
     da2_grid = alpha2_grid - np.array(alphas)[:, None]
-    dl1_grid = lambda1_grid - Lambda
-    dl2_grid = lambda2_grid - Lambda
+    lambda1_factor = lambda1_grid / Lambda
+    lambda2_factor = lambda2_grid / Lambda
 
-    dx_min = np.nanmin([dx1_grid.min(), dx2_grid.min()])
-    dx_max = np.nanmax([dx1_grid.max(), dx2_grid.max()])
+    dx1_log = np.log10(xmin1_factor)
+    dx2_log = np.log10(xmin2_factor)
+    dx_min = np.nanmin([dx1_log.min(), dx2_log.min()])
+    dx_max = np.nanmax([dx1_log.max(), dx2_log.max()])
+
     da_min = np.nanmin([da1_grid.min(), da2_grid.min()])
     da_max = np.nanmax([da1_grid.max(), da2_grid.max()])
-    dl_min = np.nanmin([dl1_grid.min(), dl2_grid.min()])
-    dl_max = np.nanmax([dl1_grid.max(), dl2_grid.max()])
-    dl_abs_max = np.nanmax(np.abs([dl_min, dl_max]))
-
-    fig, axes = plt.subplots(4, 2, figsize=(12, 13), constrained_layout=True)
+    fig, axes = plt.subplots(3, 2, figsize=(12, 10), constrained_layout=True)
 
     im1 = axes[0, 0].imshow(
-        xmin1_grid, aspect="auto", origin="lower", vmin=xmin_min, vmax=xmin_max
+        dx1_log, aspect="auto", origin="lower", vmin=dx_min, vmax=dx_max
     )
-    axes[0, 0].set_title("xmin (min KS)")
+    axes[0, 0].set_title(r"$\log_{10}(x_{\min}/x_{\min,true})$ (min KS)")
     fig.colorbar(im1, ax=axes[0, 0], fraction=0.046, pad=0.04)
 
     im2 = axes[0, 1].imshow(
-        xmin2_grid, aspect="auto", origin="lower", vmin=xmin_min, vmax=xmin_max
+        dx2_log, aspect="auto", origin="lower", vmin=dx_min, vmax=dx_max
     )
-    axes[0, 1].set_title("xmin (max $p$)")
+    axes[0, 1].set_title(r"$\log_{10}(x_{\min}/x_{\min,true})$ (max $p$)")
     fig.colorbar(im2, ax=axes[0, 1], fraction=0.046, pad=0.04)
 
     im3 = axes[1, 0].imshow(
-        dx1_grid, aspect="auto", origin="lower", vmin=dx_min, vmax=dx_max
+        da1_grid, aspect="auto", origin="lower", vmin=da_min, vmax=da_max
     )
-    axes[1, 0].set_title("xmin (min KS) - true xmin")
+    axes[1, 0].set_title("alpha (min KS) - true alpha")
     fig.colorbar(im3, ax=axes[1, 0], fraction=0.046, pad=0.04)
 
     im4 = axes[1, 1].imshow(
-        dx2_grid, aspect="auto", origin="lower", vmin=dx_min, vmax=dx_max
+        da2_grid, aspect="auto", origin="lower", vmin=da_min, vmax=da_max
     )
-    axes[1, 1].set_title("xmin (max $p$) - true xmin")
+    axes[1, 1].set_title("alpha (max $p$) - true alpha")
     fig.colorbar(im4, ax=axes[1, 1], fraction=0.046, pad=0.04)
 
+    dl1_log = np.log10(lambda1_factor)
+    dl2_log = np.log10(lambda2_factor)
+    dl_min = np.nanmin([dl1_log.min(), dl2_log.min()])
+    dl_max = np.nanmax([dl1_log.max(), dl2_log.max()])
     im5 = axes[2, 0].imshow(
-        da1_grid, aspect="auto", origin="lower", vmin=da_min, vmax=da_max
+        dl1_log, aspect="auto", origin="lower", vmin=dl_min, vmax=dl_max
     )
-    axes[2, 0].set_title("alpha (min KS) - true alpha")
+    axes[2, 0].set_title(r"$\log_{10}(\lambda/\lambda_{true})$ (min KS)")
     fig.colorbar(im5, ax=axes[2, 0], fraction=0.046, pad=0.04)
 
     im6 = axes[2, 1].imshow(
-        da2_grid, aspect="auto", origin="lower", vmin=da_min, vmax=da_max
+        dl2_log, aspect="auto", origin="lower", vmin=dl_min, vmax=dl_max
     )
-    axes[2, 1].set_title("alpha (max $p$) - true alpha")
+    axes[2, 1].set_title(r"$\log_{10}(\lambda/\lambda_{true})$ (max $p$)")
     fig.colorbar(im6, ax=axes[2, 1], fraction=0.046, pad=0.04)
 
-    dl1_abs = np.abs(dl1_grid)
-    dl2_abs = np.abs(dl2_grid)
-    dl_abs_min = np.nanmin([dl1_abs.min(), dl2_abs.min()])
-    dl_abs_max = np.nanmax([dl1_abs.max(), dl2_abs.max()])
-    if not np.isfinite(dl_abs_min) or dl_abs_min <= 0:
-        dl_abs_min = max(dl_abs_max * 1e-6, 1e-12)
-    lambda_norm = (
-        mcolors.LogNorm(vmin=dl_abs_min, vmax=dl_abs_max)
-        if np.isfinite(dl_abs_max) and dl_abs_max > 0
-        else None
-    )
-    im7 = axes[3, 0].imshow(dl1_abs, aspect="auto", origin="lower", norm=lambda_norm)
-    axes[3, 0].set_title("|lambda (min KS) - true lambda|")
-    fig.colorbar(im7, ax=axes[3, 0], fraction=0.046, pad=0.04)
-
-    im8 = axes[3, 1].imshow(dl2_abs, aspect="auto", origin="lower", norm=lambda_norm)
-    axes[3, 1].set_title("|lambda (max $p$) - true lambda|")
-    fig.colorbar(im8, ax=axes[3, 1], fraction=0.046, pad=0.04)
-
-    for row in range(4):
+    for row in range(3):
         for col in range(2):
             axes[row, col].set_xticks(range(len(xmins)))
             axes[row, col].set_xticklabels(
@@ -297,38 +319,101 @@ def grid_compare_xmin(
             )
             axes[row, col].set_yticks(range(len(alphas)))
             axes[row, col].set_yticklabels([f"{a:.2f}" for a in alphas])
-            axes[row, col].set_xlabel("true xmin")
-            axes[row, col].set_ylabel("true alpha")
+            if row == 2:
+                axes[row, col].set_xlabel("true xmin")
+            else:
+                axes[row, col].set_xlabel("")
+            if col == 0:
+                axes[row, col].set_ylabel("true alpha")
+            else:
+                axes[row, col].set_ylabel("")
+
+    from datetime import datetime
 
     fig.suptitle("Grid comparison of xmin estimates")
-    filename = f"{PLOTPATH}grid_compare_xmin.pdf"
+    timestamp = datetime.now().strftime("%H%M")
+    filename = f"{PLOTPATH}grid_compare_xmin_{timestamp}.pdf"
     fig.savefig(filename, format="pdf", bbox_inches="tight")
     print(f"Saved figure to {filename}")
     plt.close(fig)
 
+    # --- Standalone alpha z-score plot for method 2 ---
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z2 = np.abs(da2_grid) / alpha2std_grid
+    z2 = np.where(np.isfinite(z2), z2, np.nan)
+
+    fig2, ax = plt.subplots(1, 1, figsize=(6, 5), constrained_layout=True)
+    z_vmax = np.nanmax(z2)
+    if not np.isfinite(z_vmax) or z_vmax <= 0:
+        z_vmax = 1.0
+    imz = ax.imshow(z2, aspect="auto", origin="lower", vmin=0, vmax=z_vmax)
+    ax.set_title(
+        r"Alpha z-score (max $p$): $\vert \Delta\alpha\vert / \alpha_{\mathrm{std}}$"
+    )
+    ax.set_xticks(range(len(xmins)))
+    ax.set_xticklabels([f"{x:.1e}" for x in xmins], rotation=45, ha="right")
+    ax.set_yticks(range(len(alphas)))
+    ax.set_yticklabels([f"{a:.2f}" for a in alphas])
+    ax.set_xlabel("true xmin")
+    ax.set_ylabel("true alpha")
+    fig2.colorbar(imz, ax=ax, fraction=0.046, pad=0.04)
+
+    filename2 = f"{PLOTPATH}grid_compare_alpha_zscore.pdf"
+    fig2.savefig(filename2, format="pdf", bbox_inches="tight")
+    print(f"Saved figure to {filename2}")
+    plt.close(fig2)
+
     return xmin1_grid, xmin2_grid
 
 
-def testCombinedDists(alpha1=1.2, alpha2=1.4):
-    # drops = generate_truncated_powerlaw_data(
-    #     n=1000, alpha=alpha1, Lambda=1e4, xmin=1e-8
-    # )
-    # # It is different when i use the cache!
-    # fit = make_fit(drops, xmin_range=(9.9e-9, 1.1e-8))
-
-    # print(fit.xmin)
-    # fit.evaluate_fit()
-
-    drops = get_only_drops(
-        generate_powerlaw_avalanche_data(alpha1)
-        + generate_powerlaw_avalanche_data(alpha2)
-    )
-
+def testDist(alpha1=1.05):
+    Lambda = 1e4
+    drops = generate_powerlaw_avalanche_data(alpha1, xmin=1e-6, Lambda=Lambda)
     fit = make_fit(drops, fast_xmin=True)
     fit.evaluate_fit()
     find_best_xmin(drops, debug=True, xmin_results=fit.xmin_fitting_results)
-    plot_xmin_fitting(fit, save=True, show=True)
+    plot_xmin_fitting(fit, save=True)
 
-    filename = f"testing/{alpha1}_{alpha2}_lamb=1e4"
+    filename = f"testing/{alpha1}_lamb={Lambda:.0e}"
     title = make_title_from_fit(fit)
     plot_data_and_fit(fit, title=title, extraPath=filename)
+
+
+def testSamplePiecewise(
+    n=5000,
+    A=1.0,
+    B=1.0,
+    beta=2.0,
+    alpha=1.2,
+    lam=1e3,
+    xmin=1e-6,
+    xlow=None,
+    seed=0,
+):
+    rng = np.random.default_rng(seed)
+    drops, info = sample_piecewise(
+        n=n,
+        A=A,
+        B=B,
+        beta=beta,
+        alpha=alpha,
+        lam=lam,
+        xmin=xmin,
+        xlow=xlow,
+        rng=rng,
+    )
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops)]
+    if drops.size < 10:
+        print("Not enough samples to fit.")
+        return None
+
+    fit = make_fit(drops, fast_xmin=True, xmin_accuracy=0.1)
+    # fit.evaluate_fit()
+    # find_best_xmin(drops, debug=True, xmin_results=fit.xmin_fitting_results)
+    # plot_xmin_fitting(fit, save=True)
+
+    filename = f"testing/piecewise_a{alpha:.2f}_lam{lam:.0e}_xmin{xmin:.1e}"
+    title = make_title_from_fit(fit)
+    plot_data_and_fit(fit, title=title, extraPath=filename)
+    return fit, info
