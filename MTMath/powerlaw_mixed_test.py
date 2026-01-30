@@ -1,4 +1,4 @@
-from .plotPowerLaw import (
+from ..Plotting.plotPowerLaw import (
     make_fit,
     plot_data_and_fit,
     PLOTPATH,

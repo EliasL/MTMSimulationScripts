@@ -19,7 +19,7 @@ from Management.jobs import (
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
 from MTMath.powerlaw_mixed_test import testDist, grid_compare_xmin, testSamplePiecewise
-from MTMath.plotPowerLaw import make_exponent_fit, plot_powerlaw
+from Plotting.plotPowerLaw import make_exponent_fit, plot_powerlaw
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
     elasticReductionPlots,
@@ -329,13 +329,13 @@ def plotLogAnalasys():
     # plotEnergy(configs, labels=labels)
     # # Find split
     fast_xmin = True
-    plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
+    # plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
     # plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
 
     p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
     lab = [["umut"]]
-    # plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
-    # plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
+    plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
+    plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
 
 
 if __name__ == "__main__":
@@ -377,8 +377,8 @@ if __name__ == "__main__":
     # elasticReductionPlots()
     # showDecomposition()
     # compareStop()
-    compareStep()
-    # plotLogAnalasys()
+    # compareStep()
+    plotLogAnalasys()
     # grid_compare_xmin()
     # testDist()
     # testSamplePiecewise()

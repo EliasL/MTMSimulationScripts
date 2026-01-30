@@ -3,14 +3,14 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-from .evaluatePowerlawFit import Fit, Truncated_Power_Law
+from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law
 from powerlaw import Distribution
 from Management.updateCSV import update_df_header
-from Plotting.makePlots import safePath
+from .makePlots import safePath
 import os
 import glob
-from Plotting.makePlots import safePath
 from tqdm import tqdm
+import warnings
 
 np.random.seed(0)
 # Create directories for saving plots
@@ -259,7 +259,7 @@ def plot_data_pdf(
             nrDrops = data.size
         else:
             nrDrops = f"{data.size:.1e}"
-        label = f"Binned PDF of {nrDrops} energy drops"
+        label = f"PDF of {nrDrops} energy drops"
 
     # Plot as points
     plot_kwargs = {
@@ -489,7 +489,8 @@ def make_title_from_data_info(data_info):
     L = data_info["L"]
     n = data_info["nrSimulations"]
     samples_string = f"{n} sample{'s' if n != 1 else ''}"
-    title = rf"{data_info['minimizer']} {L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f} ({data_info['label']})"
+    title = rf"{data_info['minimizer']} {L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f} {data_info['label']}"
+    title = title.strip().replace("  ", " ")
     return title
 
 
@@ -613,7 +614,9 @@ def make_debug_plot(xmins, strainLim=None):
         # plt.show()
 
 
-def plot_ks_distance(drops, xmin, dist_name="truncated_power_law", data_info=None):
+def plot_ks_distance(
+    drops, xmin, dist_name="truncated_power_law", data_info=None, name=""
+):
     """
     Plot the empirical CCDF vs the fitted CCDF and visually show the KS distance (D).
     """
@@ -636,7 +639,7 @@ def plot_ks_distance(drops, xmin, dist_name="truncated_power_law", data_info=Non
     # ax.set_yscale("log")
     ax.set_xlabel(r"$-\Delta \langle E \rangle$")
     ax.set_ylabel(r"$P(X > x)$")
-    title = "Kolmogorov–Smirnov Distance (CCDF)"
+    title = "KS Distance (CCDF)" + (" " + name if name != "" else "")
     if data_info is not None:
         title = make_title_from_data_info(data_info)
         title += rf" $E_{{\mathrm{{min}}}}$={xmin:.2e}"
@@ -652,6 +655,7 @@ def plot_ks_distance(drops, xmin, dist_name="truncated_power_law", data_info=Non
     fig.savefig(filename, dpi=300)
     print(f"Saved fig to {filename}")
     # plt.show()
+    plt.close(fig)
 
 
 def _fit_single_xmin_task(args):
@@ -886,9 +890,10 @@ def find_start_of_plastic_events(
     if "nr_plastic_deformations" in all_data:
         plastics = all_data["nr_plastic_deformations"][mask].to_numpy()
     else:
-        raise KeyError("nr_plastic_deformations column not found.")
+        warnings.warn("nr_plastic_deformations column not found.")
+        return None
 
-    xmin_peak = None
+    xmin_loc_min = None
     drops_pos = drops[drops > 0]
     if drops_pos.size > 0:
         decades = np.log10(drops_pos.max()) - np.log10(drops_pos.min())
@@ -902,57 +907,76 @@ def find_start_of_plastic_events(
             drops_pos, bins=bins, weights=weights, density=True
         )
         bin_centers = np.sqrt(bins[:-1] * bins[1:])
+        # Find first local minimum
         if len(bin_sums) >= 3:
             for i in range(1, len(bin_sums) - 1):
-                if bin_sums[i] >= bin_sums[i - 1] and bin_sums[i] >= bin_sums[i + 1]:
-                    xmin_peak = bin_centers[i]
+                if bin_sums[i] <= bin_sums[i - 1] and bin_sums[i] <= bin_sums[i + 1]:
+                    xmin_loc_min = bin_centers[i]
                     break
 
     if debug:
         fig, ax1 = plt.subplots(1, 1, figsize=(6.4, 4.2))
         ax2 = ax1.twinx()
-        c_pdf = "tab:blue"
-        c_plastic = "tab:orange"
+
+        c_drop_pdf = "tab:blue"
+        c_plastic_pdf = "tab:green"
+        c_plastic_counts = "tab:orange"
+
+        # 1) Energy-drop PDF (normalized) on ax1
         plot_data_pdf(ax1, drops)
-        ax1.set_title("Energy drop PDF and plastic events")
+        ax1.set_title("Energy-drop PDF and plasticity vs drop size")
         ax1.set_xlabel(r"$-\Delta \langle E \rangle$")
-        ax1.set_ylabel(r"$p(-\Delta \langle E \rangle)$", color=c_pdf)
-        ax1.tick_params(axis="y", colors=c_pdf)
-        ax1.spines["left"].set_color(c_pdf)
+        ax1.set_ylabel("Density (normalized)", color=c_drop_pdf)
+        ax1.tick_params(axis="y", colors=c_drop_pdf)
+        ax1.spines["left"].set_color(c_drop_pdf)
         ax1.set_xscale("log")
 
         if drops_pos.size > 0:
-            ax2.plot(
+            # bins, bin_sums, bin_density, bin_centers already computed above
+
+            # Plastic-event PDF vs drop size (normalized over plastic events) on ax1
+            plastic_pdf = bin_density  # W_i / (sum W) / Δx_i
+            ax1.plot(
                 bin_centers,
-                bin_density,
+                plastic_pdf,
                 marker="o",
-                linestyle="-",
-                color=c_plastic,
-                label="Plastic-event density (weighted by drop size bins)",
+                linestyle="--",
+                color=c_plastic_pdf,
+                label="Plastic-event PDF",
             )
-            if xmin_peak is not None:
+
+            # Optional: mark xmin_peak on x-axis
+            if xmin_loc_min is not None:
                 ax1.axvline(
-                    xmin_peak,
+                    xmin_loc_min,
                     color="black",
                     linestyle="--",
                     linewidth=1.2,
                     alpha=0.6,
                 )
+
+            # 2) Raw plastic-event counts per bin (no scaling) on ax2
+            ax2.plot(
+                bin_centers,
+                bin_sums,
+                marker="o",
+                linestyle="-",
+                color=c_plastic_counts,
+                label="Plastic events per drop-size bin",
+            )
             ax2.set_xscale("log")
-            ax2.set_ylabel(
-                "Plastic-event density vs drop size (weighted)", color=c_plastic
-            )
-            ax2.tick_params(axis="y", colors=c_plastic)
-            ax2.spines["right"].set_color(c_plastic)
+            ax2.set_ylabel("Nr plastic events", color=c_plastic_counts)
+            ax2.tick_params(axis="y", colors=c_plastic_counts)
+            ax2.spines["right"].set_color(c_plastic_counts)
+
         else:
-            ax2.set_ylabel(
-                "Plastic-event density vs drop size (weighted)", color=c_plastic
-            )
+            ax2.set_ylabel("Plastic events per bin (counts)", color=c_plastic_counts)
 
         # Keep ax1 legend above ax2 plot elements
         ax2.set_zorder(0)
         ax1.set_zorder(1)
         ax1.patch.set_visible(False)
+
         handles1, labels1 = ax1.get_legend_handles_labels()
         handles2, labels2 = ax2.get_legend_handles_labels()
         legend = ax1.legend(handles1 + handles2, labels1 + labels2, loc="best")
@@ -966,7 +990,7 @@ def find_start_of_plastic_events(
         print(f"Saved figure to {filename}")
         plt.close(fig)
 
-    return xmin_peak
+    return xmin_loc_min
 
 
 def dist_from_fit(fit: Fit) -> type[Distribution]:
@@ -1468,7 +1492,9 @@ def plot_powerlaw(
             )
             all_drops.extend(drops)  # drops is a list of arrays
 
-        find_start_of_plastic_events(paths, postRegime, data_info, debug=True)
+        event_min_xmin = find_start_of_plastic_events(
+            paths, postRegime, data_info, debug=True
+        )
 
         # After the loop
         all_drops = np.concatenate(all_drops)
@@ -1482,7 +1508,7 @@ def plot_powerlaw(
         if xmin_range is None and not fast_xmin:
             # Not using fast_xmin is brutally slow. We add a default range here
             xmin_range = [1e-9, 1]
-        fit = make_fit(
+        KS_fit = make_fit(
             data=all_drops,
             xmin_range=xmin_range,
             distType=distType,
@@ -1490,17 +1516,17 @@ def plot_powerlaw(
             xmin_accuracy=xmin_accuracy,
         )
 
-        best_fit = find_best_xmin(
+        p_fit = find_best_xmin(
             all_drops,
             debug=debug,
             data_info=data_info,
-            xmin_results=fit.xmin_fitting_results,
+            xmin_results=KS_fit.xmin_fitting_results,
         )
 
-        d = dist_from_fit(fit)
+        d = dist_from_fit(p_fit)
 
         attribute = get_attribute(labels[0])
-        if attribute == "Unkown":
+        if attribute == "Unknown":
             assert isinstance(data_info, dict)
             if "minimizer" in data_info:
                 attribute = data_info["minimizer"]
@@ -1511,7 +1537,7 @@ def plot_powerlaw(
             color = "black"
 
         if evaluate:
-            p, mean_exp, exp_std = fit.evaluate_fit(all_drops, parallel=True)
+            p, mean_exp, exp_std = p_fit.evaluate_fit(all_drops, parallel=True)
 
             thresholds = [0.05, 0.1, 0.3, float("inf")]
             ratings = ["bad", "poor", "good", "excellent"]
@@ -1526,16 +1552,24 @@ def plot_powerlaw(
                 f"{attribute}: P value: {p:.2f} ({r}), exp: {d.alpha}, std: {exp_std}"
             )
 
-        min_drop = np.min(all_drops)
-        # We exclude the first decade. Usually not interesting
-        exclude_factor = 10
-        plot_ks_distance(all_drops, min_drop * exclude_factor)  # fit.xmin)
+        if event_min_xmin:
+            plot_ks_distance(
+                all_drops, event_min_xmin, data_info=data_info, name="event-min-fit"
+            )
+        else:
+            min_drop = np.min(all_drops)
+            # We exclude the first two decades.
+            exclude_factor = 100
+            plot_ks_distance(all_drops, min_drop * exclude_factor, name="most-fit")
 
-        title = make_title(data_info=data_info, fit=fit)
+        plot_ks_distance(all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit")
+        plot_ks_distance(all_drops, KS_fit.xmin, data_info=data_info, name=r"KS-fit")
+
+        title = make_title(data_info=data_info, fit=p_fit)
         if attribute:
             title = attribute + " " + title
         plot_data_and_fit(
-            fit,
+            p_fit,
             title=title,
             color=color,
             addFit=addFit,

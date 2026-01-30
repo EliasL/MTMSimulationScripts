@@ -19,7 +19,7 @@ from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
 from Management.connectToCluster import getServerUserName
 from tqdm import tqdm
 import numpy as np
-from MTMath.plotPowerLaw import plot_powerlaw
+from Plotting.plotPowerLaw import plot_powerlaw
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
