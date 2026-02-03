@@ -6,7 +6,7 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law
 from powerlaw import Distribution
 from Management.updateCSV import update_df_header
-from .makePlots import safePath
+from .makePlots import safePath, maybe_avg
 import os
 import glob
 from tqdm import tqdm
@@ -28,9 +28,9 @@ def get_minimizer(df):
     if "LBFGS_Term_reason" in df:
         if not len(df["LBFGS_Term_reason"]) >= 2:
             print("No data in file!")
-            return "Unkown"
+            return "Unknown"
     else:
-        return "Unkown"
+        return "Unknown"
 
     # We use iloc so that if for example the second half of the file is loaded,
     # we take the third line from that arbitrary startingpoint, instead of trying
@@ -75,7 +75,7 @@ def get_system_size(csvPaths):
 
 def get_energy_drops(
     csvPaths,
-    use_avg_e_change_from_init=True,
+    use_avg_e_change_from_init=False,
     df=None,
     strainLim=[-np.inf, np.inf],
     debug=False,
@@ -89,23 +89,32 @@ def get_energy_drops(
         csvPaths = [csvPaths]
 
     drops = []
+    L = get_system_size(csvPaths)
     for singlePath in csvPaths:
         if df is None:
             df = pd.read_csv(singlePath)
-            df = update_df_header(df)
+            df = update_df_header(df, L=L)
         if use_avg_e_change_from_init:
             assert "avg_e_change_from_init" in df, (
-                "Uh oh. If the data is old, set use_avg_e_change_from_inti."
+                "Uh oh. If the data is old, set use_avg_e_change_from_init."
             )
             diffs = df["avg_e_change_from_init"]
-        elif "avg_energy_change" not in df:
-            # Add 0 in the beginning
-            diffs = np.insert(np.diff(df["avg_energy"]), 0, 0)
-        else:
+        elif "e_change_from_init" in df:
+            diffs = df["e_change_from_init"]
+        elif "energy_change" in df:
+            diffs = df["energy_change"]
+        elif "avg_energy_change" in df:
             diffs = df["avg_energy_change"]
-
+        else:
+            # Add 0 in the beginning
+            energy_key = "energy" if "energy" in df else "avg_energy"
+            diffs = np.insert(np.diff(df[energy_key]), 0, 0)
         if "Iteration" in df:
             # This is umut data, so he has already flipped his drops
+            diffs = -diffs
+        elif np.all(diffs >= 0):
+            # More umut code things. I'm just assuming if all the drops are positive
+            # they should probably be flipped.
             diffs = -diffs
 
         strain = df["load"]
@@ -130,19 +139,26 @@ def get_energy_drops(
 
         strain_limited = strain[1:][lim_mask[1:]]
         plotDrops = np.clip(-diffs[1:][lim_mask[1:]], 0, np.inf)
-        e = df["avg_energy"]
+        energy_key = "avg_energy" if use_avg_e_change_from_init else "energy"
+        if energy_key not in df:
+            energy_key = "avg_energy"
+        e = df[energy_key]
         debug_fig, ax1 = plt.subplots()
-        ax1.plot(strain, e, label=r"$\langle E \rangle$")
-        ax1.set_ylabel(r"$\langle E \rangle$")
+        avg_label = maybe_avg("E", use_avg_e_change_from_init)
+        ax1.plot(strain, e, label=rf"${avg_label}$")
+        ax1.set_ylabel(rf"${avg_label}$")
         ax1.set_xlabel(r"$\gamma$")
         ax2 = ax1.twinx()
         ax2.plot([])  # advance color cycle
         if use_avg_e_change_from_init:
-            label = r"$- \langle E_{\mathrm{pre}-E_{\mathrm{post}}} \rangle$"
+            pre_post = maybe_avg("E_{\\mathrm{pre}-E_{\\mathrm{post}}}", True)
+            label = rf"$- {pre_post}$"
         else:
-            label = r"$-\Delta \langle E \rangle$"
+            delta_e = maybe_avg("E", False)
+            label = rf"$-\Delta {delta_e}$"
         ax2.plot(strain_limited, plotDrops, label=label)
-        ax2.set_ylabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
+        avg_delta = maybe_avg("E", use_avg_e_change_from_init)
+        ax2.set_ylabel(rf"$-\Delta {avg_delta}$ (Energy Drop)")
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax1.legend(lines + lines2, labels + labels2)
@@ -215,21 +231,22 @@ def get_energy_drops(
     return (drops, data_info)
 
 
-def getHist(data):
+def getHist(data, weights=None, density=True, bins_per_decade=5):
     # Find the start of the tail where Poisson noise exceeds threshold
     data_min = data.min()
     data_max = data.max()
 
     # Compute number of bins from x_min to data_max
-    bins_per_decade = 5
     decades = np.log10(data_max) - np.log10(data_min)
-    n_bins = int(np.ceil(decades * bins_per_decade))
+    n_bins = max(10, int(np.ceil(decades * bins_per_decade)))
     # Define bin edges from data_max downward
     log_edges = np.log10(data_max) - np.arange(n_bins + 1) / bins_per_decade
     bin_edges = np.power(10, log_edges)[::-1]  # Reverse to make it ascending
 
     # Compute the histogram for the tail (density=True → area under PDF = 1)
-    hist_vals, edges = np.histogram(data, bins=bin_edges, density=True)
+    hist_vals, edges = np.histogram(
+        data, bins=bin_edges, weights=weights, density=density
+    )
     bin_centers = np.sqrt(edges[:-1] * edges[1:])
     return bin_centers, hist_vals
 
@@ -279,8 +296,8 @@ def plot_data_pdf(
     # Set log–log axes
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
-    ax.set_ylabel(r"$p(-\Delta \langle E \rangle)$")
+    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
+    ax.set_ylabel(rf"$p(-\Delta {maybe_avg('E')})$")
     ax.legend()
 
 
@@ -362,8 +379,8 @@ def plot_fit_pdf(
 
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_xlabel(r"$-\Delta \langle E \rangle$ (Energy Drop)")
-    ax.set_ylabel(r"$p(-\Delta \langle E \rangle)$")
+    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
+    ax.set_ylabel(rf"$p(-\Delta {maybe_avg('E')})$")
     ax.set_title(title)
     ax.legend()
     return ax
@@ -403,7 +420,7 @@ def findPrePostSplit(csvPath="", df=None):
     # Uses P12 (off diagonal of first piola kirchhoff stress)
     if df is None:
         df = pd.read_csv(csvPath)
-        df = update_df_header(df)
+        df = update_df_header(df, L=get_system_size([csvPath]))
     if "avg_Pxy" in df:
         i = df["avg_Pxy"].argmax()
     elif "avg_sigmaxy" in df:
@@ -424,7 +441,7 @@ def get_drops_in_windows(
 ):
     if df is None:
         df = pd.read_csv(csvPath)
-        df = update_df_header(df)
+        df = update_df_header(df, L=get_system_size([csvPath]))
 
     strain = df["load"]
     if strainLim is not None:
@@ -489,7 +506,13 @@ def make_title_from_data_info(data_info):
     L = data_info["L"]
     n = data_info["nrSimulations"]
     samples_string = f"{n} sample{'s' if n != 1 else ''}"
-    title = rf"{data_info['minimizer']} {L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f} {data_info['label']}"
+    title = (
+        rf"{L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f}"
+    )
+    if data_info["minimizer"] != "Unknown":
+        title = rf"{data_info['minimizer']} " + title
+    if data_info["label"]:
+        title += data_info["label"]
     title = title.strip().replace("  ", " ")
     return title
 
@@ -502,8 +525,6 @@ def make_title(data_info=None, fit: Fit | None = None):
         if data_info:
             title += " "
         title += make_title_from_fit(fit)
-    if title == "":
-        title = "unknown"
     return title
 
 
@@ -517,9 +538,12 @@ def plot_data_and_fit(
     save=True,
     extraPath="",
     show=False,
+    close=True,
 ):
     if ax is None:
         fig, ax = plt.subplots()
+    else:
+        fig = ax.figure
 
     plot_data_pdf(ax, fit.data_original)
 
@@ -567,9 +591,10 @@ def plot_data_and_fit(
         filename = f"{PLOTPATH}{extraPath}{safe_title}.pdf"
         fig.savefig(filename, format="pdf", bbox_inches="tight")
         print(f"Saved figure to {filename}")
+
+    if close:
         plt.close(fig)
-    else:
-        return ax
+    return ax
 
 
 def make_debug_plot(xmins, strainLim=None):
@@ -615,13 +640,20 @@ def make_debug_plot(xmins, strainLim=None):
 
 
 def plot_ks_distance(
-    drops, xmin, dist_name="truncated_power_law", data_info=None, name=""
+    drops,
+    xmin,
+    dist_name="truncated_power_law",
+    data_info=None,
+    name="",
+    ax=None,
+    save=True,
+    close=True,
 ):
     """
     Plot the empirical CCDF vs the fitted CCDF and visually show the KS distance (D).
     """
     # Fit the distribution
-    fitObj = Fit(drops, xmin=xmin)
+    fitObj = Fit(drops, xmin=xmin, xmin_distribution=dist_name)
     dist = getattr(fitObj, dist_name)
     # Get the ECDF and model CCDF
     data = fitObj.data
@@ -631,31 +663,40 @@ def plot_ks_distance(
     model_ccdf = dist.ccdf(sorted_data)
 
     # Plotting
-    fig, ax = plt.subplots()
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.figure
     ax.step(sorted_data, ecdf, where="post", label="Empirical CCDF", color="blue")
-    ax.plot(sorted_data, model_ccdf, label="Model CCDF", color="gray")
+    ax.plot(
+        sorted_data,
+        model_ccdf,
+        label=rf"Model CCDF ($\alpha={dist.alpha:.2f}, \lambda=$ {dist.Lambda:.2e})",
+        color="gray",
+    )
     D_val = plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf)
     ax.set_xscale("log")
     # ax.set_yscale("log")
-    ax.set_xlabel(r"$-\Delta \langle E \rangle$")
+    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
     ax.set_ylabel(r"$P(X > x)$")
-    title = "KS Distance (CCDF)" + (" " + name if name != "" else "")
+    title = rf"KS Distance $E_{{\mathrm{{min}}}}$={xmin:.2e}" + (
+        " " + name if name != "" else ""
+    )
     if data_info is not None:
-        title = make_title_from_data_info(data_info)
-        title += rf" $E_{{\mathrm{{min}}}}$={xmin:.2e}"
+        title += make_title_from_data_info(data_info)
     ax.set_title(title)
     ax.legend()
     fig.tight_layout()
     # Save the plot
-    if data_info is not None:
-        safe_title = safePath(title)
-        filename = f"{PLOTPATH}{safe_title}_ks_distance{OUTPUTTYPE}"
-    else:
-        filename = f"{PLOTPATH}ks_distance_xmin_{xmin:.2e}_{dist_name}{OUTPUTTYPE}"
-    fig.savefig(filename, dpi=300)
-    print(f"Saved fig to {filename}")
+    safe_title = safePath(title)
+    filename = f"{PLOTPATH}{safe_title}.pdf"
+    if save:
+        fig.savefig(filename, dpi=300)
+        print(f"Saved fig to {filename}")
     # plt.show()
-    plt.close(fig)
+    if close:
+        plt.close(fig)
+    return ax
 
 
 def _fit_single_xmin_task(args):
@@ -770,7 +811,7 @@ def find_best_xmin(
     )
 
     # We now have a rough sample on possible xmin values
-    exponents = [dist_from_fit(f).alpha for f in test_fits]
+    # exponents = [dist_from_fit(f).alpha for f in test_fits]
     p_values = [f.p for f in test_fits]
     xmins = [f.xmin for f in test_fits]
 
@@ -845,10 +886,11 @@ def find_start_of_plastic_events(
     strainLim = None
     if data_info is not None:
         strainLim = data_info.get("strainLim", None)
+    L = get_system_size(paths)
 
     for path in paths:
         df = pd.read_csv(path)
-        df = update_df_header(df)
+        df = update_df_header(df, L=L)
         if strainLim is None or strainLim == "auto":
             gamma_max_stress = findPrePostSplit(df=df)
             if postRegime:
@@ -868,8 +910,8 @@ def find_start_of_plastic_events(
     # drop, and make histogram of the number of plastic deformations associated
     # with each drop size
 
-    if "avg_e_change_from_init" in all_data:
-        diffs = all_data["avg_e_change_from_init"]
+    if "e_change_from_init" in all_data:
+        diffs = all_data["e_change_from_init"]
     else:
         raise RuntimeError("Avoid using old data")
         if "avg_energy_change" not in df:
@@ -880,6 +922,10 @@ def find_start_of_plastic_events(
 
     if "Iteration" in all_data:
         # This is umut data, so he has already flipped his drops
+        diffs = -diffs
+    elif np.all(diffs >= 0):
+        # More umut code things. I'm just assuming if all the drops are positive
+        # they should probably be flipped.
         diffs = -diffs
 
     strain = all_data["load"]
@@ -925,7 +971,7 @@ def find_start_of_plastic_events(
         # 1) Energy-drop PDF (normalized) on ax1
         plot_data_pdf(ax1, drops)
         ax1.set_title("Energy-drop PDF and plasticity vs drop size")
-        ax1.set_xlabel(r"$-\Delta \langle E \rangle$")
+        ax1.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
         ax1.set_ylabel("Density (normalized)", color=c_drop_pdf)
         ax1.tick_params(axis="y", colors=c_drop_pdf)
         ax1.spines["left"].set_color(c_drop_pdf)
@@ -993,6 +1039,110 @@ def find_start_of_plastic_events(
     return xmin_loc_min
 
 
+def plot_plastic_counts(
+    paths,
+    labels=None,
+    postRegime=True,
+    strainLim="auto",
+    binsPerDecade=5,
+    ax=None,
+    show=False,
+    save=True,
+    filename=None,
+    name=None,
+):
+    if isinstance(paths, (str, os.PathLike)):
+        paths = [str(paths)]
+    if labels is None:
+        labels = ["" for _ in paths]
+    if len(labels) < len(paths):
+        labels = labels + [""] * (len(paths) - len(labels))
+    elif len(labels) > len(paths):
+        labels = labels[: len(paths)]
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(6.4, 4.2))
+    else:
+        fig = ax.figure
+
+    data_info = None
+    for path, label in zip(paths, labels):
+        df = pd.read_csv(path)
+        df = update_df_header(df, L=get_system_size([path]))
+        resolved_strain_lim = strainLim
+        if resolved_strain_lim is None or resolved_strain_lim == "auto":
+            gamma_max_stress = findPrePostSplit(df=df)
+            if postRegime:
+                resolved_strain_lim = [gamma_max_stress + 1e-2, df["load"].max()]
+            else:
+                resolved_strain_lim = [df["load"].min(), gamma_max_stress - 1e-4]
+        drops, info = get_energy_drops(
+            [path], df=df, strainLim=resolved_strain_lim, debug=False, label=None
+        )
+        if data_info is None:
+            data_info = info
+        drops = np.asarray(drops, dtype=float)
+        drops_pos = drops[drops > 0]
+        if drops_pos.size == 0:
+            continue
+
+        if "e_change_from_init" in df:
+            diffs = df["e_change_from_init"]
+        else:
+            raise RuntimeError("Avoid using old data")
+
+        if "Iteration" in df:
+            diffs = -diffs
+        elif np.all(diffs >= 0):
+            # More umut code things. I'm just assuming if all the drops are positive
+            # they should probably be flipped.
+            diffs = -diffs
+
+        strain = df["load"]
+        lim_mask = (strain > resolved_strain_lim[0]) & (strain < resolved_strain_lim[1])
+        drop_mask = diffs < 0
+        mask = drop_mask & lim_mask
+        if "nr_plastic_deformations" in df:
+            plastics = df["nr_plastic_deformations"][mask].to_numpy()
+        else:
+            warnings.warn("nr_plastic_deformations column not found.")
+            continue
+
+        bin_centers, bin_sums = getHist(
+            drops_pos, weights=plastics, density=False, bins_per_decade=binsPerDecade
+        )
+        if bin_centers.size == 0:
+            continue
+        ax.plot(bin_centers, bin_sums, marker="o", linestyle="-", label=label)
+
+    if not ax.lines:
+        print("No data found for plastic count plotting.")
+        return None
+
+    ax.set_xscale("log")
+    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
+    ax.set_ylabel("Nr plastic events")
+    ax.legend(loc="best")
+    if name:
+        title = name
+    elif data_info:
+        title = make_title_from_data_info(data_info)
+    else:
+        title = "plastic_counts"
+    ax.set_title(title)
+    fig.tight_layout()
+
+    if save:
+        if filename is None:
+            filename = f"{PLOTPATH}{safePath(title)}_plastic_counts{OUTPUTTYPE}"
+        fig.savefig(filename, dpi=300)
+        print(f"Saved figure to {filename}")
+    if show:
+        plt.show()
+
+    return ax
+
+
 def dist_from_fit(fit: Fit) -> type[Distribution]:
     dist = getattr(fit, fit.xmin_distribution.name)
     return dist
@@ -1017,7 +1167,7 @@ def _get_cache_path(cache_dir, data, extra_string=""):
 
 def make_fit(
     data,
-    xmin_range: tuple | list | None = None,
+    xmin_range: tuple | list | float | None = None,
     distType: type[Distribution] = Truncated_Power_Law,
     use_cache=True,
     cache_dir: str = ".xmin_values",
@@ -1164,7 +1314,7 @@ def plot_fits_over_xmin(
     ax1.set_xscale("log")
 
     # --- Left axis: p-values ---
-    p_line = ax1.errorbar(
+    ax1.errorbar(
         x,
         pvals,
         yerr=p_stds,
@@ -1179,7 +1329,7 @@ def plot_fits_over_xmin(
         capthick=1.0,
         zorder=2,
     )
-    thr_line = ax1.axhline(
+    ax1.axhline(
         0.10,
         linestyle="--",
         linewidth=1.0,
@@ -1194,8 +1344,6 @@ def plot_fits_over_xmin(
     ax1.spines["left"].set_color(c_p)
     ax1.set_ylim(0, 1)
 
-    # Optional overlay: KS distance (scaled) from xmin fitting results
-    ks_line = None
     if xmin_results is not None:
         r = xmin_results
         xmins = np.asarray(r["xmins"], dtype=float)
@@ -1204,37 +1352,68 @@ def plot_fits_over_xmin(
         if valid_fits is not None:
             valid_fits = np.asarray(valid_fits, dtype=bool)
         mask = np.isfinite(distances)
-        # if valid_fits is not None:
-        #    mask &= valid_fits
+        if valid_fits is not None:
+            mask &= valid_fits
+        max_xmin_filter = xmins < np.max(x)
         if mask.any():
+            # Filtered (optionally-valid) KS minimum
             x_d = xmins[mask]
             d = distances[mask]
             order = np.argsort(x_d)
             x_d = x_d[order]
             d = d[order]
-            ks_line = ax1.plot(
-                x_d,
-                d,
+            ks_xmin_filtered = float(x_d[np.argmin(d)])
+
+            # Global KS minimum (ignoring validity mask, but still ignoring NaNs)
+            global_idx = int(np.nanargmin(distances))
+            ks_xmin_global = float(xmins[global_idx])
+
+            # KS distance curve (plotted over the range used for the p/alpha curves)
+            ax1.plot(
+                xmins[max_xmin_filter],
+                distances[max_xmin_filter],
                 linestyle="--",
                 linewidth=1.2,
                 color="0.5",
                 alpha=0.7,
-                label="KS distance (scaled)",
+                label="KS distance",
                 zorder=0,
             )[0]
-            ax1.axvline(
-                x_d[np.argmin(d)],
-                color="0.5",
-                linestyle="--",
-                linewidth=1,
-                label=f"Best KS xmin: {best_fit.xmin:.2e}",
-                zorder=-1,
-                alpha=0.5,
-            )
+
+            # Only draw both markers if they actually differ.
+            if np.isclose(ks_xmin_filtered, ks_xmin_global, rtol=1e-12, atol=0.0):
+                ax1.axvline(
+                    ks_xmin_global,
+                    color="0.5",
+                    linestyle="-.",
+                    linewidth=1,
+                    label=f"Global KS xmin: {ks_xmin_global:.2e}",
+                    zorder=-1,
+                    alpha=0.7,
+                )
+            else:
+                ax1.axvline(
+                    ks_xmin_filtered,
+                    color="0.5",
+                    linestyle="-",
+                    linewidth=1,
+                    label=f"Filtered KS xmin: {ks_xmin_filtered:.2e}",
+                    zorder=-1,
+                    alpha=0.7,
+                )
+                ax1.axvline(
+                    ks_xmin_global,
+                    color="0.5",
+                    linestyle="-.",
+                    linewidth=1,
+                    label=f"Global KS xmin: {ks_xmin_global:.2e}",
+                    zorder=-1,
+                    alpha=0.7,
+                )
 
     # --- Right axis: alpha (+ error bars) ---
     ax2 = ax1.twinx()
-    alpha_err = ax2.errorbar(
+    ax2.errorbar(
         x,
         alphas,
         yerr=alpha_stds,
@@ -1255,22 +1434,36 @@ def plot_fits_over_xmin(
     ax2.spines["right"].set_color(c_a)
 
     if best_fit:
-        best_line = ax1.axvline(
+        ax1.axvline(
             best_fit.xmin,
             color="red",
             linestyle="--",
             linewidth=1.2,
             label=rf"Best $p$-xmin: {best_fit.xmin:.2e}",
             zorder=-1,
-            alpha=0.5,
+            alpha=0.7,
         )
 
-    legend_handles = [p_line, thr_line, alpha_err]
-    if ks_line is not None:
-        legend_handles.append(ks_line)
-    if best_fit:
-        legend_handles.append(best_line)
-    ax1.legend(handles=legend_handles)
+    # --- Legend: collect handles from both axes and draw on top ---
+    ax1.set_zorder(1)
+    ax2.set_zorder(0)
+    ax1.patch.set_visible(False)
+
+    handles1, labels1 = ax1.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+
+    # Deduplicate by label while preserving order
+    seen = set()
+    handles = []
+    labels = []
+    for h, l in list(zip(handles1, labels1)) + list(zip(handles2, labels2)):
+        if l not in seen and l != "":
+            seen.add(l)
+            handles.append(h)
+            labels.append(l)
+
+    legend = ax1.legend(handles, labels, loc="best", frameon=True)
+    legend.set_zorder(100)
     fig.tight_layout()
     ax1.set_title(title)
 
@@ -1476,7 +1669,7 @@ def plot_powerlaw(
         data_info = None
         for path, label in zip(paths, labels):
             df = pd.read_csv(path)
-            df = update_df_header(df)
+            df = update_df_header(df, L=get_system_size([path]))
             if strainLim == "auto":
                 gamma_max_stress = findPrePostSplit(df=df)
                 if postRegime:
@@ -1535,6 +1728,8 @@ def plot_powerlaw(
             color = MINIMIZER_COLORS[attribute]
         else:
             color = "black"
+        if attribute == "Unknown":
+            attribute = ""
 
         if evaluate:
             p, mean_exp, exp_std = p_fit.evaluate_fit(all_drops, parallel=True)
@@ -1556,21 +1751,47 @@ def plot_powerlaw(
             plot_ks_distance(
                 all_drops, event_min_xmin, data_info=data_info, name="event-min-fit"
             )
-        else:
-            min_drop = np.min(all_drops)
-            # We exclude the first two decades.
-            exclude_factor = 100
-            plot_ks_distance(all_drops, min_drop * exclude_factor, name="most-fit")
+
+        min_drop = np.min(all_drops)
+        # We exclude the first two decades.
+        exclude_factor = 100
+        rmEnd_xmin = min_drop * exclude_factor
+        plot_ks_distance(
+            all_drops,
+            rmEnd_xmin,
+            data_info=data_info,
+            name=f"rmEnd{exclude_factor}",
+        )
 
         plot_ks_distance(all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit")
         plot_ks_distance(all_drops, KS_fit.xmin, data_info=data_info, name=r"KS-fit")
 
         title = make_title(data_info=data_info, fit=p_fit)
-        if attribute:
+        if attribute and attribute not in title:
             title = attribute + " " + title
         plot_data_and_fit(
             p_fit,
             title=title,
+            color=color,
+            addFit=addFit,
+            save=save,
+            show=show,
+        )
+        title = make_title(data_info=data_info, fit=KS_fit)
+        plot_data_and_fit(
+            KS_fit,
+            title=title + "_KS_xmin",
+            color=color,
+            addFit=addFit,
+            save=save,
+            show=show,
+        )
+
+        rmEnd_fit = Fit(all_drops, xmin=rmEnd_xmin, xmin_distribution=distType.name)
+        title = make_title(data_info=data_info, fit=rmEnd_fit)
+        plot_data_and_fit(
+            rmEnd_fit,
+            title=title + "_rmEnd_Emin",
             color=color,
             addFit=addFit,
             save=save,

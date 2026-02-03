@@ -36,6 +36,15 @@ def safePath(path):
     return safe_path
 
 
+USE_AVG_ENERGY = False
+
+
+def maybe_avg(text, use_avg=None):
+    if use_avg is None:
+        use_avg = USE_AVG_ENERGY
+    return rf"\langle {text} \rangle" if use_avg else text
+
+
 def enable_strict_runtimewarnings():
     import warnings
 
@@ -293,6 +302,18 @@ color_index = 0
 index = 0
 
 
+def _get_system_size_from_path(path):
+    import re
+
+    match = re.search(r"(\d+)x(\d+)", str(path))
+    if not match:
+        return None
+    n1, n2 = match.groups()
+    if n1 != n2:
+        return None
+    return int(n1)
+
+
 def get_method(cvs_file_path):
     if not isinstance(cvs_file_path, str):
         cvs_file_path = cvs_file_path[0]
@@ -306,8 +327,13 @@ def get_method(cvs_file_path):
         return "L-BFGS"
 
 
-def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
-    e = "avg_energy"
+def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label="", use_avg=None):
+    if use_avg is None:
+        if dfs and len(dfs) > 0:
+            use_avg = "avg_energy" in dfs[0].columns
+        else:
+            use_avg = USE_AVG_ENERGY
+    e = "avg_energy" if use_avg else "energy"
     pre_yield_df = [df[0 : np.argmax(df[e]) + 1] for df in dfs]
     post_yield_df = [df[np.argmax(df[e]) + 1 :] for df in dfs]
 
@@ -385,9 +411,9 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label=""):
             # ax.xaxis.set_major_locator(MaxNLocator(3))
             # Remove axis names for inner axes
             if i % 3 == 0:  # Not the first column
-                ax.set_ylabel(r"$P>\langle E \rangle$")
+                ax.set_ylabel(rf"$P>{maybe_avg('E', use_avg)}$")
             if i >= 6:  # Not the bottom row
-                ax.set_xlabel(r"$-\Delta \langle E \rangle$")
+                ax.set_xlabel(rf"$-\Delta {maybe_avg('E', use_avg)}$")
 
     return fig, axs
 
@@ -413,17 +439,24 @@ def getPrettyLabel(string):
     return s
 
 
-def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True):
+def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True, use_avg=None):
     """
     Determines appropriate axis labels based on given column names.
     """
+    if use_avg is None:
+        use_avg = isinstance(Y, str) and Y.startswith("avg_")
     if x_name is None:
         x_name = r"Strain $\gamma$" if X == "load" else X
 
     if y_name is None and use_y_axis_name:
+        sigma = r"\sigma"
+        sigma12 = r"\sigma_{12}"
+        p12 = r"P_{12}"
         y_labels = {
-            "avg_RSS": r"Stress $\langle \sigma \rangle$",
-            "avg_energy": r"Energy $\langle E \rangle$",
+            "avg_RSS": rf"Stress ${maybe_avg(sigma, True)}$",
+            "avg_energy": rf"Energy ${maybe_avg('E', True)}$",
+            "RSS": rf"Stress ${maybe_avg(sigma, False)}$",
+            "energy": rf"Energy ${maybe_avg('E', False)}$",
             "est_time_remaining": "Estimated time remaining (s)",
         }
         y_name = y_labels.get(Y, Y)
@@ -504,7 +537,7 @@ def makePlot(
         if X is None:
             breakpoint
         df = pd.read_csv(csv_file_path)
-        df = update_df_header(df)
+        df = update_df_header(df, L=_get_system_size_from_path(csv_file_path))
         # If it is a string, we assume it is a time that we can convert to seconds
         if isinstance(df[Y][0], str):
             df[Y] = durations_to_seconds(df[Y])
@@ -854,23 +887,16 @@ def makeAverageComparisonPlot(
     global color_index, index, line_index
     color_index, index, line_index = 0, 0, 0
     X = "load"
-    if Y == "avg_energy":
-        y_name = r"Energy $\langle E \rangle$"
-        if name == "":
+    x_name, y_name = get_axis_labels("load", Y, use_y_axis_name=use_y_axis_name)
+    if name == "":
+        if Y == "avg_energy":
             name = "Avg energy"
-    elif Y == "avg_sigmaxy":
-        y_name = r"Stress $\langle \sigma_{12} \rangle$"
-        if name == "":
+        elif Y == "avg_sigmaxy":
             name = "Avg Cauchy shear stress"
-    elif Y == "avg_Pxy":
-        y_name = r"Stress $\langle P_{12} \rangle$"
-        if name == "":
+        elif Y == "avg_Pxy":
             name = "Avg Piola shear stress"
-    elif "time" in Y:
-        y_name = "Seconds"
-        name = Y
-
-    x_name = r"Strain $\gamma$"
+        elif "time" in Y:
+            name = Y
     title = f"{name}"
 
     if fig is None or ax is None:

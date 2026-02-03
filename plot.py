@@ -43,6 +43,7 @@ from MTMath.plotEnergy import generate_cauchy_stress_grid, generate_energy_grid
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     plotLog2,
+    plotPlasticCounts,
     get_csv_files,
     plotEnergy,
     stressPlotWithImages,
@@ -314,9 +315,10 @@ def compareStop():
 
 def compareStep():
     # Compare using Epsx or EpsR to stop
-    c, l = loadStepJob(group_by_seeds=True)
+    c, l = loadStepJob()
     fast_xmin = True
     xmin_accuracy = 0.1
+    plotPlasticCounts(c, l)
     plotLog2(
         c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
     )
@@ -332,8 +334,37 @@ def plotLogAnalasys():
     # plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
     # plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
 
-    p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
-    lab = [["umut"]]
+    # p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
+    # lab = [["umut"]]
+    # plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
+    # plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
+
+    # p = [
+    #     [
+    #         "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop1.csv",
+    #     ],
+    #     [
+    #         "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop2.csv",
+    #     ],
+    #     [
+    #         "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop3.csv",
+    #     ],
+    #     [
+    #         "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop4.csv",
+    #     ],
+    # ]
+    # lab = [["umut_noRe_1"], ["umut_noRe_2"], ["umut_noRe_3"], ["umut_noRe_4"]]
+
+    p = [
+        [
+            "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop1.csv",
+            "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop2.csv",
+            "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop3.csv",
+            "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop4.csv",
+        ]
+    ]
+    lab = [["umut_noRe_1", "umut_noRe_2", "umut_noRe_3", "umut_noRe_4"]]
+
     plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
     plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
 

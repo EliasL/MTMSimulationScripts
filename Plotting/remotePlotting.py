@@ -9,7 +9,6 @@ import pandas as pd
 from .makePlots import (
     makePlot,
     makeAverageComparisonPlot,
-    makeLogPlotComparison,
     add_power_law_line,
     duration_to_seconds,
 )
@@ -19,7 +18,7 @@ from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
 from Management.connectToCluster import getServerUserName
 from tqdm import tqdm
 import numpy as np
-from Plotting.plotPowerLaw import plot_powerlaw
+from Plotting.plotPowerLaw import plot_powerlaw, plot_plastic_counts
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
@@ -814,22 +813,12 @@ def plotWholeRangePowerLaw(paths, Y, **kwargs):
         ylim = [1e-5, 2e5]
     for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
-        makeLogPlotComparison(
-            [group],
-            outerStrainLims=(0.31, 1),
-            innerStrainLims=(1, np.inf),
-            plot_post_yield=False,
+        plot_powerlaw(
+            group_paths=group,
+            group_labels=None,
+            postRegime=False,
             save=False,
-            use_y_axis_name=method == "L-BFGS",
-            Y=Y,
-            ax=ax,
-            fig=fig,
-            legend_loc="lower left",
             show=False,
-            add_fit=Y == "avg_RSS",
-            mark=mark,
-            mark_pos=(0.85, 0.9),
-            **kwargs,
         )
         if Y == "avg_energy":
             add_power_law_line(ax, -0.85, [5e-7, 3e-4], 7e-1)
@@ -868,20 +857,12 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
             **kwargs,
         )
 
-        makeLogPlotComparison(
-            [group],
-            outerStrainLims=(preYield[0], 1),
-            innerStrainLims=(preYield[1], 1),
-            plot_post_yield=False,
+        plot_powerlaw(
+            group_paths=group,
+            group_labels=None,
+            postRegime=False,
             save=False,
-            use_y_axis_name=method == "L-BFGS",
-            Y=Y,
-            ax=axes[1, i],
-            fig=fig,
-            legend_loc="lower left",
-            mark=mark,
-            mark_pos=(0.85, 0.9),
-            **kwargs,
+            show=False,
         )
         set_font_size(axes[0, i])
         set_font_size(axes[1, i])
@@ -916,21 +897,12 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
             **kwargs,
         )
 
-        makeLogPlotComparison(
-            [group],
-            outerStrainLims=(0.31, postYield[1]),
-            innerStrainLims=(0.31, postYield[0]),
-            plot_pre_yield=False,
+        plot_powerlaw(
+            group_paths=group,
+            group_labels=None,
+            postRegime=True,
             save=False,
-            use_y_axis_name=method == "L-BFGS",
-            Y=Y,
-            ax=axes[1, i],
-            fig=fig,
-            legend_loc="lower left",
-            # ylim=log_ylim,
-            mark=mark,
-            mark_pos=(0.85, 0.9),
-            **kwargs,
+            show=False,
         )
         set_font_size(axes[0, i])
         set_font_size(axes[1, i])
@@ -953,21 +925,12 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
     for ax, group, method, mark in zip(axes, paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
 
-        makeLogPlotComparison(
-            [group],
-            plot_post_yield=False,
+        plot_powerlaw(
+            group_paths=group,
+            group_labels=None,
+            postRegime=False,
             save=False,
-            use_y_axis_name=method == "L-BFGS",
-            Y=Y,
-            ax=ax,
-            fig=fig,
-            legend_loc="lower right",
-            window=True,
-            ylim=ylim,
-            show_lambda=show_lambda,
-            mark=mark,
-            mark_pos=(0.85, 0.9),
-            **kwargs,
+            show=False,
         )
         set_font_size(ax)
 
@@ -1074,6 +1037,14 @@ def plotLog2(config_groups, labels, **kwargs):
 
     # print(np.array(paths).size)
     plot_powerlaw(paths, labels, **kwargs)
+
+
+def plotPlasticCounts(config_groups, labels, **kwargs):
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+
+    plot_plastic_counts(paths, labels, **kwargs)
 
 
 if __name__ == "__main__":

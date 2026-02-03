@@ -1,7 +1,12 @@
 import pandas as pd
 
 
-def update_df_header(df: pd.DataFrame):
+def update_df_header(
+    df: pd.DataFrame,
+    add_total_columns: bool = True,
+    L: int | None = None,
+    nr_elements: int | None = None,
+):
     # Mapping of old column names to new column names
     rename_map = {
         "Load": "load",
@@ -29,15 +34,25 @@ def update_df_header(df: pd.DataFrame):
         "avg_RSS": "avg_Pxy",
         # Umut headers (Note energy is NOT averaged)
         "Alpha": "load",
-        "PreEnergy": "avg_init_energy",
-        "PostEnergy": "avg_energy",
+        "PreEnergy": "init_energy",
+        "PostEnergy": "energy",
         "PreStress": "avg_init_sigmaxy",
         "PostStress": "avg_sigmaxy",
-        "EnergyChange": "avg_e_change_from_init",
+        "EnergyChange": "e_change_from_init",
         "StressChange": "avg_sigma_change_from_init",
     }
 
     # Rename columns if they exist in the DataFrame
     df = df.rename(columns=rename_map)
+
+    if add_total_columns:
+        if nr_elements is None and L is not None:
+            nr_elements = int(L) * int(L) * 2
+        if nr_elements is not None:
+            for col in df.columns:
+                if col.startswith("avg_"):
+                    total_col = col[4:]
+                    if total_col not in df.columns:
+                        df[total_col] = df[col] * nr_elements
 
     return df

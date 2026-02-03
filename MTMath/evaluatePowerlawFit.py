@@ -534,7 +534,7 @@ class Fit(powerlaw.Fit):
         xmin_distribution="power_law",
         verbose=1,
         fast_xmin=False,
-        xmin_accuracy=1,
+        xmin_accuracy=1.0,
     ):
         self.fast_xmin = fast_xmin
         self.xmin_accuracy = xmin_accuracy

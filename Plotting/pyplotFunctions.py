@@ -21,7 +21,7 @@ from MTMath.plotEnergy import (
 from Management.jobs import propperJob
 
 from MTMath.energyFunction import ContiEnergy
-from .makePlots import makePlot, makeLogPlotComparison
+from .makePlots import makePlot
 from .remotePlotting import get_csv_files
 from .dataFunctions import get_data_from_name, VTUData, CArrsToMat, get_previous_data
 
@@ -688,22 +688,23 @@ def make_static_plot(fileName, **kwargs):
         nrSeeds = 40
         configs, labels = propperJob(3, nrSeeds, group_by_seeds=True)
         paths, labels = get_csv_files(configs, labels=labels)
-        makeLogPlotComparison(
-            [paths[0]],  # We choose only the LBFGS
-            innerStrainLims=(1, np.inf),
-            outerStrainLims=(0.31, 1),
-            plot_post_yield=False,
-            save=False,
-            use_y_axis_name=True,
-            Y="avg_energy",
-            ax=ax,
-            fig=fig,
-            labels=labels,
-            legend_loc="lower left",
-            show=False,
-            add_fit=False,
-            **kwargs,
-        )
+        # TODO
+        # makeLogPlotComparison(
+        #     [paths[0]],  # We choose only the LBFGS
+        #     innerStrainLims=(1, np.inf),
+        #     outerStrainLims=(0.31, 1),
+        #     plot_post_yield=False,
+        #     save=False,
+        #     use_y_axis_name=True,
+        #     Y="avg_energy",
+        #     ax=ax,
+        #     fig=fig,
+        #     labels=labels,
+        #     legend_loc="lower left",
+        #     show=False,
+        #     add_fit=False,
+        #     **kwargs,
+        # )
     return fig, ax
 
 

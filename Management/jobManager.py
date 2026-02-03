@@ -196,7 +196,7 @@ class Process:
 
 class JobManager:
     def __init__(self) -> None:
-        self.processes = []
+        self.processes: list[Process] = []
         self.slurmJobs = []
         self.users = ["elundheim", "uog82gz"]
 

@@ -1,4 +1,4 @@
-from ..Plotting.plotPowerLaw import (
+from Plotting.plotPowerLaw import (
     make_fit,
     plot_data_and_fit,
     PLOTPATH,
@@ -13,6 +13,244 @@ import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import colors as mcolors
 from scipy.special import gamma, gammaincc, expn
+from math import isfinite
+
+
+def _upper_incomplete_gamma(a, x):
+    """
+    Compute Γ(a, x) (upper incomplete gamma) for real a (including a<=0),
+    using recurrence from a' = a + k > 0, and a special-case for integer poles.
+
+    Requires x>0.
+    """
+    if gammaincc is None or gamma is None:
+        raise RuntimeError("SciPy is required (scipy.special.gammaincc, gamma, expn).")
+    if not (x > 0.0):
+        raise ValueError("Need x>0 for Γ(a,x).")
+
+    # If a is a non-positive integer, gamma(a) has a pole; use identity with expn:
+    # For n = 1-a (integer >= 1):  Γ(1-n, x) = x^{1-n} E_n(x) = x^a * expn(n, x)
+    if np.isclose(a, np.round(a), atol=1e-12) and (np.round(a) <= 0):
+        n = int(round(1.0 - a))
+        return (x**a) * expn(n, x)
+
+    # If a>0, direct formula is fine
+    if a > 0.0:
+        return gamma(a) * gammaincc(a, x)
+
+    # Otherwise, shift up to positive a+k, compute Γ(a+k, x), then recur down
+    k = int(np.floor(-a)) + 1  # ensures a+k > 0
+    ap = a + k
+    G = gamma(ap) * gammaincc(ap, x)  # Γ(ap, x) with ap>0
+
+    # Downward recurrence: Γ(t-1,x) = (Γ(t,x) - x^{t-1} e^{-x}) / (t-1)
+    t = ap
+    logx = np.log(x)
+    for _ in range(k):
+        term = np.exp((t - 1.0) * logx - x)  # x^{t-1} e^{-x}
+        G = (G - term) / (t - 1.0)
+        t -= 1.0
+
+    return G
+
+
+def _Z_tail(alpha, lam, xmin):
+    """
+    Z_tail = ∫_{xmin}^∞ x^{-alpha} exp(-x/lam) dx
+           = lam^{1-alpha} Γ(1-alpha, xmin/lam)
+    Works for alpha>1 (i.e., 1-alpha<0).
+    """
+    if lam <= 0 or xmin <= 0:
+        raise ValueError("Need lam>0 and xmin>0.")
+    a = 1.0 - alpha
+    z = xmin / lam
+    G = _upper_incomplete_gamma(a, z)
+    Zt = (lam ** (1.0 - alpha)) * G
+    if not np.isfinite(Zt) or Zt <= 0:
+        raise RuntimeError(
+            f"Z_tail is invalid: {Zt}. Check alpha={alpha}, lam={lam}, xmin={xmin}."
+        )
+    return Zt
+
+
+def _sample_trunc_powerlaw(n, beta, xlow, xhigh, rng):
+    """
+    Sample from pdf ∝ x^{-beta} on [xlow, xhigh], with xlow>0.
+
+    Inverse CDF:
+      - if beta != 1:
+          F(x) = (x^{1-beta} - xlow^{1-beta}) / (xhigh^{1-beta} - xlow^{1-beta})
+      - if beta == 1:
+          F(x) = log(x/xlow) / log(xhigh/xlow)
+    """
+    if not (xlow > 0 and xhigh > xlow):
+        raise ValueError("Need 0 < xlow < xhigh for truncated power law.")
+
+    u = rng.random(n)
+
+    if np.isclose(beta, 1.0):
+        # x = xlow * (xhigh/xlow)^u
+        return xlow * (xhigh / xlow) ** u
+
+    p = 1.0 - beta
+    a = xlow**p
+    b = xhigh**p
+    # x = (a + u*(b-a))^(1/p)
+    return (a + u * (b - a)) ** (1.0 / p)
+
+
+def _sample_cutoff_powerlaw_fast_sylvain(n, alpha, lam, xmin, rng):
+    """
+    Sample from density proportional to x^{-alpha} exp(-x/lam) on [xmin, ∞),
+    using Pareto proposal and accept with exp(-x/lam). Requires alpha > 1.
+    """
+    if alpha <= 1.0:
+        raise ValueError("alpha must be > 1 for this sampler.")
+
+    out = np.empty(n, dtype=float)
+    filled = 0
+    finfo = np.finfo(float)
+
+    while filled < n:
+        m = max(4096, int(1.2 * (n - filled)))
+
+        u = rng.random(m)
+        u = np.minimum(u, 1.0 - finfo.eps)  # avoid u=1
+
+        # Proposal g(x) ∝ x^{-alpha} on [xmin,∞):
+        y = xmin * (1.0 - u) ** (-1.0 / (alpha - 1.0))
+
+        # Accept with probability exp(-y/lam)
+        accept = rng.random(m) < np.exp(-y / lam)
+        k = int(accept.sum())
+        if k:
+            take = min(k, n - filled)
+            out[filled : filled + take] = y[accept][:take]
+            filled += take
+
+    return out
+
+
+def sample_piecewise(n, beta, alpha, lam, xmin, A=None, B=None, xlow=None, rng=None):
+    """
+    Sample from:
+      0 < x < xmin:  f(x) ∝ A*x^{-beta} + B*xmin^{-alpha}*exp(-xmin/lam)
+      x >= xmin:     f(x) ∝ B*x^{-alpha}*exp(-x/lam)
+
+    Notes:
+      - alpha > 1 required.
+      - Left power-law needs a lower cutoff xlow>0 if beta>=1 (otherwise not normalizable).
+        If xlow is None, we set xlow = xmin*1e-3 as a practical default.
+      - If A and/or B are None, they are chosen to enforce continuity at xmin:
+        A * xmin^{-beta} = B * xmin^{-alpha} * exp(-xmin/lam).
+
+    Returns:
+      x: samples (shape n,)
+      info: dict of mixture weights and component masses.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+    n = int(n)
+    # Basic checks
+    if not (isfinite(xmin) and xmin > 0):
+        raise ValueError("xmin must be finite and > 0.")
+    if lam <= 0:
+        raise ValueError("lam must be > 0.")
+    if alpha <= 1.0:
+        raise ValueError("alpha must be > 1.")
+    if A is not None and A < 0:
+        raise ValueError("A must be nonnegative.")
+    if B is not None and B < 0:
+        raise ValueError("B must be nonnegative.")
+    if not (-alpha * 2 < beta < 3.0 * alpha):
+        raise ValueError("Require -alpha < beta < 3*alpha (as requested).")
+
+    # Set / validate xlow
+    if xlow is None:
+        xlow = xmin * 1e-3  # edit as needed
+    if not (isfinite(xlow) and 0 < xlow < xmin):
+        raise ValueError(
+            "Need 0 < xlow < xmin (xlow is the lower cutoff for the left power-law)."
+        )
+
+    # Choose A/B to enforce continuity at xmin if needed.
+    if A is None and B is None:
+        B = 1.0
+        A = B * (xmin ** (beta - alpha)) * np.exp(-xmin / lam)
+    elif A is None:
+        A = B * (xmin ** (beta - alpha)) * np.exp(-xmin / lam)
+    elif B is None:
+        B = A * (xmin ** (alpha - beta)) * np.exp(xmin / lam)
+
+    # Component masses
+    # Left: power-law mass M_P = A * ∫_{xlow}^{xmin} x^{-beta} dx
+    if np.isclose(beta, 1.0):
+        I_beta = np.log(xmin / xlow)
+    else:
+        I_beta = (xmin ** (1.0 - beta) - xlow ** (1.0 - beta)) / (1.0 - beta)
+    M_P = A * I_beta
+
+    # Left: plateau constant density value at xmin (times B)
+    c = (xmin ** (-alpha)) * np.exp(-xmin / lam)
+    # M_U = B * c * (xmin - 0.0)  # uniform on (0,xmin)
+    M_U = B * c * (xmin - xlow)
+
+    # Tail: cutoff power-law mass
+    Zt = _Z_tail(alpha, lam, xmin)
+    M_T = B * Zt
+
+    M_total = M_P + M_U + M_T
+    if M_total <= 0:
+        raise ValueError("Total mass is zero; check A,B and parameters.")
+
+    # Mixture weights:
+    w_left = (M_P + M_U) / M_total
+    w_tail = 1.0 - w_left
+    w_pow_left = (M_P / (M_P + M_U)) if (M_P + M_U) > 0 else 0.0
+    w_uni_left = 1.0 - w_pow_left
+
+    # Allocate and sample
+    x = np.empty(n, dtype=float)
+
+    u = rng.random(n)
+    is_left = u < w_left
+    n_left = int(is_left.sum())
+    n_tail = n - n_left
+
+    # Left region sampling: choose power-law vs uniform plateau
+    if n_left > 0:
+        u2 = rng.random(n_left)
+        is_pow = u2 < w_pow_left
+        n_pow = int(is_pow.sum())
+        n_uni = n_left - n_pow
+
+        left = np.empty(n_left, dtype=float)
+        if n_pow > 0:
+            left[is_pow] = _sample_trunc_powerlaw(n_pow, beta, xlow, xmin, rng)
+        if n_uni > 0:
+            # left[~is_pow] = xmin * rng.random(n_uni)  # uniform on (0,xmin)
+            left[~is_pow] = xlow + (xmin - xlow) * rng.random(
+                n_uni
+            )  # uniform on (xlow,xmin)
+
+        x[is_left] = left
+
+    # Tail sampling
+    if n_tail > 0:
+        x[~is_left] = _sample_cutoff_powerlaw_fast(n_tail, alpha, lam, xmin, rng)
+
+    info = {
+        "xlow": xlow,
+        "M_P": M_P,
+        "M_U": M_U,
+        "M_T": M_T,
+        "M_total": M_total,
+        "w_left": w_left,
+        "w_tail": w_tail,
+        "w_pow_left": w_pow_left,
+        "w_uni_left": w_uni_left,
+    }
+    return x, info
 
 
 # Generate synthetic power-law distributed data
@@ -36,157 +274,23 @@ def generate_powerlaw_avalanche_data(
     return np.concatenate((logNormalDrops, drops))
 
 
-def _sample_trunc_powerlaw(n, beta, xlow, xmin, rng):
-    u = rng.random(n)
-    if np.isclose(beta, 1.0):
-        return xlow * (xmin / xlow) ** u
-    a = 1.0 - beta
-    return (u * (xmin**a - xlow**a) + xlow**a) ** (1.0 / a)
-
-
 def _sample_cutoff_powerlaw_fast(n, alpha, lam, xmin, rng):
     dist = Truncated_Power_Law(xmin=xmin, alpha=alpha, Lambda=lam)
     return dist.generate_random(size=n, rng=rng)
 
 
-def _upper_incomplete_gamma(a, x):
-    """
-    Compute Γ(a, x) for real a (including a<=0) using recurrence.
-    Requires x > 0.
-    """
-    x = np.asarray(x, dtype=float)
-    if np.any(x <= 0.0):
-        raise ValueError("Need x>0 for Γ(a,x).")
-
-    if np.isclose(a, np.round(a), atol=1e-12) and (np.round(a) <= 0):
-        n = int(round(1.0 - a))
-        return (x**a) * expn(n, x)
-
-    if a > 0.0:
-        return gamma(a) * gammaincc(a, x)
-
-    k = int(np.floor(-a)) + 1
-    ap = a + k
-    G = gamma(ap) * gammaincc(ap, x)
-
-    t = ap
-    logx = np.log(x)
-    for _ in range(k):
-        term = np.exp((t - 1.0) * logx - x)
-        G = (G - term) / (t - 1.0)
-        t -= 1.0
-    return G
-
-
-def _Z_tail(alpha, lam, xmin):
-    s = 1.0 - alpha
-    z = np.asarray(xmin, dtype=float) / lam
-    G = _upper_incomplete_gamma(s, z)
-    return (lam ** (1.0 - alpha)) * G
-
-
-def sample_piecewise(
-    n,
-    A,
-    B,
-    beta,
-    alpha,
-    lam,
-    xmin,
-    xlow=None,
-    rng=None,
-):
-    """
-    Sample from:
-      0 < x < xmin:  f(x) ∝ A*x^{-beta} + B*xmin^{-alpha}*exp(-xmin/lam)
-      x >= xmin:     f(x) ∝ B*x^{-alpha}*exp(-x/lam)
-    """
-    if rng is None:
-        rng = np.random.default_rng()
-
-    if not (np.isfinite(xmin) and xmin > 0):
-        raise ValueError("xmin must be finite and > 0.")
-    if lam <= 0:
-        raise ValueError("lam must be > 0.")
-    if alpha <= 1.0:
-        raise ValueError("alpha must be > 1.")
-    if A < 0 or B < 0:
-        raise ValueError("A and B must be nonnegative.")
-    if not (-alpha * 2 < beta < 3.0 * alpha):
-        raise ValueError("Require -alpha < beta < 3*alpha.")
-    if xlow is None:
-        xlow = 1e-10
-    if not (np.isfinite(xlow) and 0 < xlow < xmin):
-        raise ValueError("Need 0 < xlow < xmin.")
-
-    # I_beta is the (unnormalized) integral of x^{-beta} over [xlow, xmin]
-    # for the left-side truncated power-law component.
-    if np.isclose(beta, 1.0):
-        I_beta = np.log(xmin / xlow)
-    else:
-        I_beta = (xmin ** (1.0 - beta) - xlow ** (1.0 - beta)) / (1.0 - beta)
-    # Enforce continuity at xmin by setting the left-side scale A
-    # so that A * xmin^{-beta} = B * xmin^{-alpha} * exp(-xmin/lam)
-    A = B * (xmin ** (beta - alpha)) * np.exp(-xmin / lam)
-
-    # M_P: total mass of the left power-law component (scaled by A)
-    M_P = A * I_beta
-
-    # No uniform plateau on the left; only a pure truncated power law.
-    M_U = 0.0
-
-    # Zt is the tail normalization integral over [xmin, ∞) for x^{-alpha} exp(-x/lam)
-    Zt = _Z_tail(alpha, lam, xmin)
-    # M_T: total mass of the right cutoff-power-law tail (scaled by B)
-    M_T = B * Zt
-
-    M_total = M_P + M_U + M_T
-    if M_total <= 0:
-        raise ValueError("Total mass is zero; check A,B and parameters.")
-
-    w_left = (M_P + M_U) / M_total
-    w_tail = 1.0 - w_left
-    w_pow_left = (M_P / (M_P + M_U)) if (M_P + M_U) > 0 else 0.0
-
-    x = np.empty(n, dtype=float)
-    u = rng.random(n)
-    is_left = u < w_left
-    n_left = int(is_left.sum())
-    n_tail = n - n_left
-
-    if n_left > 0:
-        x[is_left] = _sample_trunc_powerlaw(n_left, beta, xlow, xmin, rng)
-
-    if n_tail > 0:
-        x[~is_left] = _sample_cutoff_powerlaw_fast(n_tail, alpha, lam, xmin, rng)
-
-    info = {
-        "xlow": xlow,
-        "M_P": M_P,
-        "M_U": M_U,
-        "M_T": M_T,
-        "M_total": M_total,
-        "w_left": w_left,
-        "w_tail": w_tail,
-        "w_pow_left": w_pow_left,
-        "w_uni_left": 1.0 - w_pow_left,
-    }
-    return x, info
-
-
 def grid_compare_xmin(
     alphas=None,
     xmins=None,
-    n=5000,
-    Lambda=1e4,
-    A=1.0,
-    B=1.0,
-    beta=1.5,
+    n=5e4,
+    Lambda=1,
+    beta=2.0,
     xlow=None,
     seed=0,
     rng=None,
     xmin_range=None,
     fast_xmin=True,
+    save_individual=True,
 ):
     """
     Compare xmin estimates on a grid of (alpha, true xmin) using a single distribution.
@@ -197,7 +301,7 @@ def grid_compare_xmin(
     if alphas is None:
         alphas = np.linspace(1.05, 3, 6)
     if xmins is None:
-        xmins = np.logspace(-9, -3, 6)
+        xmins = np.logspace(-5, 0, 6)
     if rng is None:
         rng = np.random.default_rng(seed)
 
@@ -209,6 +313,10 @@ def grid_compare_xmin(
     lambda1_grid = np.full_like(xmin1_grid, np.nan)
     lambda2_grid = np.full_like(xmin1_grid, np.nan)
 
+    fig1, axes1 = plt.subplots(len(alphas), len(xmins), figsize=(24, 24))
+    fig2, axes2 = plt.subplots(len(alphas), len(xmins), figsize=(24, 24))
+    fig3, axes3 = plt.subplots(len(alphas), len(xmins), figsize=(24, 24))
+
     for i, alpha in enumerate(alphas):
         for j, xmin_true in enumerate(xmins):
             data_info = {
@@ -217,8 +325,6 @@ def grid_compare_xmin(
 
             drops, _ = sample_piecewise(
                 n=n,
-                A=A,
-                B=B,
                 beta=beta,
                 alpha=float(alpha),
                 lam=Lambda,
@@ -226,33 +332,69 @@ def grid_compare_xmin(
                 xlow=xlow,
                 rng=rng,
             )
-            # drops = generate_powerlaw_avalanche_data(alpha, xmin=xmin_true, size=n)
 
             drops = np.asarray(drops, dtype=float)
             drops = drops[np.isfinite(drops)]
             if drops.size < 10:
                 continue
 
-            fit1 = make_fit(
+            KS_fit = make_fit(
                 drops, xmin_range=xmin_range, fast_xmin=fast_xmin, xmin_accuracy=0.1
             )
-            xmin1_grid[i, j] = float(fit1.xmin)
-            alpha1_grid[i, j] = getattr(dist_from_fit(fit1), "alpha", np.nan)
-            lambda1_grid[i, j] = getattr(dist_from_fit(fit1), "Lambda", np.nan)
+            xmin1_grid[i, j] = float(KS_fit.xmin)
+            alpha1_grid[i, j] = getattr(dist_from_fit(KS_fit), "alpha", np.nan)
+            lambda1_grid[i, j] = getattr(dist_from_fit(KS_fit), "Lambda", np.nan)
 
-            fit2 = find_best_xmin(
-                drops,
-                min_xmin=float(drops.min()),
-                max_xmin=float(drops.max()),
-                xmin_results=fit1.xmin_fitting_results,
-                data_info=data_info,
+            p_fit = find_best_xmin(
+                drops, xmin_results=KS_fit.xmin_fitting_results, data_info=data_info
             )
-            # plot_ks_distance(drops, max(fit1.xmin, fit2.xmin), data_info=data_info)
-            plot_data_and_fit(fit2, data_info=data_info)
-            xmin2_grid[i, j] = float(fit2.xmin)
-            alpha2_grid[i, j] = getattr(dist_from_fit(fit2), "alpha", np.nan)
-            alpha2std_grid[i, j] = getattr(fit2, "alpha_std", np.nan)
-            lambda2_grid[i, j] = getattr(dist_from_fit(fit2), "Lambda", np.nan)
+            plot_ks_distance(
+                drops,
+                KS_fit.xmin,
+                data_info=data_info,
+                ax=axes1[i, j],
+                save=False,
+                close=False,
+            )
+            plot_ks_distance(
+                drops,
+                p_fit.xmin,
+                data_info=data_info,
+                ax=axes2[i, j],
+                save=False,
+                close=False,
+            )
+            plot_data_and_fit(
+                p_fit,
+                data_info=data_info,
+                ax=axes3[i, j],
+                save=False,
+                close=False,
+            )
+            if save_individual:
+                plot_ks_distance(
+                    drops,
+                    KS_fit.xmin,
+                    data_info=data_info,
+                    ax=None,
+                    save=True,
+                    close=True,
+                )
+                plot_ks_distance(
+                    drops,
+                    p_fit.xmin,
+                    data_info=data_info,
+                    ax=None,
+                    save=True,
+                    close=True,
+                )
+                plot_data_and_fit(
+                    p_fit, data_info=data_info, ax=None, save=True, close=True
+                )
+            xmin2_grid[i, j] = float(p_fit.xmin)
+            alpha2_grid[i, j] = getattr(dist_from_fit(p_fit), "alpha", np.nan)
+            alpha2std_grid[i, j] = getattr(p_fit, "alpha_std", np.nan)
+            lambda2_grid[i, j] = getattr(dist_from_fit(p_fit), "Lambda", np.nan)
 
     xmins_arr = np.array(xmins, dtype=float)[None, :]
     xmin1_factor = xmin1_grid / xmins_arr
@@ -337,6 +479,22 @@ def grid_compare_xmin(
     print(f"Saved figure to {filename}")
     plt.close(fig)
 
+    fig1.tight_layout()
+    fig2.tight_layout()
+    fig3.tight_layout()
+    filename1 = f"{PLOTPATH}ks_distance_grid_minKS_{timestamp}.pdf"
+    filename2 = f"{PLOTPATH}ks_distance_grid_maxP_{timestamp}.pdf"
+    filename3 = f"{PLOTPATH}fit_grid_{timestamp}.pdf"
+    fig1.savefig(filename1, format="pdf", bbox_inches="tight")
+    fig2.savefig(filename2, format="pdf", bbox_inches="tight")
+    fig3.savefig(filename3, format="pdf", bbox_inches="tight")
+    print(f"Saved figure to {filename1}")
+    print(f"Saved figure to {filename2}")
+    print(f"Saved figure to {filename3}")
+    plt.close(fig1)
+    plt.close(fig2)
+    plt.close(fig3)
+
     # --- Standalone alpha z-score plot for method 2 ---
     with np.errstate(divide="ignore", invalid="ignore"):
         z2 = np.abs(da2_grid) / alpha2std_grid
@@ -380,21 +538,17 @@ def testDist(alpha1=1.05):
 
 
 def testSamplePiecewise(
-    n=5000,
-    A=1.0,
-    B=1.0,
+    n=5e4,
     beta=2.0,
-    alpha=1.2,
-    lam=1e3,
-    xmin=1e-6,
+    alpha=1.4,
+    lam=1,
+    xmin=1e-5,
     xlow=None,
     seed=0,
 ):
     rng = np.random.default_rng(seed)
     drops, info = sample_piecewise(
         n=n,
-        A=A,
-        B=B,
         beta=beta,
         alpha=alpha,
         lam=lam,
@@ -408,12 +562,12 @@ def testSamplePiecewise(
         print("Not enough samples to fit.")
         return None
 
-    fit = make_fit(drops, fast_xmin=True, xmin_accuracy=0.1)
-    # fit.evaluate_fit()
-    # find_best_xmin(drops, debug=True, xmin_results=fit.xmin_fitting_results)
-    # plot_xmin_fitting(fit, save=True)
+    KS_fit = make_fit(drops, xmin_range=None, fast_xmin=True, xmin_accuracy=0.01)
+    # KS_fit.evaluate_fit()
+    p_fit = find_best_xmin(drops, debug=True, xmin_results=KS_fit.xmin_fitting_results)
+    plot_xmin_fitting(p_fit, save=True)
 
     filename = f"testing/piecewise_a{alpha:.2f}_lam{lam:.0e}_xmin{xmin:.1e}"
-    title = make_title_from_fit(fit)
-    plot_data_and_fit(fit, title=title, extraPath=filename)
-    return fit, info
+    title = make_title_from_fit(p_fit)
+    plot_data_and_fit(p_fit, title=title, extraPath=filename)
+    return p_fit, info
