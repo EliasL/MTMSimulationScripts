@@ -12,7 +12,7 @@ def task(config, **kwargs):
     run_locally(config, **kwargs)
 
 
-def run_many_locally(configs, taskNames=None, build=False, **kwargs):
+def run_many_locally(configs, taskNames=None, build=True, **kwargs):
     # Ensure taskNames is a list of correct length
     if taskNames is None:
         taskNames = [None] * len(configs)

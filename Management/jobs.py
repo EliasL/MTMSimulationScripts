@@ -191,6 +191,34 @@ def basicJob(
     return configs, labels
 
 
+def debugJob(
+    nrThreads=1,
+    nrSeeds=1,
+    size=20,
+    group_by_seeds=False,
+    maxLoad=1.0,
+    reconnection="edgeFlip",
+):
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        group_by_seeds=group_by_seeds,
+        rows=size,
+        cols=size,
+        startLoad=0.2,
+        maxLoad=maxLoad,
+        nrThreads=nrThreads,
+        minimizer="LBFGS",
+        loadIncrement=1e-3,
+        epsR=1e-5,
+        LBFGSEpsx=1e-6,
+        scenario="simpleShear",
+        reconnectionMethod=reconnection,
+        energyDropThreshold=1e-10,
+        # logDuringMinimization=1,
+    )
+    return configs, labels
+
+
 def longJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -597,7 +625,13 @@ def umutTestJob(group_by_seeds=False):
     return configs, labels
 
 
-def umutJob(L, loadIncrement=2e-5, EliasStop=False, group_by_seeds=False):
+def umutJob(
+    L,
+    loadIncrement: float | list[float] = 2e-5,
+    EliasStop=False,
+    group_by_seeds=False,
+    reconnecton: str | list[str] = "none",
+):
     if EliasStop:
         stop = {"epsR": 1e-5}
     else:
@@ -613,6 +647,7 @@ def umutJob(L, loadIncrement=2e-5, EliasStop=False, group_by_seeds=False):
         minimizer="LBFGS",
         scenario="simpleShear",
         group_by_seeds=group_by_seeds,
+        reconnectionMethod=reconnecton,
         **stop,
     )
     return configs, labels
@@ -638,7 +673,10 @@ def stopConditionJob():
 
 def loadStepJob(group_by_seeds=False):
     return umutJob(
-        L=150, loadIncrement=[5e-6, 1e-5, 2e-5, 4e-5], group_by_seeds=group_by_seeds
+        L=150,
+        loadIncrement=[5e-6, 1e-5, 2e-5, 4e-5],
+        group_by_seeds=group_by_seeds,
+        reconnecton=["none", "edgeFlip"],
     )
 
 

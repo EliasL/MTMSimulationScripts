@@ -1354,7 +1354,7 @@ def plot_fits_over_xmin(
         mask = np.isfinite(distances)
         if valid_fits is not None:
             mask &= valid_fits
-        max_xmin_filter = xmins < np.max(x)
+        max_xmin_filter = (xmins < np.nanmax(x)) & (np.isfinite(distances))
         if mask.any():
             # Filtered (optionally-valid) KS minimum
             x_d = xmins[mask]
@@ -1364,9 +1364,9 @@ def plot_fits_over_xmin(
             d = d[order]
             ks_xmin_filtered = float(x_d[np.argmin(d)])
 
-            # Global KS minimum (ignoring validity mask, but still ignoring NaNs)
-            global_idx = int(np.nanargmin(distances))
-            ks_xmin_global = float(xmins[global_idx])
+            # Global KS minimum
+            global_idx = np.argmin(distances[max_xmin_filter])
+            ks_xmin_global = xmins[max_xmin_filter][global_idx]
 
             # KS distance curve (plotted over the range used for the p/alpha curves)
             ax1.plot(
@@ -1708,6 +1708,8 @@ def plot_powerlaw(
             fast_xmin=fast_xmin,
             xmin_accuracy=xmin_accuracy,
         )
+        if evaluate:
+            KS_fit.evaluate_fit()
 
         p_fit = find_best_xmin(
             all_drops,
@@ -1788,6 +1790,9 @@ def plot_powerlaw(
         )
 
         rmEnd_fit = Fit(all_drops, xmin=rmEnd_xmin, xmin_distribution=distType.name)
+        if evaluate:
+            rmEnd_fit.evaluate_fit()
+
         title = make_title(data_info=data_info, fit=rmEnd_fit)
         plot_data_and_fit(
             rmEnd_fit,

@@ -21,6 +21,7 @@ from Management.jobs import (
     bigJob,
     smallJob,
     basicJob,
+    debugJob,
     allPlasticEventsJob,
     propperJob,
     propperJob1,
@@ -333,13 +334,14 @@ def runOnServer():
     queueJobs(server, configs, resume=False, jobCopies=1)
 
 
-def runReconnectionJob(L=30):
-    configs, labels = reconnectionTest(L=L)
-    run_many_locally(configs, taskNames=labels, resume=True)
+def runReconnectionJob(L=20):
+    # configs, labels = reconnectionTest(L=L)
+    configs, labels = debugJob(size=L, maxLoad=1.0)
+    run_locally(configs[0], resume=False)
+    # run_many_locally(configs, taskNames=labels, resume=False)
 
 
 def runOnLocalMachine():
-    return
     configs, labels = propperJob(3, nrSeeds=10, size=200, group_by_seeds=False)
     # configs, labels = allPlasticEventsJob()
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"

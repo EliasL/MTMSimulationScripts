@@ -4,7 +4,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 
-Vec2 = Tuple[float, float]
+Vec2 = Tuple[float, float] | np.ndarray
+Vec2_ = Tuple[float, float] | np.ndarray | None
 
 
 class LatticeFigure:
@@ -25,6 +26,8 @@ class LatticeFigure:
         limits: Tuple[float, float, float, float] | None = None,
         font_size: int = 25,
         label_spacing: float = 0.1,
+        origin: Vec2 = (0.0, 0.0),
+        basis: Tuple[Vec2, Vec2] | None = None,
     ) -> None:
         self.ax = ax
         self.margin = margin
@@ -32,9 +35,156 @@ class LatticeFigure:
         self.grid_linestyle = grid_linestyle
         self.grid_color = grid_color
         self.vector_color = vector_color
-        self.limits = limits
+        self._limits = limits
         self._vector_endpoints = np.empty((0, 2), dtype=float)
         self.font_size = font_size
+        self.origin = (float(origin[0]), float(origin[1]))
+        self._basis = (np.array([1.0, 0.0]), np.array([0.0, 1.0]))
+        if basis is not None:
+            self.set_basis(*basis)
+
+    def set_basis(self, e1: Vec2, e2: Vec2) -> None:
+        self._basis = (
+            np.array([float(e1[0]), float(e1[1])]),
+            np.array([float(e2[0]), float(e2[1])]),
+        )
+
+    def _auto_limits(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+        if self._vector_endpoints.size == 0:
+            max_abs = 0.0
+        else:
+            max_abs = float(np.max(np.abs(self._vector_endpoints)))
+
+        half = max_abs + float(self.margin)
+        xlim = (-half, half)
+        ylim = (-half, half)
+        return xlim, ylim
+
+    def _set_lims(self, xlim: Vec2_, ylim: Vec2_) -> Tuple[Vec2, Vec2]:
+        if xlim is None and self._limits is not None:
+            xmin, xmax, _, _ = self._limits
+            xlim = (xmin, xmax)
+        if ylim is None and self._limits is not None:
+            _, _, ymin, ymax = self._limits
+            ylim = (ymin, ymax)
+
+        if xlim is None or ylim is None:
+            auto_xlim, auto_ylim = self._auto_limits()
+            xlim = auto_xlim if xlim is None else xlim
+            ylim = auto_ylim if ylim is None else ylim
+        return xlim, ylim
+
+    def limits(self, xlim: Vec2_ = None, ylim: Vec2_ = None, margin=None):
+        e1, e2 = self._basis
+
+        (xmin, xmax), (ymin, ymax) = self._set_lims(xlim, ylim)
+        if margin is None:
+            margin = self.margin
+        xmin -= margin  # * max(abs(e1[0]), abs(e2[0]))
+        xmax += margin  # * max(abs(e1[0]), abs(e2[0]))
+        ymin -= margin  # * max(abs(e1[1]), abs(e2[1]))
+        ymax += margin  # * max(abs(e1[1]), abs(e2[1]))
+        return xmin, xmax, ymin, ymax
+
+    def drawGrid(self, linestyle: str = "--", color: str = "gray", **kwargs) -> None:
+        if self._limits is None:
+            raise ValueError("drawGrid requires self.limits to be set.")
+
+        e1, e2 = self._basis
+        if e1.shape != (2,) or e2.shape != (2,):
+            raise ValueError("drawGrid requires a 2D basis to be set.")
+
+        ox, oy = self.origin
+        origin = np.array([ox, oy], dtype=float)
+
+        xmin, xmax, ymin, ymax = self.limits()
+        limits = (float(xmin), float(xmax), float(ymin), float(ymax))
+
+        def line_segment_in_box(p0: np.ndarray, v: np.ndarray):
+            t_min = -np.inf
+            t_max = np.inf
+            for p_i, v_i, min_i, max_i in (
+                (p0[0], v[0], limits[0], limits[1]),
+                (p0[1], v[1], limits[2], limits[3]),
+            ):
+                if abs(v_i) < 1e-12:
+                    if p_i < min_i or p_i > max_i:
+                        return None
+                    continue
+                t1 = (min_i - p_i) / v_i
+                t2 = (max_i - p_i) / v_i
+                t_low = t1 if t1 < t2 else t2
+                t_high = t2 if t1 < t2 else t1
+                if t_low > t_min:
+                    t_min = t_low
+                if t_high < t_max:
+                    t_max = t_high
+                if t_min > t_max:
+                    return None
+            p_start = p0 + t_min * v
+            p_end = p0 + t_max * v
+            return p_start, p_end
+
+        def draw_family(direction: np.ndarray, offset: np.ndarray) -> None:
+            offset_norm = float(np.linalg.norm(offset))
+            if offset_norm < 1e-12:
+                return
+            max_dim = max(
+                abs(limits[0]), abs(limits[1]), abs(limits[2]), abs(limits[3])
+            )
+            max_steps = int(np.ceil((2.0 * max_dim + 2.0) / offset_norm)) + 1
+            for k in range(-max_steps, max_steps + 1):
+                p0 = origin + offset * float(k)
+                segment = line_segment_in_box(p0, direction)
+                if segment is None:
+                    continue
+                p_start, p_end = segment
+                self.ax.plot(
+                    [p_start[0], p_end[0]],
+                    [p_start[1], p_end[1]],
+                    linewidth=1,
+                    alpha=0.7,
+                    linestyle=linestyle,
+                    color=color,
+                    zorder=0,
+                    **kwargs,
+                )
+
+        # First family: lines parallel to e1, offset by e2.
+        draw_family(e1, e2)
+        # Second family: lines parallel to e2, offset by e1.
+        draw_family(e2, e1)
+
+    def draw_lattice_points(
+        self,
+        origin: Vec2_ = None,
+        xlim_: Vec2_ = None,
+        ylim_: Vec2_ = None,
+        maxDepth: int = 50,
+        basis: Tuple[Vec2, Vec2] | None = None,
+    ) -> None:
+        xmin, xmax, ymin, ymax = self.limits(xlim=xlim_, ylim=ylim_, margin=0.1)
+
+        e1, e2 = (
+            self._basis
+            if basis is None
+            else (
+                np.array([float(basis[0][0]), float(basis[0][1])]),
+                np.array([float(basis[1][0]), float(basis[1][1])]),
+            )
+        )
+        if origin is None:
+            ox, oy = self.origin
+        else:
+            ox, oy = float(origin[0]), float(origin[1])
+
+        for i in range(-maxDepth, maxDepth + 1):
+            for j in range(-maxDepth, maxDepth + 1):
+                px, py = (i * e1) + (j * e2)
+                px += ox
+                py += oy
+                if xmin <= px <= xmax and ymin <= py <= ymax:
+                    self.ax.plot(px, py, self.point_fmt, zorder=1)
 
     def draw_vector(
         self,
@@ -42,7 +192,7 @@ class LatticeFigure:
         label: str | None = None,
         label_pos: Vec2 | None = None,
         color: str | None = None,
-        origin: Vec2 = (0.0, 0.0),
+        origin: Vec2_ = None,
         ha: Literal["left", "center", "right"] | None = "left",
         va: Literal["top", "center", "bottom", "baseline", "center_baseline"]
         | None = "center",
@@ -57,7 +207,10 @@ class LatticeFigure:
         qkw.setdefault("headlength", 7)
         qkw.setdefault("headaxislength", 6)
 
-        ox, oy = float(origin[0]), float(origin[1])
+        if origin is None:
+            ox, oy = self.origin
+        else:
+            ox, oy = float(origin[0]), float(origin[1])
         vx, vy = float(v[0]), float(v[1])
 
         end = (ox + vx, oy + vy)
@@ -149,7 +302,7 @@ class LatticeFigure:
         self,
         a: Vec2,
         b: Vec2,
-        origin: Vec2 = (0.0, 0.0),
+        origin: Vec2_ = None,
         color: str | None = None,
         extra_linestyle: str = "--",
         labels: Tuple[str | None, str | None] | str = (None, None),
@@ -168,7 +321,10 @@ class LatticeFigure:
 
         c = self.vector_color if color is None else color
 
-        ox, oy = float(origin[0]), float(origin[1])
+        if origin is None:
+            ox, oy = self.origin
+        else:
+            ox, oy = float(origin[0]), float(origin[1])
         ax, ay = float(a[0]), float(a[1])
         bx, by = float(b[0]), float(b[1])
 
@@ -227,59 +383,35 @@ class LatticeFigure:
             **extra_kwargs,
         )
 
-    def _auto_limits(self) -> Tuple[Tuple[float, float], Tuple[float, float]]:
-        if self._vector_endpoints.size == 0:
-            max_abs = 0.0
-        else:
-            max_abs = float(np.max(np.abs(self._vector_endpoints)))
-
-        half = max_abs + float(self.margin)
-        xlim = (-half, half)
-        ylim = (-half, half)
-        return xlim, ylim
-
     def style_axis(
         self,
-        xlim: Tuple[float, float] | None = None,
-        ylim: Tuple[float, float] | None = None,
+        xlim_: Vec2_ = None,
+        ylim_: Vec2_ = None,
+        set_ax_lims=True,
+        draw_grid=True,
         hide_ticklabels: bool = True,
         equal_aspect: bool = True,
+        maxDepth: int = 50,
+        draw_points: bool = True,
     ) -> None:
-        if self.limits is not None:
-            xmin, xmax, ymin, ymax = self.limits
-            xlim = (xmin - self.margin, xmax + self.margin)
-            ylim = (ymin - self.margin, ymax + self.margin)
-        else:
-            if xlim is None or ylim is None:
-                auto_xlim, auto_ylim = self._auto_limits()
-                xlim = auto_xlim if xlim is None else xlim
-                ylim = auto_ylim if ylim is None else ylim
-
-        # Use floor/ceil to cover the visible region without adding extra buffer.
-        ix_min = int(np.floor(xlim[0]))
-        ix_max = int(np.ceil(xlim[1]))
-        iy_min = int(np.floor(ylim[0]))
-        iy_max = int(np.ceil(ylim[1]))
-
         # Ensure grid/points stay behind vectors.
         self.ax.set_axisbelow(True)
-        # Draw points
-        for x in range(ix_min, ix_max + 1):
-            for y in range(iy_min, iy_max + 1):
-                self.ax.plot(x, y, self.point_fmt, zorder=1)
+        if draw_points:
+            self.draw_lattice_points(
+                xlim_=xlim_,
+                ylim_=ylim_,
+                maxDepth=maxDepth,
+            )
+        if draw_grid:
+            self.drawGrid()
 
-        self.ax.set_xticks(range(ix_min, ix_max + 1))
-        self.ax.set_yticks(range(iy_min, iy_max + 1))
-        self.ax.grid(
-            True,
-            which="both",
-            linestyle=self.grid_linestyle,
-            color=self.grid_color,
-            zorder=0,
-        )
+        xmin, xmax, ymin, ymax = self.limits(xlim_, ylim_)
+        self.ax.set_xticks(range(int(xmin), int(xmax) + 1))
+        self.ax.set_yticks(range(int(ymin), int(ymax) + 1))
 
-        self.ax.set_xlim(*xlim)
-        self.ax.set_ylim(*ylim)
+        if set_ax_lims:
+            self.ax.set_xlim(xmin, xmax)
+            self.ax.set_ylim(ymin, ymax)
 
         if hide_ticklabels:
             self.ax.set_xticklabels([])
@@ -350,7 +482,7 @@ def three_bases_same_lattice():
     lf.draw_parallelogram(
         e1bar,
         e2bar,
-        labels=r"\bar{\mathbf{e}}",
+        labels=r"\bar\mathbf{e}",
         has=("right", "right"),
         origin=o2,
         color="tab:blue",
@@ -359,7 +491,7 @@ def three_bases_same_lattice():
     lf.draw_parallelogram(
         e1hat,
         e2hat,
-        labels=r"\hat{\mathbf{e}}",
+        labels=r"\hat\mathbf{e}",
         has=("left", None),
         origin=o3,
         color="tab:red",
@@ -373,6 +505,46 @@ def three_bases_same_lattice():
     plt.show()
 
 
+def two_lattices_side_by_side():
+    """Plot two lattices with different bases side by side on the same axes."""
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    # Bases for the two lattices.
+    e1_left: Vec2 = (0.5, 1.5)
+    e2_left: Vec2 = (0.0, 2.0)
+    e1_right: Vec2 = (-0.5, 1.5)
+    e2_right: Vec2 = (0.0, 2.0)
+
+    # Place them side by side by shifting their origins.
+    o_left: Vec2 = (-1.5, 0.0)
+    o_right: Vec2 = (1.5, 0.0)
+
+    # Visible regions for each lattice.
+    limits1 = (-3.0, -0.6, -0.5, 3.0)
+    limits2 = (0.6, 3.0, -0.5, 3.0)
+
+    # Draw basis vectors for each lattice.
+    lf1 = LatticeFigure(ax, limits=limits1, basis=(e1_left, e2_left), origin=o_left)
+    lf2 = LatticeFigure(ax, limits=limits2, basis=(e1_right, e2_right), origin=o_right)
+    lf1.draw_parallelogram(e1_left, e2_left, labels=r"\mathbf{e}", color="black")
+    lf2.draw_parallelogram(
+        e1_right,
+        e2_right,
+        labels=r"\bar\mathbf{e}",
+        color="tab:blue",
+        spacing=(0, 0.1),
+        has=("right", "left"),
+    )
+
+    lf1.style_axis(set_ax_lims=False)
+    lf2.style_axis(set_ax_lims=False)
+
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == "__main__":
     # simple_integer_shear_transformation()
-    three_bases_same_lattice()
+    # three_bases_same_lattice()
+    two_lattices_side_by_side()

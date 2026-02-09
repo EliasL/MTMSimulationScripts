@@ -319,9 +319,9 @@ def compareStep():
     fast_xmin = True
     xmin_accuracy = 0.1
     plotPlasticCounts(c, l)
-    plotLog2(
-        c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
-    )
+    # plotLog2(
+    #     c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
+    # )
 
 
 def plotLogAnalasys():
@@ -331,13 +331,13 @@ def plotLogAnalasys():
     # plotEnergy(configs, labels=labels)
     # # Find split
     fast_xmin = True
-    # plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
-    # plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
+    plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
+    plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
 
-    # p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
-    # lab = [["umut"]]
-    # plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
-    # plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
+    p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
+    lab = [["umut"]]
+    plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
+    plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
 
     # p = [
     #     [
@@ -408,8 +408,8 @@ if __name__ == "__main__":
     # elasticReductionPlots()
     # showDecomposition()
     # compareStop()
-    # compareStep()
-    plotLogAnalasys()
+    compareStep()
+    # plotLogAnalasys()
     # grid_compare_xmin()
     # testDist()
     # testSamplePiecewise()
