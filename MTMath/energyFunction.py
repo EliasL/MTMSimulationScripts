@@ -1,4 +1,16 @@
-from sympy import symbols, diff, sqrt, log, lambdify, ccode, cse, simplify, Rational, S
+from sympy import (
+    Matrix,
+    diff,
+    hessian,
+    lambdify,
+    log,
+    simplify,
+    sqrt,
+    symbols,
+    Rational,
+    S,
+    Mul,
+)
 import numpy as np
 from typing import TypeAlias
 from numpy.typing import ArrayLike
@@ -14,6 +26,7 @@ class EnergyFunction:
     # Define symbols as class constants (immutables)
     _C11, _C22, _C12, _BETA, _K, _NOISE = symbols("C_{11} C_{22} C_{12} beta K noise")
     _PHI_ARGS = (_C11, _C22, _C12, _BETA, _K, _NOISE)
+    _C_VARS = Matrix([_C11, _C22, _C12])
 
     # Cache for symbolic and numeric computations
     _PHI = None
@@ -37,45 +50,27 @@ class EnergyFunction:
                 cls._C11, cls._C22, cls._C12, cls._BETA, cls._K, cls._NOISE
             )
             cls._PHI = lambdify(cls._PHI_ARGS, cls._PHI_SYMBOLIC)
-        assert cls._PHI is not None
 
     @classmethod
     def _initialize_div_phi(cls):
         """Compute and cache the first derivatives of _PHI."""
         if cls._DIV_PHI is None:
             cls._initialize_phi()  # Ensure _PHI is initialized
-            first_derivatives = {
-                "dPhi_dC11": diff(cls._PHI_SYMBOLIC, cls._C11),
-                "dPhi_dC22": diff(cls._PHI_SYMBOLIC, cls._C22),
-                "dPhi_dC12": diff(cls._PHI_SYMBOLIC, cls._C12),
-            }
-            cls._DIV_PHI_SYMBOLIC = first_derivatives
-            cls._DIV_PHI = {
-                k: lambdify(cls._PHI_ARGS, v) for k, v in first_derivatives.items()
-            }
+            grad = Matrix([cls._PHI_SYMBOLIC]).jacobian(cls._C_VARS)
+            cls._DIV_PHI_SYMBOLIC = grad
+            cls._DIV_PHI = lambdify(cls._PHI_ARGS, grad)
 
     @classmethod
     def _initialize_div_div_phi(cls):
         """Compute and cache the second derivatives of _PHI."""
         if cls._DIV_DIV_PHI is None:
             cls._initialize_div_phi()  # Ensure first derivatives are initialized
-            assert cls._DIV_PHI_SYMBOLIC is not None
-            first_derivatives = cls._DIV_PHI_SYMBOLIC
-            second_derivatives = {
-                "dPhi_dC11_dC11": diff(first_derivatives["dPhi_dC11"], cls._C11),
-                "dPhi_dC22_dC22": diff(first_derivatives["dPhi_dC22"], cls._C22),
-                "dPhi_dC12_dC12": diff(first_derivatives["dPhi_dC12"], cls._C12),
-                "dPhi_dC11_dC22": diff(first_derivatives["dPhi_dC11"], cls._C22),
-                "dPhi_dC11_dC12": diff(first_derivatives["dPhi_dC11"], cls._C12),
-                "dPhi_dC22_dC12": diff(first_derivatives["dPhi_dC22"], cls._C12),
-            }
-            cls.DIV_DIV_PHI_SYMBOLIC = second_derivatives
-            cls._DIV_DIV_PHI = {
-                k: lambdify(cls._PHI_ARGS, v) for k, v in second_derivatives.items()
-            }
+            H = hessian(cls._PHI_SYMBOLIC, cls._C_VARS)
+            cls._DIV_DIV_PHI_SYMBOLIC = H
+            cls._DIV_DIV_PHI = lambdify(cls._PHI_ARGS, H)
 
     @classmethod
-    def _initialize_all(cls):
+    def _initialize_phi_divs(cls):
         """Compute and cache all potential functions and derivatives."""
         cls._initialize_phi()
         cls._initialize_div_phi()
@@ -83,12 +78,12 @@ class EnergyFunction:
 
     @classmethod
     def symbolic_potential(cls):
-        cls._initialize_all()
-        return cls._PHI_SYMBOLIC, cls._DIV_PHI_SYMBOLIC, cls.DIV_DIV_PHI_SYMBOLIC
+        cls._initialize_phi_divs()
+        return cls._PHI_SYMBOLIC, cls._DIV_PHI_SYMBOLIC, cls._DIV_DIV_PHI_SYMBOLIC
 
     @classmethod
     def numeric_potential(cls):
-        cls._initialize_all()
+        cls._initialize_phi_divs()
         return cls._PHI, cls._DIV_PHI, cls._DIV_DIV_PHI
 
     @classmethod
@@ -195,9 +190,10 @@ class EnergyFunction:
         cls._initialize_div_phi()
         assert cls._DIV_PHI is not None
         C_11, C_22, C_12 = C_R[..., 0, 0], C_R[..., 1, 1], C_R[..., 0, 1]
-        dPhi_dC11 = cls._DIV_PHI["dPhi_dC11"](C_11, C_22, C_12, beta, K, noise)
-        dPhi_dC22 = cls._DIV_PHI["dPhi_dC22"](C_11, C_22, C_12, beta, K, noise)
-        dPhi_dC12 = cls._DIV_PHI["dPhi_dC12"](C_11, C_22, C_12, beta, K, noise)
+        dPhi = np.asarray(cls._DIV_PHI(C_11, C_22, C_12, beta, K, noise))
+        dPhi_dC11 = dPhi[0, 0]
+        dPhi_dC22 = dPhi[0, 1]
+        dPhi_dC12 = dPhi[0, 2]
         # sigma = 1/2 (∂Φ/∂C_R + (∂Φ/∂C_R)^T)
         # Preallocate an array of shape (..., 2, 2):
         sigma = np.empty(C_R.shape, dtype=dPhi_dC11.dtype)
@@ -214,11 +210,13 @@ class EnergyFunction:
         """
         assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
 
-        C_R , M_R = lagrange_reduction(C)
+        C_R, M_R = lagrange_reduction(C)
 
         sigma = cls.sigma_from_C_R(C_R, beta=beta, K=K, noise=noise)
 
-        # Swapaxes is equivalent to transpose for 2D matrices, but works for ND-arrays
+        # Definition: S = 2 * ∂φ/∂C.
+        # The factor 2 comes from the constitutive definition (not from reduction).
+        # Swapaxes is equivalent to transpose for 2D matrices, but works for ND-arrays.
         S = 2 * M_R @ sigma @ M_R.swapaxes(-1, -2)
         return S
 
@@ -236,6 +234,16 @@ class EnergyFunction:
         """
         Compute the first Piola-Kirchhoff stress tensor P from the deformation gradient F.
         """
+        S = cls.S_from_F(F, beta=beta, K=K, noise=noise)
+        P = F @ S
+        return P
+
+    @classmethod
+    def P_from_C(cls, C, beta=-1 / 4, K=4, noise=1):
+        """
+        Compute the first Piola-Kirchhoff stress tensor P from the metric tensor C, using the polar decomposition to find F.
+        """
+        F = F_from_C(C)
         S = cls.S_from_F(F, beta=beta, K=K, noise=noise)
         P = F @ S
         return P
@@ -359,6 +367,218 @@ class EnergyFunction:
         forces = cls.eulerian_forces_from_F(F, dN_dx, beta, K, noise, area)
         return forces
 
+    @classmethod
+    def tangent_elasticity_tensor(
+        cls, F, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True
+    ):
+        """
+        A_{iJkL} = ∂^2Φ/( ∂F_{iJ}∂F_{kL})
+        Formulation in terms of dPhi_dC22_dC12 ('C') from Roberta Baggio's thesis, page 74:
+
+                A_{iJkL} = 2 'C'_{RJSL}F_{kR}F_{iS} + S_{JL}δ_{ik}
+
+        Where S is the second Piola-Kirchhoff stress tensor
+
+        Also called linearized elastic moduli or first elasticity tensor in Robertas thesis.
+        Refered to as elastic moduli associated to the pairs (S,F) on Wikipedia: https://en.wikipedia.org/wiki/Incremental_deformations
+        """
+        assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
+
+        cls._initialize_div_div_phi()
+        assert cls._DIV_DIV_PHI is not None
+
+        # Compute C and its Lagrange reduction (for the potential defined on reduced C)
+        C = np.einsum("...ji,...jk->...ik", F, F)
+        C_R, M_R = lagrange_reduction(C, loops=loops)
+        C_11, C_22, C_12 = C_R[..., 0, 0], C_R[..., 1, 1], C_R[..., 0, 1]
+
+        # Hessian of Phi with respect to (C11, C22, C12)
+        H_raw = cls._DIV_DIV_PHI(C_11, C_22, C_12, beta, K, noise)
+        H = np.asarray(H_raw, dtype=float)
+        # SymPy lambdify returns a 3x3 matrix with the batch dimension last (3,3,...).
+        # Move those two matrix axes to the end so we consistently work with (...,3,3).
+        H = np.moveaxis(H, (0, 1), (-2, -1))
+        if H.shape[-2:] != (3, 3):
+            raise ValueError(f"Hessian has unexpected shape {H.shape}")
+
+        # Map symmetric derivatives into full tensor with shear scaling:
+        # C4_red_{ijkl} = E_{ij,a} H_{ab} E_{kl,b}
+        E = np.zeros((2, 2, 3), dtype=float)
+        E[0, 0, 0] = 1.0
+        E[1, 1, 1] = 1.0
+        E[0, 1, 2] = 0.5
+        E[1, 0, 2] = 0.5
+        C4_red = np.einsum("ija,...ab,klb->...ijkl", E, H, E)
+        # Definition in Roberta Baggio's thesis: C_{IJKL} = 2 * ∂²φ/∂C_{IJ}∂C_{KL}.
+        # Our Hessian H is just ∂²φ/∂C∂C, so multiply by 2 here.
+        C4_red *= 2.0
+
+        # Transform reduced C-tensor back to the original basis (ignore dM/dC)
+        C4 = np.einsum(
+            "...ir,...js,...kt,...lu,...rstu->...ijkl", M_R, M_R, M_R, M_R, C4_red
+        )
+
+        # Second Piola-Kirchhoff stress from F
+        S = cls.S_from_F(F, beta=beta, K=K, noise=noise)
+
+        # From Roberta's thesis
+        #    A_{iJkL} = 2 * C_{R J S L} F_{kR} F_{iS} + S_{JL} δ_{ik}
+        # MISTAKE: Thesis should have kS and iR instead of kR and iS.
+        term1 = 2 * np.einsum("...rjsl,...ks,...ir->...ijkl", C4, F, F)
+        term2 = np.einsum("...jl,ik->...ijkl", S, np.eye(2, dtype=S.dtype))
+
+        # A is (mixed) Lagrangian
+        A = term1 + term2
+
+        if eulerian:
+            # Push-forward A to a
+            a = np.einsum("...jR,...lS,...iRkS->...ijkl", F, F, A)
+            return a
+        else:
+            return A
+
+    @staticmethod
+    def print_tangent_elasticity_index_map():
+        """
+        Print a simple index map for A_{iJkL} = dP_{iJ}/dF_{kL}
+        and return it as a (2,2,2,2) tensor of strings.
+        """
+        tensor = EnergyFunction.tangent_elasticity_index_tensor()
+        print("Index map tensor A_{iJkL} = dP_{iJ}/dF_{kL}:")
+        print(tensor)
+        return tensor
+
+    @staticmethod
+    def tangent_elasticity_index_tensor():
+        """
+        Return a (2,2,2,2) tensor of strings for A_{iJkL} = dP_{iJ}/dF_{kL}.
+        """
+        tensor = np.empty((2, 2, 2, 2), dtype=object)
+        for i in range(2):
+            for j in range(2):
+                for k in range(2):
+                    for l in range(2):
+                        tensor[i, j, k, l] = f"dP{i}{j}/dF{k}{l}"
+        return tensor
+
+    @classmethod
+    def acoustic_tensor(
+        cls, F, n, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True
+    ):
+        """
+        Acoustic tensor q_{ik} = n_j n_l a_{ijkl},
+        where a is the tangent elasticity tensor computed from reduced C.
+        """
+        F = np.asarray(F, dtype=float)
+        n = np.asarray(n, dtype=float)
+        assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
+        assert n.shape[-1] == 2, "N must have shape (..., 2)"
+
+        a = cls.tangent_elasticity_tensor(
+            F, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
+        )
+        q = np.einsum("...j,...l,...ijkl->...ik", n, n, a)
+        return q
+
+    @classmethod
+    def acoustic_tensor_eigenvalues(
+        cls, F, n, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True
+    ):
+        """
+        Eigenvalues of the acoustic tensor. If eulerian=True, uses q(n);
+        otherwise uses the Lagrangian acoustic tensor Q(N).
+        """
+        q = cls.acoustic_tensor(
+            F, n, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
+        )
+        # Enforce symmetry for numerical stability before eigendecomposition.
+        q = 0.5 * (q + q.swapaxes(-1, -2))
+        return np.linalg.eigvalsh(q)
+
+    @classmethod
+    def acoustic_determinant(
+        cls, F, n, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True
+    ):
+        """
+        Determinant of the acoustic tensor. If eulerian=True, use q(n);
+        otherwise use the Lagrangian acoustic tensor Q(N).
+        """
+        q = cls.acoustic_tensor(
+            F, n, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
+        )
+
+        return np.linalg.det(q)
+
+    @classmethod
+    def stability(cls, F, n, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True):
+        """
+        Return True where det(acoustic tensor) >= 0. If eulerian=True, use q(n);
+        otherwise use the Lagrangian acoustic tensor Q(N).
+        """
+        det_q = cls.acoustic_determinant(
+            F, n, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
+        )
+        return det_q >= 0
+
+    @staticmethod
+    def _voigt_from_A(A):
+        """
+        Map a 4th-order tensor A_{ijkl} to a 3x3 Voigt-like matrix using symmetric C components.
+        Input shape: (..., 2, 2, 2, 2)
+        Output shape: (..., 3, 3)
+
+        We use the ordering (11, 22, 12) and the same shear scaling (1/2) as in
+        sigma_from_C_R. The mapping is
+          A_voigt[a,b] = E_{ij,a} * A_{ijkl} * E_{kl,b},
+        where E maps (11,22,12) to (ij) with a 1/2 on shear.
+        """
+        A = np.asarray(A, dtype=float)
+        assert A.shape[-4:] == (2, 2, 2, 2), (
+            f"A must have shape (...,2,2,2,2), got {A.shape}"
+        )
+        # Warn once if A is not symmetric in the minor index pairs (ij) or (kl).
+        if not hasattr(EnergyFunction._voigt_from_A, "_warned"):
+            EnergyFunction._voigt_from_A._warned = False
+        if not EnergyFunction._voigt_from_A._warned:
+            sym_ij = np.allclose(A, A.swapaxes(-4, -3), equal_nan=True)
+            sym_kl = np.allclose(A, A.swapaxes(-2, -1), equal_nan=True)
+            if not (sym_ij and sym_kl):
+                print(
+                    "Warning: _voigt_from_A assumes minor symmetries in (ij) and (kl); "
+                    "A is not symmetric, so Voigt mapping is a symmetrized projection."
+                )
+                EnergyFunction._voigt_from_A._warned = True
+        E = np.zeros((2, 2, 3), dtype=float)
+        E[0, 0, 0] = 1.0
+        E[1, 1, 1] = 1.0
+        E[0, 1, 2] = 0.5
+        E[1, 0, 2] = 0.5
+        return np.einsum("ija,...ijkl,klb->...ab", E, A, E)
+
+    @classmethod
+    def moduli_at_F(cls, F, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True):
+        """
+        Return mu from the tangent tensor using Voigt component (12,12).
+        If eulerian=True, use the pushed-forward tensor a; otherwise use A.
+        Note: matches linearized isotropic definition when evaluated at the
+        reference configuration.
+        """
+        A = cls.tangent_elasticity_tensor(
+            F, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
+        )
+        t_voigt = cls._voigt_from_A(A)
+        # https://en.wikipedia.org/wiki/Lam%C3%A9_parameters
+        mu = t_voigt[..., 2, 2]  # Shear modulus
+        Lambda = t_voigt[..., 1, 0]  # First Lame parameter
+        return mu, Lambda
+
+    @classmethod
+    def moduli_at_C(cls, C, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True):
+        F = F_from_C(C)
+        return cls.moduli_at_F(
+            F, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
+        )
+
 
 class ContiEnergy(EnergyFunction):
     @staticmethod
@@ -441,6 +661,7 @@ class PieceWiseQuadratic(EnergyFunction):
             + 0.5 * kappa * (J - S.One) ** 2
         )
 
+
 def F_from_C(C):
     """
     Given C = F^T F (right Cauchy–Green tensor), this function returns
@@ -492,6 +713,7 @@ def F_from_C(C):
         F[nan_mask, :, :] = np.nan
 
     return F
+
 
 def rotation(theta: (float | np.ndarray) = 0.0) -> np.ndarray:
     c = np.cos(theta)
@@ -577,9 +799,7 @@ def SShear_with_R(
     s_conponent=(0, 1),
 ):
     """Return (rotShear, R), where R is the imposed rigid rotation Rotation(theta)."""
-    rotShear, R, _ = _SShear_core(
-        h=h, theta=theta, s_conponent=s_conponent
-    )
+    rotShear, R, _ = _SShear_core(h=h, theta=theta, s_conponent=s_conponent)
     return rotShear, R
 
 
@@ -615,7 +835,6 @@ def _assert_physical_det(M: np.ndarray, context: str):
     if np.any((J < 0) & ~np.isnan(J)):
         print(f"Warning! {context}: encountered det < 0 (non-physical).")
     return nan_mask, J
-
 
 
 def get_rotation(F):
@@ -654,61 +873,6 @@ def get_rotation(F):
         R[nan_mask] = np.nan
 
     return R
-
-
-
-
-def generate_cpp_code(expressions_dict):
-    expressions = list(expressions_dict.values())
-    var_names = list(expressions_dict.keys())
-
-    # Apply common subexpression elimination
-    replacements, reduced_exprs = cse(expressions)
-
-    # Simplify the reduced expressions
-    simplified_exprs = []
-    for expr in reduced_exprs:
-        simplified_exprs.append(simplify(expr))
-    reduced_exprs = simplified_exprs
-
-    # Generate C++ code
-    ccode_replacements = []
-    for var, expr in replacements:
-        try:
-            ccode_replacements.append(f"double {var} = {ccode(expr)};")
-        except Exception as e:
-            ccode_replacements.append(f"// Error processing {var}: {str(e)}")
-
-    ccode_expressions = []
-    for i, (name, expr) in enumerate(zip(var_names, reduced_exprs)):
-        try:
-            ccode_expressions.append(f"double {name} = {ccode(expr)};")
-        except Exception as e:
-            ccode_expressions.append(f"// Error processing {name}: {str(e)}")
-
-    # Combine with a blank line separator
-    return "\n".join(ccode_replacements + [""] + ccode_expressions)
-
-
-def compute_energy_and_derivatives(
-    phi_func, div_phi_dict, div_div_phi_dict=None, include_second_derivatives=False
-):
-    # Handle energy function - wrap it in a dictionary with a single key
-    energy_dict = {"phi": phi_func}
-    energy_code = generate_cpp_code(energy_dict)
-
-    # Generate combined code if second derivatives are requested
-    if include_second_derivatives:
-        assert div_div_phi_dict is not None, "Second derivatives must be provided."
-        # Combine first and second derivatives
-        combined_dict = {**div_phi_dict, **div_div_phi_dict}
-
-        first_and_second_derivative_code = generate_cpp_code(combined_dict)
-
-        return energy_code, first_and_second_derivative_code
-    else:
-        first_derivative_code = generate_cpp_code(div_phi_dict)
-        return energy_code, first_derivative_code
 
 
 def debug_symbolic_cauchy_trace():
@@ -821,22 +985,19 @@ def sanityCheck_Piola(verbose=True):
     check(true_P, gamma)
 
 
-
-
-
 if __name__ == "__main__":
     pass
-    #debug_symbolic_cauchy_trace()
+    # debug_symbolic_cauchy_trace()
     # sanityCheck_Piola()
     # # Get symbolic expressions from ContiEnergy
-    # phi_func, div_phi_dict, div_div_phi_dict = ContiEnergy.symbolic_potential()
+    # phi_func, div_phi, div_div_phi = ContiEnergy.symbolic_potential()
 
     # # Choose whether to include second derivatives
     # include_second_derivatives = False  # Set to True when needed
 
     # # Generate the code
     # energy_code, stress_code = compute_energy_and_derivatives(
-    #     phi_func, div_phi_dict, div_div_phi_dict, include_second_derivatives
+    #     phi_func, div_phi, div_div_phi, include_second_derivatives
     # )
 
     # # Output results

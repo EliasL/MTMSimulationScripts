@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+import matplotlib as mpl
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law
@@ -89,6 +90,7 @@ def get_energy_drops(
         csvPaths = [csvPaths]
 
     drops = []
+    masks = []
     L = get_system_size(csvPaths)
     for singlePath in csvPaths:
         if df is None:
@@ -122,6 +124,7 @@ def get_energy_drops(
         drop_mask = diffs < 0
         mask = drop_mask & lim_mask
         drops.extend(-diffs[mask])
+        masks.append(mask)
 
     drops = np.array(drops)
 
@@ -131,6 +134,7 @@ def get_energy_drops(
     data_info["strainLim"] = strainLim
     data_info["L"] = get_system_size(csvPaths)
     data_info["label"] = label
+    data_info["masks"] = masks
 
     if debug:
         # Only debug first seed when using labels
@@ -1065,6 +1069,11 @@ def plot_plastic_counts(
     else:
         fig = ax.figure
 
+    blues = mpl.colormaps["Blues"]
+    oranges = mpl.colormaps["Oranges"]
+
+    edgeflip_colors = iter(blues(np.linspace(0.3, 0.9, len(paths) // 2)))
+    normal_colors = iter(oranges(np.linspace(0.3, 0.9, len(paths) // 2)))
     data_info = None
     for path, label in zip(paths, labels):
         df = pd.read_csv(path)
@@ -1113,7 +1122,23 @@ def plot_plastic_counts(
         )
         if bin_centers.size == 0:
             continue
-        ax.plot(bin_centers, bin_sums, marker="o", linestyle="-", label=label)
+
+        if "edgeFlip" in path:
+            marker = "s"
+            color = next(edgeflip_colors)
+        else:
+            marker = "o"
+            color = next(normal_colors)
+
+        ax.plot(
+            bin_centers,
+            bin_sums,
+            marker=marker,
+            linestyle="-",
+            color=color,
+            label=label,
+            markerfacecolor="none",
+        )
 
     if not ax.lines:
         print("No data found for plastic count plotting.")

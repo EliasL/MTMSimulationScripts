@@ -576,6 +576,38 @@ def singleDislocationTest(
     return configs, labels
 
 
+def reversibilityJob(
+    nrThreads=4,
+    nrSeeds=1,
+    size=150,
+    group_by_seeds=False,
+    maxLoad=1.0,
+    reconnection="none",
+    loadIncrement=1e-5,
+):
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        group_by_seeds=group_by_seeds,
+        rows=size,
+        cols=size,
+        startLoad=0.14,
+        maxLoad=maxLoad,
+        nrThreads=nrThreads,
+        minimizer="LBFGS",
+        loadIncrement=loadIncrement,
+        # epsR=1e-14,
+        LBFGSEpsx=1e-6,
+        # LBFGSEpsg=1e-8,
+        scenario="reversibilityProtocolTest",
+        reconnectionMethod=reconnection,
+        # remesh=1,
+        # temp
+        # energyDropThreshold=1e-10,
+        # logDuringMinimization=1,
+    )
+    return configs, labels
+
+
 def remeshTest(diagonal="major"):
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",

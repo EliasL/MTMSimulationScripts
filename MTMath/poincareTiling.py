@@ -648,11 +648,7 @@ def plotStressFromRealF(
     nr_theta = len(theta)
     gamma = np.linspace(0, gamma_lim, nr_gamma)
     eFunc = PieceWiseQuadratic  # ContiEnergy
-    F = SShear(
-        h=gamma,
-        theta=theta,
-        s_conponent=s_component
-    )
+    F = SShear(h=gamma, theta=theta, s_conponent=s_component)
     if stress_type == "cauchy":
         stress = eFunc.cauchy_from_F(F)
     elif stress_type == "pk2":
@@ -1355,13 +1351,13 @@ def elasticReductionBFS(
             backPropogateColor(nodes[node["parent"]], color)
 
     def sqrtm_2x2(C):
-        a, b = C[0,0], C[0,1]
-        d = C[1,1]
+        a, b = C[0, 0], C[0, 1]
+        d = C[1, 1]
         tr = a + d
-        det = a*d - b*b
+        det = a * d - b * b
         s = np.sqrt(det)
-        t = np.sqrt(tr + 2*s)
-        return (C + s*np.eye(2)) / t
+        t = np.sqrt(tr + 2 * s)
+        return (C + s * np.eye(2)) / t
 
     from collections import deque
 
@@ -1380,7 +1376,7 @@ def elasticReductionBFS(
                 # we don't move directly back from where we came
                 continue
             Cn = congruence(C, M)
-            #Cn = sqrtm_2x2(C)@ M.T@M@sqrtm_2x2(C) 
+            # Cn = sqrtm_2x2(C)@ M.T@M@sqrtm_2x2(C)
 
             first = nodes[idx]["first"]
             first = move_label if first is None else first
@@ -1495,4 +1491,3 @@ def elasticReductionPlots():
             elasticReductionBFS(
                 C, max_depth=depth, show_dead_ends=showDeadEnds, name=name
             )
-

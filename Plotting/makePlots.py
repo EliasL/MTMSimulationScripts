@@ -716,8 +716,8 @@ def makePlot(
     if save:
         fig.tight_layout()
 
+        name = safePath(name)
         figPath = os.path.join(os.path.dirname(csv_file_paths[0]), name)
-        figPath = safePath(figPath)
         fig.savefig(figPath)
         print(f'Plot saved at: "{figPath}"')
     if show:

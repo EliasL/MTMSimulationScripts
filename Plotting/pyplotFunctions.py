@@ -901,7 +901,7 @@ def process_frame(kwargs, attemps=0):
 
 def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
     """
-    Extracts the corresponding "avg_energy" and "avg_RSS" values for each load in vtu_files,
+    Extracts the corresponding "avg_energy" and "avg_sigmaxy" values for each load in vtu_files,
     along with the line numbers (indices) of the matching rows in the CSV file.
 
     Parameters:
@@ -918,14 +918,14 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         #     X,
         #     "load_step",
         #     "avg_energy",
-        #     "avg_RSS",
+        #     "avg_sigmaxy",
         #     "avg_energy_change",
         #     "nr_plastic_deformations",
         # ],
     )
     avg_energy_list = []
     change_avg_energy_list = []
-    avg_RSS_list = []
+    avg_sigmaxy_list = []
     line_numbers = []
     x_list = []
 
@@ -967,7 +967,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
 
         # Append the extracted values to the respective lists
         avg_energy_list.append(matching_row["avg_energy"])
-        avg_RSS_list.append(matching_row["avg_RSS"])
+        avg_sigmaxy_list.append(matching_row["avg_sigmaxy"])
         if "avg_energy_change" in matching_row:
             change_avg_energy_list.append(matching_row["avg_energy_change"])
             if (
@@ -998,15 +998,15 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
 
     # Find previous data and get change data as well
     px, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(macro_data, line_numbers, X)
-    change_avg_RSS_list = avg_RSS_list - pAvgRSS
+    change_avg_sigmaxy_list = avg_sigmaxy_list - pAvgRSS
     del_x = x_list - px
 
     # Return the lists of values and line numbers
     return (
         avg_energy_list,
-        avg_RSS_list,
+        avg_sigmaxy_list,
         change_avg_energy_list,
-        change_avg_RSS_list,
+        change_avg_sigmaxy_list,
         del_x,
         line_numbers,
     )
@@ -1015,13 +1015,13 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
 def get_previous_energy_and_rss(macro_data, current_line, X="load"):
     # Check if current_line is an integer
     if isinstance(current_line, int):
-        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", "avg_RSS"])
+        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", "avg_sigmaxy"])
         # Select the previous row relative to current_line
         p_row = df.iloc[current_line - 1]
-        return p_row[X], p_row["avg_energy"], p_row["avg_RSS"]
+        return p_row[X], p_row["avg_energy"], p_row["avg_sigmaxy"]
     else:
         # Handle the case where current_line is an iterable (e.g., list or array)
-        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", "avg_RSS"])
+        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", "avg_sigmaxy"])
         # Create empty lists to store previous values
         prev_x, prev_energies, prev_rss = [], [], []
 
@@ -1031,7 +1031,7 @@ def get_previous_energy_and_rss(macro_data, current_line, X="load"):
             p_row = df.iloc[line - 1]
             prev_x.append(p_row[X])
             prev_energies.append(p_row["avg_energy"])
-            prev_rss.append(p_row["avg_RSS"])
+            prev_rss.append(p_row["avg_sigmaxy"])
 
         # Return lists of previous values
         return np.array(prev_x), np.array(prev_energies), np.array(prev_rss)

@@ -3,6 +3,7 @@ from Management.jobs import (
     stopConditionJob,
     smallJob,
     allPlasticEventsJob,
+    reversibilityJob,
     bigUmutJob,
     bigUmutJobWithEliasStop,
     propperJob,
@@ -20,6 +21,7 @@ from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
 from MTMath.powerlaw_mixed_test import testDist, grid_compare_xmin, testSamplePiecewise
 from Plotting.plotPowerLaw import make_exponent_fit, plot_powerlaw
+from Plotting.reversibilityPlot import plot_reversibility_histograms
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
     elasticReductionPlots,
@@ -318,10 +320,33 @@ def compareStep():
     c, l = loadStepJob()
     fast_xmin = True
     xmin_accuracy = 0.1
-    plotPlasticCounts(c, l)
+    plotPlasticCounts(c, l, postRegime=True)
+    plotPlasticCounts(c, l, postRegime=False)
     # plotLog2(
     #     c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
     # )
+
+
+def plotReversibility():
+    configs, labels = reversibilityJob()
+    plot_reversibility_histograms(
+        configs[0], postRegime=None, show=False, save_path="Plots/reversibility_All.pdf"
+    )
+    plot_reversibility_histograms(
+        configs[0],
+        postRegime=True,
+        show=False,
+        save_path="Plots/reversibility_post.pdf",
+    )
+    plot_reversibility_histograms(
+        configs[0],
+        postRegime=False,
+        show=False,
+        save_path="Plots/reversibility_pre.pdf",
+    )
+    fast_xmin = True
+    plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
+    plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
 
 
 def plotLogAnalasys():
@@ -401,14 +426,15 @@ if __name__ == "__main__":
     # drawLeftRightExplanationFigs()
     # drawRotationExplanationFigs()
     # drawRotation2ExplanationFigs()
-    # plotStressFromRealF()
+    plotStressFromRealF()
     # tryAllRotations()
     # plotsLotsOfRealFStress("pk2", reduced=True)
     # bug_hunting()
     # elasticReductionPlots()
     # showDecomposition()
     # compareStop()
-    compareStep()
+    # compareStep()
+    # plotReversibility()
     # plotLogAnalasys()
     # grid_compare_xmin()
     # testDist()

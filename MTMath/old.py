@@ -19,7 +19,9 @@ def round_floats(expr):
 
 # Loop through the expressions in div_phi, substitute the assumptions,
 # simplify the expression, round coefficients, and then generate a multiline LaTeX string.
-for eq_label, expr in div_phi.items():
+labels = ("dPhi_dC11", "dPhi_dC22", "dPhi_dC12")
+for i, eq_label in enumerate(labels):
+    expr = div_phi[0, i]
     # Substitute the assumptions and simplify
     expr_assumed = sp.simplify(expr.subs(assumptions))
     # Round numerical coefficients to one decimal

@@ -1,5 +1,6 @@
 from Plotting.remotePlotting import plotLog, plotLog2, plotEnergy
 from Management import parameterExploring as pe
+from Management.configGenerator import SimulationConfig
 from Management.connectToCluster import uploadProject, get_server_short_name
 from Management.runOnCluster import build_on_all_servers, build_on_server
 from runSimulations import run_many_locally, run_locally
@@ -40,6 +41,7 @@ from Management.jobs import (
     remeshTest,
     initalInstability,
     reconnectionTest,
+    reversibilityJob,
 )
 
 
@@ -108,6 +110,21 @@ def benchmark():
 
     # remesh-locking (24.04.25)
     # 2% RT: 1m 58s  ETR: 52m 34s    Load: 0.173380
+
+    # Sylvain remesh (12.02.26) (with another simulation running)
+    # 0% RT: 2m 1s   ETR: 4h 4m 52s  Load: 0.156910
+
+    # noAlias (16.02.26) (with another simulation running)
+    # 1% RT: 1m 53s  ETR: 3h 5m 24s  Load: 0.158500
+
+    # Merged energy and stress (16.02.26) (with another simulation running)
+    # 0% RT: 2m 2s   ETR: 4h 23m 25s Load: 0.156440
+
+    # Unmerged again (16.02.26) (with another simulation running)
+    # 1% RT: 1m 58s  ETR: 3h 14m 21s Load: 0.158500
+
+    # New functions (slight algebraic alteration) (16.02.26) (with another simulation running)
+    # 1% RT: 2m 5s   ETR: 2h 48m 18s Load: 0.160390
 
 
 def reconnectingBenchmark():
@@ -184,6 +201,21 @@ def plotBigJob():
         # show=True,
         # debug=True,
     )
+
+
+def resumeWithLogDuringMin(configPath, dump, newOutput=True):
+    conf = SimulationConfig()
+    conf.parse(configPath)
+    conf.logDuringMinimization = 1
+    if newOutput:
+        conf.name = conf.generate_name(False)
+    run_locally(conf, dump=dump, newOutput=newOutput)
+
+
+def sylvainSmallDrop():
+    confPath = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.138,4e-05,1.0PBCt8initialGuessNoise0.04LBFGSEpsx1e-05s0/config.conf"
+    dump = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.138,4e-05,1.0PBCt8initialGuessNoise0.04LBFGSEpsx1e-05s0/dumps/dump_l0.66.xml.gz"
+    resumeWithLogDuringMin(configPath=confPath, dump=dump)
 
 
 def plotPropperJob():
@@ -352,7 +384,9 @@ def runOnLocalMachine():
     # configs, labels = umutTestJob()
     # configs, labels = bigUmutJob()
     # configs, labels = bigUmutJobWithEliasStop()
-    configs, labels = loadStepJob()
+    # configs, labels = loadStepJob()
+    configs, labels = reversibilityJob()
+
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
     # )
@@ -455,7 +489,8 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    runOnLocalMachine()
+    # runOnLocalMachine()
+    # sylvainSmallDrop()
     # plotSizeJob()
 
     # stopJobs()
@@ -468,4 +503,4 @@ if __name__ == "__main__":
     # stopConditionJob()
     # threadTest()
     # reconnectingBenchmark()
-    # benchmark()
+    benchmark()

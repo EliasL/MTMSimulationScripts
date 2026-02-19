@@ -385,9 +385,11 @@ class SymbolicFEM:
             self.evaluate_conti_energy()
 
         latex_output = []
-        self.div_phi_constrained = [None for _ in range(len(self.div_phi))]
+        labels = ("dPhi_dC11", "dPhi_dC22", "dPhi_dC12")
+        self.div_phi_constrained = [None for _ in range(len(labels))]
         # Process each derivative
-        for i, (eq_label, expr) in enumerate(self.div_phi.items()):
+        for i, eq_label in enumerate(labels):
+            expr = self.div_phi[0, i]
             # Substitute assumptions and simplify
             self.div_phi_constrained[i] = sp.simplify(expr.subs(self.assumptions))
             # Substitute C12 with C12_clean (Takes too long time. Super long expression)

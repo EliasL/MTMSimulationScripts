@@ -15,7 +15,15 @@ from Management.configGenerator import SimulationConfig, ConfigGenerator
 from matplotlib import pyplot as plt
 
 
-def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
+def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
+    # Backward-compatible handling of old flags.
+    if "noPlots" in kwargs:
+        plots = not kwargs.pop("noPlots")
+    if "noVideos" in kwargs:
+        videoes = not kwargs.pop("noVideos")
+    if "noVidoes" in kwargs:
+        videoes = not kwargs.pop("noVidoes")
+
     X = "load"
     ylog = False
 
@@ -81,7 +89,7 @@ def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
         labels = None
 
     print(f"Plotting at {path}")
-    if not noPlots and csvPath is not None:
+    if plots and csvPath is not None:
         makePlot(
             csvPath,
             name=name + "_energy.pdf",
@@ -168,7 +176,7 @@ def plotAll(unkownFile="", noVideos=False, noPlots=False, **kwargs):
         plt.close("all")
 
     # makeItterationsPlot(path+macroData, name+"_itterations.pdf")
-    if not noVideos and pvdFile is not None:
+    if videoes and pvdFile is not None:
         makeAnimations(path, X=X, **kwargs)
 
 
@@ -187,6 +195,7 @@ def handle_args_and_plot():
     parser.add_argument(
         "-nV",
         "--noVideos",
+        "--noVidoes",
         action="store_true",
         help="Disable video creation (default: False)",
     )
@@ -231,6 +240,10 @@ def handle_args_and_plot():
         if isinstance(value, str):
             kwargs[key] = value.strip()
 
+    # Map legacy flags to new names
+    kwargs["plots"] = not kwargs.pop("noPlots")
+    kwargs["videoes"] = not kwargs.pop("noVideos")
+
     # Pass the arguments directly to plotAll
     plotAll(
         **kwargs,
@@ -245,14 +258,14 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         handle_args_and_plot()
     else:
-        p = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.138,5e-06,1.0PBCedgeFlipt8initialGuessNoise0.04LBFGSEpsx1e-05s0/macroData.csv"
+        p = "/Volumes/data/MTS2D_output/doubleDislocationTest,s30x30l0.0,0.001,4.0NPBCt3meshDiagonalminorepsR1e-06logDuringMinimization1s0/macroData.csv"
         plotAll(
             # "/Volumes/data/MTS2D_output/doubleDislocationTest,s100x100l0.0,0.001,4.0NPBCt3epsR1e-06s0/macroData.csv",
             p,
             makeGIF=False,
             transparent=False,
-            noPlots=False,
-            noVideos=True,
+            plots=True,
+            videoes=False,
             combineVideos=False,
             fps=60,
             seconds_per_unit_shear=2,

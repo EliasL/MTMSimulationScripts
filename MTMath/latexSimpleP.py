@@ -210,13 +210,13 @@ def computeP(F):
     # Replace C with F variables
 
     latex_output = []
-    div_phi_constrained = {}
+    labels = ("dPhi_dC11", "dPhi_dC22", "dPhi_dC12")
+    div_phi_constrained = [None for _ in range(len(labels))]
     # Process each derivative
-    for eq_label, expr in div_phi.items():
+    for i, eq_label in enumerate(labels):
+        expr = div_phi[0, i]
         # Substitute assumptions and simplify
-        div_phi_constrained[eq_label] = simplify(
-            expr.subs(subs_dict).subs(common_assumps)
-        )
+        div_phi_constrained[i] = simplify(expr.subs(subs_dict).subs(common_assumps))
 
         # Map derivative labels to LaTeX notation
         if eq_label == "dPhi_dC11":
@@ -229,17 +229,15 @@ def computeP(F):
             label_latex = eq_label
 
         # Format the expression
-        formatted_expr = format_latex_expression(
-            div_phi_constrained[eq_label], label_latex
-        )
+        formatted_expr = format_latex_expression(div_phi_constrained[i], label_latex)
         # Create multiline LaTeX
         latex_output.append(formatted_expr)
 
     # sigma = 1/2 (∂Φ/∂C_R + (∂Φ/∂C_R)^T)
     sigma = sp.Matrix(
         [
-            [div_phi_constrained["dPhi_dC11"], div_phi_constrained["dPhi_dC12"] / 2],
-            [div_phi_constrained["dPhi_dC12"] / 2, div_phi_constrained["dPhi_dC22"]],
+            [div_phi_constrained[0], div_phi_constrained[2] / 2],
+            [div_phi_constrained[2] / 2, div_phi_constrained[1]],
         ]
     )
 

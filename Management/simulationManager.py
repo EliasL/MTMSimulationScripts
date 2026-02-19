@@ -130,7 +130,7 @@ class SimulationManager:
             command.extend(["-c", self.conf_file])
 
         if newOutput:
-            # Output does not specify the folder, but only the storage drive path
+            # outputPath does not specify the folder, but only the storage drive path
             # The data folder inside the output folder is completely determined by
             # the name variable in the config file
             command.extend(["-o", self.outputPath])

@@ -1,7 +1,13 @@
 import numpy as np
 
 
-from .energyFunction import EnergyFunction, ContiEnergy, lagrange_reduction, SShear, F_from_C
+from .energyFunction import (
+    EnergyFunction,
+    ContiEnergy,
+    lagrange_reduction,
+    SShear,
+    F_from_C,
+)
 from matplotlib import pyplot as plt
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
@@ -120,19 +126,29 @@ def generate_poincare_disk(
 
 
 def generate_energy_grid(
-    E_func=EnergyFunction, beta=-0.25, K=4, energy_lim=[None, 0.37], **kwargs
+    E_func: type[EnergyFunction] = ContiEnergy,
+    beta=-0.25,
+    K=4,
+    energy_lim=[None, 0.37],
+    **kwargs,
 ):
     return generate_grid(
         E_func.energy_from_C_in_place, beta=beta, K=K, lim=energy_lim, **kwargs
     )
 
 
-def generate_cauchy_stress_grid(E_func=EnergyFunction, beta=-0.25, K=4, **kwargs):
+def generate_cauchy_stress_grid(
+    E_func: type[EnergyFunction] = ContiEnergy, beta=-0.25, K=4, **kwargs
+):
     return generate_grid(E_func.cauchy_from_C, beta=beta, K=K, **kwargs)
 
 
 def generate_piola_stress_grid(
-    E_func=EnergyFunction, beta=-0.25, K=4, second_PK=True, **kwargs
+    E_func: type[EnergyFunction] = ContiEnergy,
+    beta=-0.25,
+    K=4,
+    second_PK=True,
+    **kwargs,
 ):
     if second_PK:
         return generate_grid(E_func.S_from_C, beta=beta, K=K, **kwargs)
@@ -202,14 +218,15 @@ def generate_angle_region(resolution=500, zoom=1):
     return region
 
 
-def C2Plane(C,plane='LogEuclideanPlane', transformation=None, eps=1e-12):
+def C2Plane(C, plane="PoincareDisk", transformation=None, eps=1e-12):
     match plane:
-        case 'PoincareDisk':
+        case "PoincareDisk":
             return C2PoincareDisk(C, transformation=transformation, eps=eps)
-        case 'LogEuclideanPlane':
+        case "LogEuclideanPlane":
             return C2LogEuclideanPlane(C, transformation=transformation, eps=eps)
         case _:
-            raise ValueError(f"No such transformation: {plane}")    
+            raise ValueError(f"No such transformation: {plane}")
+
 
 def C2PoincareDisk(C, transformation=None, eps=1e-12):
     """
@@ -248,6 +265,7 @@ def C2PoincareDisk(C, transformation=None, eps=1e-12):
 
     return x, y
 
+
 def C2LogEuclideanPlane(C, transformation=None, eps=1e-12):
     """
     Map symmetric 2x2 C to a *flat* (Euclidean) plane via the matrix logarithm:
@@ -274,7 +292,7 @@ def C2LogEuclideanPlane(C, transformation=None, eps=1e-12):
     C_hat = C / scale[..., None, None]  # det(C_hat)=1 where valid
 
     # --- Flat-plane projection via log(C_hat) using symmetric eigendecomp ---
-    w, V = np.linalg.eigh(C_hat)           # w: (..., 2), V: (..., 2, 2)
+    w, V = np.linalg.eigh(C_hat)  # w: (..., 2), V: (..., 2, 2)
     # Guard: log requires positive eigenvalues (SPD); invalid entries become nan anyway
     logw = np.log(w)
     L = V @ (logw[..., None] * np.swapaxes(V, -2, -1))  # V diag(logw) V^T
@@ -673,7 +691,7 @@ def drawCScatter(
     zoom=1,
     transformation=None,
 ):
-    x, y = C2Plane(C, transformation)
+    x, y = C2Plane(C, plane="PoincareDisk", transformation=transformation)
     # Filter out invalid points
     mask = np.isfinite(x) & np.isfinite(y)
     x = x[mask]
@@ -1659,7 +1677,6 @@ def plotPoincareFTiling(
     # Make plot of fundamental domain
     if ax is None:
         fig, ax = prepPoincareFig(grid_size=grid_size)
-
 
     Fs, labels = generateShearTransformations(depth=depth, leftApplied=leftApplied)
 
