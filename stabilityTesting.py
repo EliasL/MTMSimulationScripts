@@ -36,8 +36,8 @@ def plot_moduli_simple_shear(
     mu, lam = ContiEnergy.moduli_at_F(F, loops=loops, eulerian=True)
 
     # Compute Eulerian acoustic tensor determinant for a single direction
-    # tangent_elasticity_tensor already returns Eulerian a when eulerian=True
-    a = ContiEnergy.tangent_elasticity_tensor(F, loops=loops, eulerian=True)
+    # elasticity_tensor already returns Eulerian a when eulerian=True
+    a = ContiEnergy.elasticity_tensor(F, loops=loops, eulerian=True)
     theta = np.deg2rad(theta_deg)
     n = np.tile(np.array([np.cos(theta), np.sin(theta)]), (gamma.size, 1))
     q = np.einsum("...j,...l,...ijkl->...ik", n, n, a)
@@ -85,7 +85,7 @@ def plot_moduli_simple_shear(
     mu0, lam0 = ContiEnergy.moduli_at_F(np.eye(2), loops=loops, eulerian=True)
     mu0 = float(mu0)
     lam0 = float(lam0)
-    A0 = ContiEnergy.tangent_elasticity_tensor(np.eye(2), loops=loops, eulerian=False)
+    A0 = ContiEnergy.elasticity_tensor(np.eye(2), loops=loops, eulerian=False)
     A0_voigt = ContiEnergy._voigt_from_A(A0)
     print("Voigt matrix at gamma=0:\n", A0_voigt)
 
@@ -269,7 +269,7 @@ def estimate_mu_from_stress_simple_shear(
     print(f"A_1010 = dP10/dF10: {A_1010}")
 
     # Compare to analytic A from tangent_elasticity_tensor (Lagrangian, mixed indices).
-    A_an = ContiEnergy.tangent_elasticity_tensor(F0, loops=loops, eulerian=False)
+    A_an = ContiEnergy.elasticity_tensor(F0, loops=loops, eulerian=False)
     A_fd = np.empty((2, 2, 2, 2), dtype=float)
     for k in range(2):
         for L in range(2):
@@ -303,7 +303,7 @@ def print_tangent_elasticity_matrix(F=None, loops=300, eulerian=True, A=None):
     if A is None:
         if F is None:
             F = np.eye(2)
-        A = ContiEnergy.tangent_elasticity_tensor(F, loops=loops, eulerian=eulerian)
+        A = ContiEnergy.elasticity_tensor(F, loops=loops, eulerian=eulerian)
     if A.shape != (2, 2, 2, 2):
         raise ValueError(f"Expected A shape (2,2,2,2), got {A.shape}")
     is_numeric = np.issubdtype(np.asarray(A).dtype, np.number)
@@ -383,7 +383,7 @@ def plot_det_q_vs_theta(
 def _det_q_vs_theta_for_gamma(gamma, thetas, loops=300):
     # Simple shear F = [[1, γ], [0, 1]]
     F = np.array([[1.0, gamma], [0.0, 1.0]], dtype=float)
-    a = ContiEnergy.tangent_elasticity_tensor(F, loops=loops, eulerian=True)
+    a = ContiEnergy.elasticity_tensor(F, loops=loops, eulerian=True)
 
     det_q = np.empty_like(thetas)
     for i, theta in enumerate(thetas):

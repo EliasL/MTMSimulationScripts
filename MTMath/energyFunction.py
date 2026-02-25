@@ -11,6 +11,7 @@ from sympy import (
     S,
     Mul,
 )
+import math
 import numpy as np
 from typing import TypeAlias
 from numpy.typing import ArrayLike
@@ -368,9 +369,7 @@ class EnergyFunction:
         return forces
 
     @classmethod
-    def tangent_elasticity_tensor(
-        cls, F, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True
-    ):
+    def elasticity_tensor(cls, F, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True):
         """
         A_{iJkL} = ∂^2Φ/( ∂F_{iJ}∂F_{kL})
         Formulation in terms of dPhi_dC22_dC12 ('C') from Roberta Baggio's thesis, page 74:
@@ -468,16 +467,41 @@ class EnergyFunction:
         """
         Acoustic tensor q_{ik} = n_j n_l a_{ijkl},
         where a is the tangent elasticity tensor computed from reduced C.
+
+        Expected shapes:
+        - F: (..., 2, 2)
+        - n: (2,) or (N, 2)
+
+        If n is (N, 2), the n-axis is placed after the F batch axes and
+        before the final (2,2) of q.
         """
         F = np.asarray(F, dtype=float)
         n = np.asarray(n, dtype=float)
         assert F.shape[-2:] == (2, 2), "F must have shape (..., 2, 2)"
-        assert n.shape[-1] == 2, "N must have shape (..., 2)"
+        assert n.shape[-1] == 2, "n must have shape (..., 2)"
+        if n.ndim not in (1, 2):
+            raise ValueError("n must have shape (2,) or (N, 2)")
 
-        a = cls.tangent_elasticity_tensor(
+        a = cls.elasticity_tensor(
             F, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
         )
-        q = np.einsum("...j,...l,...ijkl->...ik", n, n, a)
+        expected_q_shape = F.shape[:-2] + n.shape[:-1] + (2, 2)
+        # Estimate memory of q and print a warning if it requires more than 20GB
+        q_bytes = math.prod(expected_q_shape) * np.dtype(float).itemsize
+        if q_bytes > 20 * 1024**3:
+            print(
+                "Warning: acoustic_tensor q will be large "
+                f"({q_bytes / 1024**3:.2f} GB) with shape {expected_q_shape}."
+            )
+
+        if n.ndim == 1:
+            n_exp = n.reshape((1,) * (F.ndim - 2) + (2,))
+            q = np.einsum("...j,...l,...ijkl->...ik", n_exp, n_exp, a)
+        else:
+            # Broadcast n across the F batch axes (n-axis comes after F batch axes).
+            n_exp = n.reshape((1,) * (F.ndim - 2) + n.shape)
+            q = np.einsum("...nj,...nl,...ijkl->...nik", n_exp, n_exp, a)
+        assert q.shape == expected_q_shape
         return q
 
     @classmethod
@@ -493,7 +517,12 @@ class EnergyFunction:
         )
         # Enforce symmetry for numerical stability before eigendecomposition.
         q = 0.5 * (q + q.swapaxes(-1, -2))
-        return np.linalg.eigvalsh(q)
+        with np.errstate(invalid="ignore", over="ignore", under="ignore"):
+            eigs = np.linalg.eigvalsh(q)
+        nonfinite_q = ~np.isfinite(q).all(axis=(-1, -2))
+        eigs = np.where(nonfinite_q[..., None], np.nan, eigs)
+        eigs = np.where(np.isfinite(eigs), eigs, np.nan)
+        return eigs
 
     @classmethod
     def acoustic_determinant(
@@ -507,7 +536,14 @@ class EnergyFunction:
             F, n, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
         )
 
-        return np.linalg.det(q)
+        with np.errstate(invalid="ignore", over="ignore", under="ignore"):
+            det_q = np.linalg.det(q)
+
+        # If q is non-finite anywhere, det should be NaN.
+        nonfinite_q = ~np.isfinite(q).all(axis=(-1, -2))
+        det_q = np.where(nonfinite_q, np.nan, det_q)
+        det_q = np.where(np.isfinite(det_q), det_q, np.nan)
+        return det_q
 
     @classmethod
     def stability(cls, F, n, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True):
@@ -518,7 +554,51 @@ class EnergyFunction:
         det_q = cls.acoustic_determinant(
             F, n, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
         )
-        return det_q >= 0
+        if np.asarray(n).ndim == 2:
+            finite = np.isfinite(det_q)
+            boolField = np.all((det_q > 0) & finite, axis=-1)
+            assert np.all(F.shape[:-2] == boolField.shape)
+            return boolField
+        return (det_q > 0) & np.isfinite(det_q)
+
+    @classmethod
+    def min_det_angle(cls, F, n, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True):
+        """
+        Return (angle, det_min) where angle is the n-direction (rad) that
+        minimizes det(q), and det_min is the minimum determinant itself.
+        """
+        F = np.asarray(F, dtype=float)
+        n = np.asarray(n, dtype=float)
+        if n.shape[-1] != 2:
+            raise ValueError("n must have shape (..., 2)")
+        if n.ndim not in (1, 2):
+            raise ValueError("n must have shape (2,) or (N, 2)")
+
+        theta = np.arctan2(n[..., 1], n[..., 0])
+        det_q = cls.acoustic_determinant(
+            F, n, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
+        )
+
+        if n.ndim == 1:
+            min_det = det_q
+            angle = float(theta)
+            if np.asarray(min_det).ndim != 0:
+                raise ValueError("Expected scalar det(q) for n shape (2,)")
+            return angle, float(min_det)
+
+        # n is (N,2): det_q is (..., N)
+        all_nan = ~np.isfinite(det_q).any(axis=-1)
+        det_q_safe = np.where(np.isfinite(det_q), det_q, np.inf)
+        argmin = np.argmin(det_q_safe, axis=-1)
+        angle = np.take(theta, argmin)
+        min_det = np.min(det_q_safe, axis=-1)
+        if np.ndim(min_det) == 0:
+            return float(angle), (float(min_det) if np.isfinite(min_det) else np.nan)
+        angle = angle.astype(float, copy=False)
+        min_det = min_det.astype(float, copy=False)
+        angle = np.where(all_nan, np.nan, angle)
+        min_det = np.where(all_nan, np.nan, min_det)
+        return angle, min_det
 
     @staticmethod
     def _voigt_from_A(A):
@@ -563,7 +643,7 @@ class EnergyFunction:
         Note: matches linearized isotropic definition when evaluated at the
         reference configuration.
         """
-        A = cls.tangent_elasticity_tensor(
+        A = cls.elasticity_tensor(
             F, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
         )
         t_voigt = cls._voigt_from_A(A)

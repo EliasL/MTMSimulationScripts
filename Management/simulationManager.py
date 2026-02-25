@@ -102,8 +102,10 @@ class SimulationManager:
         index=0,
         name=None,
         dumpFile=None,
+        configPath=None,
         build=True,
         overwriteSettings=False,
+        autoConfig=False,
         overwriteData=False,
         silent=False,
         newOutput=False,
@@ -122,12 +124,32 @@ class SimulationManager:
 
         start_time = time.time()
         # We can choose to use the previous settings, or overwrite them using new ones
+        # Resolve config path if requested
+        resolved_config_path = None
+        if configPath is not None:
+            resolved_config_path = Path(configPath)
+            if not resolved_config_path.exists():
+                raise FileNotFoundError(
+                    f"No config file found at {resolved_config_path}"
+                )
+            resolved_config_path = str(resolved_config_path)
+
         # Initialize the base command
         command = [self.program_path, "-d", dumpFile]
 
         # Conditionally add flags and paths based on inputs
         if overwriteSettings:
-            command.extend(["-c", self.conf_file])
+            if resolved_config_path is None and autoConfig:
+                # Try to infer config path from the dump folder
+                try:
+                    dump_path = Path(dumpFile)
+                    inferred = dump_path.parent.parent / settings["CONFIGNAME"]
+                    if inferred.exists():
+                        resolved_config_path = str(inferred)
+                except Exception:
+                    resolved_config_path = None
+
+            command.extend(["-c", resolved_config_path or self.conf_file])
 
         if newOutput:
             # outputPath does not specify the folder, but only the storage drive path

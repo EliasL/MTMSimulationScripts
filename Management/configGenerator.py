@@ -24,7 +24,7 @@ class SimulationConfig:
         self.QDSD = 0.00  # Quenched dissorder standard deviation
         self.initialGuessNoise = 0.05
         self.meshDiagonal = "major"
-        self.energyFunction = "conti_square"  # "conti_square", "conti_triangular"
+        self.energyFunction = "contiSquare"  # "contiSquare", "contiTriangular"
         self.bulkModulus = 4  # BulkModulus
 
         # Loading parameters

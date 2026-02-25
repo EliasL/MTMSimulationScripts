@@ -2,6 +2,7 @@ from Management.jobs import (
     loadStepJob,
     stopConditionJob,
     smallJob,
+    umutJobs,
     allPlasticEventsJob,
     reversibilityJob,
     bigUmutJob,
@@ -55,9 +56,11 @@ from Plotting.remotePlotting import (
     plotTime,
     get_folders_from_servers,
     createVideoes,
+    download_folders,
 )
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
+from Management.configGenerator import SimulationConfig
 
 
 def plotPropperJob():
@@ -145,6 +148,28 @@ def showPoincareDisk():
     from MTMath.plotEnergy import plotPoincareDisk
 
     plotPoincareDisk(depth=8)
+
+
+def showInstabilityAngle():
+    from MTMath.plotEnergy import generate_stability_min_angle_grid, prepPoincareFig
+
+    res = 100
+    # fig, ax = prepPoincareFig(
+    #     grid_size=res, withCircle=False, withGrid=False, minimalTicks=True
+    # )
+    # theta = generate_stability_min_angle_grid(resolution=res)
+    # ax.imshow(theta, cmap="twilight")
+    # path = f"Plots/acoustic_tensor_min_det_angle_{res}.png"
+    # fig.savefig(path, bbox_inches="tight")
+    # print(f"Saved plot to {path}")
+    stability = True
+
+    fig, ax = prepPoincareFig(grid_size=res)
+    theta = generate_stability_min_angle_grid(resolution=res, boolStability=stability)
+    ax.imshow(theta, cmap="twilight")
+    path = f"Plots/acoustic_tensor_min_det_{'stability' if stability else 'angle'}_{res}.png"
+    fig.savefig(path, bbox_inches="tight")
+    print(f"Saved plot to {path}")
 
 
 def oneDPlot():
@@ -304,6 +329,18 @@ def plotReconnectionJob():
     plotEnergy(configs, labels=labels, legend=True)
 
 
+def investigateJobs():
+    configs, labels = basicJob(nrSeeds=10, nrThreads=8, size=400)
+    # Get config of L=400 with seed 0 and 7
+    confs = []
+    # for g in configs:
+    for c in configs:
+        assert isinstance(c, SimulationConfig)
+        if c.rows == 400 and c.seed in [0, 7]:
+            confs.append(c)
+    get_folders_from_servers(confs)
+
+
 def compareStop():
     # Compare using Epsx or EpsR to stop
     c1, l1 = bigUmutJob()
@@ -356,13 +393,30 @@ def plotLogAnalasys():
     # plotEnergy(configs, labels=labels)
     # # Find split
     fast_xmin = True
-    plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
-    plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
+    useCDF = True
+    plotLog2(
+        configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, useCDF=useCDF
+    )
+    plotLog2(
+        configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, useCDF=useCDF
+    )
 
     p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
     lab = [["umut"]]
-    plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
-    plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
+    plot_powerlaw(
+        p,
+        group_labels=lab,
+        postRegime=True,
+        fast_xmin=fast_xmin,
+        useCDF=useCDF,
+    )
+    plot_powerlaw(
+        p,
+        group_labels=lab,
+        postRegime=False,
+        fast_xmin=fast_xmin,
+        useCDF=useCDF,
+    )
 
     # p = [
     #     [
@@ -390,8 +444,20 @@ def plotLogAnalasys():
     ]
     lab = [["umut_noRe_1", "umut_noRe_2", "umut_noRe_3", "umut_noRe_4"]]
 
-    plot_powerlaw(p, group_labels=lab, postRegime=True, fast_xmin=fast_xmin)
-    plot_powerlaw(p, group_labels=lab, postRegime=False, fast_xmin=fast_xmin)
+    plot_powerlaw(
+        p,
+        group_labels=lab,
+        postRegime=True,
+        fast_xmin=fast_xmin,
+        useCDF=useCDF,
+    )
+    plot_powerlaw(
+        p,
+        group_labels=lab,
+        postRegime=False,
+        fast_xmin=fast_xmin,
+        useCDF=useCDF,
+    )
 
 
 if __name__ == "__main__":
@@ -412,6 +478,7 @@ if __name__ == "__main__":
     # debugPlotAll()
     # energyField()
     # showPoincareDisk()
+    # showInstabilityAngle()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
     # createVideoes(configs, all_images=True)
@@ -426,9 +493,9 @@ if __name__ == "__main__":
     # drawLeftRightExplanationFigs()
     # drawRotationExplanationFigs()
     # drawRotation2ExplanationFigs()
-    plotStressFromRealF()
+    # plotStressFromRealF(grid_size=400, nr_theta=400, stress_type="stability")
     # tryAllRotations()
-    # plotsLotsOfRealFStress("pk2", reduced=True)
+    # plotsLotsOfRealFStress("stability", reduced=True)
     # bug_hunting()
     # elasticReductionPlots()
     # showDecomposition()
@@ -436,6 +503,7 @@ if __name__ == "__main__":
     # compareStep()
     # plotReversibility()
     # plotLogAnalasys()
-    # grid_compare_xmin()
+    grid_compare_xmin()
     # testDist()
     # testSamplePiecewise()
+    # investigateJobs()

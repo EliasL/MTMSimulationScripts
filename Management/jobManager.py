@@ -40,14 +40,32 @@ def parse_duration(duration_str):
 
 
 def calculate_percentage_completed(runtime_str, estimated_remaining_str):
+    if runtime_str is None or estimated_remaining_str is None:
+        return None
     runtime = parse_duration(runtime_str)
     estimated_remaining = parse_duration(estimated_remaining_str)
 
     total_time = runtime + estimated_remaining
+    if total_time.total_seconds() <= 0:
+        return None
     percentage_completed = (runtime / total_time) * 100
-    if percentage_completed == 100:
-        print("hi")
     return percentage_completed
+
+
+def calculate_percentage_from_load(current_load, start_load, end_load):
+    try:
+        current = float(current_load)
+        start = float(start_load)
+        end = float(end_load)
+    except (TypeError, ValueError):
+        return None
+
+    denom = end - start
+    if denom == 0:
+        return None
+
+    percentage = (current - start) / denom * 100
+    return max(0.0, min(100.0, percentage))
 
 
 # Shared variables
@@ -143,23 +161,33 @@ class Process:
                 headers = file.readline().strip().split(",")
                 header_indices = {header: idx for idx, header in enumerate(headers)}
 
-                # Now we want to find the last chunk of the file
+                # Read from the end until we find a complete data line
                 file_size = file.stat().st_size
-                chunk_size = 1024  # Read last 1024 bytes, adjust if necessary
-                start_pos = max(file_size - chunk_size, 0)
-                file.seek(start_pos)
-                chunk = file.read(file_size - start_pos)
-                lines = chunk.decode("utf-8").splitlines()
-                if not lines or len(lines) <= 1:
+                chunk_size = 8192
+                data = b""
+                pos = file_size
+                while pos > 0 and b"\n" not in data:
+                    read_size = min(chunk_size, pos)
+                    pos -= read_size
+                    file.seek(pos)
+                    data = file.read(read_size) + data
+
+                lines = data.decode("utf-8").splitlines()
+                if not lines:
                     self.timeEstimation = "N/A"
                     self.progress = 0
                     return
 
                 # Find the last complete line of data
-                if len(lines[-1].split(",")) == len(headers):
-                    last_line = lines[-1]
-                else:
-                    last_line = lines[-2]
+                last_line = None
+                for line in reversed(lines):
+                    if len(line.split(",")) == len(headers):
+                        last_line = line
+                        break
+                if last_line is None:
+                    self.timeEstimation = "N/A"
+                    self.progress = 0
+                    return
 
                 last_line_values = last_line.split(",")
 
@@ -168,8 +196,16 @@ class Process:
                     for header in header_indices:
                         header_indices[header] -= 1
 
+                load = None
                 try:
-                    # load = last_line_values[header_indices["load"]]
+                    load = last_line_values[header_indices["load"]]
+                except KeyError:
+                    try:
+                        load = last_line_values[header_indices["Load"]]
+                    except KeyError:
+                        load = None
+
+                try:
                     runTime = last_line_values[header_indices["run_time"]]
                     timeRemaining = last_line_values[
                         header_indices["est_time_remaining"]
@@ -191,7 +227,16 @@ class Process:
 
                 # Log the results
                 self.timeEstimation = f"RT: {runTime}, ETR: {timeRemaining}"
-                self.progress = calculate_percentage_completed(runTime, timeRemaining)
+
+                progress = None
+                if load is not None and self.configObj is not None:
+                    progress = calculate_percentage_from_load(
+                        load, self.configObj.startLoad, self.configObj.maxLoad
+                    )
+                if progress is None:
+                    progress = calculate_percentage_completed(runTime, timeRemaining)
+
+                self.progress = progress if progress is not None else "N/A"
 
 
 class JobManager:
@@ -371,13 +416,15 @@ class JobManager:
                     else:
                         estimated_time_remaining = f"Error. Time_parts:{time_parts}"
                 if isinstance(process.progress, str):
-                    process.progress = -1
+                    progress_display = process.progress
+                else:
+                    progress_display = f"{process.progress:.1f}%"
 
                 row = [
                     process.p_id,
                     process.name,
                     server_short_name,
-                    f"{process.progress:.1f}%",
+                    progress_display,
                     run_time,
                     estimated_time_remaining,
                 ]

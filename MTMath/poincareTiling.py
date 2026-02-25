@@ -1,5 +1,7 @@
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
+from matplotlib import colormaps
+from matplotlib.colors import ListedColormap
 from .plotEnergy import (
     plotPoincarePointMapping,
     plotPoincareCTiling,
@@ -12,6 +14,7 @@ from .plotEnergy import (
     prepPoincareFig,
     generateShearTransformations,
     drawCircles,
+    C2Plane,
 )
 import numpy as np
 from MTMath.energyFunction import (
@@ -643,11 +646,15 @@ def plotStressFromRealF(
     s_component=(0, 0),
     stress_type="cauchy",
     reduced=False,
+    stability_nr_theta=100,
+    stability_theta_max=np.pi,
+    stability_agg="max",
+    stability_cmap=None,
 ):
     theta = np.linspace(0, 1 * np.pi, nr_theta + 1)[:-1]
     nr_theta = len(theta)
     gamma = np.linspace(0, gamma_lim, nr_gamma)
-    eFunc = PieceWiseQuadratic  # ContiEnergy
+    eFunc = ContiEnergy  # PieceWiseQuadratic
     F = SShear(h=gamma, theta=theta, s_conponent=s_component)
     if stress_type == "cauchy":
         stress = eFunc.cauchy_from_F(F)
@@ -657,10 +664,15 @@ def plotStressFromRealF(
         # stress = getQuadrant(F, eFunc=eFunc)
         # stress = getQuadrant2(F, eFunc=eFunc)
         stress = getQuadrantSylvain(F.swapaxes(-1, -2) @ F, eFunc=eFunc)
+    elif stress_type == "stability":
+        # stability testing angles (return the most unstable direction)
+        t = np.linspace(0, stability_theta_max, stability_nr_theta, endpoint=False)
+        n = np.stack([np.cos(t), np.sin(t)], axis=-1)
+        stress, det_min = eFunc.min_det_angle(F=F, n=n)
     else:
         raise RuntimeError(f"Unknown stress type: {stress_type}")
 
-    if reduced:
+    if reduced and stress_type in ("cauchy", "pk2"):
         _, M = lagrange_reduction_F(F)
         Minv = np.linalg.inv(M)
         stress = Minv @ stress @ Minv.swapaxes(-1, -2)
@@ -684,7 +696,10 @@ def plotStressFromRealF(
         from matplotlib.colors import ListedColormap
 
         nr_Colors = len(range(limits[0], limits[1] + 1))
-        cmap = ListedColormap(plt.cm.Set1.colors[1 : nr_Colors + 1])
+
+        base = colormaps["Set1"]
+        colors = base(np.linspace(0, 1, nr_Colors + 1))[1:]
+        cmap = ListedColormap(colors)
         # To align the integer ticks with the center of the color bars,
         # we add 0.5 to the limits
         kwargs = {
@@ -692,7 +707,19 @@ def plotStressFromRealF(
             "agg": "max",
             "cbarLims": [limits[0] - 0.5, limits[1] + 0.5],
         }
+    elif stress_type == "stability":
+        # Angle map for the minimum-determinant direction.
+        val_q = zip([stress.astype(float)], ["stability_angle"])
+        limits = (0, stability_theta_max)
+        if stability_cmap is None:
+            stability_cmap = "twilight"
+        kwargs = {
+            "cmap": stability_cmap,
+            "agg": stability_agg,
+            "cbarLims": list(limits),
+        }
     else:
+        assert isinstance(stress, np.ndarray)
         N1 = stress[..., 0, 0] - stress[..., 1, 1]
         shear_stress = stress[..., 0, 1]
         trace = stress[..., 0, 0] + stress[..., 1, 1]
@@ -708,10 +735,70 @@ def plotStressFromRealF(
         # We don't really care about det and trace anymore
         # val_q = val_q[:2]
 
+    def _values_to_pixels(values, *, grid_size, zoom=1, agg="mean"):
+        # Replicate drawC pixelization for contours.
+        C = F.swapaxes(-1, -2) @ F
+        x, y = C2Plane(C)
+        valid = np.isfinite(x) & np.isfinite(y)
+        if not np.any(valid):
+            return np.full((grid_size, grid_size), np.nan, dtype=float)
+
+        x_plot = x * zoom * grid_size / 2 + grid_size / 2
+        y_plot = y * zoom * grid_size / 2 + grid_size / 2
+
+        xv = x_plot[valid]
+        yv = y_plot[valid]
+        ix = np.rint(xv).astype(int)
+        iy = np.rint(yv).astype(int)
+        mask = (ix >= 0) & (ix < grid_size) & (iy >= 0) & (iy < grid_size)
+        ix = ix[mask]
+        iy = iy[mask]
+
+        vals = np.asarray(values, dtype=float)[valid]
+        vals = vals[mask]
+        finite_vals = np.isfinite(vals)
+        ix = ix[finite_vals]
+        iy = iy[finite_vals]
+        vals = vals[finite_vals]
+
+        pixels = np.full((grid_size, grid_size), np.nan, dtype=float)
+        if agg == "max":
+            tmp = np.full_like(pixels, -np.inf)
+            np.maximum.at(tmp, (iy, ix), vals)
+            tmp[tmp == -np.inf] = np.nan
+            pixels = tmp
+        elif agg == "min":
+            tmp = np.full_like(pixels, np.inf)
+            np.minimum.at(tmp, (iy, ix), vals)
+            tmp[tmp == np.inf] = np.nan
+            pixels = tmp
+        elif agg == "mean":
+            sum_ = np.zeros_like(pixels)
+            cnt_ = np.zeros_like(pixels)
+            np.add.at(sum_, (iy, ix), vals)
+            np.add.at(cnt_, (iy, ix), 1.0)
+            np.divide(sum_, cnt_, out=pixels, where=cnt_ > 0)
+        else:
+            raise ValueError(f"Unknown agg mode: {agg}")
+        return pixels
+
     for val, quantity in val_q:
         val = np.clip(val, *limits)
         ax = drawPoincareGrid(grid_size=grid_size)
         drawF(ax, F, shade=True, shade_values=val, grid_size=grid_size, **kwargs)
+        if stress_type == "stability":
+            # Overlay det(q)=0 contour for the minimum determinant field.
+            det_pixels = _values_to_pixels(
+                det_min, grid_size=grid_size, agg="min"
+            )
+            ax.contour(
+                det_pixels,
+                levels=[0.0],
+                colors="k",
+                linewidths=0.8,
+                origin="lower",
+                extent=(0, grid_size, 0, grid_size),
+            )
         path = f"Plots/RealF{stress_type}Stress/{quantity}/"
         reducedTag = "reduced" if reduced else ""
         name = f"{reducedTag}{stress_type}Stress_from_realF_{quantity}_t{nr_theta}_g{nr_gamma}_{gamma_lim}_q{grid_size}_S{'_'.join(map(str, s_component))}.pdf"

@@ -15,7 +15,8 @@ def create_collection(
     # Regular expression to match file numbers in the filename
     regex_pattern = r".*\.([0-9]+)\.vtu"
 
-    min_regex_pattern = r".*_minStep=[0-9]+.([0-9]+)_.*"
+    min_regex_pattern = r"^.*_minStep=[0-9]+\.([0-9]+)(?:_[^.]+)?\.[0-9]+\.vtu$"
+
 
     # Iterate over files in the directory
     for entry in Path(folder_path).iterdir():

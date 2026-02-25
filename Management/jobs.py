@@ -178,8 +178,8 @@ def basicJob(
         nrThreads=nrThreads,
         minimizer="LBFGS",
         loadIncrement=1e-5,
-        # epsR=1e-14,
-        LBFGSEpsx=1e-6,
+        epsR=1e-6,
+        #LBFGSEpsx=1e-6,
         # LBFGSEpsg=1e-8,
         scenario="simpleShear",
         reconnectionMethod=reconnection,
@@ -712,7 +712,7 @@ def loadStepJob(group_by_seeds=False):
     )
 
 
-def umutJobs():
+def umutJobs(loadIncrement=1e-5):
     """
     Generates a job for size scaling tests.
     """
@@ -731,7 +731,7 @@ def umutJobs():
             cols=size,
             startLoad=0.138,
             maxLoad=1.0,
-            loadIncrement=2e-5,
+            loadIncrement=loadIncrement,
             nrThreads=threads,
             minimizer="LBFGS",
             LBFGSEpsx=1e-6,
@@ -774,3 +774,33 @@ def size_scaling_job():
         all_labels.append(list(map(lambda x: f"L={size}, " + x, labels)))
 
     return all_configs, all_labels
+
+
+def triangular_edge_flip_job(
+    size=200,
+    group_by_seeds=False,
+    maxLoad=1.0,
+    reconnection="edgeFlip",
+):
+    configs, labels = ConfigGenerator.generate(
+        seed=range(1),
+        group_by_seeds=group_by_seeds,
+        rows=size,
+        cols=size,
+        startLoad=0.29,
+        maxLoad=maxLoad,
+        nrThreads=4,
+        minimizer="LBFGS",
+        loadIncrement=1e-5,
+        # epsR=1e-14,
+        LBFGSEpsx=1e-6,
+        # LBFGSEpsg=1e-8,
+        scenario="simpleShear",
+        reconnectionMethod=reconnection,
+        energyFunction="contiTriangular",
+        # remesh=1,
+        # temp
+        # energyDropThreshold=1e-10,
+        #logDuringMinimization=1,
+    )
+    return configs, labels

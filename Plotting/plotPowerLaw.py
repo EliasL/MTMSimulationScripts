@@ -305,6 +305,54 @@ def plot_data_pdf(
     ax.legend()
 
 
+def plot_data_cdf(
+    ax,
+    data,
+    label=None,
+    color=None,
+    alpha=1,
+    use_ccdf=True,
+):
+    data = np.asarray(data)
+    data = data[np.isfinite(data)]
+    data = data[data > 0]
+    if data.size == 0:
+        return
+
+    sorted_data = np.sort(data)
+    cdf = np.arange(1, len(sorted_data) + 1) / len(sorted_data)
+    if use_ccdf:
+        y_vals = 1.0 - cdf
+        ylabel = r"$P(X > x)$"
+    else:
+        y_vals = cdf
+        ylabel = r"$P(X \leq x)$"
+
+    if label is None:
+        if data.size < 1e4:
+            nrDrops = data.size
+        else:
+            nrDrops = f"{data.size:.1e}"
+        label = f"{'CCDF' if use_ccdf else 'CDF'} of {nrDrops} energy drops"
+
+    plot_kwargs = {
+        "label": label,
+        "alpha": alpha,
+        "where": "post",
+    }
+    if color is not None:
+        plot_kwargs["color"] = color
+
+    ax.step(sorted_data, y_vals, **plot_kwargs)
+
+    ax.set_xscale("log")
+    if use_ccdf:
+        ax.set_yscale("log")
+    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
+    ax.set_ylabel(ylabel)
+    ax.legend()
+
+
 def plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf, color="red"):
     diffs = np.abs(ecdf - model_ccdf)
     max_index = np.argmax(diffs)
@@ -385,6 +433,59 @@ def plot_fit_pdf(
     ax.set_yscale("log")
     ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
     ax.set_ylabel(rf"$p(-\Delta {maybe_avg('E')})$")
+    ax.set_title(title)
+    ax.legend()
+    return ax
+
+
+def plot_fit_cdf(
+    ax,
+    fit: Fit,
+    title=None,
+    color=None,
+    alpha=1,
+    linestyle="-",
+    pre_label=None,
+    use_ccdf=True,
+):
+    dist = dist_from_fit(fit)
+
+    data = np.asarray(fit.data_original).copy()
+    data = data[np.isfinite(data)]
+    data = data[data > 0]
+    if data.size == 0:
+        return ax
+    data.sort()
+
+    tail_frac = float((data >= fit.xmin).mean())
+    bins_for_model = np.unique(data)
+    bins_for_model = bins_for_model[bins_for_model > 0]
+    bins_for_model = bins_for_model[bins_for_model >= fit.xmin]
+    if bins_for_model.size == 0:
+        return ax
+
+    model_ccdf = dist.ccdf(bins_for_model)
+    if use_ccdf:
+        y_vals = model_ccdf * tail_frac
+        ylabel = r"$P(X > x)$"
+    else:
+        y_vals = 1.0 - model_ccdf * tail_frac
+        ylabel = r"$P(X \leq x)$"
+
+    ax.plot(
+        bins_for_model,
+        y_vals,
+        label=(pre_label or "") + pretty_text(dist.name),
+        color=color,
+        alpha=alpha,
+        linestyle=linestyle,
+    )
+
+    ax.set_xscale("log")
+    if use_ccdf:
+        ax.set_yscale("log")
+    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
+    ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.legend()
     return ax
@@ -539,6 +640,8 @@ def plot_data_and_fit(
     data_info=None,
     color=None,
     addFit=True,
+    useCDF=False,
+    useCCDF=True,
     save=True,
     extraPath="",
     show=False,
@@ -549,11 +652,17 @@ def plot_data_and_fit(
     else:
         fig = ax.figure
 
-    plot_data_pdf(ax, fit.data_original)
+    if useCDF:
+        plot_data_cdf(ax, fit.data_original, use_ccdf=useCCDF)
+    else:
+        plot_data_pdf(ax, fit.data_original)
 
     # plot the fit
     if addFit:
-        plot_fit_pdf(ax, fit, color=color)
+        if useCDF:
+            plot_fit_cdf(ax, fit, color=color, use_ccdf=useCCDF)
+        else:
+            plot_fit_pdf(ax, fit, color=color)
 
         # Add shaded fit region with formula in label
         if fit.xmax is None:
@@ -592,9 +701,16 @@ def plot_data_and_fit(
         )
         if not addFit:
             safe_title += "_noFit"
+        if useCDF:
+            safe_title += "_ccdf" if useCCDF else "_cdf"
+        else:
+            safe_title += "_pdf"
         filename = f"{PLOTPATH}{extraPath}{safe_title}.pdf"
         fig.savefig(filename, format="pdf", bbox_inches="tight")
         print(f"Saved figure to {filename}")
+        setattr(fig, "path", filename)
+    else:
+        setattr(fig, "path", None)
 
     if close:
         plt.close(fig)
@@ -652,6 +768,7 @@ def plot_ks_distance(
     ax=None,
     save=True,
     close=True,
+    extraPath="",
 ):
     """
     Plot the empirical CCDF vs the fitted CCDF and visually show the KS distance (D).
@@ -693,13 +810,17 @@ def plot_ks_distance(
     fig.tight_layout()
     # Save the plot
     safe_title = safePath(title)
-    filename = f"{PLOTPATH}{safe_title}.pdf"
+    filename = f"{PLOTPATH}{extraPath}{safe_title}.pdf"
     if save:
         fig.savefig(filename, dpi=300)
         print(f"Saved fig to {filename}")
+        setattr(fig, "path", filename)
+    else:
+        setattr(fig, "path", None)
     # plt.show()
     if close:
         plt.close(fig)
+
     return ax
 
 
@@ -1643,6 +1764,7 @@ def plot_powerlaw(
     fast_xmin=True,
     xmin_accuracy=1.0,
     csvPaths=None,
+    useCDF=False,
 ):
     if group_paths is None and csvPaths is not None:
         group_paths = csvPaths
@@ -1803,6 +1925,7 @@ def plot_powerlaw(
             addFit=addFit,
             save=save,
             show=show,
+            useCDF=useCDF,
         )
         title = make_title(data_info=data_info, fit=KS_fit)
         plot_data_and_fit(
@@ -1812,6 +1935,7 @@ def plot_powerlaw(
             addFit=addFit,
             save=save,
             show=show,
+            useCDF=useCDF,
         )
 
         rmEnd_fit = Fit(all_drops, xmin=rmEnd_xmin, xmin_distribution=distType.name)
@@ -1826,6 +1950,7 @@ def plot_powerlaw(
             addFit=addFit,
             save=save,
             show=show,
+            useCDF=useCDF,
         )
 
 

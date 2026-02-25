@@ -8,15 +8,23 @@ def run_locally(
     config=SimulationConfig(),
     resume=True,
     dump=None,
+    configPath=None,
     plot=False,
     build=True,
     newOutput=False,
+    overwriteSettings=True,
+    autoConfig=False,
     **kwargs,
 ):
     manager = SimulationManager(config, overwriteData=not resume, **kwargs)
     if dump:
         manager.resumeSimulation(
-            dumpFile=dump, overwriteSettings=True, build=build, newOutput=newOutput
+            dumpFile=dump,
+            configPath=configPath,
+            overwriteSettings=overwriteSettings,
+            autoConfig=autoConfig,
+            build=build,
+            newOutput=newOutput,
         )
     else:
         manager.runSimulation(resumeIfPossible=resume, build=build)

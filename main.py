@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from Plotting.remotePlotting import plotLog, plotLog2, plotEnergy
 from Management import parameterExploring as pe
 from Management.configGenerator import SimulationConfig
@@ -7,6 +9,7 @@ from runSimulations import run_many_locally, run_locally
 from Management.connectToCluster import Servers
 from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
 from Management.dataManager import DataManager
+from Management.simulationManager import findOutputPath
 from Management.jobs import (
     loadStepJob,
     cyclicLoading,
@@ -24,6 +27,7 @@ from Management.jobs import (
     basicJob,
     debugJob,
     allPlasticEventsJob,
+    triangular_edge_flip_job,
     propperJob,
     propperJob1,
     propperJob2,
@@ -126,6 +130,12 @@ def benchmark():
     # New functions (slight algebraic alteration) (16.02.26) (with another simulation running)
     # 1% RT: 2m 5s   ETR: 2h 48m 18s Load: 0.160390
 
+    # Elastic reduction (20.02.26) (with another simulation running)
+    # 0% RT: 2m 2s   ETR: 4h 32m 57s Load: 0.156210
+    # 0% RT: 20s     ETR: 2h 36m 39s Load: 0.151810
+    # 1% RT: 2m 3s   ETR: 3h 22m 42s Load: 0.158500
+    # Too much variability.
+
 
 def reconnectingBenchmark():
     configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection="edgeFlip")
@@ -210,6 +220,32 @@ def resumeWithLogDuringMin(configPath, dump, newOutput=True):
     if newOutput:
         conf.name = conf.generate_name(False)
     run_locally(conf, dump=dump, newOutput=newOutput)
+
+
+def resumeSim(dumpPath, configPath=None, newOutput=False, **kwargs):
+    dump_path = Path(dumpPath)
+    output_path = None
+    new_output_flag = False
+    if isinstance(newOutput, (str, Path)):
+        output_path = str(newOutput)
+        new_output_flag = True
+    elif newOutput:
+        output_path = findOutputPath()
+        new_output_flag = True
+
+    if output_path is not None:
+        kwargs = dict(kwargs)
+        kwargs["outputPath"] = output_path
+
+    conf = SimulationConfig()
+    run_locally(
+        conf,
+        dump=str(dump_path),
+        configPath=configPath,
+        autoConfig=True,
+        newOutput=new_output_flag,
+        **kwargs,
+    )
 
 
 def sylvainSmallDrop():
@@ -351,9 +387,11 @@ def threadTest():
 
 def runOnServer():
     configs, labels = stopConditionJob()
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50)
+
     stopJobs(configs)
 
-    server = Servers.lagrange
+    server = Servers.poincare
     uploadProject(server, verbose=True)  # , setup=True)
     build_on_server(server)
     # Choose script to run
@@ -385,7 +423,8 @@ def runOnLocalMachine():
     # configs, labels = bigUmutJob()
     # configs, labels = bigUmutJobWithEliasStop()
     # configs, labels = loadStepJob()
-    configs, labels = reversibilityJob()
+    # configs, labels = reversibilityJob()
+    configs, labels = triangular_edge_flip_job(size=50)
 
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
@@ -416,7 +455,7 @@ def runOnLocalMachine():
 
 def startJobs():
     # print("Building on all servers... ")
-    # build_on_all_servers(onlyPrefered=ONLYPREFERED)
+    build_on_all_servers(onlyPrefered=ONLYPREFERED)
 
     # Make largeProperJob with notFIRE=True to exclude FIRE
     def notFIRE_largePropperJob():
@@ -486,7 +525,7 @@ if __name__ == "__main__":
     # 150x150 16 threads -> 16 days
     # 150x150 8  threads -> 22 days
 
-    # runOnServer()
+    runOnServer()
     # parameterExploring()
     # runReconnectionJob()
     # runOnLocalMachine()
@@ -502,5 +541,9 @@ if __name__ == "__main__":
     # plotBigJob()
     # stopConditionJob()
     # threadTest()
+    # benchmark()
     # reconnectingBenchmark()
-    benchmark()
+    # resumeSim(
+    #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
+    #     newOutput=True,
+    # )

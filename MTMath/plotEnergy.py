@@ -137,6 +137,27 @@ def generate_energy_grid(
     )
 
 
+def generate_stability_min_angle_grid(
+    E_func: type[EnergyFunction] = ContiEnergy,
+    beta=-0.25,
+    K=4,
+    energy_lim=[0, 1],
+    boolStability=False,
+    **kwargs,
+):
+    def minAngle(C, **kwargs):
+        F = F_from_C(C)
+        t = np.linspace(0, np.pi, 100, endpoint=False)
+        n = np.stack([np.cos(t), np.sin(t)], axis=-1)
+        angle, det = E_func.min_det_angle(F, n, **kwargs)
+        if boolStability:
+            return det
+        else:
+            return angle
+
+    return generate_grid(minAngle, beta=beta, K=K, lim=energy_lim, **kwargs)
+
+
 def generate_cauchy_stress_grid(
     E_func: type[EnergyFunction] = ContiEnergy, beta=-0.25, K=4, **kwargs
 ):
@@ -1477,24 +1498,28 @@ def plotEnergyField(
         )
 
 
-def prepPoincareFig(grid_size=200, zoom=1, ax=None, withGrid=True):
+def prepPoincareFig(
+    grid_size=200, zoom=1, ax=None, withCircle=True, withGrid=True, minimalTicks=False
+):
     # Zoom does not always work properly. Be careful
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 6))
     else:
         fig = ax.get_figure()
-    # Add a thin black circle
-    circleSize = (grid_size / 2) * zoom
-    circle_center_x = grid_size / 2
-    circle_center_y = grid_size / 2
-    circle = Circle(
-        (circle_center_x, circle_center_y),
-        circleSize,
-        color="black",
-        fill=False,
-        linewidth=1,
-    )
-    ax.add_patch(circle)
+
+    if withCircle:
+        # Add a thin black circle
+        circleSize = (grid_size / 2) * zoom
+        circle_center_x = grid_size / 2 - 0.5
+        circle_center_y = grid_size / 2 - 0.5
+        circle = Circle(
+            (circle_center_x, circle_center_y),
+            circleSize,
+            color="black",
+            fill=False,
+            linewidth=1,
+        )
+        ax.add_patch(circle)
 
     if withGrid:
         drawPoincareGrid(
@@ -1503,17 +1528,24 @@ def prepPoincareFig(grid_size=200, zoom=1, ax=None, withGrid=True):
             zoom=zoom,
             c="gray",
         )
+    if minimalTicks:
+        ax.set_xticklabels([])
+        ax.set_yticklabels([])
 
-    ax.set_xticks(
-        np.linspace(0, grid_size, 5),
-        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-    )
-    ax.set_yticks(
-        np.linspace(0, grid_size, 5),
-        np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-    )
-    ax.set_xlabel(r"$x_p$")
-    ax.set_ylabel(r"$y_p$")
+        # Hide tick marks without disabling the axis
+        ax.tick_params(axis="both", which="both", length=0)
+        ax.set_frame_on(False)
+    else:
+        ax.set_xticks(
+            np.linspace(0, grid_size, 5),
+            np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
+        )
+        ax.set_yticks(
+            np.linspace(0, grid_size, 5),
+            np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
+        )
+        ax.set_xlabel(r"$x_p$")
+        ax.set_ylabel(r"$y_p$")
     ax.set_aspect("equal")
     return fig, ax
 

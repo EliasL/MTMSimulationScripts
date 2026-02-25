@@ -8,7 +8,9 @@ from Plotting.plotPowerLaw import (
     plot_ks_distance,
     dist_from_fit,
 )
+from comparePlots import combine_pdfs_grid
 from .evaluatePowerlawFit import Truncated_Power_Law
+import os
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import colors as mcolors
@@ -279,18 +281,202 @@ def _sample_cutoff_powerlaw_fast(n, alpha, lam, xmin, rng):
     return dist.generate_random(size=n, rng=rng)
 
 
+def _symmetric_limits(arrays, default=1.0):
+    values = []
+    for arr in arrays:
+        if arr is None:
+            continue
+        finite_vals = np.asarray(arr)[np.isfinite(arr)]
+        if finite_vals.size:
+            values.append(finite_vals)
+    if not values:
+        return -default, default
+    max_abs = np.nanmax(np.abs(np.concatenate(values)))
+    if not np.isfinite(max_abs) or max_abs == 0:
+        max_abs = default
+    return -max_abs, max_abs
+
+
+def _format_grid_axes(axes, xmins, alphas):
+    x_tick_labels = [f"{x:.1e}" for x in xmins]
+    y_tick_labels = [f"{a:.2f}" for a in alphas]
+    for row in range(3):
+        for col in range(2):
+            ax = axes[row, col]
+            ax.set_xticks(range(len(xmins)))
+            ax.set_xticklabels(x_tick_labels, rotation=45, ha="right")
+            ax.set_yticks(range(len(alphas)))
+            ax.set_yticklabels(y_tick_labels)
+            ax.set_xlabel("true xmin" if row == 2 else "")
+            ax.set_ylabel("true alpha" if col == 0 else "")
+
+
+def _plot_grid_compare(
+    dx1_log,
+    dx2_log,
+    da1_grid,
+    da2_grid,
+    dl1_log,
+    dl2_log,
+    xmins,
+    alphas,
+    filename,
+    dx_limits,
+    da_limits,
+    dl_limits,
+    cmap="coolwarm",
+):
+    fig, axes = plt.subplots(3, 2, figsize=(12, 10), constrained_layout=True)
+
+    im1 = axes[0, 0].imshow(
+        dx1_log,
+        aspect="auto",
+        origin="lower",
+        vmin=dx_limits[0],
+        vmax=dx_limits[1],
+        cmap=cmap,
+    )
+    axes[0, 0].set_title(r"$\log_{10}(x_{\min}/x_{\min,true})$ (min KS)")
+    fig.colorbar(im1, ax=axes[0, 0], fraction=0.046, pad=0.04)
+
+    im2 = axes[0, 1].imshow(
+        dx2_log,
+        aspect="auto",
+        origin="lower",
+        vmin=dx_limits[0],
+        vmax=dx_limits[1],
+        cmap=cmap,
+    )
+    axes[0, 1].set_title(r"$\log_{10}(x_{\min}/x_{\min,true})$ (max $p$)")
+    fig.colorbar(im2, ax=axes[0, 1], fraction=0.046, pad=0.04)
+
+    im3 = axes[1, 0].imshow(
+        da1_grid,
+        aspect="auto",
+        origin="lower",
+        vmin=da_limits[0],
+        vmax=da_limits[1],
+        cmap=cmap,
+    )
+    axes[1, 0].set_title("alpha (min KS) - true alpha")
+    fig.colorbar(im3, ax=axes[1, 0], fraction=0.046, pad=0.04)
+
+    im4 = axes[1, 1].imshow(
+        da2_grid,
+        aspect="auto",
+        origin="lower",
+        vmin=da_limits[0],
+        vmax=da_limits[1],
+        cmap=cmap,
+    )
+    axes[1, 1].set_title("alpha (max $p$) - true alpha")
+    fig.colorbar(im4, ax=axes[1, 1], fraction=0.046, pad=0.04)
+
+    im5 = axes[2, 0].imshow(
+        dl1_log,
+        aspect="auto",
+        origin="lower",
+        vmin=dl_limits[0],
+        vmax=dl_limits[1],
+        cmap=cmap,
+    )
+    axes[2, 0].set_title(r"$\log_{10}(\lambda/\lambda_{true})$ (min KS)")
+    fig.colorbar(im5, ax=axes[2, 0], fraction=0.046, pad=0.04)
+
+    im6 = axes[2, 1].imshow(
+        dl2_log,
+        aspect="auto",
+        origin="lower",
+        vmin=dl_limits[0],
+        vmax=dl_limits[1],
+        cmap=cmap,
+    )
+    axes[2, 1].set_title(r"$\log_{10}(\lambda/\lambda_{true})$ (max $p$)")
+    fig.colorbar(im6, ax=axes[2, 1], fraction=0.046, pad=0.04)
+
+    _format_grid_axes(axes, xmins, alphas)
+    fig.suptitle("Grid comparison of xmin estimates")
+    fig.savefig(filename, format="pdf", bbox_inches="tight")
+    print(f"Saved figure to {filename}")
+    plt.close(fig)
+
+
+def _plot_alpha_zscore(z2, xmins, alphas, filename, vmin, vmax, cmap="coolwarm"):
+    fig2, ax = plt.subplots(1, 1, figsize=(6, 5), constrained_layout=True)
+    imz = ax.imshow(z2, aspect="auto", origin="lower", vmin=vmin, vmax=vmax, cmap=cmap)
+    ax.set_title(
+        r"Alpha z-score (max $p$): $\vert \Delta\alpha\vert / \alpha_{\mathrm{std}}$"
+    )
+    ax.set_xticks(range(len(xmins)))
+    ax.set_xticklabels([f"{x:.1e}" for x in xmins], rotation=45, ha="right")
+    ax.set_yticks(range(len(alphas)))
+    ax.set_yticklabels([f"{a:.2f}" for a in alphas])
+    ax.set_xlabel("true xmin")
+    ax.set_ylabel("true alpha")
+    fig2.colorbar(imz, ax=ax, fraction=0.046, pad=0.04)
+    fig2.savefig(filename, format="pdf", bbox_inches="tight")
+    print(f"Saved figure to {filename}")
+    plt.close(fig2)
+
+
+def _ensure_placeholder_pdf(path, text="Missing"):
+    if os.path.exists(path):
+        return path
+    fig, ax = plt.subplots(figsize=(4, 3))
+    ax.text(0.5, 0.5, text, ha="center", va="center")
+    ax.axis("off")
+    fig.savefig(path, format="pdf", bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def _save_fit_plot_paths(drops, ks_fit, p_fit, data_info, extra_path=""):
+    ax1 = plot_ks_distance(
+        drops,
+        ks_fit.xmin,
+        data_info=data_info,
+        ax=None,
+        save=True,
+        close=True,
+        extraPath=extra_path,
+    )
+    ks_min_path = getattr(ax1.figure, "path", None)
+
+    ax2 = plot_ks_distance(
+        drops,
+        p_fit.xmin,
+        data_info=data_info,
+        ax=None,
+        save=True,
+        close=True,
+        extraPath=extra_path,
+    )
+    ks_max_path = getattr(ax2.figure, "path", None)
+
+    ax3 = plot_data_and_fit(
+        p_fit,
+        data_info=data_info,
+        ax=None,
+        save=True,
+        close=True,
+        extraPath=extra_path,
+    )
+    fit_path = getattr(ax3.figure, "path", None)
+
+    return ks_min_path, ks_max_path, fit_path
+
+
 def grid_compare_xmin(
     alphas=None,
     xmins=None,
     n=5e4,
     Lambda=1,
-    beta=2.0,
+    beta=0.0,
     xlow=None,
     seed=0,
     rng=None,
     xmin_range=None,
     fast_xmin=True,
-    save_individual=True,
 ):
     """
     Compare xmin estimates on a grid of (alpha, true xmin) using a single distribution.
@@ -312,10 +498,14 @@ def grid_compare_xmin(
     alpha2std_grid = np.full_like(xmin1_grid, np.nan)
     lambda1_grid = np.full_like(xmin1_grid, np.nan)
     lambda2_grid = np.full_like(xmin1_grid, np.nan)
-
-    fig1, axes1 = plt.subplots(len(alphas), len(xmins), figsize=(24, 24))
-    fig2, axes2 = plt.subplots(len(alphas), len(xmins), figsize=(24, 24))
-    fig3, axes3 = plt.subplots(len(alphas), len(xmins), figsize=(24, 24))
+    ks_min_paths = []
+    ks_max_paths = []
+    fit_paths = []
+    output_subdir = "grid_compare_xmin_cells/"
+    os.makedirs(f"{PLOTPATH}{output_subdir}", exist_ok=True)
+    placeholder_path = _ensure_placeholder_pdf(
+        f"{PLOTPATH}{output_subdir}placeholder.pdf", text="No data"
+    )
 
     for i, alpha in enumerate(alphas):
         for j, xmin_true in enumerate(xmins):
@@ -336,6 +526,9 @@ def grid_compare_xmin(
             drops = np.asarray(drops, dtype=float)
             drops = drops[np.isfinite(drops)]
             if drops.size < 10:
+                ks_min_paths.append(placeholder_path)
+                ks_max_paths.append(placeholder_path)
+                fit_paths.append(placeholder_path)
                 continue
 
             KS_fit = make_fit(
@@ -348,49 +541,13 @@ def grid_compare_xmin(
             p_fit = find_best_xmin(
                 drops, xmin_results=KS_fit.xmin_fitting_results, data_info=data_info
             )
-            plot_ks_distance(
-                drops,
-                KS_fit.xmin,
-                data_info=data_info,
-                ax=axes1[i, j],
-                save=False,
-                close=False,
+            ks_min_path, ks_max_path, fit_path = _save_fit_plot_paths(
+                drops, KS_fit, p_fit, data_info, extra_path=output_subdir
             )
-            plot_ks_distance(
-                drops,
-                p_fit.xmin,
-                data_info=data_info,
-                ax=axes2[i, j],
-                save=False,
-                close=False,
-            )
-            plot_data_and_fit(
-                p_fit,
-                data_info=data_info,
-                ax=axes3[i, j],
-                save=False,
-                close=False,
-            )
-            if save_individual:
-                plot_ks_distance(
-                    drops,
-                    KS_fit.xmin,
-                    data_info=data_info,
-                    ax=None,
-                    save=True,
-                    close=True,
-                )
-                plot_ks_distance(
-                    drops,
-                    p_fit.xmin,
-                    data_info=data_info,
-                    ax=None,
-                    save=True,
-                    close=True,
-                )
-                plot_data_and_fit(
-                    p_fit, data_info=data_info, ax=None, save=True, close=True
-                )
+            ks_min_paths.append(ks_min_path or placeholder_path)
+            ks_max_paths.append(ks_max_path or placeholder_path)
+            fit_paths.append(fit_path or placeholder_path)
+
             xmin2_grid[i, j] = float(p_fit.xmin)
             alpha2_grid[i, j] = getattr(dist_from_fit(p_fit), "alpha", np.nan)
             alpha2std_grid[i, j] = getattr(p_fit, "alpha_std", np.nan)
@@ -399,127 +556,87 @@ def grid_compare_xmin(
     xmins_arr = np.array(xmins, dtype=float)[None, :]
     xmin1_factor = xmin1_grid / xmins_arr
     xmin2_factor = xmin2_grid / xmins_arr
-    da1_grid = alpha1_grid - np.array(alphas)[:, None]
-    da2_grid = alpha2_grid - np.array(alphas)[:, None]
+    alphas_arr = np.array(alphas, dtype=float)[:, None]
+    da1_grid = alpha1_grid - alphas_arr
+    da2_grid = alpha2_grid - alphas_arr
     lambda1_factor = lambda1_grid / Lambda
     lambda2_factor = lambda2_grid / Lambda
 
     dx1_log = np.log10(xmin1_factor)
     dx2_log = np.log10(xmin2_factor)
-    dx_min = np.nanmin([dx1_log.min(), dx2_log.min()])
-    dx_max = np.nanmax([dx1_log.max(), dx2_log.max()])
-
-    da_min = np.nanmin([da1_grid.min(), da2_grid.min()])
-    da_max = np.nanmax([da1_grid.max(), da2_grid.max()])
-    fig, axes = plt.subplots(3, 2, figsize=(12, 10), constrained_layout=True)
-
-    im1 = axes[0, 0].imshow(
-        dx1_log, aspect="auto", origin="lower", vmin=dx_min, vmax=dx_max
-    )
-    axes[0, 0].set_title(r"$\log_{10}(x_{\min}/x_{\min,true})$ (min KS)")
-    fig.colorbar(im1, ax=axes[0, 0], fraction=0.046, pad=0.04)
-
-    im2 = axes[0, 1].imshow(
-        dx2_log, aspect="auto", origin="lower", vmin=dx_min, vmax=dx_max
-    )
-    axes[0, 1].set_title(r"$\log_{10}(x_{\min}/x_{\min,true})$ (max $p$)")
-    fig.colorbar(im2, ax=axes[0, 1], fraction=0.046, pad=0.04)
-
-    im3 = axes[1, 0].imshow(
-        da1_grid, aspect="auto", origin="lower", vmin=da_min, vmax=da_max
-    )
-    axes[1, 0].set_title("alpha (min KS) - true alpha")
-    fig.colorbar(im3, ax=axes[1, 0], fraction=0.046, pad=0.04)
-
-    im4 = axes[1, 1].imshow(
-        da2_grid, aspect="auto", origin="lower", vmin=da_min, vmax=da_max
-    )
-    axes[1, 1].set_title("alpha (max $p$) - true alpha")
-    fig.colorbar(im4, ax=axes[1, 1], fraction=0.046, pad=0.04)
-
     dl1_log = np.log10(lambda1_factor)
     dl2_log = np.log10(lambda2_factor)
-    dl_min = np.nanmin([dl1_log.min(), dl2_log.min()])
-    dl_max = np.nanmax([dl1_log.max(), dl2_log.max()])
-    im5 = axes[2, 0].imshow(
-        dl1_log, aspect="auto", origin="lower", vmin=dl_min, vmax=dl_max
-    )
-    axes[2, 0].set_title(r"$\log_{10}(\lambda/\lambda_{true})$ (min KS)")
-    fig.colorbar(im5, ax=axes[2, 0], fraction=0.046, pad=0.04)
-
-    im6 = axes[2, 1].imshow(
-        dl2_log, aspect="auto", origin="lower", vmin=dl_min, vmax=dl_max
-    )
-    axes[2, 1].set_title(r"$\log_{10}(\lambda/\lambda_{true})$ (max $p$)")
-    fig.colorbar(im6, ax=axes[2, 1], fraction=0.046, pad=0.04)
-
-    for row in range(3):
-        for col in range(2):
-            axes[row, col].set_xticks(range(len(xmins)))
-            axes[row, col].set_xticklabels(
-                [f"{x:.1e}" for x in xmins], rotation=45, ha="right"
-            )
-            axes[row, col].set_yticks(range(len(alphas)))
-            axes[row, col].set_yticklabels([f"{a:.2f}" for a in alphas])
-            if row == 2:
-                axes[row, col].set_xlabel("true xmin")
-            else:
-                axes[row, col].set_xlabel("")
-            if col == 0:
-                axes[row, col].set_ylabel("true alpha")
-            else:
-                axes[row, col].set_ylabel("")
 
     from datetime import datetime
 
-    fig.suptitle("Grid comparison of xmin estimates")
     timestamp = datetime.now().strftime("%H%M")
+    fixed_limits = (-1.0, 1.0)
     filename = f"{PLOTPATH}grid_compare_xmin_{timestamp}.pdf"
-    fig.savefig(filename, format="pdf", bbox_inches="tight")
-    print(f"Saved figure to {filename}")
-    plt.close(fig)
+    _plot_grid_compare(
+        dx1_log,
+        dx2_log,
+        da1_grid,
+        da2_grid,
+        dl1_log,
+        dl2_log,
+        xmins,
+        alphas,
+        filename,
+        fixed_limits,
+        fixed_limits,
+        fixed_limits,
+        cmap="coolwarm",
+    )
 
-    fig1.tight_layout()
-    fig2.tight_layout()
-    fig3.tight_layout()
+    dx_limits = _symmetric_limits([dx1_log, dx2_log])
+    da_limits = _symmetric_limits([da1_grid, da2_grid])
+    dl_limits = _symmetric_limits([dl1_log, dl2_log])
+    filename_centered = f"{PLOTPATH}grid_compare_xmin_centered_{timestamp}.pdf"
+    _plot_grid_compare(
+        dx1_log,
+        dx2_log,
+        da1_grid,
+        da2_grid,
+        dl1_log,
+        dl2_log,
+        xmins,
+        alphas,
+        filename_centered,
+        dx_limits,
+        da_limits,
+        dl_limits,
+        cmap="coolwarm",
+    )
+
+    rows = len(alphas)
+    cols = len(xmins)
     filename1 = f"{PLOTPATH}ks_distance_grid_minKS_{timestamp}.pdf"
     filename2 = f"{PLOTPATH}ks_distance_grid_maxP_{timestamp}.pdf"
     filename3 = f"{PLOTPATH}fit_grid_{timestamp}.pdf"
-    fig1.savefig(filename1, format="pdf", bbox_inches="tight")
-    fig2.savefig(filename2, format="pdf", bbox_inches="tight")
-    fig3.savefig(filename3, format="pdf", bbox_inches="tight")
+    combine_pdfs_grid(ks_min_paths, rows, cols, filename1)
     print(f"Saved figure to {filename1}")
+    combine_pdfs_grid(ks_max_paths, rows, cols, filename2)
     print(f"Saved figure to {filename2}")
+    combine_pdfs_grid(fit_paths, rows, cols, filename3)
     print(f"Saved figure to {filename3}")
-    plt.close(fig1)
-    plt.close(fig2)
-    plt.close(fig3)
 
     # --- Standalone alpha z-score plot for method 2 ---
     with np.errstate(divide="ignore", invalid="ignore"):
         z2 = np.abs(da2_grid) / alpha2std_grid
     z2 = np.where(np.isfinite(z2), z2, np.nan)
 
-    fig2, ax = plt.subplots(1, 1, figsize=(6, 5), constrained_layout=True)
     z_vmax = np.nanmax(z2)
     if not np.isfinite(z_vmax) or z_vmax <= 0:
         z_vmax = 1.0
-    imz = ax.imshow(z2, aspect="auto", origin="lower", vmin=0, vmax=z_vmax)
-    ax.set_title(
-        r"Alpha z-score (max $p$): $\vert \Delta\alpha\vert / \alpha_{\mathrm{std}}$"
-    )
-    ax.set_xticks(range(len(xmins)))
-    ax.set_xticklabels([f"{x:.1e}" for x in xmins], rotation=45, ha="right")
-    ax.set_yticks(range(len(alphas)))
-    ax.set_yticklabels([f"{a:.2f}" for a in alphas])
-    ax.set_xlabel("true xmin")
-    ax.set_ylabel("true alpha")
-    fig2.colorbar(imz, ax=ax, fraction=0.046, pad=0.04)
-
     filename2 = f"{PLOTPATH}grid_compare_alpha_zscore.pdf"
-    fig2.savefig(filename2, format="pdf", bbox_inches="tight")
-    print(f"Saved figure to {filename2}")
-    plt.close(fig2)
+    _plot_alpha_zscore(
+        z2, xmins, alphas, filename2, vmin=0, vmax=z_vmax, cmap="coolwarm"
+    )
+
+    filename2_fixed = f"{PLOTPATH}grid_compare_alpha_zscore_fixed_0_2.pdf"
+    _plot_alpha_zscore(
+        z2, xmins, alphas, filename2_fixed, vmin=0, vmax=2, cmap="coolwarm"
+    )
 
     return xmin1_grid, xmin2_grid
 
@@ -539,10 +656,10 @@ def testDist(alpha1=1.05):
 
 def testSamplePiecewise(
     n=5e4,
-    beta=2.0,
-    alpha=1.4,
+    beta=0,
+    alpha=3,
     lam=1,
-    xmin=1e-5,
+    xmin=1e-1,
     xlow=None,
     seed=0,
 ):

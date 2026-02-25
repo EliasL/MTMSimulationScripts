@@ -14,6 +14,7 @@ class ServerInfo:
         self.totalRAM = 0  # GB
         self.usedRAM = 0  # GB
         self.freeRAM = 0  # GB
+        self.freeSpaceTB = {}
         self.nodeState = ""  # Node state (e.g., up, down, drained)
         self.nrIdleNodes = 0
         self.nrNodesTotal = 0
@@ -60,6 +61,40 @@ def get_server_info(ssh_client):
     )
     si.nrIdleNodes = idle_count
     si.nrNodesTotal = total_nodes
+
+    # Free space (TB). If both /data and /data2 exist, show both.
+    def _get_free_bytes(path):
+        cmd = (
+            f'if [ -d "{path}" ]; then df -B1 "{path}" | awk \'NR==2{{print $4}}\'; fi'
+        )
+        stdin, stdout, stderr = ssh_client.exec_command(cmd)
+        output = stdout.read().decode().strip()
+        if not output:
+            return None
+        try:
+            return float(output.splitlines()[-1].strip())
+        except ValueError:
+            return None
+
+    free_bytes_data = _get_free_bytes("/data")
+    free_bytes_data2 = _get_free_bytes("/data2")
+    if free_bytes_data is not None:
+        si.freeSpaceTB["/data"] = free_bytes_data / (1024**4)
+    if free_bytes_data2 is not None:
+        si.freeSpaceTB["/data2"] = free_bytes_data2 / (1024**4)
+
+    # Fallback if neither /data nor /data2 exists
+    if not si.freeSpaceTB:
+        fallback_paths = [
+            "/data/elundheim",
+            "/data2/elundheim",
+            "/lustre/fswork/projects/rech/bph/uog82gz",
+        ]
+        for p in fallback_paths:
+            free_bytes = _get_free_bytes(p)
+            if free_bytes is not None:
+                si.freeSpaceTB[p] = free_bytes / (1024**4)
+                break
 
     return si
 
@@ -137,6 +172,22 @@ def display_server_info(server_info):
 
         name = get_server_short_name(server)
         results, headers, total_score = score_and_color_server(info)
+        if not info.freeSpaceTB:
+            free_display = "N/A"
+        else:
+            def fmt(tb):
+                return colorize(tb, 1.1, 0.5, f"{tb:.1f}")[0]
+
+            if "/data" in info.freeSpaceTB and "/data2" in info.freeSpaceTB:
+                free_display = (
+                    f"{fmt(info.freeSpaceTB['/data'])} | "
+                    f"{fmt(info.freeSpaceTB['/data2'])}"
+                )
+            else:
+                # Single value (or fallback path)
+                key = next(iter(info.freeSpaceTB.keys()))
+                free_display = fmt(info.freeSpaceTB[key])
+
         if "drain" in info.nodeState or "down" in info.nodeState:
             name += "(d)"
             total_score -= 1000
@@ -144,6 +195,8 @@ def display_server_info(server_info):
         results.insert(0, colorize(total_score, 200, -100, name)[0])
         headers.insert(0, "Server")
         info.totalScore = total_score
+        results.append(free_display)
+        headers.append("Free (TB)")
         # Append results with total_score for sorting
         data.append((total_score, results))
 

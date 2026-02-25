@@ -38,27 +38,40 @@ class DataManager:
         # Prepare lists to hold paths and sizes
         folders = []
         sizes = []
+        free_space = {}
 
         if isinstance(lines, list):
             lines_list = lines
         else:
             lines_list = lines.split("\n")
 
-        # Process each line (Except the last)
-        for line in lines_list[:-1]:
+        # Process each line
+        for line in lines_list:
             # Split by tab to separate the path and the size
             parts = line.split("\t")
+            if len(parts) >= 3 and parts[0] == "FREE":
+                try:
+                    free_space[parts[1]] = float(parts[2])
+                except ValueError:
+                    pass
+                continue
             if len(parts) == 2:  # Make sure the line is properly formatted
                 folders.append(parts[0])  # The first part is the folder path
                 sizes.append(
                     int(parts[1])
                 )  # The second part is the size, converted to int
-        # The last line is the free space in GB
-        try:
-            free_space_in_gb = float(lines[-1])
-        except ValueError as e:
-            free_space_in_gb = -1
-        return folders, sizes, free_space_in_gb
+        # The last numeric line is the free space in GB (fallback)
+        free_space_in_gb = -1
+        if not free_space:
+            for line in reversed(lines_list):
+                if not line:
+                    continue
+                try:
+                    free_space_in_gb = float(line.strip())
+                    break
+                except ValueError:
+                    continue
+        return folders, sizes, (free_space if free_space else free_space_in_gb)
 
     def find_data_on_server(self, server, silent):
         remote_script_path = (
@@ -150,14 +163,55 @@ class DataManager:
         # Iterate over the remaining data after removing 'date'
         for server, (folders, sizes, free_space_in_GB) in data_copy.items():
             if folders:  # If there are folders and sizes
+                # Track data usage per mount before grouping alters names
+                usage_by_mount = {"d1": 0, "d2": 0}
+                for folder_path, size in zip(folders, sizes):
+                    if folder_path.startswith("/data2"):
+                        usage_by_mount["d2"] += size
+                    elif folder_path.startswith("/data"):
+                        usage_by_mount["d1"] += size
+
                 grouped_folders = self.parse_and_group_seeds((folders, sizes))
                 if grouped_folders:
                     folders, sizes = zip(*grouped_folders)
                     sizes = [f"{nr}{unit}" for nr, unit in sizes]
                     server = get_server_short_name(server)
+                    server_lines = [f"{server}"]
+                    def fmt_tb_from_gb(value_gb):
+                        return f"{value_gb / 1024:.1f}TB"
+                    def fmt_tb_from_bytes(value_bytes):
+                        return f"{value_bytes / (1024**4):.1f}TB"
+                    if isinstance(free_space_in_GB, dict):
+                        d1 = free_space_in_GB.get("/data")
+                        d2 = free_space_in_GB.get("/data2")
+                        if d1 is not None:
+                            server_lines.append(f"(d1) {fmt_tb_from_gb(d1)} free")
+                            if usage_by_mount["d1"] > 0:
+                                server_lines.append(
+                                    f"(d1 me) {fmt_tb_from_bytes(usage_by_mount['d1'])}"
+                                )
+                        if d2 is not None:
+                            server_lines.append(f"(d2) {fmt_tb_from_gb(d2)} free")
+                            if usage_by_mount["d2"] > 0:
+                                server_lines.append(
+                                    f"(d2 me) {fmt_tb_from_bytes(usage_by_mount['d2'])}"
+                                )
+                        if d1 is None and d2 is None and free_space_in_GB:
+                            # Fallback to first available entry
+                            key = next(iter(free_space_in_GB.keys()))
+                            server_lines.append(
+                                f"{fmt_tb_from_gb(free_space_in_GB[key])} free"
+                            )
+                    else:
+                        try:
+                            server_lines.append(
+                                f"{fmt_tb_from_gb(float(free_space_in_GB))} free"
+                            )
+                        except Exception:
+                            server_lines.append("N/A")
                     table_data.append(
                         [
-                            f"{server}\n{round(free_space_in_GB):d}GB free",
+                            "\n".join(server_lines),
                             "\n".join(folders),
                             "\n".join(sizes),
                         ]
@@ -350,51 +404,62 @@ class DataManager:
         # Regex to match the base part of the folder name and the seed
         pattern = re.compile(r"(.*)s(\d+)$")
 
-        # Parse folder names into base names and seeds
-        parsed_folders = []
+        # Aggregate sizes per (base_name, seed) to avoid duplicate seeds
+        by_base = {}
+        has_d1 = any(p.startswith("/data/") or p.startswith("/data") for p in folder_paths)
+        has_d2 = any(p.startswith("/data2/") or p.startswith("/data2") for p in folder_paths)
+        use_prefix = has_d1 and has_d2
         for folderPath, size in zip(folder_paths, sizes):
             folder = folderPath.split("/")[-1]
             match = pattern.match(folder)
-            if match:
-                base_name, seed = match.groups()
-                parsed_folders.append((base_name, int(seed), folder, size))
+            if not match:
+                continue
+            base_name, seed_str = match.groups()
+            if use_prefix:
+                if folderPath.startswith("/data2"):
+                    base_name = f"(d2){base_name}"
+                elif folderPath.startswith("/data"):
+                    base_name = f"(d1){base_name}"
+            seed = int(seed_str)
+            base_entry = by_base.setdefault(base_name, {})
+            base_entry[seed] = base_entry.get(seed, 0) + size
 
-        # Sort by base name and seed to ensure correct grouping
-        parsed_folders.sort(key=lambda x: (x[0], x[1]))
-
-        grouped_folders = {}
-        # Group by base name
-        for base_name, group in groupby(parsed_folders, key=lambda x: x[0]):
-            # Extract and sort seeds within each base name group
-            seeds = [item for item in group]
-            # Group consecutive seeds and calculate total size
-            grouped_seeds = []
-            for k, g in groupby(enumerate(seeds), lambda i_x: i_x[0] - i_x[1][1]):
-                seq = list(g)
-                # Calculate total size for the group
-                grouped_size = sum_folder_sizes([item[1][3] for item in seq])
-                if len(seq) > 1:
-                    start, end = seq[0][1], seq[-1][1]
-                    grouped_seeds.append((f"{start[1]}-{end[1]}", grouped_size))
-                else:
-                    single = seq[0][1]
-                    grouped_seeds.append((str(single[1]), grouped_size))
-            # Reconstruct the folder names for each base name group and associate sizes
-            for seed_group, size in grouped_seeds:
-                original_folder = seeds[0][2].rsplit("s", 1)[
-                    0
-                ]  # Get one example folder and remove seed
-                grouped_folder = f"{original_folder}s{seed_group}"
-                if base_name in grouped_folders:
-                    grouped_folders[base_name].append((grouped_folder, size))
-                else:
-                    grouped_folders[base_name] = [(grouped_folder, size)]
-
-        # Flatten the grouped_folders dictionary to a list and include sizes
         final_grouped_folders = []
-        for base_name, folders in grouped_folders.items():
-            for folder, size in folders:
-                final_grouped_folders.append((folder, size))
+        for base_name, seed_sizes in by_base.items():
+            if not seed_sizes:
+                continue
+            # Sort seeds to group consecutive ranges
+            sorted_seeds = sorted(seed_sizes.items(), key=lambda x: x[0])
+            start_seed, end_seed = sorted_seeds[0][0], sorted_seeds[0][0]
+            current_sizes = [sorted_seeds[0][1]]
+
+            for seed, size in sorted_seeds[1:]:
+                if seed == end_seed + 1:
+                    end_seed = seed
+                    current_sizes.append(size)
+                else:
+                    grouped_size = sum_folder_sizes(current_sizes)
+                    seed_group = (
+                        str(start_seed)
+                        if start_seed == end_seed
+                        else f"{start_seed}-{end_seed}"
+                    )
+                    grouped_folder = f"{base_name}s{seed_group}"
+                    final_grouped_folders.append((grouped_folder, grouped_size))
+
+                    # Reset for next group
+                    start_seed = end_seed = seed
+                    current_sizes = [size]
+
+            # Finalize the last group
+            grouped_size = sum_folder_sizes(current_sizes)
+            seed_group = (
+                str(start_seed)
+                if start_seed == end_seed
+                else f"{start_seed}-{end_seed}"
+            )
+            grouped_folder = f"{base_name}s{seed_group}"
+            final_grouped_folders.append((grouped_folder, grouped_size))
 
         # Sort the folders by size, largest first
         final_grouped_folders.sort(key=lambda x: convert_to_bytes(*x[1]), reverse=True)
