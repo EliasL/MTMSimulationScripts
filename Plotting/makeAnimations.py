@@ -214,6 +214,7 @@ def makeAnimations(
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in [
         # (plot_and_save_nodes, "nodes"),
+        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
         (plot_and_save_mesh, "mesh"),
         # (plot_and_save_mesh_with_force, "mesh_with_forces"),
         (plot_and_save_in_poincare_disk, "disk"),
@@ -221,7 +222,6 @@ def makeAnimations(
         (plot_and_save_plot, "energy_plot"),
         # (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_m_mesh, "m_mesh"),
-        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
     ]:
         images = make_images(
             vtu_files,

@@ -10,6 +10,8 @@ from Management.updateCSV import update_df_header
 from .makePlots import safePath, maybe_avg
 import os
 import glob
+import tempfile
+import uuid
 from tqdm import tqdm
 import warnings
 
@@ -20,6 +22,16 @@ OUTPUTTYPE = ".png"
 os.makedirs(PLOTPATH, exist_ok=True)
 os.makedirs(PLOTPATH + "debug/", exist_ok=True)
 MINIMIZER_COLORS = {"L-BFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
+
+
+def _append_sample_suffix(name, n_samples):
+    if n_samples is None:
+        return name
+    try:
+        n_int = int(n_samples)
+    except (TypeError, ValueError):
+        return name
+    return f"{name}_n{n_int}"
 
 
 def get_minimizer(df):
@@ -705,6 +717,7 @@ def plot_data_and_fit(
             safe_title += "_ccdf" if useCCDF else "_cdf"
         else:
             safe_title += "_pdf"
+        safe_title = _append_sample_suffix(safe_title, len(fit.data_original))
         filename = f"{PLOTPATH}{extraPath}{safe_title}.pdf"
         fig.savefig(filename, format="pdf", bbox_inches="tight")
         print(f"Saved figure to {filename}")
@@ -810,6 +823,7 @@ def plot_ks_distance(
     fig.tight_layout()
     # Save the plot
     safe_title = safePath(title)
+    safe_title = _append_sample_suffix(safe_title, len(drops))
     filename = f"{PLOTPATH}{extraPath}{safe_title}.pdf"
     if save:
         fig.savefig(filename, dpi=300)
@@ -824,8 +838,31 @@ def plot_ks_distance(
     return ax
 
 
+_MEMMAP_CACHE: dict[tuple[str, str, tuple[int, ...]], np.memmap] = {}
+
+
+def _load_memmap(spec):
+    key = (
+        spec["memmap_path"],
+        spec["dtype"],
+        tuple(spec["shape"]),
+    )
+    if key not in _MEMMAP_CACHE:
+        _MEMMAP_CACHE[key] = np.memmap(
+            spec["memmap_path"],
+            mode="r",
+            dtype=np.dtype(spec["dtype"]),
+            shape=tuple(spec["shape"]),
+        )
+    return _MEMMAP_CACHE[key]
+
+
 def _fit_single_xmin_task(args):
-    drops, trial_xmin, xmax, dist_name, confidence = args
+    drops_spec, trial_xmin, xmax, dist_name, confidence = args
+    if isinstance(drops_spec, dict) and "memmap_path" in drops_spec:
+        drops = _load_memmap(drops_spec)
+    else:
+        drops = drops_spec
     fit = Fit(
         data=drops,
         xmin=trial_xmin,
@@ -846,6 +883,11 @@ def explore_xmin(
     distType: type[Distribution] = Truncated_Power_Law,
     debug=False,
     xmax=None,
+    parallel=True,
+    max_workers=None,
+    use_memmap=True,
+    memmap_min_size=5e4,
+    memmap_dir=None,
 ):
     if min_xmin is None:
         min_xmin = min(drops)
@@ -859,26 +901,56 @@ def explore_xmin(
         np.log10(min_xmin), np.log10(max_xmin), nr_evaluation + remove_nr
     )[:-remove_nr]
 
+    drops_spec = drops
+    memmap_path = None
+    if parallel and use_memmap and len(drops) >= memmap_min_size:
+        drops_array = np.asarray(drops)
+        memmap_dir = memmap_dir or tempfile.gettempdir()
+        os.makedirs(memmap_dir, exist_ok=True)
+        memmap_path = os.path.join(
+            memmap_dir, f"explore_xmin_{os.getpid()}_{uuid.uuid4().hex}.dat"
+        )
+        mmap = np.memmap(
+            memmap_path,
+            dtype=drops_array.dtype,
+            mode="w+",
+            shape=drops_array.shape,
+        )
+        mmap[:] = drops_array[:]
+        mmap.flush()
+        drops_spec = {
+            "memmap_path": memmap_path,
+            "dtype": str(drops_array.dtype),
+            "shape": drops_array.shape,
+        }
+
     tasks = [
-        (drops, float(trial_xmin), xmax, distType.name, confidence)
+        (drops_spec, float(trial_xmin), xmax, distType.name, confidence)
         for trial_xmin in xmin_values
     ]
 
     try:
-        from concurrent.futures import ProcessPoolExecutor
+        if parallel:
+            from concurrent.futures import ProcessPoolExecutor
 
-        with ProcessPoolExecutor() as ex:
-            fits_iter = ex.map(_fit_single_xmin_task, tasks)
-            test_fits = list(
-                tqdm(
-                    fits_iter,
-                    total=len(tasks),
-                    desc="Fitting xmins",
-                    disable=False,
+            with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                fits_iter = ex.map(_fit_single_xmin_task, tasks)
+                test_fits = list(
+                    tqdm(
+                        fits_iter,
+                        total=len(tasks),
+                        desc="Fitting xmins",
+                        disable=False,
+                    )
                 )
-            )
+        else:
+            raise RuntimeError("Parallel disabled")
+    except KeyboardInterrupt:
+        print("Parallel xmin exploration interrupted.")
+        raise
     except Exception as e:
-        print(f"Parallel xmin exploration failed, falling back to serial: {e}")
+        if parallel:
+            print(f"Parallel xmin exploration failed, falling back to serial: {e}")
         test_fits = []
         for i, trial_xmin in enumerate(xmin_values):
             desc = f"xmin:{trial_xmin:.2e}: {i + 1}/{len(xmin_values)}:"
@@ -895,6 +967,12 @@ def explore_xmin(
                 tqdmDesc=desc,
             )
             test_fits.append(fit)
+    finally:
+        if memmap_path and os.path.exists(memmap_path):
+            try:
+                os.remove(memmap_path)
+            except OSError:
+                pass
 
     return test_fits
 
@@ -912,6 +990,12 @@ def find_best_xmin(
     DistType: type[Distribution] = Truncated_Power_Law,
     data_info=None,
     xmin_results=None,
+    extraPath="",
+    parallel=True,
+    max_workers=None,
+    use_memmap=True,
+    memmap_min_size=5e4,
+    memmap_dir=None,
 ):
     """
     We scan many possible xmin values. We try to identify a plateau region
@@ -921,8 +1005,12 @@ def find_best_xmin(
 
     title = make_title(data_info)
     path_name = safePath(title)
+    path_name = _append_sample_suffix(path_name, len(drops))
 
     print(f"Testing xmins for {title}")
+
+    if parallel and len(drops) > 5e4 and not use_memmap:
+        parallel = False
 
     test_fits = explore_xmin(
         drops,
@@ -933,6 +1021,11 @@ def find_best_xmin(
         DistType,
         debug,
         xmax=xmax,
+        parallel=parallel,
+        max_workers=max_workers,
+        use_memmap=use_memmap,
+        memmap_min_size=memmap_min_size,
+        memmap_dir=memmap_dir,
     )
 
     # We now have a rough sample on possible xmin values
@@ -974,6 +1067,11 @@ def find_best_xmin(
             DistType,
             debug,
             xmax,
+            parallel=parallel,
+            max_workers=max_workers,
+            use_memmap=use_memmap,
+            memmap_min_size=memmap_min_size,
+            memmap_dir=memmap_dir,
         )
         p_vals = np.array([f.p for f in new_fits], dtype=float)
         local_max_idx = None
@@ -993,13 +1091,15 @@ def find_best_xmin(
         test_fits.extend(new_fits)
 
     # Plot p and exponent
+    xmin_plot_path = f"{PLOTPATH}{extraPath}{path_name}_xMins.pdf"
     plot_fits_over_xmin(
         test_fits,
         best_fit,
-        PLOTPATH + f"{path_name}_xMins.pdf",
+        xmin_plot_path,
         title=title,
         xmin_results=xmin_results,
     )
+    setattr(best_fit, "xmin_plot_path", xmin_plot_path)
 
     return best_fit
 
@@ -1280,7 +1380,7 @@ def plot_plastic_counts(
 
     if save:
         if filename is None:
-            filename = f"{PLOTPATH}{safePath(title)}_plastic_counts{OUTPUTTYPE}"
+            filename = f"{PLOTPATH}{safePath(title)}_plastic_counts.pdf"
         fig.savefig(filename, dpi=300)
         print(f"Saved figure to {filename}")
     if show:
@@ -1319,6 +1419,7 @@ def make_fit(
     cache_dir: str = ".xmin_values",
     fast_xmin=False,
     xmin_accuracy=1.0,
+    parallel_xmin=None,
 ) -> Fit:
     """
     This is a wrapper for the Fit function. Finding xmin takes a long
@@ -1362,6 +1463,8 @@ def make_fit(
         fast_xmin=fast_xmin,
         xmin_accuracy=xmin_accuracy,
     )
+    if parallel_xmin is not None:
+        fitObj.parallel_xmin = bool(parallel_xmin)
     if xmin_fitting_results:
         fitObj.xmin_fitting_results = xmin_fitting_results
 
@@ -1490,6 +1593,7 @@ def plot_fits_over_xmin(
     ax1.spines["left"].set_color(c_p)
     ax1.set_ylim(0, 1)
 
+    ax3 = None
     if xmin_results is not None:
         r = xmin_results
         xmins = np.asarray(r["xmins"], dtype=float)
@@ -1525,6 +1629,36 @@ def plot_fits_over_xmin(
                 label="KS distance",
                 zorder=0,
             )[0]
+
+            # Log-derivative of KS distance on a third axis
+            if np.any(max_xmin_filter):
+                x_k = xmins[max_xmin_filter]
+                d_k = distances[max_xmin_filter]
+                order_k = np.argsort(x_k)
+                x_k = x_k[order_k]
+                d_k = d_k[order_k]
+                if x_k.size >= 2:
+                    logx = np.log10(x_k)
+                    dD = np.gradient(d_k, logx)
+                    ax3 = ax1.twinx()
+                    ax3.spines["right"].set_position(("axes", 1.15))
+                    c_dd = "tab:green"
+                    ax3.plot(
+                        x_k,
+                        dD,
+                        marker="^",
+                        linestyle=":",
+                        linewidth=1.2,
+                        markersize=4,
+                        label=r"$dD/d\log_{10}(x_{\min})$",
+                        color=c_dd,
+                        markerfacecolor="none",
+                        markeredgecolor=c_dd,
+                        zorder=1,
+                    )
+                    ax3.set_ylabel(r"$dD/d\log_{10}(x_{\min})$", color=c_dd)
+                    ax3.tick_params(axis="y", colors=c_dd)
+                    ax3.spines["right"].set_color(c_dd)
 
             # Only draw both markers if they actually differ.
             if np.isclose(ks_xmin_filtered, ks_xmin_global, rtol=1e-12, atol=0.0):
@@ -1597,12 +1731,19 @@ def plot_fits_over_xmin(
 
     handles1, labels1 = ax1.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
+    handles3, labels3 = ([], [])
+    if ax3 is not None:
+        handles3, labels3 = ax3.get_legend_handles_labels()
 
     # Deduplicate by label while preserving order
     seen = set()
     handles = []
     labels = []
-    for h, l in list(zip(handles1, labels1)) + list(zip(handles2, labels2)):
+    for h, l in (
+        list(zip(handles1, labels1))
+        + list(zip(handles2, labels2))
+        + list(zip(handles3, labels3))
+    ):
         if l not in seen and l != "":
             seen.add(l)
             handles.append(h)
@@ -1610,13 +1751,20 @@ def plot_fits_over_xmin(
 
     legend = ax1.legend(handles, labels, loc="best", frameon=True)
     legend.set_zorder(100)
-    fig.tight_layout()
+    if ax3 is not None:
+        fig.tight_layout(rect=[0, 0, 0.82, 1])
+    else:
+        fig.tight_layout()
     ax1.set_title(title)
 
     if savePath:
         fig.savefig(savePath, format="pdf", bbox_inches="tight")
         print(f"Saved figure to {savePath}")
+        setattr(fig, "path", savePath)
+    else:
+        setattr(fig, "path", None)
     plt.close(fig)
+    return savePath
 
 
 def plot_xmin_fitting(fit, save=True, show=False):
@@ -1749,6 +1897,128 @@ def plot_xmin_fitting(fit, save=True, show=False):
     return fig, (ax1, ax2)
 
 
+def plot_KS_fitting(fit, save=True, show=False):
+    """Plot KS distance and its derivative versus candidate xmin.
+
+    Expects `fit.xmin_fitting_results` to be a dict with keys:
+        distances, xmins, valid_fits
+
+    Produces a plot of KS distance (D) and dD/dlog10(xmin) as a function of
+    candidate xmin. NaNs are ignored. A vertical line is drawn at the chosen
+    xmin (`fit.xmin`).
+    """
+
+    if not hasattr(fit, "xmin_fitting_results") or fit.xmin_fitting_results is None:
+        print("No xmin_fitting_results found on fit object.")
+        return None
+
+    r = fit.xmin_fitting_results
+
+    xmins = np.asarray(r["xmins"], dtype=float)
+    distances = np.asarray(r["distances"], dtype=float)
+
+    valid_fits = r.get("valid_fits", None)
+    if valid_fits is not None:
+        valid_fits = np.asarray(valid_fits, dtype=bool)
+
+    mask = np.isfinite(distances) & np.isfinite(xmins)
+    if valid_fits is not None:
+        mask &= valid_fits
+    mask &= xmins > 0
+
+    if mask.sum() == 0:
+        print("No valid xmin fitting points after filtering NaNs/invalid fits.")
+        return None
+
+    x = xmins[mask]
+    D = distances[mask]
+
+    order = np.argsort(x)
+    x = x[order]
+    D = D[order]
+
+    logx = np.log10(x)
+    dD = np.gradient(D, logx)
+
+    fig, ax1 = plt.subplots()
+    c_d = "tab:blue"
+    c_dd = "tab:green"
+
+    ax1.plot(
+        x,
+        D,
+        marker="o",
+        linestyle="-",
+        label="KS distance (D)",
+        color=c_d,
+        markerfacecolor="none",
+        markeredgecolor=c_d,
+    )
+    ax1.set_xscale("log")
+    ax1.set_xlabel(r"$x_{\min}$")
+    ax1.set_ylabel("KS distance (D)")
+    ax1.tick_params(axis="y", colors=c_d)
+    ax1.spines["left"].set_color(c_d)
+
+    ax2 = ax1.twinx()
+    ax2.plot(
+        x,
+        dD,
+        marker="s",
+        linestyle="--",
+        label=r"$dD/d\log_{10}(x_{\min})$",
+        color=c_dd,
+        markerfacecolor="none",
+        markeredgecolor=c_dd,
+    )
+    ax2.set_ylabel(r"$dD/d\log_{10}(x_{\min})$")
+    ax2.tick_params(axis="y", colors=c_dd)
+    ax2.spines["right"].set_color(c_dd)
+
+    ax2.set_zorder(0)
+    ax1.set_zorder(1)
+    ax1.patch.set_visible(False)
+
+    chosen_xmin = getattr(fit, "xmin", None)
+    if chosen_xmin is not None and np.isfinite(chosen_xmin):
+        ax1.axvline(
+            chosen_xmin,
+            linestyle=":",
+            linewidth=1.5,
+            label=rf"Chosen $x_{{\min}}$ = {chosen_xmin:.2e}",
+            alpha=0.9,
+        )
+
+    try:
+        dist_name = fit.xmin_distribution.name
+    except Exception:
+        dist_name = ""
+    title = "KS fitting"
+    if dist_name:
+        title += f" ({pretty_text(dist_name, addEquation=False)})"
+    ax1.set_title(title)
+
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
+
+    fig.tight_layout()
+    if show:
+        plt.show()
+
+    if save:
+        os.makedirs(PLOTPATH + "debug/", exist_ok=True)
+        dist_tag = dist_name if dist_name else "dist"
+        xmin_tag = f"{chosen_xmin:.2e}" if chosen_xmin is not None else "unknown"
+        filename = f"{PLOTPATH}debug/ks_fitting_{dist_tag}_xmin_{xmin_tag}{OUTPUTTYPE}"
+        fig.savefig(filename, dpi=300)
+        print(f"Saved figure to {filename}")
+        plt.close(fig)
+        return filename
+
+    return fig, (ax1, ax2)
+
+
 def plot_powerlaw(
     group_paths=None,
     group_labels=None,
@@ -1820,15 +2090,15 @@ def plot_powerlaw(
             if strainLim == "auto":
                 gamma_max_stress = findPrePostSplit(df=df)
                 if postRegime:
-                    strainLim = [gamma_max_stress + 1e-2, df["load"].max()]
+                    _strainLim = [gamma_max_stress + 1e-2, df["load"].max()]
                 else:
-                    strainLim = [df["load"].min(), gamma_max_stress - 1e-4]
+                    _strainLim = [df["load"].min(), gamma_max_stress - 1e-4]
             if data_info is None:
                 _, data_info = get_energy_drops(
-                    paths, strainLim=strainLim, debug=debug, label=label
+                    paths, strainLim=_strainLim, debug=debug, label=label
                 )
             drops, _, _ = get_drops_in_windows(
-                path, df=df, strainLim=strainLim, debug=debug, label=label
+                path, df=df, strainLim=_strainLim, debug=debug, label=label
             )
             all_drops.extend(drops)  # drops is a list of arrays
 

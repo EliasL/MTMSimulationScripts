@@ -20,8 +20,21 @@ from Management.jobs import (
 
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
-from MTMath.powerlaw_mixed_test import testDist, grid_compare_xmin, testSamplePiecewise
-from Plotting.plotPowerLaw import make_exponent_fit, plot_powerlaw
+from MTMath.powerlaw_mixed_test import (
+    testDist,
+    grid_compare_xmin,
+    testSamplePiecewise,
+    plot_compare_xmin,
+    plot_convergence_xmin,
+)
+from Plotting.plotPowerLaw import (
+    make_exponent_fit,
+    plot_powerlaw,
+    make_fit,
+    get_energy_drops,
+    plot_KS_fitting,
+    findPrePostSplit,
+)
 from Plotting.reversibilityPlot import plot_reversibility_histograms
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
@@ -388,9 +401,11 @@ def plotReversibility():
 
 def plotLogAnalasys():
     configs, labels = bigUmutJob(group_by_seeds=True)
+    configs, labels = umutJobs(loadIncrement=2e-5)
 
     # # Powerlaw
-    # plotEnergy(configs, labels=labels)
+    plotEnergy(configs, labels=labels)
+
     # # Find split
     fast_xmin = True
     useCDF = True
@@ -400,6 +415,7 @@ def plotLogAnalasys():
     plotLog2(
         configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, useCDF=useCDF
     )
+    return
 
     p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
     lab = [["umut"]]
@@ -460,6 +476,49 @@ def plotLogAnalasys():
     )
 
 
+def syntheticDataPlotting():
+    seeds = range(10)
+    ns = [1e2, 1e3, 1e4, 1e5]
+    datasets = [grid_compare_xmin(n=n) for n in ns]
+
+    plot_compare_xmin(
+        data=datasets,
+        sample_sizes=[int(n) for n in ns],
+        method="all",
+        # subgrid=(3, 3),
+    )
+    plot_convergence_xmin(data=datasets, subgrid=(3, 3))
+
+
+def testRealData():
+    import numpy as np
+
+    paths = [
+        "/Volumes/data/MTS2D_output/simpleShear,s500x500l0.138,2e-05,1.0PBCt8initialGuessNoise0.04LBFGSEpsx1e-05s0/macroData.csv",
+        "/Volumes/data/MTS2D_output/simpleShear,s500x500l0.138,2e-05,1.0PBCt8initialGuessNoise0.04epsR1e-05s0/macroData.csv",
+        "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop1.csv",
+        "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop2.csv",
+        "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop3.csv",
+        "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop4.csv",
+    ]
+    for path in paths:
+        try:
+            split = findPrePostSplit(csvPath=path)
+        except Exception as e:
+            print(f"Failed to find pre/post split for {path}: {e}")
+            continue
+        drops, _ = get_energy_drops(
+            path, use_avg_e_change_from_init=True, strainLim=[split, np.inf]
+        )
+        drops = np.asarray(drops, dtype=float)
+        drops = drops[np.isfinite(drops)]
+        if drops.size < 10:
+            print(f"Not enough drops for {path}")
+            continue
+        fit = make_fit(drops, fast_xmin=True, xmin_accuracy=0.1, parallel_xmin=True)
+        plot_KS_fitting(fit, save=True, show=False)
+
+
 if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
@@ -502,8 +561,10 @@ if __name__ == "__main__":
     # compareStop()
     # compareStep()
     # plotReversibility()
-    # plotLogAnalasys()
-    grid_compare_xmin()
+    plotLogAnalasys()
+    # syntheticDataPlotting()
     # testDist()
-    # testSamplePiecewise()
+    # testRealData()
+    # testSamplePiecewise(alpha=1.35, xmin=1e-5, xlow=1e-7)
     # investigateJobs()
+    pass

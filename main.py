@@ -416,7 +416,7 @@ def runOnLocalMachine():
     # configs, labels = allPlasticEventsJob()
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
-    # configs, labels = basicJob(8, 1, size=400, maxLoad=1.0)
+    # configs, labels = basicJob(8, 1, size=40, maxLoad=0.2)
     # configs, labels = reconnectionJob(L=300)
     # configs, labels = fixedBoundaries(1, 1, L=3)
     # configs, labels = umutTestJob()
@@ -424,7 +424,7 @@ def runOnLocalMachine():
     # configs, labels = bigUmutJobWithEliasStop()
     # configs, labels = loadStepJob()
     # configs, labels = reversibilityJob()
-    configs, labels = triangular_edge_flip_job(size=50)
+    # configs, labels = triangular_edge_flip_job(size=50)
 
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
@@ -437,7 +437,7 @@ def runOnLocalMachine():
     # configs, labels = remeshTest(diagonal="minor")
     # run_many_locally(configs, taskNames=labels, resume=False)
 
-    # configs, labels = longJob(6, 1, size=100)
+    # configs, labels = longJob(8, 1, size=300)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
     # configs, labels, dump = avalanches(nrThreads=20, size=100)
@@ -485,13 +485,13 @@ def startJobs():
                     pass
 
 
-def stopJobs(configs):
+def stopJobs(configs=None):
     j = JobManager()
     j.findSlurmJobs()
-    j.cancelJobs(configs, dryRun=False)
+    # j.cancelJobs(configs, dryRun=False)
     # j.findAndShowSlurmJobs()
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
-    # j.cancelJobsByNameSubstring("500x500", force=True)
+    j.cancelJobsByNameSubstring("500x500", force=True)
     # j.cancelAllJobs(force=True, on=Servers.lagrange)
 
     # j.cancel_jobs_on_server(Servers.schwartz, 466525)
@@ -525,10 +525,10 @@ if __name__ == "__main__":
     # 150x150 16 threads -> 16 days
     # 150x150 8  threads -> 22 days
 
-    runOnServer()
+    # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    # runOnLocalMachine()
+    runOnLocalMachine()
     # sylvainSmallDrop()
     # plotSizeJob()
 

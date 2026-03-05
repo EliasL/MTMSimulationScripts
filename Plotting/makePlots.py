@@ -103,12 +103,13 @@ def plotYOverX(
     if X.shape != Y.shape:
         raise ValueError("X and Y must have the same shape.")
 
-    # crop
+    # crop + drop non-finite values
     mask = np.ones_like(X, dtype=bool)
     if xlim is not None:
         mask &= (X >= xlim[0]) & (X <= xlim[1])
     if ylim is not None:
         mask &= (Y >= ylim[0]) & (Y <= ylim[1])
+    mask &= np.isfinite(X) & np.isfinite(Y)
     X = X[mask]
     Y = Y[mask]
     if X.size == 0:
@@ -117,11 +118,17 @@ def plotYOverX(
     Xs, Ys = X, Y  # (keep your simplification hook if you want)
 
     # --- auto detection of "spikes" (robust 6-sigma using MAD) ---
-    def has_spikes(y, k=sigma_thresh):
+    def _spike_z(y):
         med = np.median(y)
-        mad = np.median(np.abs(y - med)) or 1e-12
+        mad = np.median(np.abs(y - med))
+        if not np.isfinite(mad) or mad == 0:
+            return np.zeros_like(y)
         # For normal dist, std ≈ 1.4826 * MAD
-        z = np.abs(y - med) / (1.4826 * mad)
+        z = (y - med) / (1.4826 * mad)
+        return z
+
+    def has_spikes(y, k=sigma_thresh):
+        z = _spike_z(y)
         if np.all(np.isnan(z)):
             return False
         return np.nanmax(z) > k
@@ -156,11 +163,19 @@ def plotYOverX(
         # --- broken y-axis ---
         # decide gap automatically if not provided
         if break_gap is None:
-            y_lo = np.quantile(Ys, 0.95)  # upper end of the “normal” band
-            y_hi = np.quantile(Ys, 0.995)  # start of “spikes”
-            if y_hi <= y_lo:  # fallback
-                y_lo = np.max(Ys[np.abs(Ys - np.median(Ys)) < 3 * np.std(Ys)])
-                y_hi = np.min(Ys[np.abs(Ys - np.median(Ys)) >= 3 * np.std(Ys)])
+            z = _spike_z(Ys)
+            spike_mask = z > sigma_thresh
+            y_lo = None
+            y_hi = None
+            if spike_mask.any() and (~spike_mask).any():
+                y_lo = np.max(Ys[~spike_mask])  # top of the lower region
+                y_hi = np.min(Ys[spike_mask])  # bottom of spike region
+            if y_lo is None or y_hi is None or not np.isfinite(y_lo) or not np.isfinite(y_hi) or y_hi <= y_lo:
+                y_lo = np.quantile(Ys, 0.95)  # upper end of the “normal” band
+                y_hi = np.quantile(Ys, 0.995)  # start of “spikes”
+            if not np.isfinite(y_lo) or not np.isfinite(y_hi) or y_hi <= y_lo:
+                y_lo = np.max(Ys) * 0.9
+                y_hi = np.max(Ys)
             break_gap = (y_lo, y_hi)
 
         if fig is None or ax is not None:
@@ -469,7 +484,7 @@ def makePlot(
     ax=None,
     fig=None,
     name="",
-    Y="avg_energy",
+    Y="total_energy",
     X="load",
     x_name=None,
     y_name=None,
@@ -1123,28 +1138,43 @@ def safe_log_norm(values):
     )
 
 
-def create_color_matrix(prop1_values, prop2_values):
-    """Generate a color matrix based on the logarithmic normalization of property values."""
+def safe_linear_norm(values):
+    min_val, max_val = values.min(), values.max()
+    return (
+        np.zeros_like(values)
+        if min_val == max_val
+        else (values - min_val) / (max_val - min_val)
+    )
+
+
+def create_color_matrix(prop1_values, prop2_values, log_p1=True, log_p2=True):
+    """Generate a color matrix based on normalized property values."""
+
+    def _norm(values, use_log):
+        if use_log:
+            return safe_log_norm(values)
+        return safe_linear_norm(values)
+
     unique_p1 = np.unique(prop1_values)
 
     if prop2_values[0] is None:
         unique_p2 = None
-        log_p1_norm = safe_log_norm(unique_p1)
+        p1_norm = _norm(unique_p1, log_p1)
         color_matrix = np.zeros((1, len(unique_p1), 4))  # Single row matrix
-        for col, (p1, r) in enumerate(zip(unique_p1, log_p1_norm)):
+        for col, (p1, r) in enumerate(zip(unique_p1, p1_norm)):
             color_matrix[0, col] = [r, 0, 0, 1]  # Only using log_p1_norm
         return color_matrix, unique_p1, unique_p2
 
     unique_p2 = np.unique(prop2_values)
 
-    log_p1_norm = safe_log_norm(prop1_values)
-    log_p2_norm = safe_log_norm(prop2_values)
+    p1_norm = _norm(prop1_values, log_p1)
+    p2_norm = _norm(prop2_values, log_p2)
 
     color_matrix = np.zeros((len(unique_p2), len(unique_p1), 4))
     index_map = {}
 
     for i, (p1, p2, r, b) in enumerate(
-        zip(prop1_values, prop2_values, log_p1_norm, log_p2_norm)
+        zip(prop1_values, prop2_values, p1_norm, p2_norm)
     ):
         row, col = np.where(unique_p2 == p2)[0][0], np.where(unique_p1 == p1)[0][0]
         color_matrix[row, col] = [r, abs(r - b), b, 1]
@@ -1153,31 +1183,124 @@ def create_color_matrix(prop1_values, prop2_values):
     return color_matrix, unique_p1, unique_p2
 
 
-def plot_color_matrix(ax, color_matrix, unique_p1, unique_p2, property_keys):
+def plot_color_matrix(
+    ax,
+    color_matrix,
+    unique_p1,
+    unique_p2,
+    property_keys,
+    fmt_p1=None,
+    fmt_p2=None,
+    xlabel=None,
+    ylabel=None,
+    width="25%",
+    height="25%",
+    loc="upper left",
+    bbox_to_anchor=None,
+):
     """Inset a color matrix inside the main plot."""
 
-    bbox_to_anchor = (0.1, -0.05, 1, 1)
+    if bbox_to_anchor is None:
+        bbox_to_anchor = (0.1, -0.05, 1, 1)
 
     inset_ax = inset_axes(
         ax,
-        width="25%",
-        height="25%",
-        loc="upper left",
+        width=width,
+        height=height,
+        loc=loc,
         bbox_to_anchor=bbox_to_anchor,
         bbox_transform=ax.transAxes,
     )
     inset_ax.matshow(color_matrix.transpose((0, 1, 2)), origin="upper", aspect="auto")
     inset_ax.set_xticks(range(len(unique_p1)))
-    inset_ax.set_xticklabels([sci_format(val) for val in unique_p1])
-    inset_ax.set_xlabel(getPrettyLabel(property_keys[0]), fontsize=10)
+    if fmt_p1 is None:
+        fmt_p1 = sci_format
+    if fmt_p2 is None:
+        fmt_p2 = sci_format
+    inset_ax.set_xticklabels([fmt_p1(val) for val in unique_p1])
+    inset_ax.set_xlabel(
+        getPrettyLabel(property_keys[0]) if xlabel is None else xlabel, fontsize=10
+    )
     if unique_p2 is not None:
         inset_ax.set_yticks(range(len(unique_p2)))
-        inset_ax.set_yticklabels([sci_format(val) for val in unique_p2])
-        inset_ax.set_ylabel(getPrettyLabel(property_keys[1]), fontsize=10)
+        inset_ax.set_yticklabels([fmt_p2(val) for val in unique_p2])
+        inset_ax.set_ylabel(
+            getPrettyLabel(property_keys[1]) if ylabel is None else ylabel, fontsize=10
+        )
     inset_ax.set_title("Parameter color map", fontsize=10)
     inset_ax.invert_yaxis()
     inset_ax.xaxis.set_ticks_position("bottom")
     return inset_ax
+
+
+def find_best_color_matrix_corner(
+    x_vals,
+    y_vals,
+    logx=False,
+    logy=False,
+    default_loc="upper left",
+    bbox_to_anchor=(0.1, -0.05, 1, 1),
+    quantile=0.25,
+    ax=None,
+):
+    x = np.asarray(x_vals).ravel()
+    y = np.asarray(y_vals).ravel()
+    if x.size == 0 or y.size == 0:
+        return default_loc, bbox_to_anchor
+
+    mask = np.isfinite(x) & np.isfinite(y)
+    if logx:
+        mask &= x > 0
+    if logy:
+        mask &= y > 0
+    x = x[mask]
+    y = y[mask]
+    if x.size == 0 or y.size == 0:
+        return default_loc, bbox_to_anchor
+
+    x_use = np.log10(x) if logx else x
+    y_use = np.log10(y) if logy else y
+
+    x_min, x_max = np.min(x_use), np.max(x_use)
+    y_min, y_max = np.min(y_use), np.max(y_use)
+    q = np.clip(quantile * 1.6, 0.0, 0.5)
+    x_lo = x_min + q * (x_max - x_min)
+    x_hi = x_max - q * (x_max - x_min)
+    y_lo = y_min + q * (y_max - y_min)
+    y_hi = y_max - q * (y_max - y_min)
+
+    counts = {
+        "upper right": np.sum((x_use >= x_hi) & (y_use >= y_hi)),
+        "upper left": np.sum((x_use <= x_lo) & (y_use >= y_hi)),
+        "lower right": np.sum((x_use >= x_hi) & (y_use <= y_lo)),
+        "lower left": np.sum((x_use <= x_lo) & (y_use <= y_lo)),
+    }
+    order = ["upper left", "upper right", "lower left", "lower right"]
+    min_count = min(counts.values())
+    for loc in order:
+        if counts[loc] == min_count:
+            chosen_loc = loc
+            break
+    else:
+        chosen_loc = default_loc
+
+    x_off, y_off, w, h = bbox_to_anchor
+    x_off_base = abs(x_off)
+    y_off_base = abs(y_off)
+    if chosen_loc == "upper right":
+        x_off = -x_off_base * 0.6
+        y_off = -y_off_base
+    elif chosen_loc == "upper left":
+        x_off = x_off_base
+        y_off = -y_off_base
+    elif chosen_loc == "lower right":
+        x_off = -x_off_base
+        y_off = y_off_base * 1.4
+    else:
+        x_off = x_off_base
+        y_off = y_off_base * 1.4
+
+    return chosen_loc, (x_off, y_off, w, h)
 
 
 def all_files_have_same_starting_point(csv_file_paths):
@@ -1240,8 +1363,6 @@ def makeSettingComparison(
     # --- Create the figure and the main plot ---
     fig, ax = plt.subplots(figsize=(6, 6))
 
-    plot_color_matrix(ax, color_matrix, unique_p1, unique_p2, property_keys)
-
     # --- Find the best simulation ---
     # Dictionaries coresponding to the seed
     best_df = {}
@@ -1263,6 +1384,8 @@ def makeSettingComparison(
 
     # --- Data manipulation ---
     added_labels = []
+    all_x = []
+    all_y = []
     for i, csv_file_path in enumerate(csv_file_paths):
         seed = get_data_from_name(csv_file_path)["seed"]
         if seed not in seedsToShow:
@@ -1366,6 +1489,8 @@ def makeSettingComparison(
                 marker=marker,
                 **kwargs,
             )
+            all_x.extend(np.atleast_1d(prop1_values[i]))
+            all_y.extend(np.atleast_1d(X_data))
 
         else:
             ax.plot(
@@ -1377,6 +1502,8 @@ def makeSettingComparison(
                 linestyle=linestyle,
                 **kwargs,
             )
+            all_x.extend(np.atleast_1d(X_data))
+            all_y.extend(np.atleast_1d(Y_data))
             if subtract:
                 if detach_index == -1:
                     marker = "^"
@@ -1411,6 +1538,18 @@ def makeSettingComparison(
     ax.set_xlabel(x_name)
     ax.set_ylabel(y_name)
     # ax.set_title(f"{', '.join(set(extra_labels))}")
+    cm_loc, cm_bbox = find_best_color_matrix_corner(
+        all_x, all_y, logx=detatchment, logy=False
+    )
+    plot_color_matrix(
+        ax,
+        color_matrix,
+        unique_p1,
+        unique_p2,
+        property_keys,
+        loc=cm_loc,
+        bbox_to_anchor=cm_bbox,
+    )
     ax.legend(fontsize=8, loc=loc, ncol=2)
 
     fig.suptitle(title)

@@ -179,7 +179,7 @@ def basicJob(
         minimizer="LBFGS",
         loadIncrement=1e-5,
         epsR=1e-6,
-        #LBFGSEpsx=1e-6,
+        # LBFGSEpsx=1e-6,
         # LBFGSEpsg=1e-8,
         scenario="simpleShear",
         reconnectionMethod=reconnection,
@@ -226,13 +226,15 @@ def longJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
         rows=size,
         cols=size,
         startLoad=0.15,
-        maxLoad=2.0,
+        maxLoad=5.0,
         nrThreads=nrThreads,
         minimizer="LBFGS",
         loadIncrement=1e-5,
+        LBFGSEpsx=1e-6,
         epsR=1e-5,
         LBFGSEpsg=1e-8,
         scenario="simpleShear",
+        reconnectionMethod="edgeFlip",
     )
     return configs, labels
 
@@ -716,9 +718,9 @@ def umutJobs(loadIncrement=1e-5):
     """
     Generates a job for size scaling tests.
     """
-    sizes = [200, 250, 300, 400, 500]
-    nr_samples = [10, 10, 10, 10, 10]
-    nr_threads = [4, 8, 8, 8, 8]
+    sizes = [200, 250, 300, 400]
+    nr_samples = [10, 10, 10, 10]
+    nr_threads = [4, 8, 8, 8]
     sizes.reverse()
     nr_samples.reverse()
     nr_threads.reverse()
@@ -801,6 +803,6 @@ def triangular_edge_flip_job(
         # remesh=1,
         # temp
         # energyDropThreshold=1e-10,
-        #logDuringMinimization=1,
+        # logDuringMinimization=1,
     )
     return configs, labels

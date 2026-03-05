@@ -11,13 +11,8 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import threading
-from MTMath.plotEnergy import (
-    plotEnergyField,
-    generate_energy_grid,
-    drawCScatter,
-    lagrange_reduction,
-    # elastic_reduction,
-)
+from MTMath.plotEnergy import plotEnergyField, generate_energy_grid, drawCScatter
+from MTMath.reduction import elastic_reduction
 from Management.jobs import propperJob
 
 from MTMath.energyFunction import ContiEnergy
@@ -113,6 +108,7 @@ def base_plot(
     equalAspect=True,
     remove_ticks=True,
     dpi=250,
+    stress_label=None,
     **kwargs,
 ):
     quality = 1
@@ -151,17 +147,20 @@ def base_plot(
         else:
             steps_since_last_frame = 0
 
+        if stress_label is None:
+            stress_label = r"\sigma"
+
         if delta_title:
             data_row = [
                 rf"$\Delta\gamma$: {delx:.1e}",
                 rf"$\Delta\langle E \rangle$: {delAvgEnergy:.2e}",
-                rf"$\Delta\langle \sigma \rangle$: {delAvgRSS:.2e}",
+                rf"$\Delta\langle {stress_label} \rangle$: {delAvgRSS:.2e}",
             ]
         else:
             data_row = [
                 rf"$\gamma$: {load:.5f}",
                 rf"$\langle E \rangle$: {avgEnergy:.3f}",
-                rf"$\langle \sigma \rangle$: {avgRSS:.3f}",
+                rf"$\langle {stress_label} \rangle$: {avgRSS:.3f}",
             ]
 
         data_row.append(rf"$N_p$: {nrPlasticEvents}")
@@ -766,12 +765,12 @@ def plot_in_poincare_disk(
     data = VTUData(vtu_file)
 
     C = data.get_C()
-    # if do_elastic_reduction:
-    #     # Do the elastic reduction
-    #     C = arrsToMat(*elastic_reduction(C[:, 0, 0], C[:, 1, 1], C[:, 0, 1]))
-    #     zoom = 3
-    # else:
-    zoom = 1
+    if do_elastic_reduction:
+        # Do the elastic reduction
+        C, _ = elastic_reduction(C)
+        zoom = 3
+    else:
+        zoom = 1
 
     g = get_energy_grid(zoom=zoom)
     plotEnergyField(
@@ -899,9 +898,27 @@ def process_frame(kwargs, attemps=0):
             process_frame(kwargs, attemps=attemps + 1)
 
 
+def _resolve_stress_column(df, macro_data):
+    if "avg_sigmaxy" in df.columns:
+        return "avg_sigmaxy", r"\sigma"
+    if "avg_RSS" in df.columns:
+        print(
+            f"Warning: 'avg_sigmaxy' not found in {macro_data}. Using 'avg_RSS' instead."
+        )
+        return "avg_RSS", r"\mathrm{RSS}"
+    if "avg_Pxy" in df.columns:
+        print(
+            f"Warning: 'avg_sigmaxy' not found in {macro_data}. Using 'avg_Pxy' instead."
+        )
+        return "avg_Pxy", r"P_{xy}"
+    raise KeyError(
+        "Missing stress column: expected 'avg_sigmaxy' (or fallback 'avg_RSS'/'avg_Pxy')."
+    )
+
+
 def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
     """
-    Extracts the corresponding "avg_energy" and "avg_sigmaxy" values for each load in vtu_files,
+    Extracts the corresponding "avg_energy" and stress values for each load in vtu_files,
     along with the line numbers (indices) of the matching rows in the CSV file.
 
     Parameters:
@@ -909,8 +926,8 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         macro_data (str): Path to the CSV file containing macro data.
 
     Returns:
-        Tuple[List[float], List[float], List[int]]: Lists of average energy, RSS values,
-        and line numbers of matching rows.
+        Tuple[List[float], List[float], List[int]]: Lists of average energy, stress values,
+        and line numbers of matching rows. Also returns the stress label used for plotting.
     """
     df = pd.read_csv(
         macro_data,
@@ -923,9 +940,10 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         #     "nr_plastic_deformations",
         # ],
     )
+    stress_col, stress_label = _resolve_stress_column(df, macro_data)
     avg_energy_list = []
     change_avg_energy_list = []
-    avg_sigmaxy_list = []
+    avg_stress_list = []
     line_numbers = []
     x_list = []
 
@@ -967,7 +985,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
 
         # Append the extracted values to the respective lists
         avg_energy_list.append(matching_row["avg_energy"])
-        avg_sigmaxy_list.append(matching_row["avg_sigmaxy"])
+        avg_stress_list.append(matching_row[stress_col])
         if "avg_energy_change" in matching_row:
             change_avg_energy_list.append(matching_row["avg_energy_change"])
             if (
@@ -997,31 +1015,37 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
             change_avg_energy_list.append(diff)
 
     # Find previous data and get change data as well
-    px, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(macro_data, line_numbers, X)
-    change_avg_sigmaxy_list = avg_sigmaxy_list - pAvgRSS
-    del_x = x_list - px
+    px, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(
+        macro_data, line_numbers, X, stress_col=stress_col
+    )
+    avg_stress_arr = np.array(avg_stress_list)
+    change_avg_stress_list = avg_stress_arr - pAvgRSS
+    del_x = np.array(x_list) - px
 
     # Return the lists of values and line numbers
     return (
         avg_energy_list,
-        avg_sigmaxy_list,
+        avg_stress_list,
         change_avg_energy_list,
-        change_avg_sigmaxy_list,
+        change_avg_stress_list,
         del_x,
         line_numbers,
+        stress_label,
     )
 
 
-def get_previous_energy_and_rss(macro_data, current_line, X="load"):
+def get_previous_energy_and_rss(
+    macro_data, current_line, X="load", stress_col="avg_sigmaxy"
+):
     # Check if current_line is an integer
     if isinstance(current_line, int):
-        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", "avg_sigmaxy"])
+        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", stress_col])
         # Select the previous row relative to current_line
         p_row = df.iloc[current_line - 1]
-        return p_row[X], p_row["avg_energy"], p_row["avg_sigmaxy"]
+        return p_row[X], p_row["avg_energy"], p_row[stress_col]
     else:
         # Handle the case where current_line is an iterable (e.g., list or array)
-        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", "avg_sigmaxy"])
+        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", stress_col])
         # Create empty lists to store previous values
         prev_x, prev_energies, prev_rss = [], [], []
 
@@ -1031,7 +1055,7 @@ def get_previous_energy_and_rss(macro_data, current_line, X="load"):
             p_row = df.iloc[line - 1]
             prev_x.append(p_row[X])
             prev_energies.append(p_row["avg_energy"])
-            prev_rss.append(p_row["avg_sigmaxy"])
+            prev_rss.append(p_row[stress_col])
 
         # Return lists of previous values
         return np.array(prev_x), np.array(prev_energies), np.array(prev_rss)
@@ -1045,9 +1069,15 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
         axis_limits = get_axis_limits(macro_data)
         e_lims = get_energy_range(vtu_files, macro_data)
         e_lims[1] = min(e_lims[1], 0.3)  # optional custom limit
-        avgEnergy, avgRSS, delAvgEnergy, delAvgRSS, delx, macroDataRowIndex = (
-            get_corresponding_energy_and_rss(vtu_files, macro_data, X)
-        )
+        (
+            avgEnergy,
+            avgRSS,
+            delAvgEnergy,
+            delAvgRSS,
+            delx,
+            macroDataRowIndex,
+            stress_label,
+        ) = get_corresponding_energy_and_rss(vtu_files, macro_data, X)
     else:
         # set default values
         axis_limits = None
@@ -1058,9 +1088,11 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
         delAvgRSS = [0] * len(vtu_files)
         delx = [0] * len(vtu_files)
         macroDataRowIndex = [0] * len(vtu_files)
+        stress_label = r"\sigma"
         # make default macro data
         macro_data = {X: 0, "loadIncrement": 0, "nrM": 0}
         kwargs["macro_data"] = macro_data
+    kwargs["stress_label"] = stress_label
 
     # Some ploting functions cannot handle multithreading
     # in particular, if we want to reuse a plot many times

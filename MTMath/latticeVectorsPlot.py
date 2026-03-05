@@ -424,8 +424,29 @@ class LatticeFigure:
         self.ax.tick_params(axis="both", which="both", length=0)
         self.ax.set_frame_on(False)
 
+    def add_corner_label(
+        self,
+        text: str,
+        color: str = "black",
+        dx: float = 0.1,
+        dy: float = 0.1,
+        fontsize: int | None = None,
+    ) -> None:
+        xmin, xmax, ymin, ymax = self.limits()
+        fs = self.font_size if fontsize is None else fontsize
+        self.ax.text(
+            xmin + dx,
+            ymax - dy,
+            text,
+            fontsize=fs,
+            ha="left",
+            va="top",
+            color=color,
+            bbox=dict(facecolor="white", edgecolor="none", pad=0.2),
+        )
 
-def simple_integer_shear_transformation():
+
+def integer_shear_examples():
     # Define vectors e1 and three versions of e2
     e1: Vec2 = (1, 0)
     e2_list = [(-1, 1), (0, 1), (1, 1)]  # Different cases for e2
@@ -541,10 +562,136 @@ def two_lattices_side_by_side():
     lf2.style_axis(set_ax_lims=False)
 
     plt.tight_layout()
+    path = Path("Plots/TwoLattices.pdf")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, bbox_inches="tight")
+    print(f"Fig saved to : {path}")
+    plt.show()
+
+
+def four_lattices_translation_rotation(
+    translation: float | Vec2 = 0.2,
+    rotation_deg: float = 10.0,
+):
+    """Show translation and rotation freedoms using two lattice pairs."""
+
+    fig, ax = plt.subplots(figsize=(9, 4))
+
+    # Base lattice vectors.
+    e1: Vec2 = (1.0, 0.0)
+    e2: Vec2 = (0.0, 1.0)
+
+    if isinstance(translation, (int, float)):
+        t = np.array([float(translation), float(translation)])
+    else:
+        t = np.array([float(translation[0]), float(translation[1])])
+
+    theta = np.deg2rad(rotation_deg)
+    rot = np.array(
+        [
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta), np.cos(theta)],
+        ]
+    )
+    e1_rot = rot @ np.array(e1, dtype=float)
+    e2_rot = rot @ np.array(e2, dtype=float)
+
+    # Left/right bounding boxes so the two pairs stay separate.
+    half_span_x = 1.1
+    half_span_y = 1.5
+    x_center_left = -1.7
+    x_center_right = 1.7
+    y_center = 0.5
+    left_limits = (
+        x_center_left - half_span_x,
+        x_center_left + half_span_x,
+        y_center - half_span_y,
+        y_center + half_span_y,
+    )
+    right_limits = (
+        x_center_right - half_span_x,
+        x_center_right + half_span_x,
+        y_center - half_span_y,
+        y_center + half_span_y,
+    )
+
+    # Translation pair (left).
+    o_left: Vec2 = (x_center_left, 0.0)
+    o_left_shift: Vec2 = (o_left[0] + t[0], o_left[1] + t[1])
+
+    lf_left = LatticeFigure(
+        ax,
+        limits=left_limits,
+        basis=(e1, e2),
+        origin=o_left,
+        point_fmt="ko",
+        grid_color="lightgray",
+        vector_color="black",
+    )
+    lf_left_shift = LatticeFigure(
+        ax,
+        limits=left_limits,
+        basis=(e1, e2),
+        origin=o_left_shift,
+        point_fmt="bo",
+        grid_color="lightgray",
+        vector_color="tab:blue",
+    )
+
+    lf_left.draw_parallelogram(e1, e2, color="black")
+    lf_left_shift.draw_parallelogram(e1, e2, color="tab:blue")
+
+    lf_left.style_axis(set_ax_lims=False, draw_grid=True, draw_points=True)
+    lf_left_shift.style_axis(set_ax_lims=False, draw_grid=True, draw_points=True)
+
+    lf_left.add_corner_label("A")
+    # Rotation pair (right).
+    o_right: Vec2 = (x_center_right, 0.0)
+
+    lf_right = LatticeFigure(
+        ax,
+        limits=right_limits,
+        basis=(e1, e2),
+        origin=o_right,
+        point_fmt="ko",
+        grid_color="lightgray",
+        vector_color="black",
+    )
+    lf_right_rot = LatticeFigure(
+        ax,
+        limits=right_limits,
+        basis=(e1_rot, e2_rot),
+        origin=o_right,
+        point_fmt="ro",
+        grid_color="tab:red",
+        vector_color="tab:red",
+    )
+
+    lf_right.draw_parallelogram(e1, e2, color="black")
+    lf_right_rot.draw_parallelogram(e1_rot, e2_rot, color="tab:red")
+
+    lf_right.style_axis(set_ax_lims=False, draw_grid=True, draw_points=True)
+    lf_right_rot.style_axis(set_ax_lims=False, draw_grid=True, draw_points=True)
+
+    lf_right.add_corner_label("B")
+
+    plt.tight_layout()
+    path = Path("Plots/TranslationAndRotation.pdf")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, bbox_inches="tight")
+    print(f"Fig saved to : {path}")
     plt.show()
 
 
 if __name__ == "__main__":
-    # simple_integer_shear_transformation()
+    # integer_shear_examples()
     # three_bases_same_lattice()
-    two_lattices_side_by_side()
+    # two_lattices_side_by_side()
+    four_lattices_translation_rotation()
+
+    # f = np.array(((1, 0), (0.25, 1)))
+    # v = np.array((8, 0))
+    # v1 = np.array((5, 0.25))
+    # v2 = np.array((3, 0.25))
+    # print(f @ v1)
+    # print(f @ v2)

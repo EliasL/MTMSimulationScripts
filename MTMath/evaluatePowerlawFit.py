@@ -7,6 +7,8 @@ from numpy import nan
 
 # For checking how many processes are available
 import os
+import tempfile
+import uuid
 
 # For parallelization
 import multiprocessing
@@ -53,6 +55,91 @@ def _suppress_powerlaw_warnings():
         category=OptimizeWarning,
         module=r"powerlaw\.distributions",
     )
+
+
+_MEMMAP_CACHE: dict[tuple[str, str, tuple[int, ...]], np.memmap] = {}
+
+
+def _load_memmap(spec):
+    key = (
+        spec["memmap_path"],
+        spec["dtype"],
+        tuple(spec["shape"]),
+    )
+    if key not in _MEMMAP_CACHE:
+        _MEMMAP_CACHE[key] = np.memmap(
+            spec["memmap_path"],
+            mode="r",
+            dtype=np.dtype(spec["dtype"]),
+            shape=tuple(spec["shape"]),
+        )
+    return _MEMMAP_CACHE[key]
+
+
+def _coerce_param_list(params, parameter_names):
+    if not parameter_names:
+        return None
+    if params is None:
+        return None
+    if isinstance(params, dict):
+        return [params.get(p, nan) for p in parameter_names]
+    try:
+        seq = list(params)
+    except TypeError:
+        return None
+    if len(seq) == len(parameter_names):
+        return seq
+    return None
+
+
+def _fit_xmin_batch_worker(args):
+    (
+        data_spec,
+        xmin_values,
+        xmin_distance,
+        dist_cls,
+        xmax,
+        discrete,
+        fit_method,
+        parameter_ranges,
+        parameter_constraints,
+        estimate_discrete,
+        parameter_names,
+        initial_params,
+    ) = args
+
+    if isinstance(data_spec, dict) and "memmap_path" in data_spec:
+        data = _load_memmap(data_spec)
+    else:
+        data = data_spec
+
+    prev_params = _coerce_param_list(initial_params, parameter_names)
+    distances = []
+    params_out = []
+    valid_out = []
+
+    for xmin in xmin_values:
+        pl = dist_cls(
+            xmin=xmin,
+            xmax=xmax,
+            discrete=discrete,
+            fit_method=fit_method,
+            data=data,
+            parameters=prev_params,
+            parameter_ranges=parameter_ranges,
+            parameter_constraints=parameter_constraints,
+            parent_Fit=None,
+            estimate_discrete=estimate_discrete,
+            verbose=0,
+        )
+        param_vals = [getattr(pl, p, nan) for p in parameter_names]
+        if parameter_names and np.isfinite(param_vals).any():
+            prev_params = param_vals
+        distances.append(getattr(pl, xmin_distance))
+        params_out.append(param_vals)
+        valid_out.append(pl.in_range() and not pl.noise_flag)
+
+    return distances, params_out, valid_out
 
 
 def _upper_incomplete_gamma(a, x):
@@ -563,12 +650,72 @@ class Fit(powerlaw.Fit):
                 verbose,
             )
 
+    def new_find_xmin(self):
+        """
+        This is an experimental method meant to find a better xmin than the one
+        commonly found by using the global minimum of the KS distance. This
+        method makes two assumptions that appear to be valid for representative
+        synthetic data that I have seen:
+        1) The KS distance has two regions. One region of high KS distance
+        before xmin, and a region of comparatively low KS distance after
+        xmin. 2) At the transition from the high to the low region, there is a
+        change in the KS-distance (D) that can be  detected by dD/dlog(xmin).
+        This algorithm has two stages: First identify the two regions, and attempt
+        to make a small interval to search in. Second, compute the derivative of
+        the KS-distance in this region and choose the minimum of the derivative
+        as the chosen xmin value
+        """
+        # Grab the indices of possible xmin values
+        possible_ind = np.where(
+            (self.data >= np.min(self.xmin_range))
+            & (self.data < np.max(self.xmin_range))
+        )
+        possible_xmin = self.data[possible_ind]
+
+        # Take unique values
+        possible_xmin, possible_ind = np.unique(possible_xmin, return_index=True)
+
+        # Don't look at last xmin, as that's also the xmax
+        possible_xmin = possible_xmin[:-1]
+        possible_ind = possible_ind[:-1]
+
+        parameter_names = list(getattr(self.xmin_distribution, "parameter_names", []))
+
+        def fit_function(xmin):
+            # Generate a distribution with the current values of xmin
+            pl = self.xmin_distribution(
+                xmin=xmin,
+                xmax=self.xmax,
+                discrete=self.discrete,
+                fit_method=self.fit_method,
+                data=self.data,
+                parameter_ranges=self.parameter_ranges,
+                parameter_constraints=self.parameter_constraints,
+                parent_Fit=self,
+                estimate_discrete=self.estimate_discrete,
+                verbose=0,
+            )
+            param_vals = [getattr(pl, p, nan) for p in parameter_names]
+            return (
+                pl.D,
+                param_vals,
+                (pl.in_range() and not pl.noise_flag),
+            )
+
+        # Stage 1:
+
     def find_xmin(
         self,
         xmin_distance=None,
         use_fast_search=None,
         xmin_accuracy=None,
         retain_factor=3.0,
+        parallel=True,
+        max_workers=None,
+        batch_size=None,
+        use_memmap=True,
+        memmap_min_size=5e4,
+        memmap_dir=None,
     ):
         # This function will be called if xmin is None, and we will already
         # have a defined xmin_range from __init__
@@ -632,23 +779,10 @@ class Fit(powerlaw.Fit):
         num_params = len(parameter_names)
         num_xmin = len(possible_xmin)
 
-        def _coerce_param_list(params):
-            if not num_params:
-                return None
-            if params is None:
-                return None
-            if isinstance(params, dict):
-                return [params.get(p, nan) for p in parameter_names]
-            try:
-                seq = list(params)
-            except TypeError:
-                return None
-            if len(seq) == num_params:
-                return seq
-            return None
-
         # Reuse the previous xmin's fitted parameters as the next initial guess.
-        prev_params = _coerce_param_list(getattr(self, "initial_parameters", None))
+        prev_params = _coerce_param_list(
+            getattr(self, "initial_parameters", None), parameter_names
+        )
 
         def fit_function(xmin):
             nonlocal prev_params
@@ -697,6 +831,96 @@ class Fit(powerlaw.Fit):
             evaluated[i] = True
             return distances[i]
 
+        if parallel is None:
+            parallel = getattr(self, "parallel_xmin", PARALLEL_ENABLE)
+
+        if max_workers is None:
+            max_workers = getattr(self, "xmin_max_workers", None)
+        if max_workers is None and parallel and len(self.data) >= 5e4:
+            max_workers = 6
+
+        data_spec = self.data
+        memmap_path = None
+        if parallel and use_memmap and len(self.data) >= memmap_min_size:
+            data_array = np.asarray(self.data)
+            memmap_dir = memmap_dir or tempfile.gettempdir()
+            os.makedirs(memmap_dir, exist_ok=True)
+            memmap_path = os.path.join(
+                memmap_dir, f"find_xmin_{os.getpid()}_{uuid.uuid4().hex}.dat"
+            )
+            mmap = np.memmap(
+                memmap_path,
+                dtype=data_array.dtype,
+                mode="w+",
+                shape=data_array.shape,
+            )
+            mmap[:] = data_array[:]
+            mmap.flush()
+            data_spec = {
+                "memmap_path": memmap_path,
+                "dtype": str(data_array.dtype),
+                "shape": data_array.shape,
+            }
+
+        def _eval_indices_parallel(indices, desc="Fitting xmin"):
+            if not indices:
+                return
+            nonlocal distances, parameters, valid_fits, evaluated
+            if batch_size is None:
+                workers = max_workers or (os.cpu_count() or 1)
+                batch = int(np.ceil(len(indices) / max(1, workers * 2)))
+                local_batch_size = max(1, min(256, batch))
+            else:
+                local_batch_size = int(batch_size)
+
+            batches = [
+                indices[i : i + local_batch_size]
+                for i in range(0, len(indices), local_batch_size)
+            ]
+
+            args_common = (
+                xmin_distance,
+                self.xmin_distribution,
+                self.xmax,
+                self.discrete,
+                self.fit_method,
+                self.parameter_ranges,
+                self.parameter_constraints,
+                self.estimate_discrete,
+                parameter_names,
+                getattr(self, "initial_parameters", None),
+            )
+
+            tasks = [
+                (
+                    data_spec,
+                    possible_xmin[batch].tolist(),
+                    *args_common,
+                )
+                for batch in batches
+            ]
+
+            from concurrent.futures import ProcessPoolExecutor
+
+            progress = tqdm(total=len(indices), desc=desc, disable=not self.verbose)
+            try:
+                with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                    results_iter = ex.map(_fit_xmin_batch_worker, tasks)
+                    for batch, (d_list, params_list, valid_list) in zip(
+                        batches, results_iter
+                    ):
+                        for idx, d, params_i, valid_i in zip(
+                            batch, d_list, params_list, valid_list
+                        ):
+                            distances[idx] = d
+                            valid_fits[idx] = bool(valid_i)
+                            if num_params:
+                                parameters[idx, :] = np.asarray(params_i, dtype=float)
+                            evaluated[idx] = True
+                        progress.update(len(batch))
+            finally:
+                progress.close()
+
         def _nearest_true(arr, start):
             "Find closest true indexes"
             right = np.flatnonzero(arr[start:])
@@ -716,75 +940,122 @@ class Fit(powerlaw.Fit):
             t = (i - L) / (R - L)
             return (1 - t) * distances[L] + t * distances[R]
 
-        if not use_fast_search:
-            # --- Exhaustive evaluation over all candidate xmins (original behavior)
-            with warnings.catch_warnings():
-                _suppress_powerlaw_warnings()
+        try:
+            if not use_fast_search:
+                # --- Exhaustive evaluation over all candidate xmins (original behavior)
+                with warnings.catch_warnings():
+                    _suppress_powerlaw_warnings()
 
-                iterator = (
-                    tqdm(range(num_xmin), desc="Fitting xmin")
-                    if self.verbose
-                    else range(num_xmin)
+                    if parallel:
+                        try:
+                            indices = list(range(num_xmin))
+                            _eval_indices_parallel(indices)
+                        except Exception as e:
+                            if self.verbose:
+                                print(
+                                    f"Parallel find_xmin failed, falling back to serial: {e}"
+                                )
+                            iterator = (
+                                tqdm(range(num_xmin), desc="Fitting xmin")
+                                if self.verbose
+                                else range(num_xmin)
+                            )
+                            for i in iterator:
+                                _eval_index(int(i))
+                    else:
+                        iterator = (
+                            tqdm(range(num_xmin), desc="Fitting xmin")
+                            if self.verbose
+                            else range(num_xmin)
+                        )
+                        for i in iterator:
+                            _eval_index(int(i))
+            else:
+                # Strategy:
+                # Pass over xmin with a certain stepsize
+                # Only evaluate if the linear approximation from known values is
+                # within the retain factor times the smallest found value
+                # Once you are at the end, choose a smaller step size
+                iteration = 0
+                min_step = max(1, int(round(1.0 / xmin_accuracy)))
+                max_iterations = int(
+                    np.ceil(np.log2(num_xmin / (np.log2(num_xmin) * min_step)))
                 )
-                for i in iterator:
-                    _eval_index(int(i))
-        else:
-            # Strategy:
-            # Pass over xmin with a certain stepsize
-            # Only evaluate if the linear approximation from known values is
-            # within the retain factor times the smallest found value
-            # Once you are at the end, choose a smaller step size
-            iteration = 0
-            min_step = max(1, int(round(1.0 / xmin_accuracy)))
-            max_iterations = int(
-                np.ceil(np.log2(num_xmin / (np.log2(num_xmin) * min_step)))
-            )
-            current_best = np.inf
-            previous_best = np.inf
+                current_best = np.inf
+                previous_best = np.inf
 
-            def _should_prune(est: float | None) -> bool:
-                # If we can't estimate, do not prune.
-                if est is None or not np.isfinite(est):
-                    return False
-                return est >= previous_best * retain_factor  # prune when clearly worse
+                def _should_prune(est: float | None) -> bool:
+                    # If we can't estimate, do not prune.
+                    if est is None or not np.isfinite(est):
+                        return False
+                    return (
+                        est >= previous_best * retain_factor
+                    )  # prune when clearly worse
 
-            with warnings.catch_warnings():
-                _suppress_powerlaw_warnings()
+                with warnings.catch_warnings():
+                    _suppress_powerlaw_warnings()
 
-                while True:
-                    iteration += 1
-                    step_size = int(
-                        np.ceil(num_xmin / (np.log2(num_xmin) * 2**iteration))
+                    while True:
+                        iteration += 1
+                        step_size = int(
+                            np.ceil(num_xmin / (np.log2(num_xmin) * 2**iteration))
+                        )
+
+                        if self.verbose:
+                            print(f"Pass nr: {iteration}/{max_iterations}")
+
+                        candidate_indices = []
+                        for i in range(0, num_xmin, step_size):
+                            if evaluated[i]:
+                                continue
+
+                            est = _estimate_val(i)
+                            if _should_prune(est):
+                                continue
+                            candidate_indices.append(int(i))
+
+                        if candidate_indices:
+                            if parallel:
+                                try:
+                                    _eval_indices_parallel(candidate_indices)
+                                except Exception as e:
+                                    if self.verbose:
+                                        print(
+                                            f"Parallel find_xmin failed, falling back to serial: {e}"
+                                        )
+                                    for i in tqdm(
+                                        candidate_indices,
+                                        disable=not self.verbose,
+                                    ):
+                                        _eval_index(int(i))
+                            else:
+                                for i in tqdm(
+                                    candidate_indices,
+                                    disable=not self.verbose,
+                                ):
+                                    _eval_index(int(i))
+
+                            cand = np.asarray(distances)[candidate_indices]
+                            if np.isfinite(cand).any():
+                                current_best = min(current_best, np.nanmin(cand))
+
+                        previous_best = current_best
+                        if step_size <= min_step:
+                            break
+
+                if self.verbose:
+                    print(
+                        f"This was {num_xmin / np.sum(evaluated):.0f} times faster than a full search!"
                     )
-
-                    if self.verbose:
-                        print(f"Pass nr: {iteration}/{max_iterations}")
-
-                    for i in tqdm(
-                        range(0, num_xmin, step_size),
-                        disable=not self.verbose,
-                    ):
-                        if evaluated[i]:
-                            continue
-
-                        est = _estimate_val(i)
-                        if _should_prune(est):
-                            continue
-
-                        d = _eval_index(i)
-                        if np.isfinite(d) and d < current_best:
-                            current_best = d
-
-                    previous_best = current_best
-                    if step_size <= min_step:
-                        break
-            if self.verbose:
-                print(
-                    f"This was {num_xmin / np.sum(evaluated):.0f} times faster than a full search!"
-                )
-                print(
-                    "Note that the best xmin might not have been found. Set Fit.fast_xmin=False to do a full search."
-                )
+                    print(
+                        "Note that the best xmin might not have been found. Set Fit.fast_xmin=False to do a full search."
+                    )
+        finally:
+            if memmap_path and os.path.exists(memmap_path):
+                try:
+                    os.remove(memmap_path)
+                except OSError:
+                    pass
 
         # Only consider evaluated candidates; the objective is discrete and may be
         # expensive to compute everywhere.
@@ -879,7 +1150,13 @@ class Fit(powerlaw.Fit):
 
     @staticmethod
     def _fit_on_sample(
-        sample, dist: type[Distribution], xmin, xmax, discrete, fit_method
+        sample,
+        dist: type[Distribution],
+        xmin,
+        xmax,
+        discrete,
+        fit_method,
+        parameter_names=None,
     ):
         with warnings.catch_warnings():
             _suppress_powerlaw_warnings()
@@ -890,7 +1167,11 @@ class Fit(powerlaw.Fit):
                 discrete=discrete,
                 fit_method=fit_method,
             )
-        return m.D, getattr(m, m.parameter1_name)
+        if parameter_names:
+            param_vals = [getattr(m, p, nan) for p in parameter_names]
+        else:
+            param_vals = [getattr(m, m.parameter1_name)]
+        return m.D, param_vals
 
     def evaluate_fit(
         self,
@@ -900,6 +1181,7 @@ class Fit(powerlaw.Fit):
         use_cache=True,
         cache_dir=".eval_cache",
         tqdmDesc="",
+        max_synthetic_samples=5e6,
     ):
         """
         Evaluate fit, optionally parallel, and cache computed scalars on disk via JSON.
@@ -908,10 +1190,10 @@ class Fit(powerlaw.Fit):
         -----
         - If `use_cache` is True and a cache hit occurs, this loads cached values and
           updates *only* the computed attributes in-place:
-          `p`, `p_std`, `alpha_mean`, `alpha_std`.
+          `p`, `p_std`, `alpha_mean`, `alpha_std`, plus any cached parameter means/stds.
         - The cache key depends on key params and a SHA-1 hash of the (trimmed) data.
         """
-        from numpy import array_split, mean, std, asarray
+        from numpy import mean, std, asarray
         from functools import partial
         from tqdm import tqdm
 
@@ -947,64 +1229,151 @@ class Fit(powerlaw.Fit):
                     self.alpha_mean = float(payload["alpha_mean"])
                     self.alpha_std = float(payload["alpha_std"])
 
-                    return self.p, self.alpha_mean, self.alpha_std
+                    parameter_names = list(
+                        getattr(self.xmin_distribution, "parameter_names", [])
+                    )
+                    param_means = payload.get("param_means")
+                    param_stds = payload.get("param_stds")
+                    if not parameter_names:
+                        cache_complete = True
+                    else:
+                        cache_complete = bool(param_means) and bool(param_stds)
+                        if cache_complete:
+                            cache_complete = all(
+                                (name in param_means and name in param_stds)
+                                for name in parameter_names
+                            )
+
+                    if cache_complete and parameter_names:
+                        for name, mean_val in param_means.items():
+                            setattr(self, f"{name}_mean", float(mean_val))
+                        for name, std_val in param_stds.items():
+                            setattr(self, f"{name}_std", float(std_val))
+                        if "alpha" in param_means:
+                            self.alpha_mean = float(param_means["alpha"])
+                        if "alpha" in param_stds:
+                            self.alpha_std = float(param_stds["alpha"])
+
+                        return self.p, self.alpha_mean, self.alpha_std
                 except Exception:
                     # fall through to recompute if loading fails
                     pass
 
         # Get distribution (Let me know if there is a better way to do this)
         dist = dist_from_fit(self)
-        # --- no (usable) cache: compute
-        synthetic_data = dist.generate_random(len(data) * nr_sets)
-        if synthetic_data is None:
-            print("Fit not evaluated.")
-            self.p = -0.01
-            self.p_std = 0
-            # keep both mean and std; fix the original overwrite bug
-            self.alpha_mean = 0
-            self.alpha_std = 0
-            # If you don't want non results to be saved, return here
-            # return self.p, self.alpha_mean, self.alpha_std
-        else:
-            synthetic_sets = array_split(synthetic_data, nr_sets)
+        # --- no (usable) cache: compute in batches to cap memory
+        samples_per_set = len(data)
+        if max_synthetic_samples is None:
+            max_synthetic_samples = samples_per_set * nr_sets
+        max_synthetic_samples = int(max_synthetic_samples)
+        sets_per_batch = max(1, max_synthetic_samples // max(1, samples_per_set))
 
-            worker = partial(
-                self._fit_on_sample,
-                dist=self.xmin_distribution,
-                xmin=self.xmin,
-                xmax=self.xmax,
-                discrete=self.discrete,
-                fit_method=self.fit_method,
-            )
+        parameter_names = list(getattr(self.xmin_distribution, "parameter_names", []))
+        worker = partial(
+            self._fit_on_sample,
+            dist=self.xmin_distribution,
+            xmin=self.xmin,
+            xmax=self.xmax,
+            discrete=self.discrete,
+            fit_method=self.fit_method,
+            parameter_names=parameter_names,
+        )
 
-            with warnings.catch_warnings():
-                _suppress_powerlaw_warnings()
-                if parallel:
-                    from concurrent.futures import ProcessPoolExecutor
+        D_vals = []
+        param_vals = []
+        remaining = nr_sets
 
-                    with ProcessPoolExecutor() as ex:
-                        results = list(
-                            tqdm(
-                                ex.map(worker, synthetic_sets),
-                                total=len(synthetic_sets),
-                                desc=tqdmDesc,
-                            )
+        with warnings.catch_warnings():
+            _suppress_powerlaw_warnings()
+            if parallel:
+                from concurrent.futures import ProcessPoolExecutor
+
+                with ProcessPoolExecutor() as ex:
+                    progress = tqdm(total=nr_sets, desc=tqdmDesc)
+                    while remaining > 0:
+                        batch_sets = min(sets_per_batch, remaining)
+                        synthetic_data = dist.generate_random(
+                            samples_per_set * batch_sets
                         )
-
-                else:
+                        if synthetic_data is None:
+                            print("Fit not evaluated.")
+                            self.p = -0.01
+                            self.p_std = 0
+                            self.alpha_mean = 0
+                            self.alpha_std = 0
+                            progress.close()
+                            break
+                        if batch_sets == 1:
+                            synthetic_sets = [synthetic_data]
+                        else:
+                            synthetic_sets = synthetic_data.reshape(
+                                batch_sets, samples_per_set
+                            )
+                        results = list(ex.map(worker, synthetic_sets))
+                        progress.update(len(results))
+                        batch_D, batch_params = zip(*results)
+                        D_vals.extend(batch_D)
+                        param_vals.extend(batch_params)
+                        remaining -= batch_sets
+                    progress.close()
+            else:
+                progress = tqdm(total=nr_sets, desc=tqdmDesc)
+                while remaining > 0:
+                    batch_sets = min(sets_per_batch, remaining)
+                    synthetic_data = dist.generate_random(samples_per_set * batch_sets)
+                    if synthetic_data is None:
+                        print("Fit not evaluated.")
+                        self.p = -0.01
+                        self.p_std = 0
+                        self.alpha_mean = 0
+                        self.alpha_std = 0
+                        progress.close()
+                        break
+                    if batch_sets == 1:
+                        synthetic_sets = [synthetic_data]
+                    else:
+                        synthetic_sets = synthetic_data.reshape(
+                            batch_sets, samples_per_set
+                        )
                     results = [worker(s) for s in synthetic_sets]
+                    progress.update(len(results))
+                    batch_D, batch_params = zip(*results)
+                    D_vals.extend(batch_D)
+                    param_vals.extend(batch_params)
+                    remaining -= batch_sets
+                progress.close()
 
+        if D_vals:
             # --- aggregate results
-            D_vals, alpha_vals = zip(*results)
-            # ensure vectorized compare
             dist = dist_from_fit(self)
             self.p = mean(asarray(D_vals) >= dist.D)
-
-            # keep both mean and std; fix the original overwrite bug
-            self.alpha_mean = mean(alpha_vals)
-            self.alpha_std = std(alpha_vals)
-            # a conservative bound for p-uncertainty (optional; keep if you use it elsewhere)
             self.p_std = confidence
+
+            param_means = {}
+            param_stds = {}
+            if parameter_names and param_vals:
+                by_name = {name: [] for name in parameter_names}
+                for params in param_vals:
+                    if not params:
+                        continue
+                    for name, val in zip(parameter_names, params):
+                        if np.isfinite(val):
+                            by_name[name].append(val)
+                for name, vals in by_name.items():
+                    if vals:
+                        param_means[name] = float(mean(vals))
+                        param_stds[name] = float(std(vals))
+                        setattr(self, f"{name}_mean", param_means[name])
+                        setattr(self, f"{name}_std", param_stds[name])
+
+            if "alpha" in param_means:
+                self.alpha_mean = param_means["alpha"]
+                self.alpha_std = param_stds.get("alpha", 0.0)
+            else:
+                # fallback if alpha wasn't part of parameter_names
+                alpha_vals = [p[0] for p in param_vals if p]
+                self.alpha_mean = mean(alpha_vals) if alpha_vals else 0.0
+                self.alpha_std = std(alpha_vals) if alpha_vals else 0.0
 
         # --- save computed scalars if requested (atomic JSON write)
         if use_cache and cache_path is not None:
@@ -1019,6 +1388,13 @@ class Fit(powerlaw.Fit):
                     "alpha_mean": float(self.alpha_mean),
                     "alpha_std": float(self.alpha_std),
                 }
+                if "param_means" not in locals():
+                    param_means = {}
+                if "param_stds" not in locals():
+                    param_stds = {}
+                if param_means or param_stds:
+                    payload["param_means"] = param_means
+                    payload["param_stds"] = param_stds
 
                 os.makedirs(os.path.dirname(cache_path) or ".", exist_ok=True)
 

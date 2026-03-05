@@ -24,7 +24,7 @@ def showDecomposition():
         label=r"$\mathbf{C}$"
     )
 
-    CE, M = elastic_reduction(C0)
+    CE, M = elastic_reduction(C0, compute_M=True)
     M_inv = np.linalg.inv(M)
     F_P = M_inv
     F_E = F0@M

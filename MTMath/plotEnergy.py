@@ -4,7 +4,6 @@ import numpy as np
 from .energyFunction import (
     EnergyFunction,
     ContiEnergy,
-    lagrange_reduction,
     SShear,
     F_from_C,
 )

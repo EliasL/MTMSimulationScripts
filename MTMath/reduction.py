@@ -164,9 +164,10 @@ def elastic_domain_quadrant(C) -> NDArray[np.int_]:
     return labels
 
 
-def elastic_reduction_components(C11, C22, C12, loops=1000):
+def elastic_reduction_components(C11, C22, C12, loops=1000, compute_M=False):
     """Vectorized elastic reduction of symmetric 2x2 C via component updates.
-    Also returns M such that C_reduced = M.T @ C @ M.
+    Also returns M such that C_reduced = M.T @ C @ M. If compute_M=False,
+    M is a small zero placeholder to keep the return signature consistent.
     """
     C11a = np.asarray(C11, dtype=float)
     C22a = np.asarray(C22, dtype=float)
@@ -180,9 +181,12 @@ def elastic_reduction_components(C11, C22, C12, loops=1000):
     c = C12b.copy()
 
     # Accumulate right-multiplication matrices M such that C_reduced = M.T @ C @ M
-    M = np.zeros(a.shape + (2, 2), dtype=float)
-    M[..., 0, 0] = 1.0
-    M[..., 1, 1] = 1.0
+    if compute_M:
+        M = np.zeros(a.shape + (2, 2), dtype=float)
+        M[..., 0, 0] = 1.0
+        M[..., 1, 1] = 1.0
+    else:
+        M = None
 
     def _in_elastic(a_, b_, c_):
         Cmin = np.minimum(a_, b_)
@@ -228,13 +232,14 @@ def elastic_reduction_components(C11, C22, C12, loops=1000):
             b = np.where(use_U, b_new, b)
             # a unchanged for U
 
-            # Accumulate M <- M @ U_m (per-entry m)
-            M_mask = M[use_U]
-            W = np.zeros_like(M_mask)
-            W[..., 0, 0] = 1.0
-            W[..., 1, 1] = 1.0
-            W[..., 0, 1] = m[use_U]
-            M[use_U] = M_mask @ W
+            if compute_M:
+                # Accumulate M <- M @ U_m (per-entry m)
+                M_mask = M[use_U]
+                W = np.zeros_like(M_mask)
+                W[..., 0, 0] = 1.0
+                W[..., 1, 1] = 1.0
+                W[..., 0, 1] = m[use_U]
+                M[use_U] = M_mask @ W
 
         # --- Apply V_m where selected: W = [[1,0],[m,1]] ---
         # b' = b
@@ -249,27 +254,32 @@ def elastic_reduction_components(C11, C22, C12, loops=1000):
             a = np.where(use_V, a_new, a)
             # b unchanged for V
 
-            # Accumulate M <- M @ V_m (per-entry m)
-            M_mask = M[use_V]
-            W = np.zeros_like(M_mask)
-            W[..., 0, 0] = 1.0
-            W[..., 1, 1] = 1.0
-            W[..., 1, 0] = m[use_V]
-            M[use_V] = M_mask @ W
+            if compute_M:
+                # Accumulate M <- M @ V_m (per-entry m)
+                M_mask = M[use_V]
+                W = np.zeros_like(M_mask)
+                W[..., 0, 0] = 1.0
+                W[..., 1, 1] = 1.0
+                W[..., 1, 0] = m[use_V]
+                M[use_V] = M_mask @ W
 
     if not done:
         print("Warning! Not enough loops in elastic reduction!")
+    if not compute_M:
+        # Placeholder to keep return signature consistent without large allocations.
+        M = np.zeros((2, 2), dtype=float)
     # Preserve scalar return type when inputs are scalars
     if a.shape == ():
         return float(a), float(b), float(c), M
     return a, b, c, M
 
 
-def elastic_reduction(C, loops=1000):
+def elastic_reduction(C, loops=1000, compute_M=False):
     """Return an elastically reduced copy of symmetric 2x2 matrices C.
 
     This function does **not** modify the input `C`.
-    Returns (C_reduced, M) where C_reduced = M.T @ C @ M.
+    Returns (C_reduced, M) where C_reduced = M.T @ C @ M. If compute_M=False,
+    M is a small zero placeholder to keep the return signature consistent.
     """
     assert C.shape[-2:] == (2, 2), "C must have shape (..., 2, 2)"
     assert np.allclose(C[..., 1, 0], C[..., 0, 1], equal_nan=True), (
@@ -283,7 +293,9 @@ def elastic_reduction(C, loops=1000):
     # Extract views (no copy) from the output array
     C11, C22, C12 = C_out[..., 0, 0], C_out[..., 1, 1], C_out[..., 0, 1]
 
-    C11r, C22r, C12r, M = elastic_reduction_components(C11, C22, C12, loops=loops)
+    C11r, C22r, C12r, M = elastic_reduction_components(
+        C11, C22, C12, loops=loops, compute_M=compute_M
+    )
 
     C_out[..., 0, 0] = C11r
     C_out[..., 1, 1] = C22r
@@ -302,7 +314,9 @@ def reduce_components(C11, C22, C12, loops=1000, fullReduction=False):
     fundamental domain (C12 >= 0 and C11 <= C22).
     Returns (C11, C22, C12, M) where C_reduced = M.T @ C @ M.
     """
-    C11r, C22r, C12r, M = elastic_reduction_components(C11, C22, C12, loops=loops)
+    C11r, C22r, C12r, M = elastic_reduction_components(
+        C11, C22, C12, loops=loops, compute_M=True
+    )
 
     if fullReduction:
         m1 = np.array([[1, 0], [0, -1]], dtype=float)
@@ -396,7 +410,7 @@ def MCheck_reductions():
     C = F.T @ F
     # Easy
     MCheck_reduction(lagrange_reduction, C)
-    MCheck_reduction(elastic_reduction, C)
+    MCheck_reduction(lambda C: elastic_reduction(C, compute_M=True), C)
     MCheck_reduction(reduce, C)
     MCheck_reduction(lambda C: reduce(C, fullReduction=True), C)
     C_lr, _ = lagrange_reduction(C)
@@ -406,7 +420,7 @@ def MCheck_reductions():
     F2 = F @ F @ F.T @ np.array([[1, -1.4], [0, 1]])
     C2 = F2.T @ F2
     MCheck_reduction(lagrange_reduction, C2)
-    MCheck_reduction(elastic_reduction, C2)
+    MCheck_reduction(lambda C: elastic_reduction(C, compute_M=True), C2)
     MCheck_reduction(reduce, C2)
     MCheck_reduction(lambda C: reduce(C, fullReduction=True), C2)
     C2_lr, _ = lagrange_reduction(C2)
@@ -474,6 +488,21 @@ def speedTest_reduction(n=1, steps=80, seed=0):
     print(f"reduce(fullReduction=True): {t3 - t2:.3f} s")
 
 
+def reductionTest():
+    F = np.array([[47, 95], [215, 460]])
+    F_R, _ = lagrange_reduction_F(F)
+    print(F_R)
+    a = np.array((3, 4))
+    b = np.array((300, 500))
+    c = a * 2352 - 12 * b
+    d = a * 2322 - 14 * b
+    F = np.array((c, d)).T
+    print(F)
+    F_R, _ = lagrange_reduction_F(F)
+    print(F_R)
+
+
 if __name__ == "__main__":
     MCheck_reductions()
     speedTest_reduction()
+    reductionTest()

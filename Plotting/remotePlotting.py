@@ -6,6 +6,7 @@ import time
 import random
 import threading
 import pandas as pd
+from pandas.errors import ParserError
 from .makePlots import (
     makePlot,
     makeAverageComparisonPlot,
@@ -14,17 +15,19 @@ from .makePlots import (
 )
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
-from .fixLineNumbers import fix_csv_files_in_data_folder, fix_csv_files
+from .fixLineNumbers import fix_csv_files_in_data_folder
 from Management.connectToCluster import getServerUserName
 from tqdm import tqdm
 import numpy as np
 from Plotting.plotPowerLaw import plot_powerlaw, plot_plastic_counts
+from Management.updateCSV import fix_csv_files
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 # Now we can import from Management
 from Management.connectToCluster import connectToCluster, Servers, download_folders
 from Management.configGenerator import ConfigGenerator, SimulationConfig
+from Management.updateCSV import fix_mixed_macrodata_csv
 
 FOLDER_PATH = "/Users/elias/Work/PhD/Code/remoteData"
 FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
@@ -326,8 +329,6 @@ def get_csv_from_server(server, configs):
         # Ask the user if the smaller folder should be deleted
         # Delete the folder
         # delete_double_folders(data_paths, ssh, server)
-        return
-        return get_csv_from_server(server, configs)
 
     # Go through each user directory we found (/data/<user>, /data2/<user>, ...)
     for data_path in data_paths:
@@ -423,16 +424,14 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
     if forceUpdate:
         return [], configs
 
-    paths, remaining_configs = [], []
+    found_paths: dict[str, str] = {}
+    remaining_configs = []
     # If an incomplete file is older than x hours, we update it
     updateAfterHours = 12
     search_folders = ["/tmp/MTS2D", MACRO_PATH]  # Directories to search in
 
     for i, folder in enumerate(search_folders):
         os.makedirs(folder, exist_ok=True)  # Ensure folder exists
-        # Check if it's the last search folder
-        last_search_folder = i == len(search_folders) - 1
-
         # Get existing CSV file names (without extensions) for quick lookup
         existing_files = {
             os.path.splitext(f)[0]
@@ -446,7 +445,12 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
             if config.name in existing_files:
                 # Read estimated time remaining from CSV file
 
-                df = pd.read_csv(file_path)
+                try:
+                    fix_mixed_macrodata_csv(file_path, inplace=True)
+                    df = pd.read_csv(file_path)
+                except Exception as fix_exc:
+                    print(f"Failed to fix {file_path}: {fix_exc}")
+                    continue
                 keys = df.keys()
                 if "est_time_remaining" in keys:
                     est_time_remaining = df["est_time_remaining"]
@@ -466,18 +470,17 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
                         or useOldFiles
                     ):
                         # Include if recent enough
-                        paths.append(file_path)
+                        found_paths[config.name] = file_path
                     else:
                         # Still needs processing
-                        remaining_configs.append(config)
+                        continue
                 else:
                     # File is done processing
-                    paths.append(file_path)
-            elif last_search_folder:
-                # If no file found, add to remaining configs
-                remaining_configs.append(config)
+                    found_paths[config.name] = file_path
 
-    return paths, remaining_configs
+    remaining_configs = [c for c in configs if c.name not in found_paths]
+
+    return list(found_paths.values()), remaining_configs
 
 
 # Converts config to a path, but if given paths, it matches the given
@@ -528,6 +531,13 @@ def rematchPathsAndLabels(configs, labels, paths):
     return matched_paths, matched_labels
 
 
+def _path_to_config_name(path: str) -> str:
+    base = os.path.basename(path)
+    if base == "macroData.csv":
+        return os.path.basename(os.path.dirname(path))
+    return os.path.splitext(base)[0]
+
+
 def flattenConfigList(listOfListsOfConfigs):
     # Check if the first element is a list and contains instances of SimulationConfig
     if isinstance(listOfListsOfConfigs[0], SimulationConfig):
@@ -555,10 +565,18 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
     global completed_servers, nr_files
 
     completed_servers, nr_files = 0, 0
+
+    def _merge_paths(found: dict[str, str], new_paths: list[str]):
+        for p in new_paths:
+            name = _path_to_config_name(p)
+            found[name] = p
+
     # First check if the files have already been downloaded
     paths, remaining_configs = search_for_cvs_files(
         all_configs, useOldFiles, forceUpdate
     )
+    found_paths: dict[str, str] = {}
+    _merge_paths(found_paths, paths)
     if len(remaining_configs) == 0:
         print("All files already downloaded.")
         if nested:
@@ -569,14 +587,16 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
             f"{len(paths)} files found, searching for the remaining {len(remaining_configs)}."
         )
     if len(paths) == 0 and useOldFiles:
-        raise Exception("No files found!")
+        print("No files found!")
+        # raise Exception("No files found!")
 
     # Second check local path to see if we can avoid checking the servers
     localPaths = get_csv_from_server(Servers.local_path_mac, remaining_configs)
-    if len(localPaths) == len(remaining_configs):
-        # We have found all the requested files, so we don't need to search more.
+    _merge_paths(found_paths, localPaths)
+    remaining_configs = [c for c in remaining_configs if c.name not in found_paths]
+    if len(remaining_configs) == 0:
         print(f"{len(localPaths)} files found. Not searching servers.")
-        paths = paths + localPaths
+        paths = list(found_paths.values())
         if nested:
             paths, labels = flatToStructure(config_groups, labels, paths)
         return paths, labels
@@ -598,21 +618,29 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
             try:
                 server_paths = future.result()
                 if server_paths:
-                    # We extend, not append
-                    paths += server_paths
+                    _merge_paths(found_paths, server_paths)
             except Exception as exc:
                 print(f"\n{server} generated an exception: {exc}")
-                print("Trying to use old files... ")
-                if useOldFiles is False:
-                    return get_csv_files(config_groups, useOldFiles=True, labels=labels)
+                print("Continuing with remaining servers.")
+
+    remaining_configs = [c for c in all_configs if c.name not in found_paths]
+    if remaining_configs and not useOldFiles:
+        old_paths, _ = search_for_cvs_files(
+            remaining_configs, useOldFiles=True, forceUpdate=False
+        )
+        _merge_paths(found_paths, old_paths)
+        remaining_configs = [c for c in all_configs if c.name not in found_paths]
+        if remaining_configs:
+            print(f"Missing {len(remaining_configs)} files after fallback.")
     print("")  # New line from progress indicator
-    print(f"Found {len(paths)} files.")
+    print(f"Found {len(found_paths)} files.")
+    paths = list(found_paths.values())
     if nested:
-        paths, labels = flatToStructure(config_groups, labels, paths + localPaths)
+        paths, labels = flatToStructure(config_groups, labels, paths)
     else:
         # The paths are returned in psedu random order, so we need to
         # match them with their correct label again
-        paths, labels = rematchPathsAndLabels(all_configs, labels, paths + localPaths)
+        paths, labels = rematchPathsAndLabels(all_configs, labels, paths)
     return paths, labels
 
 
@@ -987,7 +1015,7 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
         base_colors = {"LBFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
         kwargs["colors"] = to_rgba(base_colors[configs[0].minimizer], alpha=0.2)
     if len(labels) == len(paths):
-        kwargs["legend"] = labels
+        kwargs["legend"] = None  # labels
     elif kwargs.get("legend") is None:
         kwargs["legend"] = name
 
@@ -999,7 +1027,6 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
         paths,
         name=f"{name}.pdf",
         labels=labels,
-        # legend=True,
         **kwargs,
     )
     plt.close(fig)
@@ -1034,6 +1061,8 @@ def plotLog2(config_groups, labels, **kwargs):
     paths, labels = get_csv_files(
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
+
+    # fix_csv_files(paths)
 
     # print(np.array(paths).size)
     plot_powerlaw(paths, labels, **kwargs)
