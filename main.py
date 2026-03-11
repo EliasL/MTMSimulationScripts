@@ -437,7 +437,7 @@ def runOnLocalMachine():
     # configs, labels = remeshTest(diagonal="minor")
     # run_many_locally(configs, taskNames=labels, resume=False)
 
-    # configs, labels = longJob(8, 1, size=300)
+    configs, labels = longJob(8, 1, size=300)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
     # configs, labels, dump = avalanches(nrThreads=20, size=100)
@@ -491,7 +491,7 @@ def stopJobs(configs=None):
     # j.cancelJobs(configs, dryRun=False)
     # j.findAndShowSlurmJobs()
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
-    j.cancelJobsByNameSubstring("500x500", force=True)
+    j.cancelJobsByNameSubstring("s300x300l0.138,1e-05,", force=True)
     # j.cancelAllJobs(force=True, on=Servers.lagrange)
 
     # j.cancel_jobs_on_server(Servers.schwartz, 466525)

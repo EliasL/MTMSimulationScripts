@@ -39,13 +39,13 @@ class Servers:
         descartes,
         legendre,
         duchemin,
-        cauchy,
+        # cauchy, # richard wants cauchy
         # mesopsl,
         # jeanZay,
     ]
 
     # These servers get some extra points in priority
-    preferedServers = [legendre, duchemin, cauchy]
+    preferedServers = [legendre, duchemin]  # , cauchy] # Richard wants cauchy
 
     # If we want to search all the servers including the local storage, we can do that
     serversAndLocal = servers + [local_path_mac]

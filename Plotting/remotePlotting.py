@@ -1008,6 +1008,8 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
         configs, labels=labels, useOldFiles=False, forceUpdate=False
     )
 
+    fix_csv_files(paths)
+
     if len(paths) == 0:
         print("No files found for plotting energy.")
         return
@@ -1015,7 +1017,7 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
         base_colors = {"LBFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
         kwargs["colors"] = to_rgba(base_colors[configs[0].minimizer], alpha=0.2)
     if len(labels) == len(paths):
-        kwargs["legend"] = None  # labels
+        kwargs["legend"] = labels
     elif kwargs.get("legend") is None:
         kwargs["legend"] = name
 
@@ -1062,7 +1064,7 @@ def plotLog2(config_groups, labels, **kwargs):
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
 
-    # fix_csv_files(paths)
+    fix_csv_files(paths)
 
     # print(np.array(paths).size)
     plot_powerlaw(paths, labels, **kwargs)

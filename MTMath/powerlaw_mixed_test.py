@@ -14,6 +14,7 @@ from Plotting.makePlots import (
     plot_color_matrix,
     find_best_color_matrix_corner,
 )
+from Plotting.findXmin import find_xmin
 from comparePlots import combine_pdfs_grid
 from .evaluatePowerlawFit import Truncated_Power_Law
 import os
@@ -681,6 +682,71 @@ def _slice_grid(grid, n_alpha, n_xmin):
     return arr[:n_alpha, :n_xmin]
 
 
+def _apply_subgrid_to_data(data, subgrid):
+    subgrid = _parse_subgrid(subgrid)
+    if subgrid is None or data is None:
+        return data
+
+    alphas = np.array(data.get("alphas", []), dtype=float)
+    xmins = np.array(data.get("xmins", []), dtype=float)
+    if alphas.size == 0 or xmins.size == 0:
+        return data
+
+    n_alpha, n_xmin = subgrid
+    n_alpha = min(n_alpha, len(alphas))
+    n_xmin = min(n_xmin, len(xmins))
+
+    out = dict(data)
+    out["alphas"] = [float(a) for a in alphas[:n_alpha]]
+    out["xmins"] = [float(x) for x in xmins[:n_xmin]]
+
+    grid_keys = [
+        "xmin1_grid",
+        "xmin2_grid",
+        "xmin3_grid",
+        "alpha1_grid",
+        "alpha2_grid",
+        "alpha2std_grid",
+        "alpha3_grid",
+        "alpha3std_grid",
+        "lambda1_grid",
+        "lambda2_grid",
+        "lambda2std_grid",
+        "lambda3_grid",
+        "lambda3std_grid",
+        "plateau_xmin_grid",
+    ]
+    for key in grid_keys:
+        if key in out:
+            out[key] = _slice_grid(out[key], n_alpha, n_xmin).tolist()
+
+    full_cols = len(xmins)
+
+    def _slice_paths(paths):
+        if not isinstance(paths, (list, tuple)):
+            return paths
+        sliced = []
+        for i in range(n_alpha):
+            row_start = i * full_cols
+            for j in range(n_xmin):
+                idx = row_start + j
+                if idx < len(paths):
+                    sliced.append(paths[idx])
+        return sliced
+
+    for key in ("ks_min_paths", "ks_max_paths", "fit_paths", "xmin_plot_paths"):
+        if key in out:
+            out[key] = _slice_paths(out[key])
+
+    if isinstance(out.get("params"), dict):
+        params = dict(out["params"])
+        params["alphas"] = [float(a) for a in out["alphas"]]
+        params["xmins"] = [float(x) for x in out["xmins"]]
+        out["params"] = params
+
+    return out
+
+
 def _find_dks_xmin(xmins, distances, valid_fits=None):
     x = np.asarray(xmins, dtype=float)
     D = np.asarray(distances, dtype=float)
@@ -774,7 +840,7 @@ def plot_compare_xmin(
         or data["params"]["n"] if available.
     subgrid : int or tuple or None
         If set, selects the first (n_alpha, n_xmin) parameters starting at (0,0).
-    method : {"max_p", "min_ks", "dks", "all"}
+    method : {"max_p", "min_ks", "dks", "plateau", "all"}
         Which estimator to plot for xmin/alpha/lambda.
     legend : bool
         If True, add a legend entry per sample size (marker shape).
@@ -791,8 +857,10 @@ def plot_compare_xmin(
     method = method.lower()
     if method == "both":
         method = "all"
-    if method not in ("max_p", "min_ks", "dks", "all"):
-        raise ValueError("method must be 'max_p', 'min_ks', 'dks', or 'all'.")
+    if method not in ("max_p", "min_ks", "dks", "plateau", "all"):
+        raise ValueError(
+            "method must be 'max_p', 'min_ks', 'dks', 'plateau', or 'all'."
+        )
 
     marker_cycle = ["o", "s", "^", "D", "v", "P", "X", "*"]
 
@@ -987,7 +1055,7 @@ def plot_compare_xmin(
                 lambda_est = _slice_grid(
                     data_i["lambda2_grid"], len(alphas), len(xmins)
                 ).ravel()
-            else:
+            elif method_name == "dks":
                 xmin_est = _slice_grid(
                     data_i["xmin3_grid"], len(alphas), len(xmins)
                 ).ravel()
@@ -997,6 +1065,17 @@ def plot_compare_xmin(
                 lambda_est = _slice_grid(
                     data_i["lambda3_grid"], len(alphas), len(xmins)
                 ).ravel()
+            else:
+                if "plateau_xmin_grid" not in data_i:
+                    raise ValueError(
+                        "plateau_xmin_grid not found. Regenerate cache with "
+                        "the updated grid_compare_xmin_generate."
+                    )
+                xmin_est = _slice_grid(
+                    data_i["plateau_xmin_grid"], len(alphas), len(xmins)
+                ).ravel()
+                alpha_est = np.full_like(xmin_est, np.nan)
+                lambda_est = np.full_like(xmin_est, np.nan)
 
             colors = [
                 color_lookup.get((float(a), float(x)), (0.0, 0.0, 0.0, 1.0))
@@ -1064,15 +1143,19 @@ def plot_compare_xmin(
     output_dir = f"{PLOTPATH}plot_compare/"
     os.makedirs(output_dir, exist_ok=True)
 
-    methods = ["min_ks", "max_p", "dks"] if method == "all" else [method]
+    methods = (
+        ["min_ks", "max_p", "dks", "plateau"] if method == "all" else [method]
+    )
 
     for method_name in methods:
         if method_name == "min_ks":
             method_tag = "minKS"
         elif method_name == "max_p":
             method_tag = "maxP"
-        else:
+        elif method_name == "dks":
             method_tag = "DKS"
+        else:
+            method_tag = "Plateau"
         (
             xmin_points,
             lambda_xmin_points,
@@ -1091,52 +1174,53 @@ def plot_compare_xmin(
             logy=True,
             add_diagonal=True,
         )
-        _plot_scatter(
-            lambda_xmin_points,
-            f"lambda estimate vs true xmin ({method_tag})",
-            "true xmin",
-            "estimated lambda",
-            f"{output_dir}plot_compare_xmin_scatter_lambda_vs_xmin_{method_tag}_{suffix}.pdf",
-            logx=True,
-            logy=True,
-            add_diagonal=False,
-        )
-        _plot_scatter(
-            lambda_alpha_points,
-            f"lambda estimate vs true alpha ({method_tag})",
-            "true alpha",
-            "estimated lambda",
-            f"{output_dir}plot_compare_xmin_scatter_lambda_vs_alpha_{method_tag}_{suffix}.pdf",
-            logx=False,
-            logy=True,
-            add_diagonal=False,
-        )
-        _plot_scatter(
-            alpha_points,
-            f"alpha estimate vs true ({method_tag})",
-            "true alpha",
-            "estimated alpha",
-            f"{output_dir}plot_compare_xmin_scatter_alpha_{method_tag}_{suffix}.pdf",
-            logx=False,
-            logy=False,
-            add_diagonal=True,
-        )
-        if method_name == "max_p":
-            _plot_alpha_err_vs_std(
-                alpha_err_points,
-                "alpha error vs alpha std (max p)",
-                r"$\alpha_{\mathrm{std}}$",
-                r"$|\hat{\alpha} - \alpha_{\mathrm{true}}|$",
-                f"{output_dir}plot_compare_xmin_scatter_alpha_err_std_maxP_{suffix}.pdf",
+        if method_name != "plateau":
+            _plot_scatter(
+                lambda_xmin_points,
+                f"lambda estimate vs true xmin ({method_tag})",
+                "true xmin",
+                "estimated lambda",
+                f"{output_dir}plot_compare_xmin_scatter_lambda_vs_xmin_{method_tag}_{suffix}.pdf",
+                logx=True,
+                logy=True,
+                add_diagonal=False,
             )
-        if method_name == "dks":
-            _plot_alpha_err_vs_std(
-                alpha_err_points,
-                "alpha error vs alpha std (DKS)",
-                r"$\alpha_{\mathrm{std}}$",
-                r"$|\hat{\alpha} - \alpha_{\mathrm{true}}|$",
-                f"{output_dir}plot_compare_xmin_scatter_alpha_err_std_DKS_{suffix}.pdf",
+            _plot_scatter(
+                lambda_alpha_points,
+                f"lambda estimate vs true alpha ({method_tag})",
+                "true alpha",
+                "estimated lambda",
+                f"{output_dir}plot_compare_xmin_scatter_lambda_vs_alpha_{method_tag}_{suffix}.pdf",
+                logx=False,
+                logy=True,
+                add_diagonal=False,
             )
+            _plot_scatter(
+                alpha_points,
+                f"alpha estimate vs true ({method_tag})",
+                "true alpha",
+                "estimated alpha",
+                f"{output_dir}plot_compare_xmin_scatter_alpha_{method_tag}_{suffix}.pdf",
+                logx=False,
+                logy=False,
+                add_diagonal=True,
+            )
+            if method_name == "max_p":
+                _plot_alpha_err_vs_std(
+                    alpha_err_points,
+                    "alpha error vs alpha std (max p)",
+                    r"$\alpha_{\mathrm{std}}$",
+                    r"$|\hat{\alpha} - \alpha_{\mathrm{true}}|$",
+                    f"{output_dir}plot_compare_xmin_scatter_alpha_err_std_maxP_{suffix}.pdf",
+                )
+            if method_name == "dks":
+                _plot_alpha_err_vs_std(
+                    alpha_err_points,
+                    "alpha error vs alpha std (DKS)",
+                    r"$\alpha_{\mathrm{std}}$",
+                    r"$|\hat{\alpha} - \alpha_{\mathrm{true}}|$",
+                    f"{output_dir}plot_compare_xmin_scatter_alpha_err_std_DKS_{suffix}.pdf",
+                )
 
 
 def grid_compare_xmin_generate(
@@ -1186,6 +1270,7 @@ def grid_compare_xmin_generate(
     lambda2std_grid = np.full_like(xmin1_grid, np.nan)
     lambda3_grid = np.full_like(xmin1_grid, np.nan)
     lambda3std_grid = np.full_like(xmin1_grid, np.nan)
+    plateau_xmin_grid = np.full_like(xmin1_grid, np.nan)
     ks_min_paths = []
     ks_max_paths = []
     fit_paths = []
@@ -1228,6 +1313,11 @@ def grid_compare_xmin_generate(
                 xmin_accuracy=0.1,
                 parallel_xmin=True,
             )
+            # Cheaky messy spaghetti, we sneak in our new xmin result
+            plateau_xmin = find_xmin(drops)
+            KS_fit.xmin_fitting_results["plateau_xmin"] = plateau_xmin
+            plateau_xmin_grid[i, j] = float(plateau_xmin)
+
             xmin1_grid[i, j] = float(KS_fit.xmin)
             alpha1_grid[i, j] = getattr(dist_from_fit(KS_fit), "alpha", np.nan)
             lambda1_grid[i, j] = getattr(dist_from_fit(KS_fit), "Lambda", np.nan)
@@ -1299,6 +1389,7 @@ def grid_compare_xmin_generate(
         "lambda2std_grid": lambda2std_grid.tolist(),
         "lambda3_grid": lambda3_grid.tolist(),
         "lambda3std_grid": lambda3std_grid.tolist(),
+        "plateau_xmin_grid": plateau_xmin_grid.tolist(),
         "ks_min_paths": ks_min_paths,
         "ks_max_paths": ks_max_paths,
         "fit_paths": fit_paths,
@@ -1413,10 +1504,21 @@ def plot_convergence_xmin(
                 xmin_grid = _slice_grid(d["xmin2_grid"], len(alphas), len(xmins))
                 alpha_grid = _slice_grid(d["alpha2_grid"], len(alphas), len(xmins))
                 lambda_grid = _slice_grid(d["lambda2_grid"], len(alphas), len(xmins))
-            else:
+            elif method_name == "dks":
                 xmin_grid = _slice_grid(d["xmin3_grid"], len(alphas), len(xmins))
                 alpha_grid = _slice_grid(d["alpha3_grid"], len(alphas), len(xmins))
                 lambda_grid = _slice_grid(d["lambda3_grid"], len(alphas), len(xmins))
+            else:
+                if "plateau_xmin_grid" not in d:
+                    raise ValueError(
+                        "plateau_xmin_grid not found. Regenerate cache with "
+                        "the updated grid_compare_xmin_generate."
+                    )
+                xmin_grid = _slice_grid(
+                    d["plateau_xmin_grid"], len(alphas), len(xmins)
+                )
+                alpha_grid = np.full_like(xmin_grid, np.nan)
+                lambda_grid = np.full_like(xmin_grid, np.nan)
 
             for i, alpha_true in enumerate(alphas):
                 for j, xmin_true in enumerate(xmins):
@@ -1480,6 +1582,15 @@ def plot_convergence_xmin(
             all_x.extend(xs.tolist())
             all_y.extend(ys.tolist())
 
+        if logx and not any((np.isfinite(v) and v > 0) for v in all_x):
+            print(f"Skipping plot {filename}: no positive x-values for log scale.")
+            plt.close(fig)
+            return
+        if logy and not any((np.isfinite(v) and v > 0) for v in all_y):
+            print(f"Skipping plot {filename}: no positive y-values for log scale.")
+            plt.close(fig)
+            return
+
         if logx:
             ax.set_xscale("log")
         if logy:
@@ -1531,7 +1642,9 @@ def plot_convergence_xmin(
 
     output_dir = f"{PLOTPATH}plot_convergence/"
     os.makedirs(output_dir, exist_ok=True)
-    methods = ["min_ks", "max_p", "dks"] if method == "all" else [method]
+    methods = (
+        ["min_ks", "max_p", "dks", "plateau"] if method == "all" else [method]
+    )
 
     if len(datasets) == 1:
         n_samples = int(datasets[0].get("n_samples", 0))
@@ -1546,8 +1659,10 @@ def plot_convergence_xmin(
             method_tag = "minKS"
         elif method_name == "max_p":
             method_tag = "maxP"
-        else:
+        elif method_name == "dks":
             method_tag = "DKS"
+        else:
+            method_tag = "Plateau"
         xmin_series, alpha_series, lambda_series = _collect_series(method_name)
 
         _plot_series(
@@ -1571,48 +1686,49 @@ def plot_convergence_xmin(
             hline=1.0,
             y_clip=5.0,
         )
-        _plot_series(
-            alpha_series,
-            f"alpha estimate vs n ({method_tag})",
-            "n (samples)",
-            "estimated alpha",
-            f"{output_dir}convergence_alpha_raw_{method_tag}{suffix}.pdf",
-            logx=True,
-            logy=False,
-        )
-        _plot_series(
-            alpha_series,
-            f"alpha estimate / true vs n ({method_tag})",
-            "n (samples)",
-            "estimated alpha / true alpha",
-            f"{output_dir}convergence_alpha_rescaled_{method_tag}{suffix}.pdf",
-            logx=True,
-            logy=False,
-            rescale=lambda y, a, x, t: y / a,
-            hline=1.0,
-            y_clip=5.0,
-        )
-        _plot_series(
-            lambda_series,
-            f"lambda estimate vs n ({method_tag})",
-            "n (samples)",
-            "estimated lambda",
-            f"{output_dir}convergence_lambda_raw_{method_tag}{suffix}.pdf",
-            logx=True,
-            logy=True,
-        )
-        _plot_series(
-            lambda_series,
-            f"lambda estimate / true vs n ({method_tag})",
-            "n (samples)",
-            "estimated lambda / true lambda",
-            f"{output_dir}convergence_lambda_rescaled_{method_tag}{suffix}.pdf",
-            logx=True,
-            logy=False,
-            rescale=lambda y, a, x, t: y / t,
-            hline=1.0,
-            y_clip=5.0,
-        )
+        if method_name != "plateau":
+            _plot_series(
+                alpha_series,
+                f"alpha estimate vs n ({method_tag})",
+                "n (samples)",
+                "estimated alpha",
+                f"{output_dir}convergence_alpha_raw_{method_tag}{suffix}.pdf",
+                logx=True,
+                logy=False,
+            )
+            _plot_series(
+                alpha_series,
+                f"alpha estimate / true vs n ({method_tag})",
+                "n (samples)",
+                "estimated alpha / true alpha",
+                f"{output_dir}convergence_alpha_rescaled_{method_tag}{suffix}.pdf",
+                logx=True,
+                logy=False,
+                rescale=lambda y, a, x, t: y / a,
+                hline=1.0,
+                y_clip=5.0,
+            )
+            _plot_series(
+                lambda_series,
+                f"lambda estimate vs n ({method_tag})",
+                "n (samples)",
+                "estimated lambda",
+                f"{output_dir}convergence_lambda_raw_{method_tag}{suffix}.pdf",
+                logx=True,
+                logy=True,
+            )
+            _plot_series(
+                lambda_series,
+                f"lambda estimate / true vs n ({method_tag})",
+                "n (samples)",
+                "estimated lambda / true lambda",
+                f"{output_dir}convergence_lambda_rescaled_{method_tag}{suffix}.pdf",
+                logx=True,
+                logy=False,
+                rescale=lambda y, a, x, t: y / t,
+                hline=1.0,
+                y_clip=5.0,
+            )
 
 
 def grid_compare_xmin(
@@ -1629,6 +1745,7 @@ def grid_compare_xmin(
     use_cache=True,
     cache_dir=None,
     force=False,
+    subgrid=None,
     plot=True,
 ):
     data = grid_compare_xmin_generate(
@@ -1646,6 +1763,7 @@ def grid_compare_xmin(
         cache_dir=cache_dir,
         force=force,
     )
+    data = _apply_subgrid_to_data(data, subgrid)
     if plot:
         grid_compare_xmin_plot(data=data)
     return data
@@ -1691,6 +1809,9 @@ def testSamplePiecewise(
 
     KS_fit = make_fit(drops, xmin_range=None, fast_xmin=True, xmin_accuracy=0.01)
     # KS_fit.evaluate_fit()
+    plateau_xmin = find_xmin(drops)
+    KS_fit.xmin_fitting_results["plateau_xmin"] = plateau_xmin
+
     p_fit = find_best_xmin(drops, debug=True, xmin_results=KS_fit.xmin_fitting_results)
     plot_xmin_fitting(KS_fit, save=True)
     plot_KS_fitting(KS_fit, save=True)

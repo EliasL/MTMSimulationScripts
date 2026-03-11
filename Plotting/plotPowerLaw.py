@@ -1,3 +1,4 @@
+from .findXmin import find_xmin
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -1460,8 +1461,6 @@ def make_fit(
         data,
         xmin=xmin_range,
         xmin_distribution=distType.name,
-        fast_xmin=fast_xmin,
-        xmin_accuracy=xmin_accuracy,
     )
     if parallel_xmin is not None:
         fitObj.parallel_xmin = bool(parallel_xmin)
@@ -1628,37 +1627,37 @@ def plot_fits_over_xmin(
                 alpha=0.7,
                 label="KS distance",
                 zorder=0,
-            )[0]
+            )
 
-            # Log-derivative of KS distance on a third axis
-            if np.any(max_xmin_filter):
-                x_k = xmins[max_xmin_filter]
-                d_k = distances[max_xmin_filter]
-                order_k = np.argsort(x_k)
-                x_k = x_k[order_k]
-                d_k = d_k[order_k]
-                if x_k.size >= 2:
-                    logx = np.log10(x_k)
-                    dD = np.gradient(d_k, logx)
-                    ax3 = ax1.twinx()
-                    ax3.spines["right"].set_position(("axes", 1.15))
-                    c_dd = "tab:green"
-                    ax3.plot(
-                        x_k,
-                        dD,
-                        marker="^",
-                        linestyle=":",
-                        linewidth=1.2,
-                        markersize=4,
-                        label=r"$dD/d\log_{10}(x_{\min})$",
-                        color=c_dd,
-                        markerfacecolor="none",
-                        markeredgecolor=c_dd,
-                        zorder=1,
-                    )
-                    ax3.set_ylabel(r"$dD/d\log_{10}(x_{\min})$", color=c_dd)
-                    ax3.tick_params(axis="y", colors=c_dd)
-                    ax3.spines["right"].set_color(c_dd)
+            # # Log-derivative of KS distance on a third axis
+            # if np.any(max_xmin_filter):
+            #     x_k = xmins[max_xmin_filter]
+            #     d_k = distances[max_xmin_filter]
+            #     order_k = np.argsort(x_k)
+            #     x_k = x_k[order_k]
+            #     d_k = d_k[order_k]
+            #     if x_k.size >= 2:
+            #         logx = np.log10(x_k)
+            #         dD = np.gradient(d_k, logx)
+            #         ax3 = ax1.twinx()
+            #         ax3.spines["right"].set_position(("axes", 1.15))
+            #         c_dd = "tab:green"
+            #         ax3.plot(
+            #             x_k,
+            #             dD,
+            #             marker="^",
+            #             linestyle=":",
+            #             linewidth=1.2,
+            #             markersize=4,
+            #             label=r"$dD/d\log_{10}(x_{\min})$",
+            #             color=c_dd,
+            #             markerfacecolor="none",
+            #             markeredgecolor=c_dd,
+            #             zorder=1,
+            #         )
+            #         ax3.set_ylabel(r"$dD/d\log_{10}(x_{\min})$", color=c_dd)
+            #         ax3.tick_params(axis="y", colors=c_dd)
+            #         ax3.spines["right"].set_color(c_dd)
 
             # Only draw both markers if they actually differ.
             if np.isclose(ks_xmin_filtered, ks_xmin_global, rtol=1e-12, atol=0.0):
@@ -1687,6 +1686,16 @@ def plot_fits_over_xmin(
                     linestyle="-.",
                     linewidth=1,
                     label=f"Global KS xmin: {ks_xmin_global:.2e}",
+                    zorder=-1,
+                    alpha=0.7,
+                )
+            if "plateau_xmin" in xmin_results:
+                ax1.axvline(
+                    xmin_results["plateau_xmin"],
+                    color="0.5",
+                    linestyle="-.",
+                    linewidth=1,
+                    label=f"Plateau xmin: {xmin_results['plateau_xmin']:.2e}",
                     zorder=-1,
                     alpha=0.7,
                 )
@@ -1731,18 +1740,17 @@ def plot_fits_over_xmin(
 
     handles1, labels1 = ax1.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
-    handles3, labels3 = ([], [])
-    if ax3 is not None:
-        handles3, labels3 = ax3.get_legend_handles_labels()
+    # handles3, labels3 = ([], [])
+    # if ax3 is not None:
+    #     handles3, labels3 = ax3.get_legend_handles_labels()
 
     # Deduplicate by label while preserving order
     seen = set()
     handles = []
     labels = []
     for h, l in (
-        list(zip(handles1, labels1))
-        + list(zip(handles2, labels2))
-        + list(zip(handles3, labels3))
+        list(zip(handles1, labels1)) + list(zip(handles2, labels2))
+        # + list(zip(handles3, labels3))
     ):
         if l not in seen and l != "":
             seen.add(l)
@@ -2115,6 +2123,7 @@ def plot_powerlaw(
                 f"No valid drops found for {group_label} in strain range {strainLim}."
             )
             continue
+
         if xmin_range is None and not fast_xmin:
             # Not using fast_xmin is brutally slow. We add a default range here
             xmin_range = [1e-9, 1]

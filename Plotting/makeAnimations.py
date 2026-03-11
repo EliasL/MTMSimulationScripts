@@ -217,7 +217,11 @@ def makeAnimations(
         (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
         (plot_and_save_mesh, "mesh"),
         # (plot_and_save_mesh_with_force, "mesh_with_forces"),
+        # TODO, the first frame of plot_and_save_in_poincare_disk uses the zoomed
+        # poincare disk from the erDisk. We need to make sure that also the
+        # first frame uses the correct energy background.
         (plot_and_save_in_poincare_disk, "disk"),
+        # TODO, e_drop_plot needs a representative pdf background
         (plot_and_save_plot, "e_drop_plot"),
         (plot_and_save_plot, "energy_plot"),
         # (plot_and_save_m_diff_mesh, "m_diff_mesh"),
@@ -257,7 +261,7 @@ def makeAnimations(
             pass
     if combineVideos:
         try:
-            # combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
+            combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
             combine_videoes(path, "mesh", "energy_plot", vertical=True)
             combine_videoes(path, "m_mesh", "mesh")
             combine_videoes(path, "mesh", "disk")

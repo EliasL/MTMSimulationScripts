@@ -61,15 +61,42 @@ def cell_energy_to_node_energy(nodes, energy_field, connectivity):
 
 
 # Use this function to set axis limits in your plot_frame function
-def get_axis_limits(cvs_file):
-    df = pd.read_csv(cvs_file, usecols=["maxX", "minX", "maxY", "minY"])
+def get_axis_limits(cvs_file, return_plastic=False):
+    desired_cols = [
+        "maxX",
+        "minX",
+        "maxY",
+        "minY",
+        "max_m3_nr",
+        "max_positive_plastic_jump",
+        "max_negative_plastic_jump",
+    ]
+    header = pd.read_csv(cvs_file, nrows=0)
+    usecols = [c for c in desired_cols if c in header.columns]
+    df = pd.read_csv(cvs_file, usecols=usecols)
 
     x_max = df["maxX"].max()
     x_min = df["minX"].min()
     y_max = df["maxY"].max()
     y_min = df["minY"].min()
 
-    return x_min, x_max, y_min, y_max
+    axis_limits = (x_min, x_max, y_min, y_max)
+    if not return_plastic:
+        return axis_limits
+
+    plastic_limits = {}
+    if "max_m3_nr" in df:
+        plastic_limits["max_plastic"] = float(df["max_m3_nr"].max())
+    if "max_positive_plastic_jump" in df:
+        plastic_limits["max_plastic_change"] = float(
+            df["max_positive_plastic_jump"].max()
+        )
+    if "max_negative_plastic_jump" in df:
+        plastic_limits["min_plastic_change"] = float(
+            df["max_negative_plastic_jump"].min()
+        )
+
+    return axis_limits, plastic_limits
 
 
 def add_padding(axis_limits, padding_ratio):
@@ -89,6 +116,46 @@ def add_padding(axis_limits, padding_ratio):
     adjusted_y_max = y_max + y_padding
 
     return adjusted_x_min, adjusted_x_max, adjusted_y_min, adjusted_y_max
+
+
+def _make_integer_bins(vmin, vmax, n_bins=12, gamma=0.5):
+    vmin = int(np.floor(vmin))
+    vmax = int(np.ceil(vmax))
+    if vmax <= vmin:
+        return np.array([vmin], dtype=int)
+    if (vmax - vmin) <= n_bins:
+        return np.arange(vmin, vmax + 1, dtype=int)
+    scaled = np.linspace(0, (vmax - vmin) ** gamma, n_bins + 1)
+    bins = np.unique(np.round(vmin + scaled ** (1.0 / gamma)).astype(int))
+    bins[0] = vmin
+    bins[-1] = vmax
+    return bins
+
+
+def _make_discrete_boundaries(min_val, max_val, n_bins=12, gamma=0.5):
+    if min_val >= 0:
+        bins = _make_integer_bins(0, max_val, n_bins=n_bins, gamma=gamma)
+    elif max_val <= 0:
+        bins = -_make_integer_bins(0, -min_val, n_bins=n_bins, gamma=gamma)[::-1]
+    else:
+        pos_bins = _make_integer_bins(0, max_val, n_bins=n_bins, gamma=gamma)
+        neg_bins = -_make_integer_bins(0, -min_val, n_bins=n_bins, gamma=gamma)[::-1]
+        bins = np.concatenate([neg_bins[:-1], pos_bins])
+    boundaries = np.concatenate([bins - 0.5, [bins[-1] + 0.5]])
+    return boundaries
+
+
+def _discrete_ticks_and_labels(boundaries):
+    centers = 0.5 * (boundaries[:-1] + boundaries[1:])
+    labels = []
+    for lo, hi in zip(boundaries[:-1], boundaries[1:]):
+        low = int(np.ceil(lo + 0.5))
+        high = int(np.floor(hi - 0.5))
+        if low == high:
+            labels.append(str(low))
+        else:
+            labels.append(f"{low}..{high}")
+    return centers, labels
 
 
 def base_plot(
@@ -430,13 +497,17 @@ def _configure_property_settings(
         cmap = "viridis"
         nrm1, nrm2, nrm3 = data.get_m_nr_field()
         field = nrm3
-        if max(field) > max_plastic:
-            raise RuntimeError(
-                f"Huge plastic deformation! Extend max_plastic to {max(field)}."
-            )
-
-        boundaries = np.arange(0, max_plastic + 1) - 0.5
-        norm = mcolors.BoundaryNorm(boundaries, plt.get_cmap(cmap).N)
+        field_max = float(np.nanmax(field)) if field.size else 0.0
+        if not np.isfinite(max_plastic):
+            max_plastic = field_max
+        else:
+            max_plastic = max(float(max_plastic), field_max)
+        max_plastic = max(1.0, max_plastic)
+        boundaries = _make_discrete_boundaries(
+            0.0, max_plastic, n_bins=12, gamma=0.5
+        )
+        cmap = plt.get_cmap(cmap, len(boundaries) - 1)
+        norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         backgroundColor = plt.get_cmap(cmap)(0)
 
         marker_patterns = ["", "_", "|", "+"]
@@ -445,18 +516,25 @@ def _configure_property_settings(
 
     elif mesh_property == "m_diff":
         field = data.get_m3_change_field()
-        if max(field) > max_plastic_change:
-            raise RuntimeError(
-                f"Huge plastic jump! Extend max_plastic_change to {max(field)}."
-            )
-        if min(field) < min_plastic_change:
-            raise RuntimeError(
-                f"Huge negative plastic jump! Extend min_plastic_change to {min(field)}."
-            )
+        field_min = float(np.nanmin(field)) if field.size else 0.0
+        field_max = float(np.nanmax(field)) if field.size else 0.0
+        if not np.isfinite(max_plastic_change):
+            max_plastic_change = field_max
+        else:
+            max_plastic_change = max(float(max_plastic_change), field_max)
+        if not np.isfinite(min_plastic_change):
+            min_plastic_change = field_min
+        else:
+            min_plastic_change = min(float(min_plastic_change), field_min)
+        if np.isclose(max_plastic_change, min_plastic_change):
+            max_plastic_change += 1.0
+            min_plastic_change -= 1.0
 
-        color_list = ["blue", "lightblue", "white", "lightcoral", "red", "darkred"]
-        cmap = mcolors.ListedColormap(color_list)
-        boundaries = np.arange(min_plastic_change, max_plastic_change + 1) - 0.5
+        cmap = "coolwarm"
+        boundaries = _make_discrete_boundaries(
+            min_plastic_change, max_plastic_change, n_bins=12, gamma=0.5
+        )
+        cmap = plt.get_cmap(cmap, len(boundaries) - 1)
         norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         backgroundColor = plt.get_cmap(cmap)(0)
 
@@ -650,9 +728,9 @@ def _add_additional_elements(
     if add_colorbar and mappable is not None:
         cbar = plt.colorbar(mappable, ax=ax, label=pretty_mesh_property(mesh_property))
         if boundaries is not None:
-            ticks = boundaries[:-1] + 0.5
+            ticks, labels = _discrete_ticks_and_labels(boundaries)
             cbar.set_ticks(ticks)
-            cbar.set_ticklabels([str(int(t)) for t in ticks])
+            cbar.set_ticklabels(labels)
             # Normalize colors for colormap
         if show_force:
             norm = mcolors.Normalize(vmin=minForce, vmax=maxForce)
@@ -1063,10 +1141,11 @@ def get_previous_energy_and_rss(
 
 def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
     print(f"Processing {kwargs['fileName']} video meta data...")
+    debug_first_frame = kwargs.pop("debug_first_frame", False)
     # Calculate global axis limits and energy range
     macro_data = kwargs["macro_data"]
     if macro_data:
-        axis_limits = get_axis_limits(macro_data)
+        axis_limits, plastic_limits = get_axis_limits(macro_data, return_plastic=True)
         e_lims = get_energy_range(vtu_files, macro_data)
         e_lims[1] = min(e_lims[1], 0.3)  # optional custom limit
         (
@@ -1078,6 +1157,19 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
             macroDataRowIndex,
             stress_label,
         ) = get_corresponding_energy_and_rss(vtu_files, macro_data, X)
+        if isinstance(plastic_limits, dict):
+            if "max_plastic" in plastic_limits and "max_plastic" not in kwargs:
+                kwargs["max_plastic"] = plastic_limits["max_plastic"]
+            if (
+                "max_plastic_change" in plastic_limits
+                and "max_plastic_change" not in kwargs
+            ):
+                kwargs["max_plastic_change"] = plastic_limits["max_plastic_change"]
+            if (
+                "min_plastic_change" in plastic_limits
+                and "min_plastic_change" not in kwargs
+            ):
+                kwargs["min_plastic_change"] = plastic_limits["min_plastic_change"]
     else:
         # set default values
         axis_limits = None
@@ -1125,8 +1217,9 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
     ]
 
     print(f"Processing {kwargs['fileName']} video frames...")
-    # Use line below to debug with first item in kwargs_list
-    image_paths = process_frame(kwargs_list[0])
+    # Optional: debug a single frame in the main process
+    if debug_first_frame:
+        process_frame(kwargs_list[0])
 
     if get_data_from_name(vtu_files[0])["L"] > 200:
         num_processes = 1  # Limited memory for large systems

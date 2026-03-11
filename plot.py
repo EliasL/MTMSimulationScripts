@@ -143,7 +143,12 @@ def plotLongJob():
 
 # MDPI Article plot
 def energyField():
-    from MTMath.plotEnergy import generate_energy_grid, make3DEnergyField
+    from matplotlib import pyplot as plt
+    from MTMath.plotEnergy import (
+        generate_energy_grid,
+        make3DEnergyField,
+        plotEnergyField,
+    )
     import numpy as np
 
     g, x, y = generate_energy_grid(
@@ -152,9 +157,13 @@ def energyField():
         zoom=1,
         poincareDisk=True,
     )
+    ax = plotEnergyField(g, save=False)
+    ax.figure.show()
+    plt.show()
     # g = generate_energy_grid(9)
     # print(np.round(g, 2))
-    make3DEnergyField(g, x, y, zScale=0.6, add_front_hole=True)
+
+    # make3DEnergyField(g, x, y, zScale=0.6, add_front_hole=True)
 
 
 def showPoincareDisk():
@@ -401,14 +410,14 @@ def plotReversibility():
 
 def plotLogAnalasys():
     configs, labels = bigUmutJob(group_by_seeds=True)
-    configs, labels = umutJobs(loadIncrement=2e-5)
+    # configs, labels = umutJobs(loadIncrement=2e-5)
 
     # # Powerlaw
-    plotEnergy(configs, labels=labels)
+    # plotEnergy(configs, labels=labels)
 
     # # Find split
     fast_xmin = True
-    useCDF = True
+    useCDF = False
     plotLog2(
         configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, useCDF=useCDF
     )
@@ -416,7 +425,6 @@ def plotLogAnalasys():
         configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, useCDF=useCDF
     )
     return
-
     p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
     lab = [["umut"]]
     plot_powerlaw(
@@ -477,17 +485,17 @@ def plotLogAnalasys():
 
 
 def syntheticDataPlotting():
-    seeds = range(10)
-    ns = [1e2, 1e3, 1e4, 1e5]
-    datasets = [grid_compare_xmin(n=n) for n in ns]
+    ns = [1e2, 1e3, 1e4, 1e5, 1e6]
+    subgrid = (3, 3)
+    datasets = [grid_compare_xmin(n=n, subgrid=subgrid) for n in ns]
 
     plot_compare_xmin(
         data=datasets,
         sample_sizes=[int(n) for n in ns],
         method="all",
-        # subgrid=(3, 3),
+        subgrid=subgrid,
     )
-    plot_convergence_xmin(data=datasets, subgrid=(3, 3))
+    plot_convergence_xmin(data=datasets, subgrid=subgrid)
 
 
 def testRealData():
@@ -535,7 +543,7 @@ if __name__ == "__main__":
     # plotPropperJob()
 
     # debugPlotAll()
-    # energyField()
+    energyField()
     # showPoincareDisk()
     # showInstabilityAngle()
     # plotThreadTest()
@@ -561,7 +569,7 @@ if __name__ == "__main__":
     # compareStop()
     # compareStep()
     # plotReversibility()
-    plotLogAnalasys()
+    # plotLogAnalasys()
     # syntheticDataPlotting()
     # testDist()
     # testRealData()

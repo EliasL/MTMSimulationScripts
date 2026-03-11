@@ -710,6 +710,8 @@ def drawCScatter(
     log_scale=True,
     zoom=1,
     transformation=None,
+    density_method="hist",
+    density_grid_size=400,
 ):
     x, y = C2Plane(C, plane="PoincareDisk", transformation=transformation)
     # Filter out invalid points
@@ -719,19 +721,33 @@ def drawCScatter(
     if x.size == 0:
         return
 
-    # Create a density estimate
-    xy = np.vstack([x, y])
-
-    # Scott rule
-    bandwidth = len(x) ** (-1 / 6)
-    try:
-        if x.size < 2:
-            raise np.linalg.LinAlgError("insufficient points for KDE")
-        kde = gaussian_kde(xy, bw_method=bandwidth)
-        density1 = kde(xy)
-    except np.linalg.LinAlgError:
-        # Assign a uniform value to make all points appear red
-        density1 = np.ones_like(x) * 1e10  # High value to map to red
+    # Create a density estimate (default: histogram counts)
+    density_method = (density_method or "hist").lower()
+    if density_method == "hist":
+        bins = int(density_grid_size) if density_grid_size else 400
+        r = 1.0 / zoom
+        scale = bins / (2.0 * r)
+        xi = ((x + r) * scale).astype(int)
+        yi = ((y + r) * scale).astype(int)
+        xi = np.clip(xi, 0, bins - 1)
+        yi = np.clip(yi, 0, bins - 1)
+        hist = np.zeros((bins, bins), dtype=int)
+        np.add.at(hist, (xi, yi), 1)
+        density1 = hist[xi, yi]
+    elif density_method == "kde":
+        # KDE is slower but can be enabled explicitly
+        xy = np.vstack([x, y])
+        bandwidth = len(x) ** (-1 / 6)  # Scott rule
+        try:
+            if x.size < 2:
+                raise np.linalg.LinAlgError("insufficient points for KDE")
+            kde = gaussian_kde(xy, bw_method=bandwidth)
+            density1 = kde(xy)
+        except np.linalg.LinAlgError:
+            # Assign a uniform value to make all points appear red
+            density1 = np.ones_like(x) * 1e10  # High value to map to red
+    else:
+        raise ValueError(f"Unknown density_method: {density_method}")
 
     cmap = "inferno"
     if remove_max_color:
@@ -774,7 +790,11 @@ def drawCScatter(
         norm=norm,
         vmax=vmax,
     )
-    plt.colorbar(scatter, ax=ax, label="Kernel density estimate", pad=-0.0005)
+    if density_method == "kde":
+        cbar_label = "Kernel density estimate"
+    else:
+        cbar_label = "Bin counts"
+    plt.colorbar(scatter, ax=ax, label=cbar_label, pad=-0.0005)
 
 
 def getCFundamental(grid_size=200, zoom_val=1, transformation=None, returnMask=False):
@@ -1495,6 +1515,7 @@ def plotEnergyField(
             dpi=600,
             bbox_inches="tight",
         )
+    return ax
 
 
 def prepPoincareFig(
