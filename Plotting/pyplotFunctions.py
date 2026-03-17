@@ -11,7 +11,12 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import threading
-from MTMath.plotEnergy import plotEnergyField, generate_energy_grid, drawCScatter
+from MTMath.plotEnergy import (
+    plotEnergyField,
+    generate_energy_grid,
+    drawCScatter,
+    C2Plane,
+)
 from MTMath.reduction import elastic_reduction
 from Management.jobs import propperJob
 
@@ -156,6 +161,23 @@ def _discrete_ticks_and_labels(boundaries):
         else:
             labels.append(f"{low}..{high}")
     return centers, labels
+
+
+def _categorize_m_diff_field(field):
+    """Map m_diff values into signed categorical bins for discrete plotting."""
+    field = np.asarray(field)
+    abs_val = np.abs(field)
+
+    category = np.zeros_like(abs_val, dtype=int)
+    category[abs_val == 1] = 1
+    category[abs_val == 2] = 2
+    category[(abs_val >= 3) & (abs_val <= 9)] = 3
+    category[(abs_val >= 10) & (abs_val <= 30)] = 4
+    category[abs_val >= 31] = 5
+
+    sign = np.sign(field)
+    sign = np.where(np.isfinite(sign), sign, 0)
+    return category * sign.astype(int)
 
 
 def base_plot(
@@ -420,15 +442,22 @@ def plot_mesh(
     x, y = nodes[:, 0], nodes[:, 1]
 
     # Configure property-specific settings
-    field, cmap, norm, boundaries, backgroundColor, state_indices = (
-        _configure_property_settings(
-            data,
-            mesh_property,
-            e_lims,
-            max_plastic,
-            max_plastic_change,
-            min_plastic_change,
-        )
+    (
+        field,
+        cmap,
+        norm,
+        boundaries,
+        backgroundColor,
+        state_indices,
+        tick_positions,
+        tick_labels,
+    ) = _configure_property_settings(
+        data,
+        mesh_property,
+        e_lims,
+        max_plastic,
+        max_plastic_change,
+        min_plastic_change,
     )
     # Main plotting
     mappable = _plot_mesh_elements(
@@ -454,6 +483,8 @@ def plot_mesh(
         mesh_property,
         add_colorbar,
         boundaries,
+        tick_positions,
+        tick_labels,
         add_rombus,
         nodes,
         data,
@@ -472,7 +503,12 @@ def _initialize_plot(vtu_file, ax, **kwargs):
 
 
 def _configure_property_settings(
-    data, mesh_property, e_lims, max_plastic, max_plastic_change, min_plastic_change
+    data,
+    mesh_property,
+    e_lims,
+    max_plastic,
+    max_plastic_change,
+    min_plastic_change,
 ):
     """Configure property-specific settings like colormaps and norms."""
     cmap = "coolwarm"
@@ -480,6 +516,8 @@ def _configure_property_settings(
     boundaries = None
     backgroundColor = None
     state_indices = None
+    tick_positions = None
+    tick_labels = None
 
     if mesh_property == "energy":
         field = data.get_energy_field()
@@ -513,28 +551,27 @@ def _configure_property_settings(
         state_indices = (nrm1 % 2) + (nrm2 % 2) * 2
 
     elif mesh_property == "m_diff":
-        field = data.get_m3_change_field()
-        field_min = float(np.nanmin(field)) if field.size else 0.0
-        field_max = float(np.nanmax(field)) if field.size else 0.0
-        if not np.isfinite(max_plastic_change):
-            max_plastic_change = field_max
-        else:
-            max_plastic_change = max(float(max_plastic_change), field_max)
-        if not np.isfinite(min_plastic_change):
-            min_plastic_change = field_min
-        else:
-            min_plastic_change = min(float(min_plastic_change), field_min)
-        if np.isclose(max_plastic_change, min_plastic_change):
-            max_plastic_change += 1.0
-            min_plastic_change -= 1.0
-
+        raw_field = data.get_m3_change_field()
+        field = _categorize_m_diff_field(raw_field)
         cmap = "coolwarm"
-        boundaries = _make_discrete_boundaries(
-            min_plastic_change, max_plastic_change, n_bins=12, gamma=0.5
-        )
+        boundaries = np.arange(-5.5, 6.0, 1.0)
         cmap = plt.get_cmap(cmap, len(boundaries) - 1)
         norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         backgroundColor = plt.get_cmap(cmap)(0)
+        tick_positions = np.arange(-5, 6, 1)
+        tick_labels = [
+            "-31+",
+            "-30..-10",
+            "-9..-3",
+            "-2",
+            "-1",
+            "0",
+            "1",
+            "2",
+            "3..9",
+            "10..30",
+            "31+",
+        ]
 
     # Ensure field is a 1D array for matplotlib collections
     field = np.asarray(field).ravel()
@@ -543,7 +580,16 @@ def _configure_property_settings(
     if not hasattr(data, "load"):
         data.load = 0
 
-    return field, cmap, norm, boundaries, backgroundColor, state_indices
+    return (
+        field,
+        cmap,
+        norm,
+        boundaries,
+        backgroundColor,
+        state_indices,
+        tick_positions,
+        tick_labels,
+    )
 
 
 def _plot_mesh_elements(
@@ -717,6 +763,8 @@ def _add_additional_elements(
     mesh_property,
     add_colorbar,
     boundaries,
+    tick_positions,
+    tick_labels,
     add_rombus,
     nodes,
     data,
@@ -726,9 +774,17 @@ def _add_additional_elements(
     if add_colorbar and mappable is not None:
         cbar = plt.colorbar(mappable, ax=ax, label=pretty_mesh_property(mesh_property))
         if boundaries is not None:
-            ticks, labels = _discrete_ticks_and_labels(boundaries)
-            cbar.set_ticks(ticks)
-            cbar.set_ticklabels(labels)
+            if tick_positions is not None or tick_labels is not None:
+                if tick_positions is None:
+                    tick_positions, _ = _discrete_ticks_and_labels(boundaries)
+                if tick_labels is None:
+                    _, tick_labels = _discrete_ticks_and_labels(boundaries)
+                cbar.set_ticks(tick_positions)
+                cbar.set_ticklabels(tick_labels)
+            else:
+                ticks, labels = _discrete_ticks_and_labels(boundaries)
+                cbar.set_ticks(ticks)
+                cbar.set_ticklabels(labels)
             # Normalize colors for colormap
         if show_force:
             norm = mcolors.Normalize(vmin=minForce, vmax=maxForce)
@@ -817,6 +873,43 @@ def get_energy_grid(zoom=1):
     return GRID
 
 
+def _bin_poincare_velocity_field(x, y, u, v, bins=40, zoom=1):
+    """Bin scattered velocities on the Poincare disk into a regular grid."""
+    if bins is None or bins <= 0:
+        raise ValueError(f"bins must be positive, got {bins}")
+    r = 1.0 / zoom
+    edges = np.linspace(-r, r, bins + 1)
+
+    ix = np.searchsorted(edges, x, side="right") - 1
+    iy = np.searchsorted(edges, y, side="right") - 1
+
+    valid = (
+        (ix >= 0)
+        & (ix < bins)
+        & (iy >= 0)
+        & (iy < bins)
+        & np.isfinite(u)
+        & np.isfinite(v)
+    )
+    if not np.any(valid):
+        return None
+
+    sum_u = np.zeros((bins, bins), dtype=float)
+    sum_v = np.zeros((bins, bins), dtype=float)
+    count = np.zeros((bins, bins), dtype=int)
+
+    np.add.at(sum_u, (iy[valid], ix[valid]), u[valid])
+    np.add.at(sum_v, (iy[valid], ix[valid]), v[valid])
+    np.add.at(count, (iy[valid], ix[valid]), 1)
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean_u = np.where(count > 0, sum_u / count, np.nan)
+        mean_v = np.where(count > 0, sum_v / count, np.nan)
+
+    centers = 0.5 * (edges[:-1] + edges[1:])
+    return centers, mean_u, mean_v, count
+
+
 def plot_in_poincare_disk(
     vtu_file, ax=None, fig=None, do_elastic_reduction=False, **kwargs
 ):
@@ -843,6 +936,182 @@ def plot_in_poincare_disk(
     return ax
 
 
+def plot_velocity_field_in_poincare_disk(
+    vtu_file,
+    ax=None,
+    fig=None,
+    do_elastic_reduction=False,
+    previous_frame_vtu_file=None,
+    delx=None,
+    **kwargs,
+):
+    use_streamplot = True
+    if ax is None:
+        ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
+
+    data = VTUData(vtu_file)
+    C = data.get_C_fix()
+    if do_elastic_reduction:
+        C, _ = elastic_reduction(C)
+        zoom = 3
+    else:
+        zoom = 1
+
+    g = get_energy_grid(zoom=zoom)
+    plotEnergyField(
+        g, fig, ax, save=False, add_title=False, zoom=zoom, remove_max_color=zoom == 1
+    )
+
+    if previous_frame_vtu_file is None:
+        if kwargs.get("velocity_show_points", False):
+            vmax = 2000 if do_elastic_reduction else 1700
+            drawCScatter(ax, C, len(g), vmax=vmax, zoom=zoom, remove_max_color=False)
+        return ax
+
+    prev_data = VTUData(previous_frame_vtu_file)
+    C_prev = prev_data.get_C_fix()
+    if do_elastic_reduction:
+        C_prev, _ = elastic_reduction(C_prev)
+
+    x, y = C2Plane(C, plane="PoincareDisk")
+    x_prev, y_prev = C2Plane(C_prev, plane="PoincareDisk")
+
+    n = min(x.size, x_prev.size)
+    if n == 0:
+        return ax
+    x, y, x_prev, y_prev = x[:n], y[:n], x_prev[:n], y_prev[:n]
+
+    mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(x_prev) & np.isfinite(y_prev)
+    if not np.any(mask):
+        return ax
+
+    dx = x[mask] - x_prev[mask]
+    dy = y[mask] - y_prev[mask]
+
+    delx_val = delx
+    if delx_val is None or not np.isfinite(delx_val) or delx_val == 0:
+        try:
+            delx_val = (
+                get_data_from_name(vtu_file)["load"]
+                - get_data_from_name(previous_frame_vtu_file)["load"]
+            )
+        except Exception:
+            delx_val = 1.0
+    if not np.isfinite(delx_val) or delx_val == 0:
+        delx_val = 1.0
+
+    u = dx / delx_val
+    v = dy / delx_val
+
+    velocity_grid_size = int(kwargs.get("velocity_grid_size", 40))
+    velocity_min_count = int(kwargs.get("velocity_min_count", 3))
+    velocity_scale = float(kwargs.get("velocity_scale", 1.0))
+    velocity_cmap = kwargs.get("velocity_cmap", "viridis")
+    velocity_color = kwargs.get("velocity_color", True)
+    velocity_width = float(kwargs.get("velocity_width", 0.002))
+    velocity_headwidth = float(kwargs.get("velocity_headwidth", 3.0))
+
+    binned = _bin_poincare_velocity_field(
+        x[mask], y[mask], u, v, bins=velocity_grid_size, zoom=zoom
+    )
+    if binned is None:
+        return ax
+    centers, mean_u, mean_v, count = binned
+
+    Xc, Yc = np.meshgrid(centers, centers)
+    valid_bins = (
+        (count >= velocity_min_count) & np.isfinite(mean_u) & np.isfinite(mean_v)
+    )
+    if not np.any(valid_bins):
+        return ax
+
+    grid_size = len(g)
+    scale_xy = zoom * grid_size / 2
+    x_plot = centers * scale_xy + grid_size / 2
+    y_plot = centers * scale_xy + grid_size / 2
+    u_plot = mean_u * scale_xy * velocity_scale
+    v_plot = mean_v * scale_xy * velocity_scale
+
+    if use_streamplot:
+        invalid = ~valid_bins | ~np.isfinite(u_plot) | ~np.isfinite(v_plot)
+        u_masked = np.ma.array(u_plot, mask=invalid)
+        v_masked = np.ma.array(v_plot, mask=invalid)
+        if velocity_color:
+            speed = np.ma.sqrt(u_masked**2 + v_masked**2)
+            stream = ax.streamplot(
+                x_plot,
+                y_plot,
+                u_masked,
+                v_masked,
+                color=speed,
+                cmap=velocity_cmap,
+                linewidth=velocity_width * 300,
+                density=1.0,
+                zorder=8,
+            )
+            if kwargs.get("velocity_colorbar", False):
+                plt.colorbar(stream.lines, ax=ax, label="|v|", pad=0.01)
+        else:
+            ax.streamplot(
+                x_plot,
+                y_plot,
+                u_masked,
+                v_masked,
+                color=kwargs.get("velocity_color_value", "black"),
+                linewidth=velocity_width * 300,
+                density=1.0,
+                zorder=8,
+            )
+    else:
+        xq = Xc[valid_bins]
+        yq = Yc[valid_bins]
+        uq = mean_u[valid_bins]
+        vq = mean_v[valid_bins]
+
+        xq_plot = xq * scale_xy + grid_size / 2
+        yq_plot = yq * scale_xy + grid_size / 2
+        uq_plot = uq * scale_xy * velocity_scale
+        vq_plot = vq * scale_xy * velocity_scale
+
+        quiver_kwargs = dict(
+            angles="xy",
+            scale_units="xy",
+            scale=1,
+            width=velocity_width,
+            headwidth=velocity_headwidth,
+            zorder=8,
+        )
+
+        if velocity_color:
+            mag = np.sqrt(uq_plot**2 + vq_plot**2)
+            quiver = ax.quiver(
+                xq_plot,
+                yq_plot,
+                uq_plot,
+                vq_plot,
+                mag,
+                cmap=velocity_cmap,
+                **quiver_kwargs,
+            )
+            if kwargs.get("velocity_colorbar", False):
+                plt.colorbar(quiver, ax=ax, label="|v|", pad=0.01)
+        else:
+            ax.quiver(
+                xq_plot,
+                yq_plot,
+                uq_plot,
+                vq_plot,
+                color=kwargs.get("velocity_color_value", "black"),
+                **quiver_kwargs,
+            )
+
+    if kwargs.get("velocity_show_points", False):
+        vmax = 2000 if do_elastic_reduction else 1700
+        drawCScatter(ax, C, len(g), vmax=vmax, zoom=zoom, remove_max_color=False)
+
+    return ax
+
+
 def plot_and_save_in_poincare_disk(**kwargs):
     return plot_and_save(
         plot_func=plot_in_poincare_disk,
@@ -853,6 +1122,14 @@ def plot_and_save_in_poincare_disk(**kwargs):
 def plot_and_save_in_e_reduced_poincare_disk(**kwargs):
     return plot_and_save(
         plot_func=plot_in_poincare_disk,
+        do_elastic_reduction=True,
+        **kwargs,
+    )
+
+
+def plot_and_save_velocity_field_in_e_reduced_poincare_disk(**kwargs):
+    return plot_and_save(
+        plot_func=plot_velocity_field_in_poincare_disk,
         do_elastic_reduction=True,
         **kwargs,
     )
@@ -1160,6 +1437,7 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
                 and "min_plastic_change" not in kwargs
             ):
                 kwargs["min_plastic_change"] = plastic_limits["min_plastic_change"]
+
     else:
         # set default values
         axis_limits = None

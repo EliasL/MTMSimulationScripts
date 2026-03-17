@@ -14,6 +14,7 @@ from .pyplotFunctions import (
     plot_and_save_plot,
     plot_and_save_in_poincare_disk,
     plot_and_save_in_e_reduced_poincare_disk,
+    plot_and_save_velocity_field_in_e_reduced_poincare_disk,
     plot_and_save_mesh_with_force,
 )
 from .dataFunctions import parse_pvd_file, get_data_from_name
@@ -222,6 +223,7 @@ def makeAnimations(
         (plot_and_save_plot, "energy_plot"),
         (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_m_mesh, "m_mesh"),
+        (plot_and_save_velocity_field_in_e_reduced_poincare_disk, "erDisk_velocity"),
     ]:
         images = make_images(
             vtu_files,
