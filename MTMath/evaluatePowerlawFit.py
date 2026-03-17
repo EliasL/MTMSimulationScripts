@@ -704,7 +704,9 @@ class Fit(powerlaw.Fit):
                 (pl.in_range() and not pl.noise_flag),
             )
 
-        # Stage 1:
+        # Lets try 100 log spaced xmin values
+
+        # Then we
 
     def _get_cache_path(self, cache_dir, data, nr_sets):
         import hashlib
@@ -754,6 +756,122 @@ class Fit(powerlaw.Fit):
             param_vals = [getattr(m, m.parameter1_name)]
         return m.D, param_vals
 
+    def bootstrap_ks_samples(
+        self,
+        data=None,
+        nr_sets=None,
+        confidence=0.01,
+        parallel=True,
+        max_synthetic_samples=5e6,
+        tqdmDesc="",
+        show_progress=True,
+        max_workers=None,
+        return_params=False,
+    ):
+        """
+        Generate bootstrap KS distances for the current fit.
+
+        Returns
+        -------
+        D_vals : np.ndarray
+            Bootstrap KS distances.
+        param_vals : list | None
+            Bootstrap parameter estimates if return_params=True.
+        """
+        from numpy import asarray
+        from functools import partial
+        from tqdm import tqdm
+
+        if data is None:
+            data = self.data
+        data = trim_to_range(data, xmin=self.xmin, xmax=self.xmax)
+        if len(data) <= 2:
+            return asarray([]), ([] if return_params else None)
+
+        if nr_sets is None:
+            nr_sets = max(1, int(1 / (4 * confidence**2)))  # At least one set
+        nr_sets = int(nr_sets)
+
+        # Get distribution (Let me know if there is a better way to do this)
+        dist = dist_from_fit(self)
+
+        samples_per_set = len(data)
+        if max_synthetic_samples is None:
+            max_synthetic_samples = samples_per_set * nr_sets
+        max_synthetic_samples = int(max_synthetic_samples)
+        sets_per_batch = max(1, max_synthetic_samples // max(1, samples_per_set))
+
+        parameter_names = list(getattr(self.xmin_distribution, "parameter_names", []))
+        worker = partial(
+            self._fit_on_sample,
+            dist=self.xmin_distribution,
+            xmin=self.xmin,
+            xmax=self.xmax,
+            discrete=self.discrete,
+            fit_method=self.fit_method,
+            parameter_names=parameter_names if return_params else None,
+        )
+
+        D_vals = []
+        param_vals = [] if return_params else None
+        remaining = nr_sets
+
+        with warnings.catch_warnings():
+            _suppress_powerlaw_warnings()
+            if parallel:
+                from concurrent.futures import ProcessPoolExecutor
+
+                with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                    progress = tqdm(
+                        total=nr_sets, desc=tqdmDesc, disable=not show_progress
+                    )
+                    while remaining > 0:
+                        batch_sets = min(sets_per_batch, remaining)
+                        synthetic_data = dist.generate_random(
+                            samples_per_set * batch_sets
+                        )
+                        if synthetic_data is None:
+                            progress.close()
+                            break
+                        if batch_sets == 1:
+                            synthetic_sets = [synthetic_data]
+                        else:
+                            synthetic_sets = synthetic_data.reshape(
+                                batch_sets, samples_per_set
+                            )
+                        results = list(ex.map(worker, synthetic_sets))
+                        progress.update(len(results))
+                        batch_D, batch_params = zip(*results)
+                        D_vals.extend(batch_D)
+                        if return_params:
+                            param_vals.extend(batch_params)
+                        remaining -= batch_sets
+                    progress.close()
+            else:
+                progress = tqdm(total=nr_sets, desc=tqdmDesc, disable=not show_progress)
+                while remaining > 0:
+                    batch_sets = min(sets_per_batch, remaining)
+                    synthetic_data = dist.generate_random(samples_per_set * batch_sets)
+                    if synthetic_data is None:
+                        progress.close()
+                        break
+                    if batch_sets == 1:
+                        synthetic_sets = [synthetic_data]
+                    else:
+                        synthetic_sets = synthetic_data.reshape(
+                            batch_sets, samples_per_set
+                        )
+                    results = [worker(s) for s in synthetic_sets]
+                    progress.update(len(results))
+                    batch_D, batch_params = zip(*results)
+                    D_vals.extend(batch_D)
+                    if return_params:
+                        param_vals.extend(batch_params)
+                    remaining -= batch_sets
+                progress.close()
+
+        return asarray(D_vals), param_vals
+
     def evaluate_fit(
         self,
         data=None,
@@ -775,8 +893,6 @@ class Fit(powerlaw.Fit):
         - The cache key depends on key params and a SHA-1 hash of the (trimmed) data.
         """
         from numpy import mean, std, asarray
-        from functools import partial
-        from tqdm import tqdm
 
         if data is None:
             data = self.data
@@ -840,93 +956,22 @@ class Fit(powerlaw.Fit):
                     # fall through to recompute if loading fails
                     pass
 
-        # Get distribution (Let me know if there is a better way to do this)
-        dist = dist_from_fit(self)
-        # --- no (usable) cache: compute in batches to cap memory
-        samples_per_set = len(data)
-        if max_synthetic_samples is None:
-            max_synthetic_samples = samples_per_set * nr_sets
-        max_synthetic_samples = int(max_synthetic_samples)
-        sets_per_batch = max(1, max_synthetic_samples // max(1, samples_per_set))
-
         parameter_names = list(getattr(self.xmin_distribution, "parameter_names", []))
-        worker = partial(
-            self._fit_on_sample,
-            dist=self.xmin_distribution,
-            xmin=self.xmin,
-            xmax=self.xmax,
-            discrete=self.discrete,
-            fit_method=self.fit_method,
-            parameter_names=parameter_names,
+
+        D_vals, param_vals = self.bootstrap_ks_samples(
+            data=data,
+            nr_sets=nr_sets,
+            parallel=parallel,
+            max_synthetic_samples=max_synthetic_samples,
+            tqdmDesc=tqdmDesc,
+            show_progress=True,
+            return_params=True,
         )
 
-        D_vals = []
-        param_vals = []
-        remaining = nr_sets
-
-        with warnings.catch_warnings():
-            _suppress_powerlaw_warnings()
-            if parallel:
-                from concurrent.futures import ProcessPoolExecutor
-
-                with ProcessPoolExecutor() as ex:
-                    progress = tqdm(total=nr_sets, desc=tqdmDesc)
-                    while remaining > 0:
-                        batch_sets = min(sets_per_batch, remaining)
-                        synthetic_data = dist.generate_random(
-                            samples_per_set * batch_sets
-                        )
-                        if synthetic_data is None:
-                            print("Fit not evaluated.")
-                            self.p = -0.01
-                            self.p_std = 0
-                            self.alpha_mean = 0
-                            self.alpha_std = 0
-                            progress.close()
-                            break
-                        if batch_sets == 1:
-                            synthetic_sets = [synthetic_data]
-                        else:
-                            synthetic_sets = synthetic_data.reshape(
-                                batch_sets, samples_per_set
-                            )
-                        results = list(ex.map(worker, synthetic_sets))
-                        progress.update(len(results))
-                        batch_D, batch_params = zip(*results)
-                        D_vals.extend(batch_D)
-                        param_vals.extend(batch_params)
-                        remaining -= batch_sets
-                    progress.close()
-            else:
-                progress = tqdm(total=nr_sets, desc=tqdmDesc)
-                while remaining > 0:
-                    batch_sets = min(sets_per_batch, remaining)
-                    synthetic_data = dist.generate_random(samples_per_set * batch_sets)
-                    if synthetic_data is None:
-                        print("Fit not evaluated.")
-                        self.p = -0.01
-                        self.p_std = 0
-                        self.alpha_mean = 0
-                        self.alpha_std = 0
-                        progress.close()
-                        break
-                    if batch_sets == 1:
-                        synthetic_sets = [synthetic_data]
-                    else:
-                        synthetic_sets = synthetic_data.reshape(
-                            batch_sets, samples_per_set
-                        )
-                    results = [worker(s) for s in synthetic_sets]
-                    progress.update(len(results))
-                    batch_D, batch_params = zip(*results)
-                    D_vals.extend(batch_D)
-                    param_vals.extend(batch_params)
-                    remaining -= batch_sets
-                progress.close()
-
-        if D_vals:
-            # --- aggregate results
+        if len(D_vals):
+            # Get distribution (Let me know if there is a better way to do this)
             dist = dist_from_fit(self)
+            # --- aggregate results
             self.p = mean(asarray(D_vals) >= dist.D)
             self.p_std = confidence
 
@@ -955,6 +1000,12 @@ class Fit(powerlaw.Fit):
                 alpha_vals = [p[0] for p in param_vals if p]
                 self.alpha_mean = mean(alpha_vals) if alpha_vals else 0.0
                 self.alpha_std = std(alpha_vals) if alpha_vals else 0.0
+        else:
+            print("Fit not evaluated.")
+            self.p = -0.01
+            self.p_std = 0
+            self.alpha_mean = 0
+            self.alpha_std = 0
 
         # --- save computed scalars if requested (atomic JSON write)
         if use_cache and cache_path is not None:

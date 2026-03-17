@@ -13,7 +13,7 @@ import scipy.interpolate as interpolate
 from matplotlib import colors
 from matplotlib import cm
 from scipy.stats import gaussian_kde
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, PowerNorm
 
 
 def oneDPotential():
@@ -1447,6 +1447,7 @@ def plotEnergyField(
     add_title=True,
     zoom=1,
     remove_max_color=True,
+    scale=1.0,
 ):
     # Define the range for x and y based on the unit circle
     radius = 1.0
@@ -1468,7 +1469,14 @@ def plotEnergyField(
         n = 2
         newcolors[-n:, -1] = np.linspace(1, 0, n) ** (1 / 2)
         cmap = colors.ListedColormap(newcolors)
-    img = ax.imshow(energy_grid, cmap=cmap, origin="lower")
+    if scale is None:
+        scale = 1.0
+    scale = float(scale)
+    if scale <= 0:
+        raise ValueError(f"Scale must be positive. Got {scale}.")
+    norm = PowerNorm(gamma=scale)
+
+    img = ax.imshow(energy_grid, cmap=cmap, origin="lower", norm=norm)
 
     # Add a thin black circle
     drawUnitCircle(ax, grid_size=grid_size, zoom=zoom)
@@ -1497,6 +1505,12 @@ def plotEnergyField(
 
     # Add colorbar
     cbar = fig.colorbar(img, label="Energy", pad=-0.01)
+    vmin, vmax = img.get_clim()
+    if np.isfinite(vmin) and np.isfinite(vmax) and vmin < vmax:
+        t = np.linspace(0.0, 1.0, 7)
+        # Evenly spaced in color space; invert PowerNorm to data space.
+        ticks = vmin + (vmax - vmin) * (t ** (1.0 / scale))
+        cbar.set_ticks(ticks)
     default_font_size = plt.rcParams["font.size"]  # Fetch default font size
     cbar.ax.set_title(f"Capped at ${max_energy}$", fontsize=default_font_size)
     nbs = "\u00a0"  # non-breaking-space

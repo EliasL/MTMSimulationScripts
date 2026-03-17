@@ -7,12 +7,7 @@ from Management.configGenerator import SimulationConfig
 from Management.updateCSV import update_df_header
 from Plotting.remotePlotting import get_csv_files
 from Plotting.makePlots import maybe_avg
-from Plotting.plotPowerLaw import (
-    get_energy_drops,
-    getHist,
-    findPrePostSplit,
-    get_system_size,
-)
+from Plotting.plotPowerLaw import get_energy_drops, getHist, get_system_size
 
 
 def _resolve_csv_path(config_file, useOldFiles=False, forceUpdate=False):
@@ -49,15 +44,6 @@ def plot_reversibility_histograms(
 
     df = pd.read_csv(csv_path)
     df = update_df_header(df, L=get_system_size([csv_path]))
-    resolved_strain_lim = strainLim
-    if resolved_strain_lim is None or resolved_strain_lim == "auto":
-        gamma_max_stress = findPrePostSplit(df=df)
-        if postRegime:
-            resolved_strain_lim = [gamma_max_stress + 1e-2, df["load"].max()]
-        elif postRegime is None:
-            resolved_strain_lim = [df["load"].min(), df["load"].max()]
-        else:
-            resolved_strain_lim = [df["load"].min(), gamma_max_stress - 1e-4]
 
     if "avg_e_change_from_init" in df:
         energy_col = "avg_e_change_from_init"
@@ -72,7 +58,12 @@ def plot_reversibility_histograms(
     rev_col = "is_reversible"
     is_rev = np.array(df[rev_col], dtype=bool)
 
-    drops, data_info = get_energy_drops(csv_path, df=df, strainLim=resolved_strain_lim)
+    drops, data_info = get_energy_drops(
+        csv_path,
+        df=df,
+        strainLim=strainLim,
+        postRegime=postRegime,
+    )
     drop_mask = data_info["masks"][0]
     is_rev = is_rev[drop_mask]
 

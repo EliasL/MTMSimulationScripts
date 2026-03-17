@@ -19,7 +19,7 @@ from MTMath.energyFunction import ContiEnergy
 from .makePlots import makePlot
 from .remotePlotting import get_csv_files
 from .dataFunctions import get_data_from_name, VTUData, CArrsToMat, get_previous_data
-
+from .plotPowerLaw import plot_plastic_counts
 # matplotlib.use("Agg")  # Use a non-interactive backend
 
 # We get almost all variables dynamically, but we choose to set the force scale
@@ -167,7 +167,7 @@ def base_plot(
     frame_index=None,
     avgEnergy=None,
     avgRSS=None,
-    delAvgEnergy=None,
+    energyDrop=None,
     delAvgRSS=None,
     delx=None,
     macroData=None,
@@ -220,7 +220,7 @@ def base_plot(
         if delta_title:
             data_row = [
                 rf"$\Delta\gamma$: {delx:.1e}",
-                rf"$\Delta\langle E \rangle$: {delAvgEnergy:.2e}",
+                rf"$\Delta E $: {energyDrop:.2e}",
                 rf"$\Delta\langle {stress_label} \rangle$: {delAvgRSS:.2e}",
             ]
         else:
@@ -503,9 +503,7 @@ def _configure_property_settings(
         else:
             max_plastic = max(float(max_plastic), field_max)
         max_plastic = max(1.0, max_plastic)
-        boundaries = _make_discrete_boundaries(
-            0.0, max_plastic, n_bins=12, gamma=0.5
-        )
+        boundaries = _make_discrete_boundaries(0.0, max_plastic, n_bins=12, gamma=0.5)
         cmap = plt.get_cmap(cmap, len(boundaries) - 1)
         norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         backgroundColor = plt.get_cmap(cmap)(0)
@@ -751,9 +749,11 @@ def make_static_plot(fileName, **kwargs):
     ax, fig = base_plot(
         add_title=False, equalAspect=False, remove_ticks=False, dpi=150, **kwargs
     )
+
+    macro_data = kwargs["macro_data"]
     if fileName == "energy_plot":
-        fig, ax = makePlot(
-            kwargs["macro_data"],
+        makePlot(
+            macro_data,
             ax=ax,
             fig=fig,
             Y="avg_energy",
@@ -762,26 +762,8 @@ def make_static_plot(fileName, **kwargs):
         )
 
     elif fileName == "e_drop_plot":
-        nrSeeds = 40
-        configs, labels = propperJob(3, nrSeeds, group_by_seeds=True)
-        paths, labels = get_csv_files(configs, labels=labels)
-        # TODO
-        # makeLogPlotComparison(
-        #     [paths[0]],  # We choose only the LBFGS
-        #     innerStrainLims=(1, np.inf),
-        #     outerStrainLims=(0.31, 1),
-        #     plot_post_yield=False,
-        #     save=False,
-        #     use_y_axis_name=True,
-        #     Y="avg_energy",
-        #     ax=ax,
-        #     fig=fig,
-        #     labels=labels,
-        #     legend_loc="lower left",
-        #     show=False,
-        #     add_fit=False,
-        #     **kwargs,
-        # )
+        plot_plastic_counts([macro_data], ax=ax, save=False)
+
     return fig, ax
 
 
@@ -797,7 +779,7 @@ def plot_plot(
     vtu_file,
     ax=None,
     fileName=None,
-    delAvgEnergy=None,
+    energyDrop=None,
     **kwargs,
 ):
     remove_vlines(ax)
@@ -806,12 +788,12 @@ def plot_plot(
     if fileName == "energy_plot":
         x = data.load
     elif fileName == "e_drop_plot":
-        x = -delAvgEnergy
+        x = -energyDrop
 
     ax.axvline(
         x=x,
         color="red",
-        linewidth=0.5,
+        linewidth=1,
     )
 
     return ax
@@ -842,7 +824,7 @@ def plot_in_poincare_disk(
         ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
     data = VTUData(vtu_file)
 
-    C = data.get_C()
+    C = data.get_C_fix()
     if do_elastic_reduction:
         # Do the elastic reduction
         C, _ = elastic_reduction(C)
@@ -1020,7 +1002,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
     )
     stress_col, stress_label = _resolve_stress_column(df, macro_data)
     avg_energy_list = []
-    change_avg_energy_list = []
+    change_energy_list = []
     avg_stress_list = []
     line_numbers = []
     x_list = []
@@ -1032,9 +1014,16 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
             n = metaData["load_step"]
             matching_rows = df[df["load_step"] == n]
             if len(matching_rows) != 1:
-                raise ValueError(
-                    f"Error in file {vtu_file}:\nload_step value '{n}' is not unique or not found. Found {len(matching_rows)} matches."
+                # raise ValueError(
+                #     f"Error in file {vtu_file}:\nload_step value '{n}' is not unique or not found. Found {len(matching_rows)} matches."
+                # )
+                print(
+                    f"Warning: in file {vtu_file}:\nload_step value '{n}' is not unique or not found. Found {len(matching_rows)} matches."
                 )
+                print(
+                    "Try moving/deleting vtu files that are further ahead than the csv file."
+                )
+                pass
         elif "load" in df.columns:
             load = metaData["load"]
             matching_rows = df[df["load"] == load]
@@ -1064,8 +1053,8 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         # Append the extracted values to the respective lists
         avg_energy_list.append(matching_row["avg_energy"])
         avg_stress_list.append(matching_row[stress_col])
-        if "avg_energy_change" in matching_row:
-            change_avg_energy_list.append(matching_row["avg_energy_change"])
+        if "total_e_change_from_init" in matching_row:
+            change_energy_list.append(matching_row["total_e_change_from_init"])
             if (
                 matching_row["avg_energy_change"] < 0
                 and matching_row["nr_plastic_deformations"] == 0
@@ -1083,6 +1072,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
             # ):
             #     print(f"Super small energy drop: {matching_row_index}, {X}={x}")
         else:
+            raise (ValueError("Outdated csv file"))
             if matching_row_index == 0:
                 diff = 0
             else:
@@ -1090,7 +1080,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
                     df["avg_energy"][matching_row_index - 1]
                     - df["avg_energy"][matching_row_index]
                 )
-            change_avg_energy_list.append(diff)
+            change_energy_list.append(diff)
 
     # Find previous data and get change data as well
     px, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(
@@ -1104,7 +1094,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
     return (
         avg_energy_list,
         avg_stress_list,
-        change_avg_energy_list,
+        change_energy_list,
         change_avg_stress_list,
         del_x,
         line_numbers,
@@ -1151,7 +1141,7 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
         (
             avgEnergy,
             avgRSS,
-            delAvgEnergy,
+            energyDrop,
             delAvgRSS,
             delx,
             macroDataRowIndex,
@@ -1176,7 +1166,7 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
         e_lims = [0, 0.03]
         avgEnergy = [0] * len(vtu_files)
         avgRSS = [0] * len(vtu_files)
-        delAvgEnergy = [0] * len(vtu_files)
+        energyDrop = [0] * len(vtu_files)
         delAvgRSS = [0] * len(vtu_files)
         delx = [0] * len(vtu_files)
         macroDataRowIndex = [0] * len(vtu_files)
@@ -1207,7 +1197,7 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
             "axis_limits": axis_limits,
             "avgEnergy": avgEnergy[i],
             "avgRSS": avgRSS[i],
-            "delAvgEnergy": delAvgEnergy[i],
+            "energyDrop": energyDrop[i],
             "delAvgRSS": delAvgRSS[i],
             "delx": delx[i],
             "macroDataRowIndex": macroDataRowIndex[i],

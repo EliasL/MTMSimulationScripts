@@ -1,4 +1,5 @@
 from .findXmin import find_xmin
+from MTMath.energyFunction import ContiEnergy
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -33,6 +34,14 @@ def _append_sample_suffix(name, n_samples):
     except (TypeError, ValueError):
         return name
     return f"{name}_n{n_int}"
+
+
+# def ax.figure -> mpl.figure.Figure:
+#     fig = ax.figure
+#     # SubFigure doesn't implement tight_layout; use the parent Figure instead.
+#     if isinstance(fig, mpl.figure.Figure):
+#         return fig
+#     return fig.figure
 
 
 def get_minimizer(df):
@@ -70,7 +79,7 @@ def get_system_size(csvPaths):
 
     sizes = set()
     for path in csvPaths:
-        match = re.search(r"(\d+)x(\d+)", path)
+        match = re.search(r"(\d+)x(\d+)", str(path))
         if match:
             n1, n2 = match.groups()
             if n1 != n2:
@@ -87,16 +96,36 @@ def get_system_size(csvPaths):
         return sizes.pop()
 
 
+def _resolve_strain_lim(strainLim, *, df, postRegime):
+    """
+    Resolve "auto"/"all"/None strain limits based on the stress peak.
+    """
+    if strainLim == "all":
+        return [-np.inf, np.inf]
+    if strainLim is None or strainLim == "auto":
+        gamma_max_stress = findPrePostSplit(df=df)
+        if postRegime is None:
+            return [df["load"].min(), df["load"].max()]
+        if postRegime:
+            return [gamma_max_stress + 1e-2, df["load"].max()]
+        return [df["load"].min(), gamma_max_stress - 1e-4]
+    return strainLim
+
+
 def get_energy_drops(
     csvPaths,
-    use_avg_e_change_from_init=False,
     df=None,
-    strainLim=[-np.inf, np.inf],
+    strainLim: str | list[float] = "auto",
     debug=False,
     label=None,
+    onlyStrainedEnergyDrops=False,
+    postRegime=True,
+    averageEnergy=False,
 ):
     """
     Strain energy drop data from CSV, filter by strain limits, and return drops.
+    When onlyStrainedEnergyDrops is true, we still use e_change_from_init, but only
+    when energy_chage is negative (there is a drop between relaxed states).
     If debug=True, plot intermediate energy and drop traces.
     """
     if isinstance(csvPaths, str):
@@ -104,27 +133,42 @@ def get_energy_drops(
 
     drops = []
     masks = []
+    dfs = []
     L = get_system_size(csvPaths)
+    resolved_strain_lim = strainLim
+    read_from_paths = df is None
     for singlePath in csvPaths:
-        if df is None:
-            df = pd.read_csv(singlePath)
-            df = update_df_header(df, L=L)
-        if use_avg_e_change_from_init:
-            assert "avg_e_change_from_init" in df, (
+        if read_from_paths:
+            df_local = pd.read_csv(singlePath)
+            df_local = update_df_header(df_local, L=L)
+            dfs.append(df_local)
+        else:
+            df_local = df
+        if resolved_strain_lim in ("auto", "all", None):
+            resolved_strain_lim = _resolve_strain_lim(
+                resolved_strain_lim, df=df_local, postRegime=postRegime
+            )
+
+        if averageEnergy:
+            assert "avg_e_change_from_init" in df_local, (
                 "Uh oh. If the data is old, set use_avg_e_change_from_init."
             )
-            diffs = df["avg_e_change_from_init"]
-        elif "e_change_from_init" in df:
-            diffs = df["e_change_from_init"]
-        elif "energy_change" in df:
-            diffs = df["energy_change"]
-        elif "avg_energy_change" in df:
-            diffs = df["avg_energy_change"]
+            energy_key = "avg_e_change_from_init"
+        elif "e_change_from_init" in df_local:
+            energy_key = "e_change_from_init"
+        elif "energy_change" in df_local:
+            energy_key = "energy_change"
+        elif "avg_energy_change" in df_local:
+            energy_key = "avg_energy_change"
         else:
             # Add 0 in the beginning
-            energy_key = "energy" if "energy" in df else "avg_energy"
-            diffs = np.insert(np.diff(df[energy_key]), 0, 0)
-        if "Iteration" in df:
+            energy_key = "energy" if "energy" in df_local else "avg_energy"
+            # I'm not sure, but i don't think we need to insert 0 here...
+            # diffs = np.insert(np.diff(df_local[energy_key]), 0, 0)
+        # energy_key = "total_energy_change"
+
+        diffs = df_local[energy_key]
+        if "Iteration" in df_local:
             # This is umut data, so he has already flipped his drops
             diffs = -diffs
         elif np.all(diffs >= 0):
@@ -132,22 +176,32 @@ def get_energy_drops(
             # they should probably be flipped.
             diffs = -diffs
 
-        strain = df["load"]
-        lim_mask = (strain > strainLim[0]) & (strain < strainLim[1])
+        strain = df_local["load"]
+        lim_mask = (strain > resolved_strain_lim[0]) & (strain < resolved_strain_lim[1])
         drop_mask = diffs < 0
         mask = drop_mask & lim_mask
+
+        if onlyStrainedEnergyDrops:
+            # We use a negative change between relaxed states as a proxy to
+            # distinguish affine relaxation from plastic relaxation.
+            realPlasticDrop = df_local["nr_plastic_deformations"] >= 1
+            mask = mask & realPlasticDrop
+
         drops.extend(-diffs[mask])
         masks.append(mask)
 
     drops = np.array(drops)
+    concat_df = pd.concat(dfs, ignore_index=True) if read_from_paths else df
 
-    data_info = {}
-    data_info["minimizer"] = get_minimizer(df)
-    data_info["nrSimulations"] = len(csvPaths)
-    data_info["strainLim"] = strainLim
-    data_info["L"] = get_system_size(csvPaths)
-    data_info["label"] = label
-    data_info["masks"] = masks
+    data_info = get_energy_drops_info(
+        csvPaths=csvPaths,
+        drops=drops,
+        energy_key=energy_key,
+        df=concat_df,
+        strainLim=resolved_strain_lim,
+        label=label,
+        masks=masks,
+    )
 
     if debug:
         # Only debug first seed when using labels
@@ -156,25 +210,25 @@ def get_energy_drops(
 
         strain_limited = strain[1:][lim_mask[1:]]
         plotDrops = np.clip(-diffs[1:][lim_mask[1:]], 0, np.inf)
-        energy_key = "avg_energy" if use_avg_e_change_from_init else "energy"
-        if energy_key not in df:
+        energy_key = "avg_energy" if averageEnergy else "energy"
+        if energy_key not in df_local:
             energy_key = "avg_energy"
-        e = df[energy_key]
+        e = df_local[energy_key]
         debug_fig, ax1 = plt.subplots()
-        avg_label = maybe_avg("E", use_avg_e_change_from_init)
+        avg_label = maybe_avg("E", averageEnergy)
         ax1.plot(strain, e, label=rf"${avg_label}$")
         ax1.set_ylabel(rf"${avg_label}$")
         ax1.set_xlabel(r"$\gamma$")
         ax2 = ax1.twinx()
         ax2.plot([])  # advance color cycle
-        if use_avg_e_change_from_init:
+        if averageEnergy:
             pre_post = maybe_avg("E_{\\mathrm{pre}-E_{\\mathrm{post}}}", True)
             label = rf"$- {pre_post}$"
         else:
             delta_e = maybe_avg("E", False)
             label = rf"$-\Delta {delta_e}$"
         ax2.plot(strain_limited, plotDrops, label=label)
-        avg_delta = maybe_avg("E", use_avg_e_change_from_init)
+        avg_delta = maybe_avg("E", averageEnergy)
         ax2.set_ylabel(rf"$-\Delta {avg_delta}$ (Energy Drop)")
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
@@ -186,8 +240,8 @@ def get_energy_drops(
             ax2.set_ylim(0, drops.max() * 1.5)
 
         # ——— Compute 0.1%‐wide central slice ———
-        mid = 0.5 * (strainLim[0] + strainLim[1])
-        total_width = strainLim[1] - strainLim[0]
+        mid = 0.5 * (resolved_strain_lim[0] + resolved_strain_lim[1])
+        total_width = resolved_strain_lim[1] - resolved_strain_lim[0]
         slice_width = total_width * 0.05  # 1% of window
         x1, x2 = mid - slice_width / 2, mid + slice_width / 2
         zoom_mask = (strain >= x1) & (strain <= x2)
@@ -246,6 +300,54 @@ def get_energy_drops(
         plt.close(debug_fig)
 
     return (drops, data_info)
+
+
+def get_energy_drops_info(
+    csvPaths,
+    drops,
+    energy_key,
+    *,
+    df=None,
+    strainLim=None,
+    label=None,
+    masks=None,
+):
+    """
+    Collect metadata for energy-drop data without recomputing the drops.
+    """
+    if isinstance(csvPaths, str):
+        csvPaths = [csvPaths]
+    info = {}
+    if df is not None:
+        info["df"] = df
+        info["minimizer"] = get_minimizer(df)
+    info["nrSimulations"] = len(csvPaths)
+    info["drops"] = drops
+    info["key"] = energy_key
+    if strainLim is not None:
+        info["strainLim"] = strainLim
+    info["L"] = get_system_size(csvPaths)
+    if label is not None:
+        info["label"] = label
+    if masks is not None:
+        info["masks"] = masks
+    if df is not None and masks:
+        if isinstance(masks, (list, tuple)):
+            if len(masks) == 1:
+                combined_mask = np.asarray(masks[0])
+            else:
+                combined_mask = np.concatenate([np.asarray(mask) for mask in masks])
+        else:
+            combined_mask = np.asarray(masks)
+        if combined_mask.size == len(df):
+            info["mask"] = combined_mask
+        else:
+            warnings.warn(
+                "Combined mask length does not match dataframe length; "
+                "skipping data_info['mask'].",
+                RuntimeWarning,
+            )
+    return info
 
 
 def getHist(data, weights=None, density=True, bins_per_decade=5):
@@ -629,8 +731,15 @@ def make_title_from_data_info(data_info):
     )
     if data_info["minimizer"] != "Unknown":
         title = rf"{data_info['minimizer']} " + title
-    if data_info["label"]:
-        title += data_info["label"]
+    if "label" in data_info:
+        l = data_info["label"]
+        if isinstance(l, list):
+            assert len(set(l)) == 1, (
+                "Labels in group are different"
+            )  # Which should we use?
+            title += l[0]
+        else:
+            title += l
     title = title.strip().replace("  ", " ")
     return title
 
@@ -1105,60 +1214,14 @@ def find_best_xmin(
     return best_fit
 
 
-def find_start_of_plastic_events(
-    paths, postRegime, data_info, debug=False, binsPerDecade=5
-):
-    all_data = None
-    strainLim = None
-    if data_info is not None:
-        strainLim = data_info.get("strainLim", None)
-    L = get_system_size(paths)
-
-    for path in paths:
-        df = pd.read_csv(path)
-        df = update_df_header(df, L=L)
-        if strainLim is None or strainLim == "auto":
-            gamma_max_stress = findPrePostSplit(df=df)
-            if postRegime:
-                strainLim = [gamma_max_stress + 1e-2, df["load"].max()]
-            else:
-                strainLim = [df["load"].min(), gamma_max_stress - 1e-4]
-        df = df[(df["load"] > strainLim[0]) & (df["load"] < strainLim[1])]
-        if all_data is None:
-            all_data = df
-        else:
-            all_data = pd.concat([all_data, df], ignore_index=True)
-
-    if all_data is None or all_data.empty:
-        print("No data found for plastic event analysis.")
+def find_start_of_plastic_events(data_info, debug=False, binsPerDecade=5):
+    if data_info is None or "df" not in data_info or "mask" not in data_info:
+        warnings.warn("Missing df/mask in data_info; cannot analyze plastic events.")
         return None
-    # The plan is to look at the nr_plastic_deformations associated with each
-    # drop, and make histogram of the number of plastic deformations associated
-    # with each drop size
 
-    if "e_change_from_init" in all_data:
-        diffs = all_data["e_change_from_init"]
-    else:
-        raise RuntimeError("Avoid using old data")
-        if "avg_energy_change" not in df:
-            # Add 0 in the beginning
-            diffs = np.insert(np.diff(df["avg_energy"]), 0, 0)
-        else:
-            diffs = df["avg_energy_change"]
-
-    if "Iteration" in all_data:
-        # This is umut data, so he has already flipped his drops
-        diffs = -diffs
-    elif np.all(diffs >= 0):
-        # More umut code things. I'm just assuming if all the drops are positive
-        # they should probably be flipped.
-        diffs = -diffs
-
-    strain = all_data["load"]
-    lim_mask = (strain > strainLim[0]) & (strain < strainLim[1])
-    drop_mask = diffs < 0
-    mask = drop_mask & lim_mask
-    drops = (-diffs[mask]).to_numpy()
+    all_data = data_info["df"]
+    mask = data_info["mask"]
+    drops = data_info["drops"]
     if "nr_plastic_deformations" in all_data:
         plastics = all_data["nr_plastic_deformations"][mask].to_numpy()
     else:
@@ -1166,19 +1229,10 @@ def find_start_of_plastic_events(
         return None
 
     xmin_loc_min = None
-    drops_pos = drops[drops > 0]
-    if drops_pos.size > 0:
-        decades = np.log10(drops_pos.max()) - np.log10(drops_pos.min())
-        nr_bins = max(1, int(np.ceil(decades * binsPerDecade)))
-        bins = np.logspace(
-            np.log10(drops_pos.min()), np.log10(drops_pos.max()), nr_bins + 1
+    if drops.size > 0:
+        bin_centers, bin_sums = getHist(
+            drops, weights=plastics, density=False, bins_per_decade=binsPerDecade
         )
-        weights = plastics[drops > 0]
-        bin_sums, _ = np.histogram(drops_pos, bins=bins, weights=weights)
-        bin_density, _ = np.histogram(
-            drops_pos, bins=bins, weights=weights, density=True
-        )
-        bin_centers = np.sqrt(bins[:-1] * bins[1:])
         # Find first local minimum
         if len(bin_sums) >= 3:
             for i in range(1, len(bin_sums) - 1):
@@ -1187,73 +1241,19 @@ def find_start_of_plastic_events(
                     break
 
     if debug:
-        fig, ax1 = plt.subplots(1, 1, figsize=(6.4, 4.2))
-        ax2 = ax1.twinx()
-
-        c_drop_pdf = "tab:blue"
-        c_plastic_pdf = "tab:green"
-        c_plastic_counts = "tab:orange"
-
-        # 1) Energy-drop PDF (normalized) on ax1
-        plot_data_pdf(ax1, drops)
-        ax1.set_title("Energy-drop PDF and plasticity vs drop size")
-        ax1.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
-        ax1.set_ylabel("Density (normalized)", color=c_drop_pdf)
-        ax1.tick_params(axis="y", colors=c_drop_pdf)
-        ax1.spines["left"].set_color(c_drop_pdf)
-        ax1.set_xscale("log")
-
-        if drops_pos.size > 0:
-            # bins, bin_sums, bin_density, bin_centers already computed above
-
-            # Plastic-event PDF vs drop size (normalized over plastic events) on ax1
-            plastic_pdf = bin_density  # W_i / (sum W) / Δx_i
-            ax1.plot(
-                bin_centers,
-                plastic_pdf,
-                marker="o",
+        ax = plot_plastic_counts(
+            info=data_info, binsPerDecade=binsPerDecade, save=False
+        )
+        # Optional: mark xmin_peak on x-axis
+        if xmin_loc_min is not None:
+            ax.axvline(
+                xmin_loc_min,
+                color="black",
                 linestyle="--",
-                color=c_plastic_pdf,
-                label="Plastic-event PDF",
+                linewidth=1.2,
+                alpha=0.6,
             )
-
-            # Optional: mark xmin_peak on x-axis
-            if xmin_loc_min is not None:
-                ax1.axvline(
-                    xmin_loc_min,
-                    color="black",
-                    linestyle="--",
-                    linewidth=1.2,
-                    alpha=0.6,
-                )
-
-            # 2) Raw plastic-event counts per bin (no scaling) on ax2
-            ax2.plot(
-                bin_centers,
-                bin_sums,
-                marker="o",
-                linestyle="-",
-                color=c_plastic_counts,
-                label="Plastic events per drop-size bin",
-            )
-            ax2.set_xscale("log")
-            ax2.set_ylabel("Nr plastic events", color=c_plastic_counts)
-            ax2.tick_params(axis="y", colors=c_plastic_counts)
-            ax2.spines["right"].set_color(c_plastic_counts)
-
-        else:
-            ax2.set_ylabel("Plastic events per bin (counts)", color=c_plastic_counts)
-
-        # Keep ax1 legend above ax2 plot elements
-        ax2.set_zorder(0)
-        ax1.set_zorder(1)
-        ax1.patch.set_visible(False)
-
-        handles1, labels1 = ax1.get_legend_handles_labels()
-        handles2, labels2 = ax2.get_legend_handles_labels()
-        legend = ax1.legend(handles1 + handles2, labels1 + labels2, loc="best")
-        legend.set_zorder(10)
-
+        fig = ax.figure
         fig.tight_layout()
         title = make_title_from_data_info(data_info) if data_info else "plastic_events"
         safe_title = safePath(title)
@@ -1261,11 +1261,110 @@ def find_start_of_plastic_events(
         fig.savefig(filename, dpi=300)
         print(f"Saved figure to {filename}")
         plt.close(fig)
-
     return xmin_loc_min
 
 
 def plot_plastic_counts(
+    paths=None,
+    info=None,
+    binsPerDecade=5,
+    postRegime=True,
+    strainLim="auto",
+    ax=None,
+    show=False,
+    save=True,
+):
+    if info is not None:
+        assert paths is None, "Only provide info or paths"
+        drops = info["drops"]
+    else:
+        drops, info = get_energy_drops(
+            paths,
+            strainLim=strainLim,
+            debug=False,
+            label=None,
+            postRegime=postRegime,
+        )
+
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.figure
+    ax2 = ax.twinx()
+
+    mask = info.get("mask")
+    df = info["df"]
+    assert mask is not None
+    plastics = df["nr_plastic_deformations"][mask].to_numpy()
+
+    bin_centers, bin_sums = getHist(
+        drops, weights=plastics, density=False, bins_per_decade=binsPerDecade
+    )
+    bin_centers, bin_density = getHist(
+        drops, weights=plastics, density=True, bins_per_decade=binsPerDecade
+    )
+
+    c_drop_pdf = "tab:blue"
+    c_plastic_pdf = "tab:green"
+    c_plastic_counts = "tab:orange"
+
+    # 1) Energy-drop PDF (normalized) on ax1
+    plot_data_pdf(ax, drops)
+    ax.set_title("Energy-drop PDF and plasticity vs drop size")
+    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
+    ax.set_ylabel("Density (normalized)", color=c_drop_pdf)
+    ax.tick_params(axis="y", colors=c_drop_pdf)
+    ax.spines["left"].set_color(c_drop_pdf)
+    ax.set_xscale("log")
+
+    # Plastic-event PDF vs drop size (normalized over plastic events) on ax1
+    plastic_pdf = bin_density  # W_i / (sum W) / Δx_i
+    ax.plot(
+        bin_centers,
+        plastic_pdf,
+        marker="o",
+        linestyle="--",
+        color=c_plastic_pdf,
+        label="Plastic-event PDF",
+    )
+
+    # 2) Raw plastic-event counts per bin (no scaling) on ax2
+    ax2.plot(
+        bin_centers,
+        bin_sums,
+        marker="o",
+        linestyle="-",
+        color=c_plastic_counts,
+        label="Plastic events per drop-size bin",
+    )
+    ax2.set_xscale("log")
+    ax2.set_ylabel("Nr plastic events", color=c_plastic_counts)
+    ax2.tick_params(axis="y", colors=c_plastic_counts)
+    ax2.spines["right"].set_color(c_plastic_counts)
+
+    # Keep ax1 legend above ax2 plot elements
+    ax2.set_zorder(0)
+    ax.set_zorder(1)
+    ax.patch.set_visible(False)
+
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    legend = ax.legend(handles1 + handles2, labels1 + labels2, loc="best")
+    legend.set_zorder(10)
+    if save:
+        fig.tight_layout()
+        title = make_title_from_data_info(info) if info else "plastic_events"
+        safe_title = safePath(title)
+        filename = f"{PLOTPATH}debug/{safe_title}_plastic_events.pdf"
+        fig.savefig(filename, dpi=300)
+        print(f"Saved figure to {filename}")
+        plt.close(fig)
+    if show:
+        plt.show()
+    return ax
+
+
+def plot_plastic_counts_compare(
     paths,
     labels=None,
     postRegime=True,
@@ -1294,53 +1393,26 @@ def plot_plastic_counts(
     blues = mpl.colormaps["Blues"]
     oranges = mpl.colormaps["Oranges"]
 
-    edgeflip_colors = iter(blues(np.linspace(0.3, 0.9, len(paths) // 2)))
-    normal_colors = iter(oranges(np.linspace(0.3, 0.9, len(paths) // 2)))
-    data_info = None
+    n_edge = sum("edgeFlip" in p for p in paths)
+    n_norm = len(paths) - n_edge
+    edgeflip_colors = iter(blues(np.linspace(0.3, 0.9, max(1, n_edge))))
+    normal_colors = iter(oranges(np.linspace(0.3, 0.9, max(1, n_norm))))
     for path, label in zip(paths, labels):
-        df = pd.read_csv(path)
-        df = update_df_header(df, L=get_system_size([path]))
-        resolved_strain_lim = strainLim
-        if resolved_strain_lim is None or resolved_strain_lim == "auto":
-            gamma_max_stress = findPrePostSplit(df=df)
-            if postRegime:
-                resolved_strain_lim = [gamma_max_stress + 1e-2, df["load"].max()]
-            else:
-                resolved_strain_lim = [df["load"].min(), gamma_max_stress - 1e-4]
         drops, info = get_energy_drops(
-            [path], df=df, strainLim=resolved_strain_lim, debug=False, label=None
+            [path],
+            strainLim=strainLim,
+            debug=False,
+            label=None,
+            postRegime=postRegime,
         )
-        if data_info is None:
-            data_info = info
-        drops = np.asarray(drops, dtype=float)
-        drops_pos = drops[drops > 0]
-        if drops_pos.size == 0:
-            continue
 
-        if "e_change_from_init" in df:
-            diffs = df["e_change_from_init"]
-        else:
-            raise RuntimeError("Avoid using old data")
-
-        if "Iteration" in df:
-            diffs = -diffs
-        elif np.all(diffs >= 0):
-            # More umut code things. I'm just assuming if all the drops are positive
-            # they should probably be flipped.
-            diffs = -diffs
-
-        strain = df["load"]
-        lim_mask = (strain > resolved_strain_lim[0]) & (strain < resolved_strain_lim[1])
-        drop_mask = diffs < 0
-        mask = drop_mask & lim_mask
-        if "nr_plastic_deformations" in df:
-            plastics = df["nr_plastic_deformations"][mask].to_numpy()
-        else:
-            warnings.warn("nr_plastic_deformations column not found.")
-            continue
+        mask = info.get("mask")
+        df = info["df"]
+        assert mask is not None
+        plastics = df["nr_plastic_deformations"][mask].to_numpy()
 
         bin_centers, bin_sums = getHist(
-            drops_pos, weights=plastics, density=False, bins_per_decade=binsPerDecade
+            drops, weights=plastics, density=False, bins_per_decade=binsPerDecade
         )
         if bin_centers.size == 0:
             continue
@@ -1369,11 +1441,13 @@ def plot_plastic_counts(
     ax.set_xscale("log")
     ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
     ax.set_ylabel("Nr plastic events")
-    ax.legend(loc="best")
+    handles, labels = ax.get_legend_handles_labels()
+    if labels:
+        ax.legend()
     if name:
         title = name
-    elif data_info:
-        title = make_title_from_data_info(data_info)
+    elif info:
+        title = make_title_from_data_info(info)
     else:
         title = "plastic_counts"
     ax.set_title(title)
@@ -1382,6 +1456,137 @@ def plot_plastic_counts(
     if save:
         if filename is None:
             filename = f"{PLOTPATH}{safePath(title)}_plastic_counts.pdf"
+        fig.savefig(filename, dpi=300)
+        print(f"Saved figure to {filename}")
+    if show:
+        plt.show()
+
+    return ax
+
+
+def plot_plastic_energy_scatter(
+    paths,
+    labels=None,
+    postRegime=True,
+    strainLim="auto",
+    ax=None,
+    show=False,
+    save=True,
+    filename=None,
+    name=None,
+):
+    if isinstance(paths, (str, os.PathLike)):
+        paths = [str(paths)]
+    if labels is None:
+        labels = ["" for _ in paths]
+    if len(labels) < len(paths):
+        labels = labels + [""] * (len(paths) - len(labels))
+    elif len(labels) > len(paths):
+        labels = labels[: len(paths)]
+
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(6.4, 4.2))
+    else:
+        fig = ax.figure
+
+    # For scaling model
+    # mu, _ = ContiEnergy.moduli_at_F(np.eye(2))
+    mu = 6.08
+
+    blues = mpl.colormaps["Blues"]
+    oranges = mpl.colormaps["Oranges"]
+
+    n_edge = sum("edgeFlip" in str(p) for p in paths)
+    n_norm = len(paths) - n_edge
+    edgeflip_colors = iter(blues(np.linspace(0.3, 0.9, max(1, n_edge))))
+    normal_colors = iter(oranges(np.linspace(0.3, 0.9, max(1, n_norm))))
+    for path, label in zip(paths, labels):
+        df = pd.read_csv(path)
+        df = update_df_header(df, L=get_system_size([path]))
+        drops, info = get_energy_drops(
+            [path],
+            df=df,
+            strainLim=strainLim,
+            debug=False,
+            label=None,
+            postRegime=postRegime,
+        )
+
+        mask = info.get("mask")
+        assert mask is not None
+        plastics = df["nr_plastic_deformations"][mask].to_numpy()
+        # idx = df["nr_plastic_deformations"][mask].idxmax()
+        # print(df.loc[idx])
+
+        if plastics.size != drops.size:
+            warnings.warn(
+                "Plastic-event count length does not match drop count; skipping.",
+                RuntimeWarning,
+            )
+            continue
+
+        positive_mask = drops > 0
+        if not np.any(positive_mask):
+            continue
+        drops_pos = drops[positive_mask]
+        plastics = plastics[positive_mask]
+
+        x_vals = plastics.astype(float) ** 2
+        y_vals = drops_pos
+
+        if "edgeFlip" in str(path):
+            marker = "s"
+            color = next(edgeflip_colors)
+        else:
+            marker = "o"
+            color = next(normal_colors)
+
+        ax.scatter(
+            x_vals,
+            y_vals,
+            marker=marker,
+            color=color,
+            label=label,
+            alpha=0.6,
+            s=14,
+            edgecolors="none",
+        )
+
+        # Scaling model
+        L = info.get("L", 1)
+
+        print(f"Using mu: {mu:.2f}")
+        print(f"Using L: {L}")
+        Np = plastics[plastics > 0]
+        x = np.array([Np.min(), Np.max()])
+        b = 1
+        y = mu * b**2 * x**2 / L**2
+        ax.plot(
+            x**2,
+            y,
+            label=rf"$\frac{{\mu b^2 N_p^2}}{{L^2}}, \mu={mu:.2f}$",
+        )
+
+    if not ax.collections:
+        print("No data found for plastic energy scatter plotting.")
+        return None
+
+    ax.set_xlabel(r"Nr plastic events$^2$, ($N_p^2$)")
+    ax.set_ylabel(rf"$-\Delta {maybe_avg('E')}$")
+    ax.legend(loc="best")
+    ax.loglog()
+    if name:
+        title = name
+    elif info:
+        title = make_title_from_data_info(info)
+    else:
+        title = "plastic_energy_scatter"
+    ax.set_title(title)
+    fig.tight_layout()
+
+    if save:
+        if filename is None:
+            filename = f"{PLOTPATH}{safePath(title)}_plastic_energy_scatter.pdf"
         fig.savefig(filename, dpi=300)
         print(f"Saved figure to {filename}")
     if show:
@@ -2027,26 +2232,18 @@ def plot_KS_fitting(fit, save=True, show=False):
     return fig, (ax1, ax2)
 
 
-def plot_powerlaw(
-    group_paths=None,
-    group_labels=None,
-    strainLim: str | list[float] = "auto",
-    postRegime=True,
-    xmin_range=None,
-    debug=False,
-    show=False,
-    evaluate=True,
-    distType: type[Distribution] = Truncated_Power_Law,
-    save=True,
-    addFit=True,
-    fast_xmin=True,
-    xmin_accuracy=1.0,
-    csvPaths=None,
-    useCDF=False,
-):
-    if group_paths is None and csvPaths is not None:
-        group_paths = csvPaths
-
+def get_group_structure(group_paths, group_labels):
+    """
+    Given a single path, a list of paths, or a list of lists of paths, it always
+    returns a list of list of paths.
+    Exampel:
+    Groups:
+        LBFSG:
+            csv1
+            csv2
+        FIRE:
+            csv1
+    """
     if group_paths is None:
         print("No paths provided.")
         return
@@ -2084,153 +2281,144 @@ def plot_powerlaw(
                 ]
             else:
                 normalized_labels = [[""] * len(paths) for paths in normalized_paths]
+    return normalized_paths, normalized_labels
 
-    for paths, labels in zip(normalized_paths, normalized_labels):
-        if len(labels) < len(paths):
-            labels = labels + [""] * (len(paths) - len(labels))
-        elif len(labels) > len(paths):
-            labels = labels[: len(paths)]
-        all_drops = []
-        data_info = None
-        for path, label in zip(paths, labels):
-            df = pd.read_csv(path)
-            df = update_df_header(df, L=get_system_size([path]))
-            if strainLim == "auto":
-                gamma_max_stress = findPrePostSplit(df=df)
-                if postRegime:
-                    _strainLim = [gamma_max_stress + 1e-2, df["load"].max()]
-                else:
-                    _strainLim = [df["load"].min(), gamma_max_stress - 1e-4]
-            if data_info is None:
-                _, data_info = get_energy_drops(
-                    paths, strainLim=_strainLim, debug=debug, label=label
-                )
-            drops, _, _ = get_drops_in_windows(
-                path, df=df, strainLim=_strainLim, debug=debug, label=label
-            )
-            all_drops.extend(drops)  # drops is a list of arrays
 
-        event_min_xmin = find_start_of_plastic_events(
-            paths, postRegime, data_info, debug=True
-        )
+def plot_powerlaw(
+    group_paths=None,
+    group_labels=None,
+    strainLim: str | list[float] = "auto",
+    postRegime=True,
+    xmin_range=None,
+    debug=False,
+    show=False,
+    evaluate=True,
+    distType: type[Distribution] = Truncated_Power_Law,
+    save=True,
+    addFit=True,
+    fast_xmin=True,
+    xmin_accuracy=1.0,
+    csvPaths=None,
+    useCDF=False,
+):
+    if group_paths is None and csvPaths is not None:
+        group_paths = csvPaths
 
-        # After the loop
-        all_drops = np.concatenate(all_drops)
+    grouped_paths, grouped_labels = get_group_structure(group_paths, group_labels)
 
-        if len(all_drops) == 0:
-            group_label = labels[0] if labels else ""
-            print(
-                f"No valid drops found for {group_label} in strain range {strainLim}."
-            )
-            continue
+    # We only deal with one group
+    all_drops, data_info = get_energy_drops(
+        grouped_paths[0],
+        strainLim=strainLim,
+        debug=debug,
+        label=grouped_labels[0],
+        postRegime=postRegime,
+    )
 
-        if xmin_range is None and not fast_xmin:
-            # Not using fast_xmin is brutally slow. We add a default range here
-            xmin_range = [1e-9, 1]
-        KS_fit = make_fit(
-            data=all_drops,
-            xmin_range=xmin_range,
-            distType=distType,
-            fast_xmin=fast_xmin,
-            xmin_accuracy=xmin_accuracy,
-        )
-        if evaluate:
-            KS_fit.evaluate_fit()
+    event_min_xmin = find_start_of_plastic_events(data_info, debug=True)
 
-        p_fit = find_best_xmin(
-            all_drops,
-            debug=debug,
-            data_info=data_info,
-            xmin_results=KS_fit.xmin_fitting_results,
-        )
+    if xmin_range is None and not fast_xmin:
+        # Not using fast_xmin is brutally slow. We add a default range here
+        xmin_range = [1e-9, 1]
+    KS_fit = make_fit(
+        data=all_drops,
+        xmin_range=xmin_range,
+        distType=distType,
+        fast_xmin=fast_xmin,
+        xmin_accuracy=xmin_accuracy,
+    )
+    if evaluate:
+        KS_fit.evaluate_fit()
 
-        d = dist_from_fit(p_fit)
+    p_fit = find_best_xmin(
+        all_drops,
+        debug=debug,
+        data_info=data_info,
+        xmin_results=getattr(KS_fit, "xmin_fitting_results", None),
+    )
 
-        attribute = get_attribute(labels[0])
-        if attribute == "Unknown":
-            assert isinstance(data_info, dict)
-            if "minimizer" in data_info:
-                attribute = data_info["minimizer"]
+    d = dist_from_fit(p_fit)
 
-        if attribute in MINIMIZER_COLORS:
-            color = MINIMIZER_COLORS[attribute]
-        else:
-            color = "black"
-        if attribute == "Unknown":
-            attribute = ""
+    attribute = get_attribute(data_info["label"][0])
+    if attribute == "Unknown":
+        assert isinstance(data_info, dict)
+        if "minimizer" in data_info:
+            attribute = data_info["minimizer"]
 
-        if evaluate:
-            p, mean_exp, exp_std = p_fit.evaluate_fit(all_drops, parallel=True)
+    if attribute in MINIMIZER_COLORS:
+        color = MINIMIZER_COLORS[attribute]
+    else:
+        color = "black"
+    if attribute == "Unknown":
+        attribute = ""
 
-            thresholds = [0.05, 0.1, 0.3, float("inf")]
-            ratings = ["bad", "poor", "good", "excellent"]
+    if evaluate:
+        p, mean_exp, exp_std = p_fit.evaluate_fit(all_drops, parallel=True)
 
-            # Set r
-            for t, r in zip(thresholds, ratings):
-                if p < t:
-                    break
+        thresholds = [0.05, 0.1, 0.3, float("inf")]
+        ratings = ["bad", "poor", "good", "excellent"]
 
-            print(f"Number of drops: {len(all_drops)}")
-            print(
-                f"{attribute}: P value: {p:.2f} ({r}), exp: {d.alpha}, std: {exp_std}"
-            )
+        # Set r
+        for t, r in zip(thresholds, ratings):
+            if p < t:
+                break
 
-        if event_min_xmin:
-            plot_ks_distance(
-                all_drops, event_min_xmin, data_info=data_info, name="event-min-fit"
-            )
+        print(f"Number of drops: {len(all_drops)}")
+        print(f"{attribute}: P value: {p:.2f} ({r}), exp: {d.alpha}, std: {exp_std}")
 
-        min_drop = np.min(all_drops)
-        # We exclude the first two decades.
-        exclude_factor = 100
-        rmEnd_xmin = min_drop * exclude_factor
+    if event_min_xmin:
         plot_ks_distance(
-            all_drops,
-            rmEnd_xmin,
-            data_info=data_info,
-            name=f"rmEnd{exclude_factor}",
+            all_drops, event_min_xmin, data_info=data_info, name="event-min-fit"
         )
 
-        plot_ks_distance(all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit")
-        plot_ks_distance(all_drops, KS_fit.xmin, data_info=data_info, name=r"KS-fit")
+    min_drop = np.min(all_drops)
+    # We exclude the first two decades.
+    exclude_factor = 100
+    rmEnd_xmin = min_drop * exclude_factor
+    # plot_ks_distance(
+    #     all_drops, rmEnd_xmin, data_info=data_info, name=f"rmEnd{exclude_factor}"
+    # )
 
-        title = make_title(data_info=data_info, fit=p_fit)
-        if attribute and attribute not in title:
-            title = attribute + " " + title
-        plot_data_and_fit(
-            p_fit,
-            title=title,
-            color=color,
-            addFit=addFit,
-            save=save,
-            show=show,
-            useCDF=useCDF,
-        )
-        title = make_title(data_info=data_info, fit=KS_fit)
-        plot_data_and_fit(
-            KS_fit,
-            title=title + "_KS_xmin",
-            color=color,
-            addFit=addFit,
-            save=save,
-            show=show,
-            useCDF=useCDF,
-        )
+    # plot_ks_distance(all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit")
+    # plot_ks_distance(all_drops, KS_fit.xmin, data_info=data_info, name=r"KS-fit")
 
-        rmEnd_fit = Fit(all_drops, xmin=rmEnd_xmin, xmin_distribution=distType.name)
-        if evaluate:
-            rmEnd_fit.evaluate_fit()
+    title = make_title(data_info=data_info, fit=p_fit)
+    if attribute and attribute not in title:
+        title = attribute + " " + title
+    plot_data_and_fit(
+        p_fit,
+        title=title,
+        color=color,
+        addFit=addFit,
+        save=save,
+        show=show,
+        useCDF=useCDF,
+    )
+    title = make_title(data_info=data_info, fit=KS_fit)
+    plot_data_and_fit(
+        KS_fit,
+        title=title + "_KS_xmin",
+        color=color,
+        addFit=addFit,
+        save=save,
+        show=show,
+        useCDF=useCDF,
+    )
 
-        title = make_title(data_info=data_info, fit=rmEnd_fit)
-        plot_data_and_fit(
-            rmEnd_fit,
-            title=title + "_rmEnd_Emin",
-            color=color,
-            addFit=addFit,
-            save=save,
-            show=show,
-            useCDF=useCDF,
-        )
+    # rmEnd_fit = Fit(all_drops, xmin=rmEnd_xmin, xmin_distribution=distType.name)
+    # if evaluate:
+    #     rmEnd_fit.evaluate_fit()
+
+    # title = make_title(data_info=data_info, fit=rmEnd_fit)
+    # plot_data_and_fit(
+    #     rmEnd_fit,
+    #     title=title + "_rmEnd_Emin",
+    #     color=color,
+    #     addFit=addFit,
+    #     save=save,
+    #     show=show,
+    #     useCDF=useCDF,
+    # )
 
 
 if __name__ == "__main__":

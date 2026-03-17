@@ -239,6 +239,26 @@ def longJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
     return configs, labels
 
 
+def longJobStatic(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+    configs, labels = ConfigGenerator.generate(
+        seed=range(nrSeeds),
+        group_by_seeds=group_by_seeds,
+        rows=size,
+        cols=size,
+        startLoad=0.15,
+        maxLoad=1.0,
+        nrThreads=nrThreads,
+        minimizer="LBFGS",
+        loadIncrement=1e-5,
+        LBFGSEpsx=1e-6,
+        epsR=1e-5,
+        LBFGSEpsg=1e-8,
+        scenario="simpleShear",
+        reconnectionMethod="none",
+    )
+    return configs, labels
+
+
 def smallJob(**kwargs):
     return basicJob(nrThreads=1, nrSeeds=1, **kwargs)
 
@@ -714,13 +734,13 @@ def loadStepJob(group_by_seeds=False):
     )
 
 
-def umutJobs(loadIncrement=1e-5):
+def umutJobs(loadIncrement=2e-5):
     """
     Generates a job for size scaling tests.
     """
-    sizes = [200, 250, 300, 400]
-    nr_samples = [10, 10, 10, 10]
-    nr_threads = [4, 8, 8, 8]
+    sizes = [50, 100, 200, 250, 300]
+    nr_samples = [10, 10, 10, 10, 10]
+    nr_threads = [4, 4, 4, 8, 8]
     sizes.reverse()
     nr_samples.reverse()
     nr_threads.reverse()
@@ -750,9 +770,9 @@ def size_scaling_job():
     """
     Generates a job for size scaling tests.
     """
-    sizes = [50, 75, 100, 150, 200, 300, 400]
-    nr_samples = [100, 60, 40, 30, 20, 10, 10]
-    nr_threads = [1, 2, 3, 4, 5, 6, 8]
+    sizes = [50, 100, 150, 200, 250]  # , 300]
+    nr_samples = [10, 10, 10, 10, 10]  # , 10]
+    nr_threads = [2, 3, 4, 8, 8]  # , 8]
     sizes.reverse()
     nr_samples.reverse()
     nr_threads.reverse()
@@ -768,7 +788,8 @@ def size_scaling_job():
             loadIncrement=1e-5,
             nrThreads=threads,
             minimizer="LBFGS",
-            epsR=1e-6,
+            LBFGSEpsx=1e-6,
+            # epsR=1e-6,
             scenario="simpleShear",
         )
         # Append the generated configs and labels to the main lists

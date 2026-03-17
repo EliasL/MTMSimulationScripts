@@ -19,7 +19,12 @@ from .fixLineNumbers import fix_csv_files_in_data_folder
 from Management.connectToCluster import getServerUserName
 from tqdm import tqdm
 import numpy as np
-from Plotting.plotPowerLaw import plot_powerlaw, plot_plastic_counts
+from Plotting.plotPowerLaw import (
+    plot_powerlaw,
+    plot_plastic_counts_compare,
+    plot_plastic_energy_scatter,
+    get_group_structure,
+)
 from Management.updateCSV import fix_csv_files
 
 # Add Management to sys.path (used to import files)
@@ -1008,7 +1013,7 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
         configs, labels=labels, useOldFiles=False, forceUpdate=False
     )
 
-    fix_csv_files(paths)
+    paths = fix_csv_files(paths)
 
     if len(paths) == 0:
         print("No files found for plotting energy.")
@@ -1064,9 +1069,12 @@ def plotLog2(config_groups, labels, **kwargs):
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
 
-    fix_csv_files(paths)
+    paths = fix_csv_files(paths)
+    paths, labels = get_group_structure(paths, labels)
 
     # print(np.array(paths).size)
+    for ps, ls in zip(paths, labels):
+        plot_plastic_energy_scatter(ps, ls, postRegime=kwargs.get("postRegime", True))
     plot_powerlaw(paths, labels, **kwargs)
 
 
@@ -1075,7 +1083,7 @@ def plotPlasticCounts(config_groups, labels, **kwargs):
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
 
-    plot_plastic_counts(paths, labels, **kwargs)
+    plot_plastic_counts_compare(paths, labels, **kwargs)
 
 
 if __name__ == "__main__":

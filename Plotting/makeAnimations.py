@@ -214,17 +214,13 @@ def makeAnimations(
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in [
         # (plot_and_save_nodes, "nodes"),
-        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
-        (plot_and_save_mesh, "mesh"),
-        # (plot_and_save_mesh_with_force, "mesh_with_forces"),
-        # TODO, the first frame of plot_and_save_in_poincare_disk uses the zoomed
-        # poincare disk from the erDisk. We need to make sure that also the
-        # first frame uses the correct energy background.
-        (plot_and_save_in_poincare_disk, "disk"),
-        # TODO, e_drop_plot needs a representative pdf background
         (plot_and_save_plot, "e_drop_plot"),
+        (plot_and_save_mesh, "mesh"),
+        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
+        # (plot_and_save_mesh_with_force, "mesh_with_forces"),
+        (plot_and_save_in_poincare_disk, "disk"),
         (plot_and_save_plot, "energy_plot"),
-        # (plot_and_save_m_diff_mesh, "m_diff_mesh"),
+        (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_m_mesh, "m_mesh"),
     ]:
         images = make_images(
@@ -267,8 +263,8 @@ def makeAnimations(
             combine_videoes(path, "mesh", "disk")
             combine_videoes(path, "m_mesh", "disk")
             combine_videoes(path, "mesh", "erDisk")
-        except:
-            pass
+        except Exception as e:
+            print(e)
 
 
 if __name__ == "__main__":

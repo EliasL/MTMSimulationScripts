@@ -40,6 +40,7 @@ from Management.jobs import (
     doubleDislocationTest,
     singleDislocationTest,
     longJob,
+    longJobStatic,
     size_scaling_job,
     reconnectionJob,
     remeshTest,
@@ -438,6 +439,7 @@ def runOnLocalMachine():
     # run_many_locally(configs, taskNames=labels, resume=False)
 
     configs, labels = longJob(8, 1, size=300)
+    configs, labels = longJobStatic(8, 1, size=300)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
     # configs, labels, dump = avalanches(nrThreads=20, size=100)
@@ -450,7 +452,11 @@ def runOnLocalMachine():
     # configs, labels = backwards(nrThreads=20)
     # configs, labels = cyclicLoading(nrThreads=3)
     # run_locally(configs[0], resume=True)  # , dump=dump)
-    run_many_locally(configs, taskNames=labels, resume=True)
+    run_many_locally(
+        configs,
+        taskNames=labels,
+        resume=True,
+    )
 
 
 def startJobs():
@@ -462,7 +468,7 @@ def startJobs():
         return largePropperJob(notFIRE=True)
 
     # for job in [notFIRE_largePropperJob, size_scaling_job]:
-    for job in [umutJobs]:
+    for job in [umutJobs, size_scaling_job]:
         configs, labels = job()
 
         # Normalize to batches so we handle both a single list of configs
@@ -491,7 +497,8 @@ def stopJobs(configs=None):
     # j.cancelJobs(configs, dryRun=False)
     # j.findAndShowSlurmJobs()
     # j.cancel_jobs_on_server(Servers.descartes, 80164)
-    j.cancelJobsByNameSubstring("s300x300l0.138,1e-05,", force=True)
+    j.cancelJobsByNameSubstring("LBFGSEpsx2e-06", force=True)
+    j.cancelJobsByNameSubstring("400x400", force=True)
     # j.cancelAllJobs(force=True, on=Servers.lagrange)
 
     # j.cancel_jobs_on_server(Servers.schwartz, 466525)
@@ -518,7 +525,7 @@ def cleanData():
 
 
 if __name__ == "__main__":
-    ONLYPREFERED = True
+    ONLYPREFERED = False
     # build_on_all_servers(onlyPrefered=ONLYPREFERED)
     # 150x150 64 threads -> 23 days
     # 150x150 32 threads -> 22 days
@@ -528,13 +535,13 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    runOnLocalMachine()
+    # runOnLocalMachine()
     # sylvainSmallDrop()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
-    # startJobs()
+    startJobs()
 
     # plotPropperJob()
     # plotSizeScaling()

@@ -14,7 +14,8 @@ from Plotting.makePlots import (
     plot_color_matrix,
     find_best_color_matrix_corner,
 )
-from Plotting.findXmin import find_xmin
+
+from Plotting.findXmin import find_xmin, find_xmin_sylvain
 from comparePlots import combine_pdfs_grid
 from .evaluatePowerlawFit import Truncated_Power_Law
 import os
@@ -715,6 +716,10 @@ def _apply_subgrid_to_data(data, subgrid):
         "lambda3_grid",
         "lambda3std_grid",
         "plateau_xmin_grid",
+        "n_tail1_grid",
+        "n_tail2_grid",
+        "n_tail3_grid",
+        "n_tail_plateau_grid",
     ]
     for key in grid_keys:
         if key in out:
@@ -1143,9 +1148,7 @@ def plot_compare_xmin(
     output_dir = f"{PLOTPATH}plot_compare/"
     os.makedirs(output_dir, exist_ok=True)
 
-    methods = (
-        ["min_ks", "max_p", "dks", "plateau"] if method == "all" else [method]
-    )
+    methods = ["min_ks", "max_p", "dks", "plateau"] if method == "all" else [method]
 
     for method_name in methods:
         if method_name == "min_ks":
@@ -1271,6 +1274,10 @@ def grid_compare_xmin_generate(
     lambda3_grid = np.full_like(xmin1_grid, np.nan)
     lambda3std_grid = np.full_like(xmin1_grid, np.nan)
     plateau_xmin_grid = np.full_like(xmin1_grid, np.nan)
+    n_tail1_grid = np.full_like(xmin1_grid, np.nan)
+    n_tail2_grid = np.full_like(xmin1_grid, np.nan)
+    n_tail3_grid = np.full_like(xmin1_grid, np.nan)
+    n_tail_plateau_grid = np.full_like(xmin1_grid, np.nan)
     ks_min_paths = []
     ks_max_paths = []
     fit_paths = []
@@ -1317,8 +1324,10 @@ def grid_compare_xmin_generate(
             plateau_xmin = find_xmin(drops)
             KS_fit.xmin_fitting_results["plateau_xmin"] = plateau_xmin
             plateau_xmin_grid[i, j] = float(plateau_xmin)
+            n_tail_plateau_grid[i, j] = float(np.sum(drops >= plateau_xmin))
 
             xmin1_grid[i, j] = float(KS_fit.xmin)
+            n_tail1_grid[i, j] = float(np.sum(drops >= KS_fit.xmin))
             alpha1_grid[i, j] = getattr(dist_from_fit(KS_fit), "alpha", np.nan)
             lambda1_grid[i, j] = getattr(dist_from_fit(KS_fit), "Lambda", np.nan)
 
@@ -1339,6 +1348,7 @@ def grid_compare_xmin_generate(
             xmin_plot_paths.append(xmin_plot_path or placeholder_path)
 
             xmin2_grid[i, j] = float(p_fit.xmin)
+            n_tail2_grid[i, j] = float(np.sum(drops >= p_fit.xmin))
             alpha2_grid[i, j] = getattr(dist_from_fit(p_fit), "alpha", np.nan)
             alpha2std_grid[i, j] = getattr(p_fit, "alpha_std", np.nan)
             lambda2_grid[i, j] = getattr(dist_from_fit(p_fit), "Lambda", np.nan)
@@ -1363,6 +1373,7 @@ def grid_compare_xmin_generate(
                 )
                 dks_fit.evaluate_fit(drops, confidence=0.05, parallel=False)
                 xmin3_grid[i, j] = float(dks_fit.xmin)
+                n_tail3_grid[i, j] = float(np.sum(drops >= dks_fit.xmin))
                 alpha3_grid[i, j] = getattr(dist_from_fit(dks_fit), "alpha", np.nan)
                 alpha3std_grid[i, j] = getattr(dks_fit, "alpha_std", np.nan)
                 lambda3_grid[i, j] = getattr(dist_from_fit(dks_fit), "Lambda", np.nan)
@@ -1390,6 +1401,10 @@ def grid_compare_xmin_generate(
         "lambda3_grid": lambda3_grid.tolist(),
         "lambda3std_grid": lambda3std_grid.tolist(),
         "plateau_xmin_grid": plateau_xmin_grid.tolist(),
+        "n_tail1_grid": n_tail1_grid.tolist(),
+        "n_tail2_grid": n_tail2_grid.tolist(),
+        "n_tail3_grid": n_tail3_grid.tolist(),
+        "n_tail_plateau_grid": n_tail_plateau_grid.tolist(),
         "ks_min_paths": ks_min_paths,
         "ks_max_paths": ks_max_paths,
         "fit_paths": fit_paths,
@@ -1500,33 +1515,57 @@ def plot_convergence_xmin(
                 xmin_grid = _slice_grid(d["xmin1_grid"], len(alphas), len(xmins))
                 alpha_grid = _slice_grid(d["alpha1_grid"], len(alphas), len(xmins))
                 lambda_grid = _slice_grid(d["lambda1_grid"], len(alphas), len(xmins))
+                n_tail_grid = (
+                    _slice_grid(d.get("n_tail1_grid"), len(alphas), len(xmins))
+                    if "n_tail1_grid" in d
+                    else None
+                )
             elif method_name == "max_p":
                 xmin_grid = _slice_grid(d["xmin2_grid"], len(alphas), len(xmins))
                 alpha_grid = _slice_grid(d["alpha2_grid"], len(alphas), len(xmins))
                 lambda_grid = _slice_grid(d["lambda2_grid"], len(alphas), len(xmins))
+                n_tail_grid = (
+                    _slice_grid(d.get("n_tail2_grid"), len(alphas), len(xmins))
+                    if "n_tail2_grid" in d
+                    else None
+                )
             elif method_name == "dks":
                 xmin_grid = _slice_grid(d["xmin3_grid"], len(alphas), len(xmins))
                 alpha_grid = _slice_grid(d["alpha3_grid"], len(alphas), len(xmins))
                 lambda_grid = _slice_grid(d["lambda3_grid"], len(alphas), len(xmins))
+                n_tail_grid = (
+                    _slice_grid(d.get("n_tail3_grid"), len(alphas), len(xmins))
+                    if "n_tail3_grid" in d
+                    else None
+                )
             else:
                 if "plateau_xmin_grid" not in d:
                     raise ValueError(
                         "plateau_xmin_grid not found. Regenerate cache with "
                         "the updated grid_compare_xmin_generate."
                     )
-                xmin_grid = _slice_grid(
-                    d["plateau_xmin_grid"], len(alphas), len(xmins)
-                )
+                xmin_grid = _slice_grid(d["plateau_xmin_grid"], len(alphas), len(xmins))
                 alpha_grid = np.full_like(xmin_grid, np.nan)
                 lambda_grid = np.full_like(xmin_grid, np.nan)
+                n_tail_grid = (
+                    _slice_grid(d.get("n_tail_plateau_grid"), len(alphas), len(xmins))
+                    if "n_tail_plateau_grid" in d
+                    else None
+                )
 
             for i, alpha_true in enumerate(alphas):
                 for j, xmin_true in enumerate(xmins):
                     key = (float(alpha_true), float(xmin_true))
-                    xmin_series.setdefault(key, []).append((n_val, xmin_grid[i, j]))
-                    alpha_series.setdefault(key, []).append((n_val, alpha_grid[i, j]))
+                    if n_tail_grid is not None and n_tail_grid.size:
+                        n_used = float(n_tail_grid[i, j])
+                        if not np.isfinite(n_used) or n_used <= 0:
+                            n_used = n_val
+                    else:
+                        n_used = n_val
+                    xmin_series.setdefault(key, []).append((n_used, xmin_grid[i, j]))
+                    alpha_series.setdefault(key, []).append((n_used, alpha_grid[i, j]))
                     lambda_series.setdefault(key, []).append(
-                        (n_val, lambda_grid[i, j], lambda_true)
+                        (n_used, lambda_grid[i, j], lambda_true)
                     )
 
         return xmin_series, alpha_series, lambda_series
@@ -1642,9 +1681,7 @@ def plot_convergence_xmin(
 
     output_dir = f"{PLOTPATH}plot_convergence/"
     os.makedirs(output_dir, exist_ok=True)
-    methods = (
-        ["min_ks", "max_p", "dks", "plateau"] if method == "all" else [method]
-    )
+    methods = ["min_ks", "max_p", "dks", "plateau"] if method == "all" else [method]
 
     if len(datasets) == 1:
         n_samples = int(datasets[0].get("n_samples", 0))
@@ -1653,6 +1690,8 @@ def plot_convergence_xmin(
         suffix = "_multi"
     if subgrid is not None:
         suffix += f"_subgrid{int(subgrid[0])}x{int(subgrid[1])}"
+
+    x_label = r"$n_{\mathrm{tail}}$ (samples in fit)"
 
     for method_name in methods:
         if method_name == "min_ks":
@@ -1668,7 +1707,7 @@ def plot_convergence_xmin(
         _plot_series(
             xmin_series,
             f"xmin estimate vs n ({method_tag})",
-            "n (samples)",
+            x_label,
             "estimated xmin",
             f"{output_dir}convergence_xmin_raw_{method_tag}{suffix}.pdf",
             logx=True,
@@ -1677,7 +1716,7 @@ def plot_convergence_xmin(
         _plot_series(
             xmin_series,
             f"xmin estimate / true vs n ({method_tag})",
-            "n (samples)",
+            x_label,
             "estimated xmin / true xmin",
             f"{output_dir}convergence_xmin_rescaled_{method_tag}{suffix}.pdf",
             logx=True,
@@ -1690,7 +1729,7 @@ def plot_convergence_xmin(
             _plot_series(
                 alpha_series,
                 f"alpha estimate vs n ({method_tag})",
-                "n (samples)",
+                x_label,
                 "estimated alpha",
                 f"{output_dir}convergence_alpha_raw_{method_tag}{suffix}.pdf",
                 logx=True,
@@ -1699,7 +1738,7 @@ def plot_convergence_xmin(
             _plot_series(
                 alpha_series,
                 f"alpha estimate / true vs n ({method_tag})",
-                "n (samples)",
+                x_label,
                 "estimated alpha / true alpha",
                 f"{output_dir}convergence_alpha_rescaled_{method_tag}{suffix}.pdf",
                 logx=True,
@@ -1711,7 +1750,7 @@ def plot_convergence_xmin(
             _plot_series(
                 lambda_series,
                 f"lambda estimate vs n ({method_tag})",
-                "n (samples)",
+                x_label,
                 "estimated lambda",
                 f"{output_dir}convergence_lambda_raw_{method_tag}{suffix}.pdf",
                 logx=True,
@@ -1720,7 +1759,7 @@ def plot_convergence_xmin(
             _plot_series(
                 lambda_series,
                 f"lambda estimate / true vs n ({method_tag})",
-                "n (samples)",
+                x_label,
                 "estimated lambda / true lambda",
                 f"{output_dir}convergence_lambda_rescaled_{method_tag}{suffix}.pdf",
                 logx=True,
@@ -1809,7 +1848,10 @@ def testSamplePiecewise(
 
     KS_fit = make_fit(drops, xmin_range=None, fast_xmin=True, xmin_accuracy=0.01)
     # KS_fit.evaluate_fit()
-    plateau_xmin = find_xmin(drops)
+    plateau_xmin = find_xmin(drops, debug=True, samplesPerDecade=30, show_progress=True)
+
+    # xmin = find_xmin_sylvain(drops, debug=True, B=1000, p0=0.1, c=1.0, nr_evaluation=20)
+
     KS_fit.xmin_fitting_results["plateau_xmin"] = plateau_xmin
 
     p_fit = find_best_xmin(drops, debug=True, xmin_results=KS_fit.xmin_fitting_results)

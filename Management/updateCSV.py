@@ -398,9 +398,11 @@ def fix_mixed_macrodata_csv(
 
 
 def fix_csv_files(paths):
-    for p in paths:
-        if isinstance(p, list):
-            for p_ in p:
-                fix_mixed_macrodata_csv(p_)
-        else:
-            fix_mixed_macrodata_csv(p)
+    def _fix_entry(entry):
+        if isinstance(entry, list):
+            return [_fix_entry(item) for item in entry]
+        if isinstance(entry, tuple):
+            return tuple(_fix_entry(item) for item in entry)
+        return fix_mixed_macrodata_csv(entry, inplace=False)
+
+    return _fix_entry(paths)

@@ -69,7 +69,7 @@ class SimulationConfig:
         #   save frame
         self.logDuringMinimization = 0  # 0=False, 1=True
         self.plasticityEventThreshold = 0.05
-        self.energyDropThreshold = 1e-4
+        self.energyDropThreshold = 1e-1
         self.showProgress = 1  # 0=False, 1=True
 
         if configPath is not None:

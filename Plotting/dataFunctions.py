@@ -102,6 +102,17 @@ class VTUData:
         C11, C12, C22 = [self.get_cell_data(C) for C in ["C11", "C12", "C22"]]
         return CArrsToMat(C11, C12, C22)
 
+    def get_C_fix(self):
+        """
+        Returns a 3D array where each slice (2x2 matrix) corresponds to the
+        [C11, C22, C12] components.
+        """
+        # Get the C11, C22, and C12 arrays from the VTK object
+        C11, C12, C22 = [
+            self.get_cell_data(C) for C in ["C_Fix11", "C_Fix12", "C_Fix22"]
+        ]
+        return CArrsToMat(C11, C12, C22)
+
     def get_P(self):
         """
         Returns a 3D array where each slice (2x2 matrix) corresponds to the

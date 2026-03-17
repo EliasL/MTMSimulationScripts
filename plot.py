@@ -14,10 +14,11 @@ from Management.jobs import (
     compareWithOldStoppingCriteria,
     basicJob,
     showMinimizationCriteriaJobs,
+    longJob,
     reconnectionTest,
 )
 
-
+from Management.updateCSV import fix_csv_files
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
 from MTMath.powerlaw_mixed_test import (
@@ -28,12 +29,14 @@ from MTMath.powerlaw_mixed_test import (
     plot_convergence_xmin,
 )
 from Plotting.plotPowerLaw import (
+    get_group_structure,
     make_exponent_fit,
     plot_powerlaw,
     make_fit,
     get_energy_drops,
     plot_KS_fitting,
     findPrePostSplit,
+    plot_plastic_energy_scatter,
 )
 from Plotting.reversibilityPlot import plot_reversibility_histograms
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
@@ -152,12 +155,13 @@ def energyField():
     import numpy as np
 
     g, x, y = generate_energy_grid(
-        resolution=200,
+        resolution=400,
         return_XY=True,
         zoom=1,
         poincareDisk=True,
+        energy_lim=[0, 50],
     )
-    ax = plotEnergyField(g, save=False)
+    ax = plotEnergyField(g, save=False, scale=0.2)
     ax.figure.show()
     plt.show()
     # g = generate_energy_grid(9)
@@ -418,13 +422,12 @@ def plotLogAnalasys():
     # # Find split
     fast_xmin = True
     useCDF = False
-    plotLog2(
-        configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, useCDF=useCDF
-    )
-    plotLog2(
-        configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, useCDF=useCDF
-    )
-    return
+    # plotLog2(
+    #     configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, useCDF=useCDF
+    # )
+    # plotLog2(
+    #     configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, useCDF=useCDF
+    # )
     p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
     lab = [["umut"]]
     plot_powerlaw(
@@ -485,8 +488,8 @@ def plotLogAnalasys():
 
 
 def syntheticDataPlotting():
-    ns = [1e2, 1e3, 1e4, 1e5, 1e6]
-    subgrid = (3, 3)
+    ns = [1e2, 1e3, 1e4, 1e5]
+    subgrid = (6, 6)
     datasets = [grid_compare_xmin(n=n, subgrid=subgrid) for n in ns]
 
     plot_compare_xmin(
@@ -515,9 +518,7 @@ def testRealData():
         except Exception as e:
             print(f"Failed to find pre/post split for {path}: {e}")
             continue
-        drops, _ = get_energy_drops(
-            path, use_avg_e_change_from_init=True, strainLim=[split, np.inf]
-        )
+        drops, _ = get_energy_drops(path, averageEnergy=True, strainLim=[split, np.inf])
         drops = np.asarray(drops, dtype=float)
         drops = drops[np.isfinite(drops)]
         if drops.size < 10:
@@ -525,6 +526,29 @@ def testRealData():
             continue
         fit = make_fit(drops, fast_xmin=True, xmin_accuracy=0.1, parallel_xmin=True)
         plot_KS_fitting(fit, save=True, show=False)
+
+
+def analyseLongData():
+    configs, labels = longJob(8, 1, size=300)
+
+    from Plotting.findXmin import find_xmin_derivative
+
+    paths, labels = get_csv_files(
+        configs, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+
+    paths = fix_csv_files(paths)
+    paths, labels = get_group_structure(paths, labels)
+    drops, info = get_energy_drops(
+        paths[0],
+        debug=False,
+        label=None,
+        postRegime=True,
+    )
+    plateau_xmin = find_xmin_derivative(drops, debug=True)
+
+    # plotLog2(configs, labels, xmin_range=1e-1)
+    # plotLog2(configs, labels, xmin_range=1e-4)
 
 
 if __name__ == "__main__":
@@ -543,7 +567,7 @@ if __name__ == "__main__":
     # plotPropperJob()
 
     # debugPlotAll()
-    energyField()
+    # energyField()
     # showPoincareDisk()
     # showInstabilityAngle()
     # plotThreadTest()
@@ -570,9 +594,10 @@ if __name__ == "__main__":
     # compareStep()
     # plotReversibility()
     # plotLogAnalasys()
+    analyseLongData()
+    # testSamplePiecewise(alpha=1.35, xmin=1e-5, xlow=1e-7)
     # syntheticDataPlotting()
     # testDist()
     # testRealData()
-    # testSamplePiecewise(alpha=1.35, xmin=1e-5, xlow=1e-7)
     # investigateJobs()
     pass
