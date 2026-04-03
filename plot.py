@@ -16,9 +16,11 @@ from Management.jobs import (
     showMinimizationCriteriaJobs,
     longJob,
     reconnectionTest,
+    size_scaling_job,
 )
 
 from Management.updateCSV import fix_csv_files
+from Management.configGenerator import ConfigGenerator
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import makePlot, makeSettingComparison
 from MTMath.powerlaw_mixed_test import (
@@ -72,11 +74,12 @@ from Plotting.remotePlotting import (
     plotTime,
     get_folders_from_servers,
     createVideoes,
-    download_folders,
+    get_csv_from_server,
 )
 from matplotlib.backends.backend_pdf import PdfPages
 from tqdm import tqdm
 from Management.configGenerator import SimulationConfig
+from Management.connectToCluster import Servers
 
 
 def plotPropperJob():
@@ -245,6 +248,54 @@ def plotThreadTest():
     plotTime(configs, labels)
 
 
+def print_remote_runtimes(load_increment=1e-5):
+    import os
+    import pandas as pd
+
+    configs, labels = size_scaling_job()
+    configs, labels = ConfigGenerator.filter(configs, labels, keys="L=300")
+    configs = [c for group in configs for c in group]
+    configs = [c for c in configs if abs(c.loadIncrement - load_increment) < 1e-12]
+    if not configs:
+        print("No configs found.")
+        return
+
+    configs_by_name = {c.name: c for c in configs}
+    for server in Servers.servers:
+        csv_paths = get_csv_from_server(server, configs)
+        if not csv_paths:
+            continue
+
+        short = server.split(".")[0]
+        print(f"{short}:")
+        for csv_path in sorted(csv_paths):
+            name = os.path.splitext(os.path.basename(csv_path))[0]
+            config = configs_by_name.get(name)
+            if config is None:
+                print(f"  {name}: config missing")
+                continue
+
+            df = pd.read_csv(csv_path)
+            col = None
+            if "run_time" in df.columns:
+                col = "run_time"
+            elif "Run_time" in df.columns:
+                col = "Run_time"
+            elif "Run time" in df.columns:
+                col = "Run time"
+
+            if col is None:
+                print(f"  seed {config.seed}: run_time column missing")
+                continue
+
+            series = df[col].dropna()
+            if series.empty:
+                print(f"  seed {config.seed}: run_time empty")
+                continue
+
+            print(f"  seed {config.seed}: {series.iloc[-1]}")
+
+
 def debugPlotAll():
     # config = "/Volumes/data/MTS2D_output/simpleShearFixedBoundary,s16x16l0.0,1e-05,1.0NPBCt4LBFGSEpsg1e-10s0/config.conf"
     config = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0/config.conf"
@@ -379,15 +430,14 @@ def compareStop():
 
 
 def compareStep():
-    # Compare using Epsx or EpsR to stop
     c, l = loadStepJob()
     fast_xmin = True
     xmin_accuracy = 0.1
     plotPlasticCounts(c, l, postRegime=True)
     plotPlasticCounts(c, l, postRegime=False)
-    # plotLog2(
-    #     c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
-    # )
+    plotLog2(
+        c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
+    )
 
 
 def plotReversibility():
@@ -413,23 +463,29 @@ def plotReversibility():
 
 
 def plotLogAnalasys():
-    configs, labels = bigUmutJob(group_by_seeds=True)
-    # configs, labels = umutJobs(loadIncrement=2e-5)
-
+    # configs, labels = bigUmutJob(group_by_seeds=True)
+    configs, labels = umutJobs(loadIncrement=2e-5)
+    configs, labels = ConfigGenerator.filter(configs, labels, ["L=200"])
     # # Powerlaw
     # plotEnergy(configs, labels=labels)
 
     # # Find split
     fast_xmin = True
     useCDF = False
-    # plotLog2(
-    #     configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, useCDF=useCDF
-    # )
-    # plotLog2(
-    #     configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, useCDF=useCDF
-    # )
-    p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
-    lab = [["umut"]]
+    plotLog2(
+        configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, useCDF=useCDF
+    )
+    plotLog2(
+        configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, useCDF=useCDF
+    )
+    # p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
+    p = [
+        [
+            "/Users/eliaslundheim/Downloads/s200x200_energy_stress_log.csv",
+            "/Users/eliaslundheim/Downloads/s200x200_energy_stress_log2.csv",
+        ]
+    ]
+    lab = [["umut", "umut"]]
     plot_powerlaw(
         p,
         group_labels=lab,
@@ -444,6 +500,7 @@ def plotLogAnalasys():
         fast_xmin=fast_xmin,
         useCDF=useCDF,
     )
+    return
 
     # p = [
     #     [
@@ -555,7 +612,7 @@ if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    # run_reconnection_demo()
+    run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
     # test()
@@ -591,13 +648,14 @@ if __name__ == "__main__":
     # elasticReductionPlots()
     # showDecomposition()
     # compareStop()
-    # compareStep()
-    # plotReversibility()
-    # plotLogAnalasys()
-    analyseLongData()
+    #compareStep()
+    #plotReversibility()
+    #plotLogAnalasys()
+    # analyseLongData()
     # testSamplePiecewise(alpha=1.35, xmin=1e-5, xlow=1e-7)
-    # syntheticDataPlotting()
+    #syntheticDataPlotting()
     # testDist()
     # testRealData()
     # investigateJobs()
+    #print_remote_runtimes()
     pass

@@ -19,12 +19,13 @@ class DraggableTriangulation:
             return j, i, k
         return k, i, j
 
-    def __init__(self, ax, points, ax_g=None):
+    def __init__(self, ax, points, ax_g=None, poincare_transformation="triangular"):
         assert points.shape == (4, 2), "Provide exactly four 2D points"
         self.ax = ax
         self.initial_points = np.copy(points)
         self.points = points
         self.ax_g = ax_g  # optional axes for (G11,G22) scatter
+        self.poincare_transformation = poincare_transformation
         self.g_scatter = None
         self.g_colors = ["tab:green", "tab:orange"]
 
@@ -356,7 +357,7 @@ class DraggableTriangulation:
         pts = []
         for i, j, k, origin, a, b, centroid in self.element_vectors():
             G = self.gram_matrix(a, b)
-            x, y = C2Plane(G, "triangular")
+            x, y = C2Plane(G, transformation=self.poincare_transformation)
             zoom = 1
             x = x * zoom * self.grid_size / 2 + self.grid_size / 2
             y = y * zoom * self.grid_size / 2 + self.grid_size / 2
@@ -653,9 +654,14 @@ def run_reconnection_demo():
     ax.set_aspect("equal", adjustable="box")
     ax.set_title("Triangulation")
 
-    dt = DraggableTriangulation(ax, points, ax_g=ax_g)
+    dt = DraggableTriangulation(ax, points, ax_g=ax_g, poincare_transformation="triangular")
     # Draw disk first so it's firmly in the background
-    plotPoincareDisk(ax=ax_g, fig=fig, grid_size=dt.grid_size, depth=4)
+    plotPoincareDisk(
+        ax=ax_g,
+        grid_size=dt.grid_size,
+        depth=4,
+        transformation=dt.poincare_transformation,
+    )
 
     plt.show()
 

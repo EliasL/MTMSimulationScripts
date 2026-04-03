@@ -1512,7 +1512,9 @@ def plotEnergyField(
         ticks = vmin + (vmax - vmin) * (t ** (1.0 / scale))
         cbar.set_ticks(ticks)
     default_font_size = plt.rcParams["font.size"]  # Fetch default font size
-    cbar.ax.set_title(f"Capped at ${max_energy}$", fontsize=default_font_size)
+    cbar.ax.set_title(
+        f"Capped at ${max_energy}$", fontsize=default_font_size, loc="left"
+    )
     nbs = "\u00a0"  # non-breaking-space
     # $P_x$(Length ratio)
     ax.set_xlabel(f"← Tall {nbs * 6} Wide →")

@@ -21,4 +21,4 @@ debugpy
 PyQt5
 pyqtgraph
 joblib
-fitz
+PyMuPDF

@@ -1,5 +1,3 @@
 {
-    "python.defaultInterpreterPath": "/Users/eliaslundheim/work/PhD/SimulationScripts/.venv/bin/python",
-    "editor.formatOnSave": true,
-    "python.REPL.enableREPLSmartSend": false
+    "python.defaultInterpreterPath": "/Users/eliaslundheim/work/PhD/SimulationScripts/.venv/bin/python"
 }

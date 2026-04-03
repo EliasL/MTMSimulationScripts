@@ -3,11 +3,12 @@ import re
 from pathlib import Path
 
 import pandas as pd
-
+import numpy as np
 
 def update_df_header(
     df: pd.DataFrame,
     add_total_columns: bool = True,
+    add_extrap_energy:bool =True,
     L: int | None = None,
     nr_elements: int | None = None,
 ):
@@ -35,16 +36,20 @@ def update_df_header(
         "minY": "minY",
         #
         "avg_init_energy_change": "avg_e_change_from_init",
-        "avg_RSS": "avg_Pxy",
+        "avg_RSS": "avg_P12",
         "max_plastic_deformation": "max_m3_nr",
         # Umut headers (Note energy is NOT averaged)
         "Alpha": "load",
         "PreEnergy": "init_energy",
         "PostEnergy": "energy",
-        "PreStress": "avg_init_sigmaxy",
-        "PostStress": "avg_sigmaxy",
-        "EnergyChange": "e_change_from_init",
+        "PreStress": "avg_init_sigma12",
+        "PostStress": "avg_sigma12",
+        "EnergyChange": "total_e_change_from_init",
         "StressChange": "avg_sigma_change_from_init",
+        # Change from xy to 12
+        "avg_sigmaxy":"avg_sigma12",
+        "avg_Pxy":"avg_P12",
+        "avg_init_sigmaxy":"avg_init_sigma12",
     }
 
     # Rename columns if they exist in the DataFrame
@@ -56,9 +61,17 @@ def update_df_header(
         if nr_elements is not None:
             for col in df.columns:
                 if col.startswith("avg_"):
-                    total_col = col[4:]
+                    total_col = "total_" + col[4:]
                     if total_col not in df.columns:
                         df[total_col] = df[col] * nr_elements
+    
+    if add_extrap_energy:
+        # This energy uses the two previous local minima energies to estimate
+        # the energy increase over the strain step. 
+        # See equation 5 in Avalanches in the Athermal Quasistatic Limit of Sheared Amorphous Solids: An Atomistic Perspective
+        # ΔE = En − E_n+1 + V σ_n δγ
+        del_gamma = np.diff(df["load"])
+        sigma = df["avg_sigma12"]
 
     return df
 
@@ -109,10 +122,10 @@ NEW_MACRODATA_HEADER = [
     "min_iter_avg_energy_change",
     "max_energy",
     "max_force",
-    "avg_sigmaxy",
-    "avg_init_sigmaxy",
+    "avg_sigma12",
+    "avg_init_sigma12",
     "avg_sigmaxy_change_from_init",
-    "avg_Pxy",
+    "avg_P12",
     "nr_plastic_deformations",
     "nr_red_q1",
     "nr_red_q2",
@@ -151,10 +164,10 @@ MID_MACRODATA_HEADER = [
     "avg_e_change_from_init",
     "max_energy",
     "max_force",
-    "avg_sigmaxy",
-    "avg_init_sigmaxy",
+    "avg_sigma12",
+    "avg_init_sigma12",
     "avg_sigmaxy_change_from_init",
-    "avg_Pxy",
+    "avg_P12",
     "nr_plastic_deformations",
     "max_m3_nr",
     "max_positive_plastic_jump",
@@ -178,9 +191,60 @@ MID_MACRODATA_HEADER = [
 
 DEFAULT_OLD_TO_NEW_RENAME = {
     "avg_init_energy_change": "avg_e_change_from_init",
-    "avg_RSS": "avg_Pxy",
+    "avg_RSS": "avg_P12",
     "max_plastic_deformation": "max_m3_nr",
+    "avg_sigmaxy": "avg_sigma12",
+    "avg_init_sigmaxy": "avg_init_sigma12",
+    "avg_Pxy": "avg_P12",
 }
+
+SIGMAXY_MACRODATA_HEADER = [
+    "load_step",
+    "load",
+    "total_energy",
+    "total_energy_change",
+    "total_init_energy",
+    "total_e_change_from_init",
+    "avg_energy",
+    "avg_energy_change",
+    "avg_init_energy",
+    "avg_e_change_from_init",
+    "min_iter_total_energy_change",
+    "min_iter_avg_energy_change",
+    "max_energy",
+    "max_force",
+    "avg_sigmaxy",
+    "avg_init_sigmaxy",
+    "avg_sigmaxy_change_from_init",
+    "avg_Pxy",
+    "nr_plastic_deformations",
+    "nr_red_q1",
+    "nr_red_q2",
+    "nr_red_q3",
+    "nr_red_q4",
+    "nr_red_q1_fixed",
+    "nr_red_q2_fixed",
+    "nr_red_q3_fixed",
+    "nr_red_q4_fixed",
+    "max_m3_nr",
+    "max_positive_plastic_jump",
+    "max_negative_plastic_jump",
+    "nr_iterations",
+    "nr_func_evals",
+    "LBFGS_Term_reason",
+    "CG_Term_reason",
+    "FIRE_Term_reason",
+    "run_time",
+    "minimization_time",
+    "write_time",
+    "est_time_remaining",
+    "cmX",
+    "cmY",
+    "maxX",
+    "minX",
+    "maxY",
+    "minY",
+]
 
 
 def fix_mixed_macrodata_csv(
@@ -247,6 +311,7 @@ def fix_mixed_macrodata_csv(
     default_old_mapping = _build_mapping(old_header)
     default_mid_mapping = _build_mapping(MID_MACRODATA_HEADER)
     default_new_mapping = _build_mapping(new_header)
+    default_sigmaxy_mapping = _build_mapping(SIGMAXY_MACRODATA_HEADER)
     header_len_map = {
         len(old_header): default_old_mapping,
         len(MID_MACRODATA_HEADER): default_mid_mapping,
@@ -257,6 +322,7 @@ def fix_mixed_macrodata_csv(
     for header, mapping in (
         (old_header, default_old_mapping),
         (MID_MACRODATA_HEADER, default_mid_mapping),
+        (SIGMAXY_MACRODATA_HEADER, default_sigmaxy_mapping),
         (new_header, default_new_mapping),
     ):
         key = tuple(_header_key(header))
@@ -287,6 +353,8 @@ def fix_mixed_macrodata_csv(
         ]
 
         def _maybe_rescale_energy_avgs() -> None:
+            if nr_elements is None:
+                return 
             idx_avg = new_index.get("avg_energy")
             idx_max = new_index.get("max_energy")
             if idx_avg is None or idx_max is None:
@@ -384,7 +452,9 @@ def fix_mixed_macrodata_csv(
 
             mapping = current_mapping
             row_len = len(row)
-            if mapping is None or (current_expected_len is not None and row_len != current_expected_len):
+            if mapping is None or (
+                current_expected_len is not None and row_len != current_expected_len
+            ):
                 mapping = header_len_map.get(row_len, default_new_mapping)
                 current_mapping = mapping
                 current_expected_len = row_len

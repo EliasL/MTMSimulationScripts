@@ -104,7 +104,7 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
                 csvPath,
                 name=name + "_stress.pdf",
                 X=X,
-                Y="avg_sigmaxy",
+                Y="avg_sigma12",
                 legend=True,
                 labels=labels,
                 # xlim=[0, 1],
@@ -114,7 +114,7 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
                 csvPath,
                 name=name + "_stress.pdf",
                 X=X,
-                Y="avg_Pxy",
+                Y="avg_P12",
                 legend=True,
                 labels=labels,
                 # xlim=[0, 1],
@@ -125,6 +125,7 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
             "nr_iterations",
             "nr_func_evals",
             "est_time_remaining",
+            "avg_P12",
         ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
             try:
                 # if Y == "est_time_remaining":

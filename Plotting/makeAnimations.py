@@ -51,7 +51,7 @@ def framesToMp4(frames, outFile, fps):
     print(f"Creating {outFile}")
 
     try:
-        writer = imageio.get_writer(outFile, fps=fps, codec="libx264", quality=5)
+        writer = imageio.get_writer(outFile, fps=fps, codec="libx264", quality=7)
         for frame_path in frames:
             frame = imageio.imread(frame_path)
             writer.append_data(frame)
@@ -153,6 +153,14 @@ def combine_videoes(path, n1, n2, n3=None, n4=None, vertical=False):
             v4,
             "-filter_complex",
             filter_complex,
+            "-c:v",
+            "libx264",
+            "-preset",
+            "slow",
+            "-crf",
+            "18",
+            "-pix_fmt",
+            "yuv420p",
             output_file,
         ]
         subprocess.run(command)
@@ -215,15 +223,15 @@ def makeAnimations(
     # The name of the video is the same as the name of the folder+_video.mp4
     for function, fileName in [
         # (plot_and_save_nodes, "nodes"),
+        (plot_and_save_m_diff_mesh, "m_diff_mesh"),
+        (plot_and_save_plot, "energy_plot"),
         (plot_and_save_plot, "e_drop_plot"),
         (plot_and_save_mesh, "mesh"),
-        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
+        # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
         # (plot_and_save_mesh_with_force, "mesh_with_forces"),
-        (plot_and_save_in_poincare_disk, "disk"),
-        (plot_and_save_plot, "energy_plot"),
-        (plot_and_save_m_diff_mesh, "m_diff_mesh"),
+        # (plot_and_save_in_poincare_disk, "disk"),
         (plot_and_save_m_mesh, "m_mesh"),
-        (plot_and_save_velocity_field_in_e_reduced_poincare_disk, "erDisk_velocity"),
+        # (plot_and_save_velocity_field_in_e_reduced_poincare_disk, "erDisk_velocity"),
     ]:
         images = make_images(
             vtu_files,
@@ -259,7 +267,8 @@ def makeAnimations(
             pass
     if combineVideos:
         try:
-            combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
+            combine_videoes(path, "m_diff_mesh", "mesh", "e_drop_plot", "energy_plot")
+            # combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
             combine_videoes(path, "mesh", "energy_plot", vertical=True)
             combine_videoes(path, "m_mesh", "mesh")
             combine_videoes(path, "mesh", "disk")

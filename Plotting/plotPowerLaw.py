@@ -1,4 +1,4 @@
-from .findXmin import find_xmin
+from .findXmin import find_xmin, find_xmin_rising_level
 from MTMath.energyFunction import ContiEnergy
 import numpy as np
 import pandas as pd
@@ -24,6 +24,26 @@ OUTPUTTYPE = ".png"
 os.makedirs(PLOTPATH, exist_ok=True)
 os.makedirs(PLOTPATH + "debug/", exist_ok=True)
 MINIMIZER_COLORS = {"L-BFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
+
+
+def _resolve_fast_xmin(fast_xmin=None, fit=None, fits=None):
+    if fast_xmin is not None:
+        return bool(fast_xmin)
+    if fit is not None:
+        return bool(getattr(fit, "fast_xmin", False))
+    if fits:
+        vals = [bool(getattr(f, "fast_xmin", False)) for f in fits]
+        if vals and all(v == vals[0] for v in vals):
+            return vals[0]
+        return any(vals)
+    return False
+
+
+def ks_tag(*, fast_xmin=None, fit=None, fits=None, lower=False):
+    use_fast = _resolve_fast_xmin(fast_xmin=fast_xmin, fit=fit, fits=fits)
+    if lower:
+        return "sks" if use_fast else "ks"
+    return "SKS" if use_fast else "KS"
 
 
 def _append_sample_suffix(name, n_samples):
@@ -120,6 +140,7 @@ def get_energy_drops(
     label=None,
     onlyStrainedEnergyDrops=False,
     postRegime=True,
+    energy_type="e_change_from_init",
     averageEnergy=False,
 ):
     """
@@ -135,9 +156,18 @@ def get_energy_drops(
     masks = []
     dfs = []
     L = get_system_size(csvPaths)
-    resolved_strain_lim = strainLim
     read_from_paths = df is None
+
+    if averageEnergy is None:
+        prefix = ""
+    else:
+        prefix = "avg_" if averageEnergy else "total_"
+    # energyType = "e_change_from_init"
+    # energyType = "energy_change"
+    energy_key = prefix + energy_type
+
     for singlePath in csvPaths:
+        resolved_strain_lim = strainLim
         if read_from_paths:
             df_local = pd.read_csv(singlePath)
             df_local = update_df_header(df_local, L=L)
@@ -149,34 +179,20 @@ def get_energy_drops(
                 resolved_strain_lim, df=df_local, postRegime=postRegime
             )
 
-        if averageEnergy:
-            assert "avg_e_change_from_init" in df_local, (
-                "Uh oh. If the data is old, set use_avg_e_change_from_init."
-            )
-            energy_key = "avg_e_change_from_init"
-        elif "e_change_from_init" in df_local:
-            energy_key = "e_change_from_init"
-        elif "energy_change" in df_local:
-            energy_key = "energy_change"
-        elif "avg_energy_change" in df_local:
-            energy_key = "avg_energy_change"
-        else:
-            # Add 0 in the beginning
-            energy_key = "energy" if "energy" in df_local else "avg_energy"
-            # I'm not sure, but i don't think we need to insert 0 here...
-            # diffs = np.insert(np.diff(df_local[energy_key]), 0, 0)
-        # energy_key = "total_energy_change"
-
         diffs = df_local[energy_key]
-        if "Iteration" in df_local:
-            # This is umut data, so he has already flipped his drops
-            diffs = -diffs
-        elif np.all(diffs >= 0):
-            # More umut code things. I'm just assuming if all the drops are positive
+
+        if np.all(diffs >= 0):
+            # Umut code compatability: I'm just assuming if all the drops are positive
             # they should probably be flipped.
             diffs = -diffs
 
         strain = df_local["load"]
+
+        # The first minimization always has a unaturally large jump
+        # set the diff at load step 1 = 0
+        if "load_step" in df_local and df_local["load_step"].iloc[0] == 1:
+            diffs.iloc[0] = 0
+
         lim_mask = (strain > resolved_strain_lim[0]) & (strain < resolved_strain_lim[1])
         drop_mask = diffs < 0
         mask = drop_mask & lim_mask
@@ -210,9 +226,6 @@ def get_energy_drops(
 
         strain_limited = strain[1:][lim_mask[1:]]
         plotDrops = np.clip(-diffs[1:][lim_mask[1:]], 0, np.inf)
-        energy_key = "avg_energy" if averageEnergy else "energy"
-        if energy_key not in df_local:
-            energy_key = "avg_energy"
         e = df_local[energy_key]
         debug_fig, ax1 = plt.subplots()
         avg_label = maybe_avg("E", averageEnergy)
@@ -299,7 +312,7 @@ def get_energy_drops(
         # to save memory, close the figure
         plt.close(debug_fig)
 
-    return (drops, data_info)
+    return drops, data_info
 
 
 def get_energy_drops_info(
@@ -351,6 +364,26 @@ def get_energy_drops_info(
 
 
 def getHist(data, weights=None, density=True, bins_per_decade=5):
+    data = np.asarray(data)
+    if data.size == 0:
+        return np.array([]), np.array([])
+
+    weights_arr = None
+    if weights is not None:
+        weights_arr = np.asarray(weights)
+
+    # Histogram bins require positive values for log scaling
+    if np.any(data <= 0):
+        mask = data > 0
+        data = data[mask]
+        if weights_arr is not None:
+            if weights_arr.shape == mask.shape:
+                weights_arr = weights_arr[mask]
+            else:
+                weights_arr = None
+        if data.size == 0:
+            return np.array([]), np.array([])
+
     # Find the start of the tail where Poisson noise exceeds threshold
     data_min = data.min()
     data_max = data.max()
@@ -364,7 +397,7 @@ def getHist(data, weights=None, density=True, bins_per_decade=5):
 
     # Compute the histogram for the tail (density=True → area under PDF = 1)
     hist_vals, edges = np.histogram(
-        data, bins=bin_edges, weights=weights, density=density
+        data, bins=bin_edges, weights=weights_arr, density=density
     )
     bin_centers = np.sqrt(edges[:-1] * edges[1:])
     return bin_centers, hist_vals
@@ -383,6 +416,11 @@ def plot_data_pdf(
     Automatically identifies x_min via find_x_min and uses 0.1-decade bin widths.
     If `fit` is provided and `data` is None, use `fit.data_original`.
     """
+
+    data = np.asarray(data)
+    data = data[np.isfinite(data) & (data > 0)]
+    if data.size == 0:
+        return
 
     # Choose edgecolor if None
     if edgecolor is None:
@@ -468,18 +506,21 @@ def plot_data_cdf(
     ax.legend()
 
 
-def plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf, color="red"):
+def plot_ks_distance_marker(
+    ax, sorted_data, ecdf, model_ccdf, color="red", fast_xmin=None
+):
     diffs = np.abs(ecdf - model_ccdf)
     max_index = np.argmax(diffs)
     D_val = diffs[max_index]
     x_D = sorted_data[max_index]
+    tag = ks_tag(fast_xmin=fast_xmin)
     ax.vlines(
         x_D,
         model_ccdf[max_index],
         ecdf[max_index],
         color=color,
         linestyle="--",
-        label=f"KS Distance D = {D_val:.3f}",
+        label=f"{tag} Distance D = {D_val:.3f}",
     )
     ax.scatter([x_D], [ecdf[max_index]], color="blue")
     ax.scatter([x_D], [model_ccdf[max_index]], color="gray")
@@ -487,13 +528,14 @@ def plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf, color="red"):
 
 
 # --- Helper for annotating KS distance on PDF plot ---
-def annotate_ks_distance_pdf(ax, xmin, D_val, color="red"):
+def annotate_ks_distance_pdf(ax, xmin, D_val, color="red", fast_xmin=None, fit=None):
+    tag = ks_tag(fast_xmin=fast_xmin, fit=fit)
     ax.axvline(
         xmin,
         color=color,
         linestyle="--",
         linewidth=1.2,
-        label=f"KS Distance D = {D_val:.3f}",
+        label=f"{tag} Distance D = {D_val:.3f}",
         zorder=-1,
         alpha=0.5,
     )
@@ -541,7 +583,7 @@ def plot_fit_pdf(
     )
     if add_ks_marker:
         annotate_ks_distance_pdf(
-            ax, fit.xmin_fitting_results["xmins"][dist.D_i], dist.D
+            ax, fit.xmin_fitting_results["xmins"][dist.D_i], dist.D, fit=fit
         )
 
     ax.set_xscale("log")
@@ -641,10 +683,10 @@ def findPrePostSplit(csvPath="", df=None):
     if df is None:
         df = pd.read_csv(csvPath)
         df = update_df_header(df, L=get_system_size([csvPath]))
-    if "avg_Pxy" in df:
-        i = df["avg_Pxy"].argmax()
-    elif "avg_sigmaxy" in df:
-        i = df["avg_sigmaxy"].argmax()
+    if "avg_P12" in df:
+        i = df["avg_P12"].argmax()
+    elif "avg_sigma12" in df:
+        i = df["avg_sigma12"].argmax()
     else:
         raise KeyError("No stress key found!")
     return df["load"].iloc[i]
@@ -720,6 +762,13 @@ def make_title_from_fit(fit: Fit):
 
 
 def make_title_from_data_info(data_info):
+    def _strip_seed(label):
+        if label is None:
+            return ""
+        tokens = [tok.strip() for tok in str(label).split(",") if tok.strip()]
+        tokens = [t for t in tokens if not t.startswith("seed=")]
+        return ", ".join(tokens)
+
     if "customTitle" in data_info:
         return data_info["customTitle"]
     strainLim = data_info["strainLim"]
@@ -734,12 +783,17 @@ def make_title_from_data_info(data_info):
     if "label" in data_info:
         l = data_info["label"]
         if isinstance(l, list):
-            assert len(set(l)) == 1, (
-                "Labels in group are different"
-            )  # Which should we use?
-            title += l[0]
+            normalized = [_strip_seed(item) for item in l]
+            normalized_non_empty = [item for item in normalized if item]
+            if normalized_non_empty and len(set(normalized_non_empty)) == 1:
+                title += normalized_non_empty[0]
+            else:
+                assert len(set(normalized)) == 1, (
+                    f"Labels in group are different: {set(normalized)}"
+                )  # Which should we use?
+                title += normalized[0]
         else:
-            title += l
+            title += _strip_seed(l)
     title = title.strip().replace("  ", " ")
     return title
 
@@ -892,6 +946,7 @@ def plot_ks_distance(
     save=True,
     close=True,
     extraPath="",
+    fast_xmin=None,
 ):
     """
     Plot the empirical CCDF vs the fitted CCDF and visually show the KS distance (D).
@@ -918,12 +973,15 @@ def plot_ks_distance(
         label=rf"Model CCDF ($\alpha={dist.alpha:.2f}, \lambda=$ {dist.Lambda:.2e})",
         color="gray",
     )
-    D_val = plot_ks_distance_marker(ax, sorted_data, ecdf, model_ccdf)
+    D_val = plot_ks_distance_marker(
+        ax, sorted_data, ecdf, model_ccdf, fast_xmin=fast_xmin
+    )
     ax.set_xscale("log")
     # ax.set_yscale("log")
     ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
     ax.set_ylabel(r"$P(X > x)$")
-    title = rf"KS Distance $E_{{\mathrm{{min}}}}$={xmin:.2e}" + (
+    tag = ks_tag(fast_xmin=fast_xmin)
+    title = rf"{tag} Distance $E_{{\mathrm{{min}}}}$={xmin:.2e}" + (
         " " + name if name != "" else ""
     )
     if data_info is not None:
@@ -1101,6 +1159,7 @@ def find_best_xmin(
     data_info=None,
     xmin_results=None,
     extraPath="",
+    fast_xmin=None,
     parallel=True,
     max_workers=None,
     use_memmap=True,
@@ -1208,6 +1267,7 @@ def find_best_xmin(
         xmin_plot_path,
         title=title,
         xmin_results=xmin_results,
+        fast_xmin=fast_xmin,
     )
     setattr(best_fit, "xmin_plot_path", xmin_plot_path)
 
@@ -1286,6 +1346,17 @@ def plot_plastic_counts(
             postRegime=postRegime,
         )
 
+    drops = np.asarray(drops)
+    valid = np.isfinite(drops) & (drops > 0)
+    if not np.any(valid):
+        if ax is None:
+            fig, ax = plt.subplots()
+            ax.set_title("Energy-drop PDF and plasticity vs drop size")
+            ax.set_xlabel(rf"$-\Delta {maybe_avg('W')}$")
+            ax.set_ylabel("Density (normalized)")
+        return ax
+
+    drops = drops[valid]
     if ax is None:
         fig, ax = plt.subplots()
     else:
@@ -1296,6 +1367,8 @@ def plot_plastic_counts(
     df = info["df"]
     assert mask is not None
     plastics = df["nr_plastic_deformations"][mask].to_numpy()
+    if plastics.size == valid.size:
+        plastics = plastics[valid]
 
     bin_centers, bin_sums = getHist(
         drops, weights=plastics, density=False, bins_per_decade=binsPerDecade
@@ -1311,7 +1384,7 @@ def plot_plastic_counts(
     # 1) Energy-drop PDF (normalized) on ax1
     plot_data_pdf(ax, drops)
     ax.set_title("Energy-drop PDF and plasticity vs drop size")
-    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
+    ax.set_xlabel(rf"$-\Delta {maybe_avg('W')}$")
     ax.set_ylabel("Density (normalized)", color=c_drop_pdf)
     ax.tick_params(axis="y", colors=c_drop_pdf)
     ax.spines["left"].set_color(c_drop_pdf)
@@ -1484,6 +1557,52 @@ def plot_plastic_energy_scatter(
     elif len(labels) > len(paths):
         labels = labels[: len(paths)]
 
+    def _split_label(label):
+        if label is None:
+            return [], None
+        tokens = [tok.strip() for tok in str(label).split(",") if tok.strip()]
+        seed = None
+        rest = []
+        for t in tokens:
+            if t.startswith("seed="):
+                try:
+                    seed = int(t.split("=", 1)[1])
+                except ValueError:
+                    seed = None
+            elif t.startswith("s="):
+                try:
+                    seed = int(t.split("=", 1)[1])
+                except ValueError:
+                    seed = None
+            else:
+                rest.append(t)
+        return rest, seed
+
+    def _base_label(label):
+        tokens, _ = _split_label(label)
+        return ", ".join(tokens)
+
+    # Build legend labels that collapse only-seed differences
+    grouped_seeds = {}
+    for label in labels:
+        base = _base_label(label)
+        if base not in grouped_seeds:
+            grouped_seeds[base] = []
+        _, seed = _split_label(label)
+        if seed is not None:
+            grouped_seeds[base].append(seed)
+
+    legend_label_for_base = {}
+    for base, seeds in grouped_seeds.items():
+        if seeds:
+            seeds = sorted(seeds)
+            legend_label_for_base[base] = f"{base}, s={seeds[0]}-{seeds[-1]}"
+        else:
+            legend_label_for_base[base] = base
+
+    used_legend_bases = set()
+    used_model_labels_by_L = set()
+
     if ax is None:
         fig, ax = plt.subplots(1, 1, figsize=(6.4, 4.2))
     else:
@@ -1501,6 +1620,13 @@ def plot_plastic_energy_scatter(
     edgeflip_colors = iter(blues(np.linspace(0.3, 0.9, max(1, n_edge))))
     normal_colors = iter(oranges(np.linspace(0.3, 0.9, max(1, n_norm))))
     for path, label in zip(paths, labels):
+        base = _base_label(label)
+        if base in used_legend_bases:
+            plot_label = "_nolegend_"
+        else:
+            plot_label = legend_label_for_base.get(base, base)
+            used_legend_bases.add(base)
+
         df = pd.read_csv(path)
         df = update_df_header(df, L=get_system_size([path]))
         drops, info = get_energy_drops(
@@ -1546,7 +1672,7 @@ def plot_plastic_energy_scatter(
             y_vals,
             marker=marker,
             color=color,
-            label=label,
+            label=plot_label,
             alpha=0.6,
             s=14,
             edgecolors="none",
@@ -1555,16 +1681,21 @@ def plot_plastic_energy_scatter(
         # Scaling model
         L = info.get("L", 1)
 
-        print(f"Using mu: {mu:.2f}")
-        print(f"Using L: {L}")
         Np = plastics[plastics > 0]
         x = np.array([Np.min(), Np.max()])
         b = 1
         y = mu * b**2 * x**2 / L**2
+        if L in used_model_labels_by_L:
+            model_label = "_nolegend_"
+        else:
+            print(f"Using mu: {mu:.2f}")
+            print(f"Using L: {L}")
+            model_label = rf"$\frac{{\mu b^2 N_p^2}}{{L^2}}, \mu={mu:.2f}$"
+            used_model_labels_by_L.add(L)
         ax.plot(
             x**2,
             y,
-            label=rf"$\frac{{\mu b^2 N_p^2}}{{L^2}}, \mu={mu:.2f}$",
+            label=model_label,
         )
 
     if not ax.collections:
@@ -1586,9 +1717,10 @@ def plot_plastic_energy_scatter(
 
     if save:
         if filename is None:
-            filename = f"{PLOTPATH}{safePath(title)}_plastic_energy_scatter.pdf"
+            filename = f"{PLOTPATH}{safePath(title)}_plastic_energy_scatter.png"
         fig.savefig(filename, dpi=300)
         print(f"Saved figure to {filename}")
+        plt.close(fig)
     if show:
         plt.show()
 
@@ -1666,6 +1798,7 @@ def make_fit(
         data,
         xmin=xmin_range,
         xmin_distribution=distType.name,
+        fast_xmin=fast_xmin,
     )
     if parallel_xmin is not None:
         fitObj.parallel_xmin = bool(parallel_xmin)
@@ -1747,12 +1880,13 @@ def get_attribute(label):
 
 
 def plot_fits_over_xmin(
-    fits, best_fit=None, savePath=None, title=None, xmin_results=None
+    fits, best_fit=None, savePath=None, title=None, xmin_results=None, fast_xmin=None
 ):
     """
     Plot KS p-value and exponent (with std error bars) versus xmin.
     """
     fits.sort(key=lambda f: f.xmin)
+    tag = ks_tag(fits=fits, fast_xmin=fast_xmin)
     x = np.array([f.xmin for f in fits], dtype=float)
     pvals = np.array([f.p for f in fits], dtype=float)
     p_stds = np.array([f.p_std for f in fits], dtype=float)
@@ -1775,7 +1909,7 @@ def plot_fits_over_xmin(
         linestyle="-",
         linewidth=1.8,
         markersize=5,
-        label="KS p-value",
+        label=f"{tag} p-value",
         color=c_p,
         elinewidth=1.0,
         capsize=3,
@@ -1792,7 +1926,7 @@ def plot_fits_over_xmin(
         zorder=1,
     )
     ax1.set_xlabel(r"$E_{\mathrm{min}}$")
-    ax1.set_ylabel("KS p-value", color=c_p)
+    ax1.set_ylabel(f"{tag} p-value", color=c_p)
     ax1.tick_params(axis="y", colors=c_p)
     ax1.spines["left"].set_color(c_p)
     ax1.set_ylim(0, 1)
@@ -1830,7 +1964,7 @@ def plot_fits_over_xmin(
                 linewidth=1.2,
                 color="0.5",
                 alpha=0.7,
-                label="KS distance",
+                label=f"{tag} distance",
                 zorder=0,
             )
 
@@ -1871,7 +2005,7 @@ def plot_fits_over_xmin(
                     color="0.5",
                     linestyle="-.",
                     linewidth=1,
-                    label=f"Global KS xmin: {ks_xmin_global:.2e}",
+                    label=f"Global {tag} xmin: {ks_xmin_global:.2e}",
                     zorder=-1,
                     alpha=0.7,
                 )
@@ -1881,7 +2015,7 @@ def plot_fits_over_xmin(
                     color="0.5",
                     linestyle="-",
                     linewidth=1,
-                    label=f"Filtered KS xmin: {ks_xmin_filtered:.2e}",
+                    label=f"Filtered {tag} xmin: {ks_xmin_filtered:.2e}",
                     zorder=-1,
                     alpha=0.7,
                 )
@@ -1890,11 +2024,11 @@ def plot_fits_over_xmin(
                     color="0.5",
                     linestyle="-.",
                     linewidth=1,
-                    label=f"Global KS xmin: {ks_xmin_global:.2e}",
+                    label=f"Global {tag} xmin: {ks_xmin_global:.2e}",
                     zorder=-1,
                     alpha=0.7,
                 )
-            if "plateau_xmin" in xmin_results:
+            if xmin_results.get("plateau_xmin", None):
                 ax1.axvline(
                     xmin_results["plateau_xmin"],
                     color="0.5",
@@ -2024,6 +2158,7 @@ def plot_xmin_fitting(fit, save=True, show=False):
     D = D[order]
     a = a[order]
 
+    tag = ks_tag(fit=fit)
     fig, ax1 = plt.subplots()
     c_d = "tab:blue"  # left axis (KS distance)
     c_a = "tab:orange"  # right axis (alpha)
@@ -2034,14 +2169,14 @@ def plot_xmin_fitting(fit, save=True, show=False):
         D,
         marker="o",
         linestyle="-",
-        label="KS distance (D)",
+        label=f"{tag} distance (D)",
         color=c_d,
         markerfacecolor="none",
         markeredgecolor=c_d,
     )
     ax1.set_xscale("log")
     ax1.set_xlabel(r"$x_{\min}$")
-    ax1.set_ylabel("KS distance (D)")
+    ax1.set_ylabel(f"{tag} distance (D)")
     ax1.tick_params(axis="y", colors=c_d)
     ax1.spines["left"].set_color(c_d)
 
@@ -2153,6 +2288,8 @@ def plot_KS_fitting(fit, save=True, show=False):
     logx = np.log10(x)
     dD = np.gradient(D, logx)
 
+    tag = ks_tag(fit=fit)
+    tag_lower = ks_tag(fit=fit, lower=True)
     fig, ax1 = plt.subplots()
     c_d = "tab:blue"
     c_dd = "tab:green"
@@ -2162,14 +2299,14 @@ def plot_KS_fitting(fit, save=True, show=False):
         D,
         marker="o",
         linestyle="-",
-        label="KS distance (D)",
+        label=f"{tag} distance (D)",
         color=c_d,
         markerfacecolor="none",
         markeredgecolor=c_d,
     )
     ax1.set_xscale("log")
     ax1.set_xlabel(r"$x_{\min}$")
-    ax1.set_ylabel("KS distance (D)")
+    ax1.set_ylabel(f"{tag} distance (D)")
     ax1.tick_params(axis="y", colors=c_d)
     ax1.spines["left"].set_color(c_d)
 
@@ -2206,7 +2343,7 @@ def plot_KS_fitting(fit, save=True, show=False):
         dist_name = fit.xmin_distribution.name
     except Exception:
         dist_name = ""
-    title = "KS fitting"
+    title = f"{tag} fitting"
     if dist_name:
         title += f" ({pretty_text(dist_name, addEquation=False)})"
     ax1.set_title(title)
@@ -2223,7 +2360,9 @@ def plot_KS_fitting(fit, save=True, show=False):
         os.makedirs(PLOTPATH + "debug/", exist_ok=True)
         dist_tag = dist_name if dist_name else "dist"
         xmin_tag = f"{chosen_xmin:.2e}" if chosen_xmin is not None else "unknown"
-        filename = f"{PLOTPATH}debug/ks_fitting_{dist_tag}_xmin_{xmin_tag}{OUTPUTTYPE}"
+        filename = (
+            f"{PLOTPATH}debug/{tag_lower}_fitting_{dist_tag}_xmin_{xmin_tag}{OUTPUTTYPE}"
+        )
         fig.savefig(filename, dpi=300)
         print(f"Saved figure to {filename}")
         plt.close(fig)
@@ -2314,6 +2453,7 @@ def plot_powerlaw(
         label=grouped_labels[0],
         postRegime=postRegime,
     )
+    # find_xmin_rising_level(all_drops, debug=True)
 
     event_min_xmin = find_start_of_plastic_events(data_info, debug=True)
 
@@ -2335,6 +2475,7 @@ def plot_powerlaw(
         debug=debug,
         data_info=data_info,
         xmin_results=getattr(KS_fit, "xmin_fitting_results", None),
+        fast_xmin=fast_xmin,
     )
 
     d = dist_from_fit(p_fit)
@@ -2366,21 +2507,38 @@ def plot_powerlaw(
         print(f"Number of drops: {len(all_drops)}")
         print(f"{attribute}: P value: {p:.2f} ({r}), exp: {d.alpha}, std: {exp_std}")
 
+    tag = ks_tag(fast_xmin=fast_xmin)
     if event_min_xmin:
         plot_ks_distance(
-            all_drops, event_min_xmin, data_info=data_info, name="event-min-fit"
+            all_drops,
+            event_min_xmin,
+            data_info=data_info,
+            name="event-min-fit",
+            fast_xmin=fast_xmin,
         )
 
     min_drop = np.min(all_drops)
     # We exclude the first two decades.
     exclude_factor = 100
     rmEnd_xmin = min_drop * exclude_factor
-    # plot_ks_distance(
-    #     all_drops, rmEnd_xmin, data_info=data_info, name=f"rmEnd{exclude_factor}"
-    # )
+    plot_ks_distance(
+        all_drops,
+        rmEnd_xmin,
+        data_info=data_info,
+        name=f"rmEnd{exclude_factor}",
+        fast_xmin=fast_xmin,
+    )
 
-    # plot_ks_distance(all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit")
-    # plot_ks_distance(all_drops, KS_fit.xmin, data_info=data_info, name=r"KS-fit")
+    plot_ks_distance(
+        all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit", fast_xmin=fast_xmin
+    )
+    plot_ks_distance(
+        all_drops,
+        KS_fit.xmin,
+        data_info=data_info,
+        name=f"{tag}-fit",
+        fast_xmin=fast_xmin,
+    )
 
     title = make_title(data_info=data_info, fit=p_fit)
     if attribute and attribute not in title:
@@ -2397,7 +2555,7 @@ def plot_powerlaw(
     title = make_title(data_info=data_info, fit=KS_fit)
     plot_data_and_fit(
         KS_fit,
-        title=title + "_KS_xmin",
+        title=title + f"_{tag}_xmin",
         color=color,
         addFit=addFit,
         save=save,

@@ -1,6 +1,12 @@
 import numpy as np
-from SymbolicFEM import FEM
-from MTMath.energyFunction import ContiEnergy
+
+try:
+    # Package context (e.g. python -m MTMath.miniMTM)
+    from .SymbolicFEM import FEM
+    from .energyFunction import ContiEnergy
+except ImportError:  # Direct script execution (e.g. python MTMath/miniMTM.py)
+    from SymbolicFEM import FEM
+    from energyFunction import ContiEnergy
 from matplotlib import pyplot as plt
 import sympy as sp
 
@@ -23,8 +29,9 @@ def simpleShearSystem(L=2, shearValues=np.linspace(0, 3, 100)):
         [nodes[3], nodes[2], nodes[1]],
     ]
 
-    F = sp.Array([FEM.F(e) for e in elements])
-    dN_dX = sp.Array([FEM.dN_dX(e) for e in elements])
+    # Use .tolist() so Sympy keeps the (elements, 2, 2) / (elements, 3, 2) shapes
+    F = sp.Array([FEM.F(e).tolist() for e in elements])
+    dN_dX = sp.Array([FEM.dN_dX(e).tolist() for e in elements])
 
     # Create symbolic shear variable
     shear = sp.symbols("shear")
@@ -53,25 +60,35 @@ def simpleShearSystem(L=2, shearValues=np.linspace(0, 3, 100)):
 
 
 # New function using the updated FEM.Element abstraction
-def simpleShearSystem2(L=2, shearValues=np.linspace(0, 3, 100)):
+def simpleShearSystem2(L=2, shearValues=np.linspace(0, 3, 100), periodic=False):
     """
     Make a LxL system of nodes connected in a triangular mesh.
     Apply shear and calculate F using new FEM.Element abstraction.
+    Note: L is the number of nodes per side; this yields (L-1)^2 * 2 triangular elements.
     """
+    if periodic:
+        raise NotImplementedError(
+            "Periodic boundary conditions are not implemented yet for simpleShearSystem2."
+        )
     N = L**2
     FEM.make_N_nodes(N)
 
     # Explicit triangular elements using node indices
-    element_indices = [
-        [0, 1, 2],
-        [1, 2, 3],
-        [2, 3, 0],
-        [3, 0, 1],
-    ]
+    element_indices = []
+    for j in range(L - 1):
+        for i in range(L - 1):
+            n0 = j * L + i
+            n1 = n0 + 1
+            n2 = n0 + L
+            n3 = n2 + 1
+            # Two triangles per cell (n0, n1, n2) and (n1, n3, n2)
+            element_indices.append([n0, n1, n2])
+            element_indices.append([n1, n3, n2])
     elements = [FEM.Element(ids) for ids in element_indices]
 
-    F = sp.Array([FEM.F(e) for e in elements])
-    dN_dX = sp.Array([FEM.dN_dX(e) for e in elements])
+    # Use .tolist() so Sympy keeps the (elements, 2, 2) / (elements, 3, 2) shapes
+    F = sp.Array([FEM.F(e).tolist() for e in elements])
+    dN_dX = sp.Array([FEM.dN_dX(e).tolist() for e in elements])
 
     shear = sp.symbols("shear")
 
@@ -164,6 +181,99 @@ def plotFValues(F):
     plt.show()
 
 
+def _assert_elements_equal(stress, name, rtol=1e-9, atol=1e-12):
+    if stress.shape[1] <= 1:
+        return
+    ref = stress[:, :1, :, :]
+    if not np.allclose(stress, ref, rtol=rtol, atol=atol):
+        diff = np.max(np.abs(stress - ref))
+        raise AssertionError(f"{name} differs across elements; max |diff|={diff:.3e}")
+
+
+def plotStressComponents(shearValues, F_values, element=0, assert_equal_elements=True):
+    """
+    Plot P_21, P_12 and sigma_21, sigma_12 vs load (shear).
+    element: integer element index, or "mean" to average across elements.
+    """
+    # F_values shape: (n_shear, n_elements, 2, 2)
+    P = ContiEnergy.P_from_F(F_values)
+    sigma = ContiEnergy.cauchy_from_F(F_values)
+
+    if assert_equal_elements:
+        _assert_elements_equal(P, "P")
+        _assert_elements_equal(sigma, "sigma")
+
+    if element == "mean":
+        P_use = P.mean(axis=1)
+        sigma_use = sigma.mean(axis=1)
+        title = "Stress components (mean over elements)"
+    else:
+        P_use = P[:, element, :, :]
+        sigma_use = sigma[:, element, :, :]
+        title = f"Stress components (element {element})"
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(shearValues, P_use[:, 1, 0], label="P_21 (1st PK)")
+    plt.plot(shearValues, P_use[:, 0, 1], label="P_12 (1st PK)", linestyle="--")
+    plt.plot(shearValues, sigma_use[:, 1, 0], label="sigma_21 (Cauchy)", linestyle="--")
+    plt.plot(shearValues, sigma_use[:, 0, 1], label="sigma_12 (Cauchy)", linestyle="--")
+    plt.xlabel("Load (shear)")
+    plt.ylabel("Stress")
+    plt.title(title)
+    plt.grid()
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+def printStressComponentsAtLoads(loads, L=2, element=0, assert_equal_elements=True):
+    """
+    Recompute simpleShearSystem2 at exact loads and print P_21, P_12,
+    sigma_21, sigma_12 for each load. Also prints the element-averaged
+    off-diagonal values at each load.
+    """
+    shear = np.asarray(loads, dtype=float)
+    _, _, F_values, _ = simpleShearSystem2(L=L, shearValues=shear)
+
+    P = ContiEnergy.P_from_F(F_values)
+    sigma = ContiEnergy.cauchy_from_F(F_values)
+
+    if assert_equal_elements:
+        _assert_elements_equal(P, "P")
+        _assert_elements_equal(sigma, "sigma")
+
+    if element == "mean":
+        P_use = P.mean(axis=1)
+        sigma_use = sigma.mean(axis=1)
+        label = "mean over elements"
+    else:
+        P_use = P[:, element, :, :]
+        sigma_use = sigma[:, element, :, :]
+        label = f"element {element}"
+
+    print(f"Stress components at exact loads ({label}):")
+    def _zero_small(x, tol=1e-10):
+        return 0.0 if abs(x) < tol else x
+
+    # Element-averaged off-diagonal values for each load
+    p_offdiag_mean = 0.5 * (P[:, :, 1, 0] + P[:, :, 0, 1]).mean(axis=1)
+    s_offdiag_mean = 0.5 * (sigma[:, :, 1, 0] + sigma[:, :, 0, 1]).mean(axis=1)
+
+    for i, load in enumerate(shear):
+        p21 = _zero_small(P_use[i, 1, 0])
+        p12 = _zero_small(P_use[i, 0, 1])
+        s21 = _zero_small(sigma_use[i, 1, 0])
+        s12 = _zero_small(sigma_use[i, 0, 1])
+        p_avg = _zero_small(p_offdiag_mean[i])
+        s_avg = _zero_small(s_offdiag_mean[i])
+        print(
+            f"load={load}: "
+            f"P21={p21:.6g}, P12={p12:.6g}, "
+            f"sigma21={s21:.6g}, sigma12={s12:.6g}, "
+            f"P_avg={p_avg:.6g}, sigma_avg={s_avg:.6g}"
+        )
+
+
 def makeVideo(pos, forces, element_indices):
     # Use FEM.x to get the node positions
     n_shear, n_elements, n_local_nodes, _ = forces.shape
@@ -211,15 +321,22 @@ def makeVideo(pos, forces, element_indices):
 
 
 if __name__ == "__main__":
-    shear = np.linspace(0, 1, 30)
-    pos, elements, F, dN_dX = simpleShearSystem2(L=2, shearValues=shear)
+    shear = np.linspace(0, 3, 300)
+    pos, elements, F, dN_dX = simpleShearSystem2(L=3, shearValues=shear)
     energies, forces = calculateForcesAndEnergy(F, dN_dX)
     # plotEnergyAndForces(shear, energies, forces)
     # plotFValues(F)
+    # plotStressComponents(shear, F, element=0, assert_equal_elements=True)
+    printStressComponentsAtLoads(
+        [0.3, 0.5, 1.3, 1.5, 2.3, 2.5],
+        L=2,
+        element=0,
+        assert_equal_elements=True,
+    )
     element_indices = [
         [0, 1, 2],
         [1, 2, 3],
         [2, 3, 0],
         [3, 0, 1],
     ]
-    makeVideo(pos, forces, element_indices)
+    # makeVideo(pos, forces, element_indices)

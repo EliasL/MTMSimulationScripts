@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 import re
 from datetime import timedelta
+from matplotlib.ticker import FuncFormatter
 import powerlaw
 import json
 from simplification.cutil import simplify_coords_vwp
@@ -83,6 +84,61 @@ def durations_to_seconds(durations):
         s = duration_to_seconds(duration)
         result.append(s)
     return result
+
+
+def _format_seconds_dhm(seconds, _pos=None):
+    if seconds is None or not np.isfinite(seconds):
+        return ""
+    sign = "-" if seconds < 0 else ""
+    seconds = abs(seconds)
+    total_minutes = int(seconds // 60)
+    days, rem_minutes = divmod(total_minutes, 24 * 60)
+    hours, minutes = divmod(rem_minutes, 60)
+    if days > 0:
+        return f"{sign}{days}d" if hours == 0 else f"{sign}{days}d {hours}h"
+    if hours > 0:
+        return f"{sign}{hours}h" if minutes == 0 else f"{sign}{hours}h {minutes}m"
+    if minutes == 0 and seconds > 0:
+        return f"{sign}<1m"
+    return f"{sign}{minutes}m"
+
+
+def _series_to_seconds(series):
+    if series is None or len(series) == 0:
+        return np.array([])
+    first = series.iloc[0]
+    if isinstance(first, str):
+        return np.asarray(durations_to_seconds(series))
+    return series.to_numpy(dtype=float)
+
+
+def _estimate_total_runtime(df, csv_file_path):
+    if "run_time" not in df.columns or df["run_time"].empty:
+        return None, None
+    run_time_sec = _series_to_seconds(df["run_time"])
+    if run_time_sec.size == 0 or not np.isfinite(run_time_sec[-1]):
+        return None, run_time_sec
+
+    total_runtime = run_time_sec[-1]
+    if "load" in df.columns and not df["load"].empty:
+        meta = get_data_from_name(csv_file_path)
+        start_load = meta.get("startLoad", df["load"].iloc[0])
+        max_load = meta.get("maxLoad")
+        if (
+            max_load is not None
+            and start_load is not None
+            and np.isfinite(max_load)
+            and np.isfinite(start_load)
+        ):
+            denom = max_load - start_load
+            if denom > 0:
+                progress = (df["load"].iloc[-1] - start_load) / denom
+                if np.isfinite(progress) and progress > 0:
+                    progress = min(progress, 1.0)
+                    if progress < 1.0:
+                        total_runtime = total_runtime / progress
+
+    return total_runtime, run_time_sec
 
 
 def plotYOverX(
@@ -161,20 +217,17 @@ def plotYOverX(
                 return fig, ax, line, point
 
         # --- broken y-axis ---
-        # decide gap automatically if not provided
+        # Use quantiles to focus the lower panel on the bulk of the data
+        q_low, q_high, q_spike = 0.01, 0.99, 0.995
+        y_low = np.quantile(Ys, q_low)
+        if not np.isfinite(y_low):
+            y_low = np.min(Ys)
         if break_gap is None:
-            z = _spike_z(Ys)
-            spike_mask = z > sigma_thresh
-            y_lo = None
-            y_hi = None
-            if spike_mask.any() and (~spike_mask).any():
-                y_lo = np.max(Ys[~spike_mask])  # top of the lower region
-                y_hi = np.min(Ys[spike_mask])  # bottom of spike region
-            if y_lo is None or y_hi is None or not np.isfinite(y_lo) or not np.isfinite(y_hi) or y_hi <= y_lo:
-                y_lo = np.quantile(Ys, 0.95)  # upper end of the “normal” band
-                y_hi = np.quantile(Ys, 0.995)  # start of “spikes”
-            if not np.isfinite(y_lo) or not np.isfinite(y_hi) or y_hi <= y_lo:
-                y_lo = np.max(Ys) * 0.9
+            y_lo = np.quantile(Ys, q_high)
+            y_hi = np.quantile(Ys, q_spike)
+            if not np.isfinite(y_lo):
+                y_lo = np.max(Ys)
+            if not np.isfinite(y_hi) or y_hi <= y_lo:
                 y_hi = np.max(Ys)
             break_gap = (y_lo, y_hi)
 
@@ -188,7 +241,7 @@ def plotYOverX(
         (line_bot,) = ax_bot.plot(Xs, Ys, **kwargs)
         (line_top,) = ax_top.plot(Xs, Ys, **kwargs)
 
-        ymin, ymax = np.min(Ys), np.max(Ys)
+        ymin, ymax = y_low, np.max(Ys)
         gap_low, gap_high = break_gap
 
         ax_bot.set_ylim(ymin, gap_low)
@@ -458,23 +511,26 @@ def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True, use_av
     """
     Determines appropriate axis labels based on given column names.
     """
-    if use_avg is None:
-        use_avg = isinstance(Y, str) and Y.startswith("avg_")
     if x_name is None:
         x_name = r"Strain $\gamma$" if X == "load" else X
 
     if y_name is None and use_y_axis_name:
-        sigma = r"\sigma"
+        # Remove total_ and avg_
+        if use_avg is None:
+            use_avg = isinstance(Y, str) and Y.startswith("avg_")
+        Y_ = Y.replace("avg_", "").replace("total_", "")
+
+        # Replace text with latex
         sigma12 = r"\sigma_{12}"
         p12 = r"P_{12}"
-        y_labels = {
-            "avg_RSS": rf"Stress ${maybe_avg(sigma, True)}$",
-            "avg_energy": rf"Energy ${maybe_avg('E', True)}$",
-            "RSS": rf"Stress ${maybe_avg(sigma, False)}$",
-            "energy": rf"Energy ${maybe_avg('E', False)}$",
+        y_labels_map = {
+            "RSS": rf"Stress ${maybe_avg(p12, use_avg)}$",
+            "P12": rf"Stress ${maybe_avg(p12, use_avg)}$",
+            "sigma12": rf"Stress ${maybe_avg(sigma12, use_avg)}$",
+            "energy": rf"Energy ${maybe_avg('W', use_avg)}$",
             "est_time_remaining": "Estimated time remaining (s)",
         }
-        y_name = y_labels.get(Y, Y)
+        y_name = y_labels_map.get(Y_, Y)
 
     return x_name, y_name
 
@@ -616,6 +672,30 @@ def makePlot(
             point = None
             if plot_raw:
                 fig, ax, line, point = plotYOverX(df[X], df[Y_], **kwargs)
+                if Y_ == "est_time_remaining":
+                    total_runtime, run_time_sec = _estimate_total_runtime(
+                        df, csv_file_path
+                    )
+                    if total_runtime is not None and run_time_sec is not None:
+                        x_vals = df[X].to_numpy()
+                        n = min(len(x_vals), len(run_time_sec))
+                        if n > 0:
+                            true_remaining = total_runtime - run_time_sec[:n]
+                            true_remaining = np.maximum(true_remaining, 0)
+                            if labels is None:
+                                true_label = "True remaining"
+                            else:
+                                true_label = (
+                                    f"{labels[i]} (true)" if j == 0 else "_nolegend_"
+                                )
+                            ax.plot(
+                                x_vals[:n],
+                                true_remaining,
+                                linestyle="--",
+                                color=kwargs.get("color", None),
+                                alpha=0.7,
+                                label=true_label,
+                            )
             if plot_roll_average:
                 fig, ax, line = plotRollingAverage(df[X], df[Y_], **kwargs)
             if line is not None:
@@ -666,6 +746,8 @@ def makePlot(
 
     if ylog:
         ax.set_yscale("log")
+    if isinstance(Y, str) and "time" in Y.lower() and not ylog:
+        ax.yaxis.set_major_formatter(FuncFormatter(_format_seconds_dhm))
 
     if xlim:
         if len(xlim) == 1:
@@ -861,7 +943,7 @@ def addImagesToPlot(
         if mesh_property == "stress":
             label = r"Stress $\sigma$"
         elif mesh_property == "energy":
-            label = r"Energy $E$"
+            label = r"Energy $W$"
         elif mesh_property == "m":
             label = r"Dislocations $\textbf{m}_3$"
         # Add the color bar to the figure
@@ -906,9 +988,9 @@ def makeAverageComparisonPlot(
     if name == "":
         if Y == "avg_energy":
             name = "Avg energy"
-        elif Y == "avg_sigmaxy":
+        elif Y == "avg_sigma12":
             name = "Avg Cauchy shear stress"
-        elif Y == "avg_Pxy":
+        elif Y == "avg_P12":
             name = "Avg Piola shear stress"
         elif "time" in Y:
             name = Y

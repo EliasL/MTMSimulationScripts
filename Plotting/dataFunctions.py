@@ -210,32 +210,44 @@ def get_data_from_name(nameOrPath):
     fileName = nameOrPath.split("/")[-1]
     if fileName == "macroData.csv":
         fileName = nameOrPath.split("/")[-2]
-    parts = fileName.split("_")
-
     # Initialize an empty dictionary
     result = {}
 
-    # We skipp the first and last part. The first part is the 'name', the last
-    # part is the type, ie .N.vtu:
-    # resettingSimpleShearPeriodicBoundary,s60x60l0.15,1e-05,10PBCt4s0_load=3.79001_nrM=0_.364001.vtu
+    # Strip extensions and optional load-step suffix so parsing is robust to
+    # flags like "_minimal" or minStep values that contain dots.
+    base_name = fileName
+    if base_name.endswith(".vtu"):
+        base_name = base_name[:-4]
+        if "." in base_name:
+            maybe_step = base_name.rsplit(".", 1)[1]
+            if maybe_step.isdigit():
+                result["load_step"] = int(maybe_step)
+                base_name = base_name.rsplit(".", 1)[0]
+    elif base_name.endswith(".csv"):
+        base_name = base_name[:-4]
 
-    # We can also handle .csv values, in which case the last part will be .csv
-    if parts[0][-4:] == ".csv":
-        parts[0] = parts[0][:-4]
-    else:
-        # Extract number of load steps (.N.vtu)
-        result["load_step"] = int(fileName.split(".")[-2])
+    parts = base_name.split("_")
 
     result["name"] = parts[0]
-    for part in parts[1:-1]:
-        key, value = part.split("=")
+    for part in parts[1:]:
+        if not part:
+            continue
+        if "=" not in part:
+            # Treat underscore-separated tokens without '=' as flags
+            result[part] = True
+            continue
+        key, value = part.split("=", 1)
         # Add the key-value pair to the dictionary
 
         # minStep is special. It has the format iterations.func_evals
         if key == "minStep":
-            result["nr_iterations"], result["nr_func_evals"] = map(
-                int, value.split(".")
-            )
+            try:
+                result["nr_iterations"], result["nr_func_evals"] = map(
+                    int, value.split(".")
+                )
+            except ValueError:
+                # Fall back to a plain value if the expected format isn't met
+                pass
             result["minStep"] = value
             continue
 

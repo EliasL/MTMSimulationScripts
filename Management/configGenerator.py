@@ -321,6 +321,71 @@ class ConfigGenerator:
             return configs, labels
 
     @staticmethod
+    def filter(configs, labels, keys):
+        """
+        Filter configs/labels by requiring each key to be present in the label.
+
+        Supports both flat lists and grouped (nested) lists as returned by
+        ConfigGenerator.generate(group_by_seeds=True).
+        """
+
+        # Normalize keys
+        if keys is None:
+            return configs, labels
+        if isinstance(keys, str) or not isinstance(keys, Iterable):
+            keys = [keys]
+        else:
+            keys = list(keys)
+
+        # Remove any empty/None keys
+        keys = [str(k).strip() for k in keys if k is not None and str(k).strip() != ""]
+        if len(keys) == 0:
+            return configs, labels
+
+        def _is_grouped(x):
+            return isinstance(x, (list, tuple)) and len(x) > 0 and isinstance(
+                x[0], (list, tuple)
+            )
+
+        def _label_tokens(label):
+            if label is None:
+                return []
+            return [tok.strip() for tok in str(label).split(",") if tok.strip()]
+
+        def _matches(label):
+            tokens = _label_tokens(label)
+            return all(k in tokens for k in keys)
+
+        # Handle grouped (nested) structure
+        if _is_grouped(labels):
+            if not _is_grouped(configs):
+                raise ValueError("configs and labels must have the same structure.")
+            filtered_configs = []
+            filtered_labels = []
+            for group_configs, group_labels in zip(configs, labels):
+                group_configs_f, group_labels_f = ConfigGenerator.filter(
+                    group_configs, group_labels, keys
+                )
+                filtered_configs.append(group_configs_f)
+                filtered_labels.append(group_labels_f)
+            return filtered_configs, filtered_labels
+
+        # Handle flat structure
+        if isinstance(configs, SimulationConfig):
+            configs = [configs]
+        if isinstance(labels, str) or not isinstance(labels, Iterable):
+            labels = [labels]
+
+        if len(configs) != len(labels):
+            raise ValueError("configs and labels must have the same length.")
+
+        filtered = [(c, l) for c, l in zip(configs, labels) if _matches(l)]
+        if not filtered:
+            return [], []
+        filtered_configs, filtered_labels = zip(*filtered)
+        return list(filtered_configs), list(filtered_labels)
+
+    @staticmethod
     def get_kwargs(configs):
         """
         A reverse of the generate method

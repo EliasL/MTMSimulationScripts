@@ -8,6 +8,7 @@ from Plotting.plotPowerLaw import (
     find_best_xmin,
     plot_ks_distance,
     dist_from_fit,
+    ks_tag,
 )
 from Plotting.makePlots import (
     create_color_matrix,
@@ -15,7 +16,13 @@ from Plotting.makePlots import (
     find_best_color_matrix_corner,
 )
 
-from Plotting.findXmin import find_xmin, find_xmin_sylvain
+from Plotting.findXmin import (
+    find_xmin,
+    find_xmin_sylvain,
+    find_xmin_rising_level,
+    find_xmin_derivative,
+    find_xmin,
+)
 from comparePlots import combine_pdfs_grid
 from .evaluatePowerlawFit import Truncated_Power_Law
 import os
@@ -332,6 +339,7 @@ def _plot_grid_compare(
     dx_limits,
     da_limits,
     dl_limits,
+    ks_label="KS",
     cmap="coolwarm",
 ):
     fig, axes = plt.subplots(3, 2, figsize=(12, 10), constrained_layout=True)
@@ -344,7 +352,9 @@ def _plot_grid_compare(
         vmax=dx_limits[1],
         cmap=cmap,
     )
-    axes[0, 0].set_title(r"$\log_{10}(x_{\min}/x_{\min,true})$ (min KS)")
+    axes[0, 0].set_title(
+        rf"$\log_{{10}}(x_{{\min}}/x_{{\min,true}})$ (min {ks_label})"
+    )
     fig.colorbar(im1, ax=axes[0, 0], fraction=0.046, pad=0.04)
 
     im2 = axes[0, 1].imshow(
@@ -366,7 +376,7 @@ def _plot_grid_compare(
         vmax=da_limits[1],
         cmap=cmap,
     )
-    axes[1, 0].set_title("alpha (min KS) - true alpha")
+    axes[1, 0].set_title(f"alpha (min {ks_label}) - true alpha")
     fig.colorbar(im3, ax=axes[1, 0], fraction=0.046, pad=0.04)
 
     im4 = axes[1, 1].imshow(
@@ -388,7 +398,9 @@ def _plot_grid_compare(
         vmax=dl_limits[1],
         cmap=cmap,
     )
-    axes[2, 0].set_title(r"$\log_{10}(\lambda/\lambda_{true})$ (min KS)")
+    axes[2, 0].set_title(
+        rf"$\log_{{10}}(\lambda/\lambda_{{true}})$ (min {ks_label})"
+    )
     fig.colorbar(im5, ax=axes[2, 0], fraction=0.046, pad=0.04)
 
     im6 = axes[2, 1].imshow(
@@ -481,6 +493,7 @@ def _ensure_placeholder_pdf(path, text="Missing"):
 
 
 def _save_fit_plot_paths(drops, ks_fit, p_fit, data_info, extra_path=""):
+    fast_xmin = bool(getattr(ks_fit, "fast_xmin", False))
     ax1 = plot_ks_distance(
         drops,
         ks_fit.xmin,
@@ -489,6 +502,7 @@ def _save_fit_plot_paths(drops, ks_fit, p_fit, data_info, extra_path=""):
         save=True,
         close=True,
         extraPath=extra_path,
+        fast_xmin=fast_xmin,
     )
     ks_min_path = getattr(ax1.figure, "path", None)
 
@@ -500,6 +514,7 @@ def _save_fit_plot_paths(drops, ks_fit, p_fit, data_info, extra_path=""):
         save=True,
         close=True,
         extraPath=extra_path,
+        fast_xmin=fast_xmin,
     )
     ks_max_path = getattr(ax2.figure, "path", None)
 
@@ -534,6 +549,11 @@ def grid_compare_xmin_plot(data=None, cache_path=None):
     xmins = np.array(data["xmins"], dtype=float)
     Lambda = float(data["Lambda"])
     n_samples = int(data["n_samples"])
+    fast_xmin = bool(
+        data.get("fast_xmin", data.get("params", {}).get("fast_xmin", False))
+    )
+    ks_label = ks_tag(fast_xmin=fast_xmin)
+    ks_tag_lower = ks_tag(fast_xmin=fast_xmin, lower=True)
 
     xmin1_grid = np.array(data["xmin1_grid"], dtype=float)
     xmin2_grid = np.array(data["xmin2_grid"], dtype=float)
@@ -573,6 +593,7 @@ def grid_compare_xmin_plot(data=None, cache_path=None):
         fixed_limits,
         fixed_limits,
         fixed_limits,
+        ks_label=ks_label,
         cmap="coolwarm",
     )
 
@@ -595,6 +616,7 @@ def grid_compare_xmin_plot(data=None, cache_path=None):
         dx_limits,
         da_limits,
         dl_limits,
+        ks_label=ks_label,
         cmap="coolwarm",
     )
 
@@ -609,8 +631,12 @@ def grid_compare_xmin_plot(data=None, cache_path=None):
     def _sanitize_paths(paths):
         return [p if p and os.path.exists(p) else placeholder_path for p in paths]
 
-    filename1 = f"{PLOTPATH}ks_distance_grid_minKS_n{n_samples}{seed_tag}.pdf"
-    filename2 = f"{PLOTPATH}ks_distance_grid_maxP_n{n_samples}{seed_tag}.pdf"
+    filename1 = (
+        f"{PLOTPATH}{ks_tag_lower}_distance_grid_min{ks_label}_n{n_samples}{seed_tag}.pdf"
+    )
+    filename2 = (
+        f"{PLOTPATH}{ks_tag_lower}_distance_grid_maxP_n{n_samples}{seed_tag}.pdf"
+    )
     filename3 = f"{PLOTPATH}fit_grid_n{n_samples}{seed_tag}.pdf"
     filename4 = f"{PLOTPATH}xmin_fits_grid_n{n_samples}{seed_tag}.pdf"
     combine_pdfs_grid(_sanitize_paths(ks_min_paths), rows, cols, filename1)
@@ -1336,6 +1362,7 @@ def grid_compare_xmin_generate(
                 xmin_results=KS_fit.xmin_fitting_results,
                 data_info=data_info,
                 extraPath=output_subdir,
+                fast_xmin=fast_xmin,
                 parallel=True,
             )
             ks_min_path, ks_max_path, fit_path = _save_fit_plot_paths(
@@ -1813,7 +1840,9 @@ def testDist(alpha1=1.05):
     drops = generate_powerlaw_avalanche_data(alpha1, xmin=1e-6, Lambda=Lambda)
     fit = make_fit(drops, fast_xmin=True)
     fit.evaluate_fit()
-    find_best_xmin(drops, debug=True, xmin_results=fit.xmin_fitting_results)
+    find_best_xmin(
+        drops, debug=True, xmin_results=fit.xmin_fitting_results, fast_xmin=True
+    )
     plot_xmin_fitting(fit, save=True)
 
     filename = f"testing/{alpha1}_lamb={Lambda:.0e}"
@@ -1848,13 +1877,15 @@ def testSamplePiecewise(
 
     KS_fit = make_fit(drops, xmin_range=None, fast_xmin=True, xmin_accuracy=0.01)
     # KS_fit.evaluate_fit()
-    plateau_xmin = find_xmin(drops, debug=True, samplesPerDecade=30, show_progress=True)
+    plateau_xmin = find_xmin(drops, debug=True)
 
     # xmin = find_xmin_sylvain(drops, debug=True, B=1000, p0=0.1, c=1.0, nr_evaluation=20)
-
+    # find_xmin_rising_level(drops, True)
     KS_fit.xmin_fitting_results["plateau_xmin"] = plateau_xmin
 
-    p_fit = find_best_xmin(drops, debug=True, xmin_results=KS_fit.xmin_fitting_results)
+    p_fit = find_best_xmin(
+        drops, debug=True, xmin_results=KS_fit.xmin_fitting_results, fast_xmin=True
+    )
     plot_xmin_fitting(KS_fit, save=True)
     plot_KS_fitting(KS_fit, save=True)
 

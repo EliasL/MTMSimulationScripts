@@ -178,15 +178,15 @@ def basicJob(
         nrThreads=nrThreads,
         minimizer="LBFGS",
         loadIncrement=1e-5,
-        epsR=1e-6,
-        # LBFGSEpsx=1e-6,
+        # epsR=1e-6,
+        LBFGSEpsx=1e-6,
         # LBFGSEpsg=1e-8,
         scenario="simpleShear",
         reconnectionMethod=reconnection,
         # remesh=1,
         # temp
-        # energyDropThreshold=1e-10,
-        # logDuringMinimization=1,
+        energyDropThreshold=1e-4,
+        #logDuringMinimization=1,
     )
     return configs, labels
 
@@ -604,7 +604,7 @@ def reversibilityJob(
     size=150,
     group_by_seeds=False,
     maxLoad=1.0,
-    reconnection="none",
+    reconnection="edgeFlip",
     loadIncrement=1e-5,
 ):
     configs, labels = ConfigGenerator.generate(
@@ -624,7 +624,7 @@ def reversibilityJob(
         reconnectionMethod=reconnection,
         # remesh=1,
         # temp
-        # energyDropThreshold=1e-10,
+        energyDropThreshold=1e-5,
         # logDuringMinimization=1,
     )
     return configs, labels

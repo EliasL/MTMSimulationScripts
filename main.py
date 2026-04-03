@@ -137,6 +137,11 @@ def benchmark():
     # 1% RT: 2m 3s   ETR: 3h 22m 42s Load: 0.158500
     # Too much variability.
 
+    # Elastic reduction (02.04.26)
+    # 2% RT: 2m 10s  ETR: 1h 33m 38s Load: 0.167000
+    # Optimizations (split update function)
+    # 2% RT: 1m 51s  ETR: 1h 11m 35s Load: 0.170570
+
 
 def reconnectingBenchmark():
     configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection="edgeFlip")
@@ -178,6 +183,12 @@ def reconnectingBenchmark():
     """
     # New reconnecting (15.09.25)
     # 2% RT: 2m 5s   ETR: 1h 9m 50s  Load: 0.174020
+
+    # New reconnecting (02.04.26) (split update function) :(
+    # 0% RT: 2m 1s   ETR: 6h 17m 11s Load: 0.154520
+
+    # Only reconnect on strained energy drop (03.04.26)
+    # 2% RT: 2m 10s  ETR: 1h 41m 4s  Load: 0.167000
 
 
 def parameterExploring():
@@ -417,14 +428,14 @@ def runOnLocalMachine():
     # configs, labels = allPlasticEventsJob()
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
-    # configs, labels = basicJob(8, 1, size=40, maxLoad=0.2)
+    #configs, labels = basicJob(1, 1, size=30, maxLoad=1.0, reconnection="edgeFlip")
     # configs, labels = reconnectionJob(L=300)
     # configs, labels = fixedBoundaries(1, 1, L=3)
     # configs, labels = umutTestJob()
     # configs, labels = bigUmutJob()
     # configs, labels = bigUmutJobWithEliasStop()
     # configs, labels = loadStepJob()
-    # configs, labels = reversibilityJob()
+    configs, labels = reversibilityJob()
     # configs, labels = triangular_edge_flip_job(size=50)
 
     # configs, labels = doubleDislocationTest(
@@ -438,8 +449,8 @@ def runOnLocalMachine():
     # configs, labels = remeshTest(diagonal="minor")
     # run_many_locally(configs, taskNames=labels, resume=False)
 
-    configs, labels = longJob(8, 1, size=300)
-    configs, labels = longJobStatic(8, 1, size=300)
+    #configs, labels = longJob(8, 1, size=300)
+    # configs, labels = longJobStatic(8, 1, size=300)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
     # configs, labels, dump = avalanches(nrThreads=20, size=100)
@@ -535,21 +546,21 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    # runOnLocalMachine()
+    runOnLocalMachine()
     # sylvainSmallDrop()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
-    startJobs()
+    # startJobs()
 
     # plotPropperJob()
     # plotSizeScaling()
     # plotBigJob()
     # stopConditionJob()
     # threadTest()
-    # benchmark()
-    # reconnectingBenchmark()
+    #benchmark()
+    #reconnectingBenchmark()
     # resumeSim(
     #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,

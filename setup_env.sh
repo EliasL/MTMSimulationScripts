@@ -22,6 +22,24 @@ VENV_DIR="$PROJECT_DIR/.venv"
 # Install dependencies using uv pip
 uv pip install -r "$PROJECT_DIR/requirements.txt"
 
+# Install local packages in editable mode (auto-discover)
+mapfile -t LOCAL_PACKAGES < <(
+    find "$PROJECT_DIR" \
+        -path "$PROJECT_DIR/.venv" -prune -o \
+        -path "$PROJECT_DIR/.git" -prune -o \
+        -path "*/__pycache__" -prune -o \
+        -path "*/build" -prune -o \
+        -path "*/dist" -prune -o \
+        \( -name setup.py -o -name pyproject.toml \) -print \
+    | xargs -I{} dirname "{}" \
+    | sort -u
+)
+
+for pkg in "${LOCAL_PACKAGES[@]}"; do
+    echo "Installing editable package: $pkg"
+    uv pip install -e "$pkg"
+done
+
 # Update VSCode settings to use uv environment interpreter
 VSCODE_SETTINGS_DIR="$PROJECT_DIR/.vscode"
 VSCODE_SETTINGS_FILE="$VSCODE_SETTINGS_DIR/settings.json"

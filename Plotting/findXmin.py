@@ -1,4 +1,5 @@
 import numpy as np
+import warnings
 from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law
 from powerlaw import Distribution
 from matplotlib import pyplot as plt
@@ -1353,11 +1354,11 @@ def find_fmin(
 def _plot_xmin_debug(
     xmin_values,
     distances,
-    min_distance,
-    region_level,
-    region_start,
-    region_end,
-    min_idx,
+    min_distance=None,
+    region_level=None,
+    region_start=None,
+    region_end=None,
+    min_idx=None,
     dip_xmin_values=None,
     dip_distances=None,
     dip_x=None,
@@ -1405,7 +1406,13 @@ def _plot_xmin_debug(
     ax1.set_zorder(1)
     ax1.patch.set_visible(False)
 
-    _plot_region_shading(ax1, region_start, region_end, min_distance, region_level)
+    if (
+        region_start is not None
+        and region_end is not None
+        and min_distance is not None
+        and region_level is not None
+    ):
+        _plot_region_shading(ax1, region_start, region_end, min_distance, region_level)
 
     if min_idx is not None:
         min_xmin = float(xmin_values[min_idx])
@@ -1439,18 +1446,13 @@ def _plot_dip_derivative_extrema_debug(
     dip_x,
     dip_D,
     dip_d1,
-    dip_d2,
+    dip_d2=None,
+    selected_xmin=None,
     coarse_x=None,
     coarse_D=None,
     smoothing=None,
 ):
-    if (
-        dip_x is None
-        or dip_D is None
-        or dip_d1 is None
-        or dip_d2 is None
-        or dip_x.size == 0
-    ):
+    if dip_x is None or dip_D is None or dip_d1 is None or dip_x.size == 0:
         return None
 
     fig, ax = plt.subplots()
@@ -1480,7 +1482,7 @@ def _plot_dip_derivative_extrema_debug(
         )
         ax.plot(x_min_d1, y_min_d1, marker="o", color="tab:green")
 
-    if np.isfinite(dip_d2).any():
+    if dip_d2 and np.isfinite(dip_d2).any():
         idx_max_d2 = int(np.nanargmax(dip_d2))
         x_max_d2 = float(dip_x[idx_max_d2])
         y_max_d2 = float(np.interp(x_max_d2, dip_x, dip_D))
@@ -1492,6 +1494,17 @@ def _plot_dip_derivative_extrema_debug(
             alpha=0.9,
         )
         ax.plot(x_max_d2, y_max_d2, marker="s", color="tab:red")
+
+    if selected_xmin is not None and np.isfinite(selected_xmin):
+        y_sel = float(np.interp(selected_xmin, dip_x, dip_D))
+        ax.axvline(
+            selected_xmin,
+            linestyle="-.",
+            color="tab:purple",
+            label=r"Chosen $x_{\min}$",
+            alpha=0.9,
+        )
+        ax.plot(selected_xmin, y_sel, marker="D", color="tab:purple")
 
     legend = ax.legend(loc="best")
     legend.set_zorder(10)
@@ -1896,7 +1909,7 @@ def find_xmin_derivative(drops, debug=False, smoothing="spline", **kwargs):
             x,
             D,
             dip_d1,
-            dip_d2,
+            dip_d2=dip_d2,
             coarse_x=coarse_xmin_values,
             coarse_D=distances,
             smoothing=smoothing,
@@ -2282,72 +2295,115 @@ def find_xmin_sizer(
     return fmin
 
 
-def find_xmin(drops, **kwargs):
-    pass
+# def find_xmin(drops, **kwargs):
+# pass
 
 
-def find_xmin_derivative2(drops, debug=False, smoothing="spline", **kwargs):
-    min_xmin = min(drops)
-    max_xmin = max(drops)
-    nr_first_evaluation = 20
-    coarse_xmin_values = np.logspace(
-        np.log10(min_xmin), np.log10(max_xmin), nr_first_evaluation
-    )
+def find_xmin(drops, debug=False, samples_per_decade=30, **kwargs):
+    log_min_xmin = np.log10(min(drops))
+    log_max_xmin = np.log10(max(drops))
+    log_mid_xmin = log_min_xmin + 0.5 * (log_max_xmin - log_min_xmin)
+
+    decades = max(log_mid_xmin - log_min_xmin, 0.0)
+    nr_first_evaluation = int(max(20, np.ceil(decades * samples_per_decade)))
+    # Coarse grid (downsampled) to find dip_d1
+    coarse_xmin_values = np.logspace(log_min_xmin, log_mid_xmin, nr_first_evaluation)
     fits = evaluate_xmin(drops, coarse_xmin_values, **kwargs)
     distances = np.asarray([f.D for f in fits], dtype=float)
 
-    min_distance, region_level, region_start, region_end, min_idx = _find_region_bounds(
-        distances, coarse_xmin_values, delta=0.05
-    )
-    assert region_start is not None
-
-    # Do better search in region of interest (This is where we expect
-    # a dip in the D value)
-    dip_xmin_values = np.logspace(
-        np.log10(region_start / 10),
-        np.log10(region_start * 10),
-        nr_first_evaluation * 10,
-    )
-    dip_fits = evaluate_xmin(drops, dip_xmin_values, **kwargs)
-    dip_distances = np.asarray([f.D for f in dip_fits], dtype=float)
-    dip_distances = _smooth_dip_distances(dip_xmin_values, dip_distances, smoothing)
-
-    dip_mask = (
-        np.isfinite(dip_xmin_values)
-        & np.isfinite(dip_distances)
-        & (dip_xmin_values > 0)
-    )
-    assert dip_mask.sum() >= 3, "Not enough data"
-    x = dip_xmin_values[dip_mask]
-    D = dip_distances[dip_mask]
+    x = coarse_xmin_values
+    D = distances
+    mask = np.isfinite(x) & np.isfinite(D) & (x > 0)
+    if mask.sum() < 3:
+        warnings.warn("Not enough finite KS distances to find a local minimum.")
+        return np.nan
+    x = x[mask]
+    D = D[mask]
     logx = np.log10(x)
     dip_d1 = np.gradient(D, logx)
-    dip_d2 = np.gradient(dip_d1, logx)
+    # We now find the steapest part on the right side of the curve
+    xmin_search_start = x[np.argmin(dip_d1)]
+
+    # Then we try xmins from there until we find a local minimum (coarse grid)
+    start_idx = int(np.searchsorted(x, xmin_search_start, side="left"))
+    xmin_local_min = np.nan
+    for i in range(max(start_idx, 1), len(D) - 1):
+        if D[i] <= D[i - 1] and D[i] <= D[i + 1]:
+            xmin_local_min = float(x[i])
+            break
+    if not np.isfinite(xmin_local_min):
+        # Fallback: smallest D after start
+        if start_idx < len(D):
+            xmin_local_min = float(x[start_idx + int(np.nanargmin(D[start_idx:]))])
+        else:
+            return np.nan
+    param_vals = [
+        [
+            getattr(fit, p, np.nan)
+            for p in list(getattr(fit.xmin_distribution, "parameter_names", []))
+        ]
+        for fit in fits
+    ]
+    xmin_fitting_results = {
+        "distances": D,
+        "param_vals": param_vals,
+        "xmins": x,
+    }
 
     # We now inspect the ks distance of the fits:
     if debug:
         _plot_xmin_debug(
             coarse_xmin_values,
             distances,
-            min_distance,
-            region_level,
-            region_start,
-            region_end,
-            min_idx,
-            dip_xmin_values=dip_xmin_values,
-            dip_distances=dip_distances,
             dip_x=x,
             dip_d1=dip_d1,
-            dip_d2=dip_d2,
-            smoothing=smoothing,
         )
         _plot_dip_derivative_extrema_debug(
             x,
             D,
             dip_d1,
-            dip_d2,
             coarse_x=coarse_xmin_values,
             coarse_D=distances,
-            smoothing=smoothing,
+            selected_xmin=xmin_local_min,
         )
-    return x[np.argmax(dip_d2)]
+    return xmin_local_min, xmin_fitting_results
+
+
+def find_xmin_rising_level(drops, debug=False, **kwargs):
+    min_xmin = min(drops)
+    max_xmin = max(drops)
+    nr_first_evaluation = 100
+    coarse_xmin_values = np.logspace(
+        np.log10(min_xmin), np.log10(max_xmin), nr_first_evaluation
+    )
+    fits = evaluate_xmin(drops, coarse_xmin_values, **kwargs)
+    distances = np.asarray([f.D for f in fits], dtype=float)
+    mask = np.isfinite(distances) & np.isfinite(coarse_xmin_values)
+    if mask.sum() == 0:
+        warnings.warn("No finite KS distances found; cannot compute plateau level.")
+        return np.nan
+    distances_valid = distances[mask]
+    x_valid = coarse_xmin_values[mask]
+
+    # We now have a rough outline of the ks distance plot.
+    # We now imagine a horizontal line at some height h,
+    # and we measure the distance between the line and the ks distance.
+
+    h = np.linspace(0, 1, nr_first_evaluation)
+    pd = [np.nansum(np.abs(distances_valid - h_)) for h_ in h]
+    if debug:
+        fig, ax1 = plt.subplots()
+        ax1.plot(h, pd)
+
+    plateau_h = h[np.argmin(pd)]
+
+    if debug:
+        fig, ax2 = plt.subplots()
+        ax2.plot(x_valid, distances_valid, label="D (coarse)")
+        ax2.axhline(plateau_h)
+        ax2.set_xscale("log")
+        plt.show()
+
+    # Assuming that there is a roughly flat plateau, the minimum of this
+    # measurement should give the height of the plateu.
+    # We then

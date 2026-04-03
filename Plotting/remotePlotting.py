@@ -1077,6 +1077,15 @@ def plotLog2(config_groups, labels, **kwargs):
         plot_plastic_energy_scatter(ps, ls, postRegime=kwargs.get("postRegime", True))
     plot_powerlaw(paths, labels, **kwargs)
 
+def plotLogCompare(config_groups, labels, **kwargs):
+    paths, labels = get_csv_files(
+        config_groups, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+
+    paths = fix_csv_files(paths)
+    paths, labels = get_group_structure(paths, labels)
+
+    plot_powerlaw(paths, labels, **kwargs)
 
 def plotPlasticCounts(config_groups, labels, **kwargs):
     paths, labels = get_csv_files(

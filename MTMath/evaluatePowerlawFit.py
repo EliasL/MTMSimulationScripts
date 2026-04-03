@@ -603,6 +603,99 @@ class Truncated_Power_Law(Original_Truncated_Power_Law):
         return cdf
 
 
+def evaluate_xmin(
+    drops,
+    xmin_values,
+    distType: type[Distribution] = Truncated_Power_Law,
+    xmax=None,
+    parallel=False,
+    max_workers=None,
+):
+    tasks = [(drops, trial_xmin, xmax, distType.name) for trial_xmin in xmin_values]
+
+    if parallel:
+        from concurrent.futures import ProcessPoolExecutor
+
+        with ProcessPoolExecutor(max_workers=max_workers) as ex:
+            fits_iter = ex.map(_fit_single_xmin_task, tasks)
+            test_fits = list(
+                tqdm(
+                    fits_iter,
+                    total=len(tasks),
+                    desc="Fitting xmins",
+                    disable=False,
+                )
+            )
+    else:
+        test_fits = []
+        for i, trial_xmin in enumerate(xmin_values):
+            desc = f"xmin:{trial_xmin:.2e}: {i + 1}/{len(xmin_values)}:"
+            fit = Fit(
+                data=drops,
+                xmin=trial_xmin,
+                xmax=xmax,
+                xmin_distribution=distType.name,
+            )
+            # fit.evaluate_fit(drops, parallel=False, tqdmDesc=desc)
+            test_fits.append(fit)
+
+    return test_fits
+
+
+def my_find_xmin(drops, debug=False, samples_per_decade=30, **kwargs):
+    log_min_xmin = np.log10(min(drops))
+    log_max_xmin = np.log10(max(drops))
+    log_mid_xmin = log_min_xmin + 0.5 * (log_max_xmin - log_min_xmin)
+
+    decades = max(log_mid_xmin - log_min_xmin, 0.0)
+    nr_first_evaluation = int(max(20, np.ceil(decades * samples_per_decade)))
+    # Coarse grid (downsampled) to find dip_d1
+    coarse_xmin_values = np.logspace(log_min_xmin, log_mid_xmin, nr_first_evaluation)
+    fits = evaluate_xmin(drops, coarse_xmin_values, **kwargs)
+    distances = np.asarray([f.D for f in fits], dtype=float)
+
+    x = coarse_xmin_values
+    D = distances
+    mask = np.isfinite(x) & np.isfinite(D) & (x > 0)
+    if mask.sum() < 3:
+        warnings.warn("Not enough finite KS distances to find a local minimum.")
+        return np.nan
+    x = x[mask]
+    D = D[mask]
+    logx = np.log10(x)
+    dip_d1 = np.gradient(D, logx)
+    # We now find the steapest part on the right side of the curve
+    xmin_search_start = x[np.argmin(dip_d1)]
+
+    # Then we try xmins from there until we find a local minimum (coarse grid)
+    start_idx = int(np.searchsorted(x, xmin_search_start, side="left"))
+    xmin_local_min = np.nan
+    for i in range(max(start_idx, 1), len(D) - 1):
+        if D[i] <= D[i - 1] and D[i] <= D[i + 1]:
+            xmin_local_min = float(x[i])
+            break
+    if not np.isfinite(xmin_local_min):
+        # Fallback: smallest D after start
+        if start_idx < len(D):
+            xmin_local_min = float(x[start_idx + int(np.nanargmin(D[start_idx:]))])
+        else:
+            return np.nan
+    param_vals = [
+        [
+            getattr(fit, p, np.nan)
+            for p in list(getattr(fit.xmin_distribution, "parameter_names", []))
+        ]
+        for fit in fits
+    ]
+    xmin_fitting_results = {
+        "distances": D,
+        "param_vals": param_vals,
+        "xmins": x,
+    }
+
+    return xmin_local_min, xmin_fitting_results
+
+
 class Fit(powerlaw.Fit):
     def __init__(
         self,
@@ -611,6 +704,7 @@ class Fit(powerlaw.Fit):
         xmin=None,
         xmax=None,
         fit_method="likelihood",
+        fast_xmin=False,
         estimate_discrete=None,
         discrete_normalization="round",
         sigma_threshold=None,
@@ -629,6 +723,7 @@ class Fit(powerlaw.Fit):
             # We need to replace the old truncated power law with our new one so we use
             # the faster generator
             SUPPORTED_DISTRIBUTIONS["truncated_power_law"] = Truncated_Power_Law
+            self.fast_xmin = fast_xmin
             super().__init__(
                 data,
                 discrete,
@@ -652,61 +747,22 @@ class Fit(powerlaw.Fit):
             else:
                 setattr(self, xmin_distance, np.nan)
 
-    def new_find_xmin(self):
-        """
-        This is an experimental method meant to find a better xmin than the one
-        commonly found by using the global minimum of the KS distance. This
-        method makes two assumptions that appear to be valid for representative
-        synthetic data that I have seen:
-        1) The KS distance has two regions. One region of high KS distance
-        before xmin, and a region of comparatively low KS distance after
-        xmin. 2) At the transition from the high to the low region, there is a
-        change in the KS-distance (D) that can be  detected by dD/dlog(xmin).
-        This algorithm has two stages: First identify the two regions, and attempt
-        to make a small interval to search in. Second, compute the derivative of
-        the KS-distance in this region and choose the minimum of the derivative
-        as the chosen xmin value
-        """
-        # Grab the indices of possible xmin values
-        possible_ind = np.where(
-            (self.data >= np.min(self.xmin_range))
-            & (self.data < np.max(self.xmin_range))
-        )
-        possible_xmin = self.data[possible_ind]
+    def find_xmin(self):
+        if not self.fast_xmin:
+            return super().find_xmin()
 
-        # Take unique values
-        possible_xmin, possible_ind = np.unique(possible_xmin, return_index=True)
+        xmin, xmin_fitting_results = my_find_xmin(self.data)
 
-        # Don't look at last xmin, as that's also the xmax
-        possible_xmin = possible_xmin[:-1]
-        possible_ind = possible_ind[:-1]
+        # Set the Fit's xmin to the optimal xmin
+        self.xmin = xmin
 
-        parameter_names = list(getattr(self.xmin_distribution, "parameter_names", []))
+        self.xmin_fitting_results = xmin_fitting_results
 
-        def fit_function(xmin):
-            # Generate a distribution with the current values of xmin
-            pl = self.xmin_distribution(
-                xmin=xmin,
-                xmax=self.xmax,
-                discrete=self.discrete,
-                fit_method=self.fit_method,
-                data=self.data,
-                parameter_ranges=self.parameter_ranges,
-                parameter_constraints=self.parameter_constraints,
-                parent_Fit=self,
-                estimate_discrete=self.estimate_discrete,
-                verbose=0,
-            )
-            param_vals = [getattr(pl, p, nan) for p in parameter_names]
-            return (
-                pl.D,
-                param_vals,
-                (pl.in_range() and not pl.noise_flag),
-            )
+        # Update the fitting CDF given the new xmin, in case other objects, like
+        # Distributions, want to use it for fitting (like if they do KS fitting)
+        self.fitting_cdf_bins, self.fitting_cdf = self.cdf()
 
-        # Lets try 100 log spaced xmin values
-
-        # Then we
+        return self.xmin
 
     def _get_cache_path(self, cache_dir, data, nr_sets):
         import hashlib

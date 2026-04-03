@@ -24,7 +24,8 @@ from MTMath.energyFunction import ContiEnergy
 from .makePlots import makePlot
 from .remotePlotting import get_csv_files
 from .dataFunctions import get_data_from_name, VTUData, CArrsToMat, get_previous_data
-from .plotPowerLaw import plot_plastic_counts
+from .plotPowerLaw import plot_plastic_counts, get_energy_drops
+from Management.updateCSV import update_df_header
 # matplotlib.use("Agg")  # Use a non-interactive backend
 
 # We get almost all variables dynamically, but we choose to set the force scale
@@ -163,23 +164,6 @@ def _discrete_ticks_and_labels(boundaries):
     return centers, labels
 
 
-def _categorize_m_diff_field(field):
-    """Map m_diff values into signed categorical bins for discrete plotting."""
-    field = np.asarray(field)
-    abs_val = np.abs(field)
-
-    category = np.zeros_like(abs_val, dtype=int)
-    category[abs_val == 1] = 1
-    category[abs_val == 2] = 2
-    category[(abs_val >= 3) & (abs_val <= 9)] = 3
-    category[(abs_val >= 10) & (abs_val <= 30)] = 4
-    category[abs_val >= 31] = 5
-
-    sign = np.sign(field)
-    sign = np.where(np.isfinite(sign), sign, 0)
-    return category * sign.astype(int)
-
-
 def base_plot(
     vtu_file=None,
     previous_frame_vtu_file=None,
@@ -187,7 +171,7 @@ def base_plot(
     add_title=True,
     delta_title=False,
     frame_index=None,
-    avgEnergy=None,
+    totalEnergy=None,
     avgRSS=None,
     energyDrop=None,
     delAvgRSS=None,
@@ -248,7 +232,7 @@ def base_plot(
         else:
             data_row = [
                 rf"$\gamma$: {load:.5f}",
-                rf"$\langle E \rangle$: {avgEnergy:.3f}",
+                rf"$W$: {totalEnergy:.0f}",
                 rf"$\langle {stress_label} \rangle$: {avgRSS:.3f}",
             ]
 
@@ -409,15 +393,15 @@ def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kw
 
 def pretty_mesh_property(mesh_property):
     if mesh_property == "energy":
-        return r"$E$"
+        return r"$W_i$"
     elif mesh_property == "stress":
         return r"$\sigma$"
     elif mesh_property == "m":
         # p is the number of times m3 was applied during lagrange reduction
-        return r"$n_p$"
+        return r"$N_p$"
     elif mesh_property == "m_diff":
         # p is the number of times m3 was applied during lagrange reduction
-        return r"$\Delta n_p$"
+        return r"$\Delta N_p$"
 
 
 def plot_mesh(
@@ -552,26 +536,13 @@ def _configure_property_settings(
 
     elif mesh_property == "m_diff":
         raw_field = data.get_m3_change_field()
-        field = _categorize_m_diff_field(raw_field)
+        field, tick_labels = _categorize_m_diff_field(raw_field)
         cmap = "coolwarm"
-        boundaries = np.arange(-5.5, 6.0, 1.0)
+        boundaries = np.arange(-3.5, 4.5, 1.0)
         cmap = plt.get_cmap(cmap, len(boundaries) - 1)
         norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         backgroundColor = plt.get_cmap(cmap)(0)
-        tick_positions = np.arange(-5, 6, 1)
-        tick_labels = [
-            "-31+",
-            "-30..-10",
-            "-9..-3",
-            "-2",
-            "-1",
-            "0",
-            "1",
-            "2",
-            "3..9",
-            "10..30",
-            "31+",
-        ]
+        tick_positions = np.arange(-3, 4, 1)
 
     # Ensure field is a 1D array for matplotlib collections
     field = np.asarray(field).ravel()
@@ -590,6 +561,32 @@ def _configure_property_settings(
         tick_positions,
         tick_labels,
     )
+
+
+def _categorize_m_diff_field(field):
+    """Map m_diff values into signed categorical bins for discrete plotting."""
+    field = np.asarray(field)
+    abs_val = np.abs(field)
+
+    category = np.zeros_like(abs_val, dtype=int)
+    category[abs_val == 1] = 1
+    category[abs_val == 2] = 2
+    category[(abs_val >= 3) & (abs_val <= 9)] = 3
+
+    sign = np.sign(field)
+    sign = np.where(np.isfinite(sign), sign, 0)
+
+    tick_labels = [
+        "-3+",
+        "-2",
+        "-1",
+        "0",
+        "1",
+        "2",
+        "3+",
+    ]
+
+    return category * sign.astype(int), tick_labels
 
 
 def _plot_mesh_elements(
@@ -812,9 +809,8 @@ def make_static_plot(fileName, **kwargs):
             macro_data,
             ax=ax,
             fig=fig,
-            Y="avg_energy",
+            Y="total_energy",
             save=False,
-            legend=True,
         )
 
     elif fileName == "e_drop_plot":
@@ -946,6 +942,7 @@ def plot_velocity_field_in_poincare_disk(
     **kwargs,
 ):
     use_streamplot = True
+    show_velocity_colorbar = True
     if ax is None:
         ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
 
@@ -1003,7 +1000,7 @@ def plot_velocity_field_in_poincare_disk(
     u = dx / delx_val
     v = dy / delx_val
 
-    velocity_grid_size = int(kwargs.get("velocity_grid_size", 40))
+    velocity_grid_size = int(kwargs.get("velocity_grid_size", 100))
     velocity_min_count = int(kwargs.get("velocity_min_count", 3))
     velocity_scale = float(kwargs.get("velocity_scale", 1.0))
     velocity_cmap = kwargs.get("velocity_cmap", "viridis")
@@ -1049,8 +1046,13 @@ def plot_velocity_field_in_poincare_disk(
                 density=1.0,
                 zorder=8,
             )
-            if kwargs.get("velocity_colorbar", False):
-                plt.colorbar(stream.lines, ax=ax, label="|v|", pad=0.01)
+            if show_velocity_colorbar:
+                plt.colorbar(
+                    stream.lines,
+                    ax=ax,
+                    label=r"$\langle |\mathbf{C}_v|\rangle$",
+                    pad=0.01,
+                )
         else:
             ax.streamplot(
                 x_plot,
@@ -1093,8 +1095,10 @@ def plot_velocity_field_in_poincare_disk(
                 cmap=velocity_cmap,
                 **quiver_kwargs,
             )
-            if kwargs.get("velocity_colorbar", False):
-                plt.colorbar(quiver, ax=ax, label="|v|", pad=0.01)
+            if show_velocity_colorbar:
+                plt.colorbar(
+                    quiver, ax=ax, label=r"$\langle |\mathbf{C}_v| \rangle$", pad=0.01
+                )
         else:
             ax.quiver(
                 xq_plot,
@@ -1236,24 +1240,30 @@ def process_frame(kwargs, attemps=0):
 
 
 def _resolve_stress_column(df, macro_data):
-    if "avg_sigmaxy" in df.columns:
-        return "avg_sigmaxy", r"\sigma"
+    if "avg_sigma12" in df.columns:
+        return "avg_sigma12", r"\sigma"
     if "avg_RSS" in df.columns:
         print(
             f"Warning: 'avg_sigmaxy' not found in {macro_data}. Using 'avg_RSS' instead."
         )
         return "avg_RSS", r"\mathrm{RSS}"
-    if "avg_Pxy" in df.columns:
+    if "avg_P12" in df.columns:
         print(
             f"Warning: 'avg_sigmaxy' not found in {macro_data}. Using 'avg_Pxy' instead."
         )
-        return "avg_Pxy", r"P_{xy}"
+        return "avg_P12", r"P_{xy}"
     raise KeyError(
         "Missing stress column: expected 'avg_sigmaxy' (or fallback 'avg_RSS'/'avg_Pxy')."
     )
 
 
-def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
+def get_corresponding_energy_and_rss(
+    vtu_files,
+    macro_data,
+    X="load",
+    energy_type="e_change_from_init",
+    averageEnergy=False,
+):
     """
     Extracts the corresponding "avg_energy" and stress values for each load in vtu_files,
     along with the line numbers (indices) of the matching rows in the CSV file.
@@ -1266,19 +1276,22 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         Tuple[List[float], List[float], List[int]]: Lists of average energy, stress values,
         and line numbers of matching rows. Also returns the stress label used for plotting.
     """
-    df = pd.read_csv(
+    _, drops_info = get_energy_drops(
         macro_data,
-        # usecols=[
-        #     X,
-        #     "load_step",
-        #     "avg_energy",
-        #     "avg_sigmaxy",
-        #     "avg_energy_change",
-        #     "nr_plastic_deformations",
-        # ],
+        strainLim="all",
+        debug=False,
+        label=None,
+        energy_type=energy_type,
+        averageEnergy=averageEnergy,
     )
+    df = drops_info["df"]
+    energy_key = drops_info["key"]
     stress_col, stress_label = _resolve_stress_column(df, macro_data)
-    avg_energy_list = []
+    diffs = df[energy_key].copy()
+    if np.all(diffs >= 0):
+        # Keep the sign convention consistent with get_energy_drops
+        diffs = -diffs
+    total_energy_list = []
     change_energy_list = []
     avg_stress_list = []
     line_numbers = []
@@ -1328,39 +1341,12 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
         matching_row = matching_rows.iloc[0]
 
         # Append the extracted values to the respective lists
-        avg_energy_list.append(matching_row["avg_energy"])
+        total_energy_list.append(matching_row["total_energy"])
         avg_stress_list.append(matching_row[stress_col])
-        if "total_e_change_from_init" in matching_row:
-            change_energy_list.append(matching_row["total_e_change_from_init"])
-            if (
-                matching_row["avg_energy_change"] < 0
-                and matching_row["nr_plastic_deformations"] == 0
-            ):
-                # print(f"No deformation energy drop: {matching_row_index}, load={load}")
-                # This can happen in the beginning in simulations
-                pass
-
-            # We were a bit curious about very small energy drops, but now we
-            # understand them better. They occur in the beginning of the simulation
-            # due to the sample preparation method used.
-            # if (
-            #     matching_row["avg_energy_change"] < 0
-            #     and -matching_row["avg_energy_change"] < 5e-8
-            # ):
-            #     print(f"Super small energy drop: {matching_row_index}, {X}={x}")
-        else:
-            raise (ValueError("Outdated csv file"))
-            if matching_row_index == 0:
-                diff = 0
-            else:
-                diff = (
-                    df["avg_energy"][matching_row_index - 1]
-                    - df["avg_energy"][matching_row_index]
-                )
-            change_energy_list.append(diff)
+        change_energy_list.append(diffs.iloc[matching_row_index])
 
     # Find previous data and get change data as well
-    px, pAvgEnergy, pAvgRSS = get_previous_energy_and_rss(
+    px, pTotalEnergy, pAvgRSS = get_previous_energy_and_rss(
         macro_data, line_numbers, X, stress_col=stress_col
     )
     avg_stress_arr = np.array(avg_stress_list)
@@ -1369,7 +1355,7 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
 
     # Return the lists of values and line numbers
     return (
-        avg_energy_list,
+        total_energy_list,
         avg_stress_list,
         change_energy_list,
         change_avg_stress_list,
@@ -1380,17 +1366,21 @@ def get_corresponding_energy_and_rss(vtu_files, macro_data, X="load"):
 
 
 def get_previous_energy_and_rss(
-    macro_data, current_line, X="load", stress_col="avg_sigmaxy"
+    macro_data,
+    current_line,
+    X="load",
+    energy_col="total_energy",
+    stress_col="avg_sigma12",
 ):
+    df = pd.read_csv(macro_data)
+    df = update_df_header(df, add_extrap_energy=False)
     # Check if current_line is an integer
     if isinstance(current_line, int):
-        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", stress_col])
         # Select the previous row relative to current_line
         p_row = df.iloc[current_line - 1]
-        return p_row[X], p_row["avg_energy"], p_row[stress_col]
+        return p_row[X], p_row[energy_col], p_row[stress_col]
     else:
         # Handle the case where current_line is an iterable (e.g., list or array)
-        df = pd.read_csv(macro_data, usecols=[X, "avg_energy", stress_col])
         # Create empty lists to store previous values
         prev_x, prev_energies, prev_rss = [], [], []
 
@@ -1399,7 +1389,7 @@ def get_previous_energy_and_rss(
             line = max(1, line)
             p_row = df.iloc[line - 1]
             prev_x.append(p_row[X])
-            prev_energies.append(p_row["avg_energy"])
+            prev_energies.append(p_row[energy_col])
             prev_rss.append(p_row[stress_col])
 
         # Return lists of previous values
@@ -1415,15 +1405,23 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
         axis_limits, plastic_limits = get_axis_limits(macro_data, return_plastic=True)
         e_lims = get_energy_range(vtu_files, macro_data)
         e_lims[1] = min(e_lims[1], 0.3)  # optional custom limit
+        energy_type = kwargs.get("energy_type", "e_change_from_init")
+        averageEnergy = kwargs.get("averageEnergy", False)
         (
-            avgEnergy,
+            totalEnergy,
             avgRSS,
             energyDrop,
             delAvgRSS,
             delx,
             macroDataRowIndex,
             stress_label,
-        ) = get_corresponding_energy_and_rss(vtu_files, macro_data, X)
+        ) = get_corresponding_energy_and_rss(
+            vtu_files,
+            macro_data,
+            X,
+            energy_type=energy_type,
+            averageEnergy=averageEnergy,
+        )
         if isinstance(plastic_limits, dict):
             if "max_plastic" in plastic_limits and "max_plastic" not in kwargs:
                 kwargs["max_plastic"] = plastic_limits["max_plastic"]
@@ -1442,7 +1440,7 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
         # set default values
         axis_limits = None
         e_lims = [0, 0.03]
-        avgEnergy = [0] * len(vtu_files)
+        totalEnergy = [0] * len(vtu_files)
         avgRSS = [0] * len(vtu_files)
         energyDrop = [0] * len(vtu_files)
         delAvgRSS = [0] * len(vtu_files)
@@ -1473,7 +1471,7 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
             "frame_index": i,
             "e_lims": e_lims,
             "axis_limits": axis_limits,
-            "avgEnergy": avgEnergy[i],
+            "totalEnergy": totalEnergy[i],
             "avgRSS": avgRSS[i],
             "energyDrop": energyDrop[i],
             "delAvgRSS": delAvgRSS[i],
@@ -1488,9 +1486,12 @@ def make_images(vtu_files, num_processes=-1, use_tqdm=True, X="load", **kwargs):
     # Optional: debug a single frame in the main process
     if debug_first_frame:
         process_frame(kwargs_list[0])
-
-    if get_data_from_name(vtu_files[0])["L"] > 200:
-        num_processes = 1  # Limited memory for large systems
+    # Limited memory for large systems
+    L = get_data_from_name(vtu_files[0])["L"]
+    if L > 300:
+        num_processes = 1
+    elif L > 200:
+        num_processes = 2
 
     if multithread:
         if num_processes < 0:

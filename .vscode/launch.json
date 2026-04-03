@@ -47,6 +47,13 @@
             "request": "launch",
             "program": "Management/runSimulation.py",
             "console": "integratedTerminal"
+        },
+        {
+            "name": "miniMTM (module)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "MTMath.miniMTM",
+            "cwd": "${workspaceFolder}"
         }
     ]
 }
