@@ -54,6 +54,14 @@
             "request": "launch",
             "module": "MTMath.miniMTM",
             "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "1DEnergyPlot (module)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "MTMath.1DEnergyPlot",
+            "cwd": "${workspaceFolder}"
         }
+
     ]
 }

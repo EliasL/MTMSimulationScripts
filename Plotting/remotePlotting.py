@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import random
 import threading
+from collections import defaultdict
 import pandas as pd
 from pandas.errors import ParserError
 from .makePlots import (
@@ -46,7 +47,7 @@ OLD_TO_NEW_KEYS = {
     "Avg energy": "avg_energy",
     "Max energy": "max_energy",
     "Avg RSS": "avg_RSS",
-    "Nr plastic deformations": "nr_plastic_deformations",
+    "Nr plastic deformations": "nr_elements_with_m3_fix_change",
     "Nr FIRE iterations": "nr_iterations",  # Assumed generic for all solvers
     "Nr LBFGS iterations": "nr_iterations",
     "Nr CG iterations": "nr_iterations",
@@ -95,7 +96,7 @@ def smart_read_csv(file_path):
             "max_energy",
             "max_force",
             "avg_RSS",
-            "nr_plastic_deformations",
+            "nr_elements_with_m3_fix_change",
             "max_plastic_deformation",
             "max_positive_plastic_jump",
             "max_negative_plastic_jump",
@@ -292,6 +293,7 @@ def get_csv_from_server(server, configs):
 
     if server[0] == "/":
         # server is actually not a ssh address, but a local path
+        print(f"Searching local data path: {server}")
         return handleLocalPath(server, configs)
 
     # Connect to the server
@@ -324,8 +326,7 @@ def get_csv_from_server(server, configs):
     # Ensure the local output folder exists
     os.makedirs(MACRO_PATH, exist_ok=True)
 
-    if len(data_paths) >= 2:
-        print(f"Searching {data_paths} on {server}.")
+    print(f"Searching {server} in {', '.join(data_paths)}.")
 
         # TEMP PART
         # DANGEROUS DOUBLE CHECK BEFORE MAKING LIVE
@@ -384,6 +385,96 @@ def get_csv_from_server(server, configs):
     return newPaths
 
 
+def _merge_candidate_sources(target, source_dict):
+    for name, entries in source_dict.items():
+        target[name].extend(entries)
+
+
+def _is_macro_path(path):
+    try:
+        return os.path.commonpath([MACRO_PATH, path]) == MACRO_PATH
+    except ValueError:
+        return False
+
+
+def _scan_local_csv_candidates(configs):
+    candidates = defaultdict(list)
+    search_folders = ["/tmp/MTS2D", MACRO_PATH]
+    for folder in search_folders:
+        if not os.path.isdir(folder):
+            continue
+        for config in configs:
+            path = os.path.join(folder, f"{config.name}.csv")
+            if os.path.isfile(path):
+                candidates[config.name].append((f"local:{folder}", path))
+
+    local_base = getattr(Servers, "local_path_mac", None)
+    if local_base:
+        base_path = os.path.join(local_base, "MTS2D_output")
+        for config in configs:
+            path = os.path.join(base_path, config.name, "macroData.csv")
+            if os.path.isfile(path):
+                candidates[config.name].append((f"local_data:{local_base}", path))
+    return candidates
+
+
+def _scan_remote_csv_candidates(server, configs):
+    candidates = defaultdict(list)
+    if server[0] == "/":
+        return candidates
+
+    ssh = connectToCluster(server, False)
+    user = getServerUserName(server)
+
+    discover_cmd = (
+        f"for base in /data /data2; do "
+        f'  if [ -d "$base" ] && [ -d "$base/{user}" ]; then '
+        f"    printf '%s\\n' \"$base/{user}\"; "
+        f"  fi; "
+        f"done"
+    )
+    stdin, stdout, stderr = ssh.exec_command(discover_cmd)
+    data_paths = [
+        line.strip() for line in stdout.read().decode().splitlines() if line.strip()
+    ]
+
+    if not data_paths:
+        return candidates
+
+    remote_folder_name = "MTS2D_output"
+    names = {config.name for config in configs}
+
+    for data_path in data_paths:
+        command = (
+            f"cd /{data_path}/{remote_folder_name} 2>/dev/null && "
+            f"ls -d */ 2>/dev/null || true"
+        )
+        stdin, stdout, stderr = ssh.exec_command(command)
+        raw = stdout.read().strip().decode()
+        if not raw:
+            continue
+        folders = {folder.rstrip("/") for folder in raw.split("\n") if folder}
+        matches = names & folders
+        if not matches:
+            continue
+        for name in matches:
+            remote_path = (
+                f"{server}:{data_path}/{remote_folder_name}/{name}/macroData.csv"
+            )
+            candidates[name].append((f"remote:{server}", remote_path))
+
+    return candidates
+
+
+def _format_duplicate_sources(dupes):
+    lines = ["Multiple CSV sources found for the same config:"]
+    for name, entries in sorted(dupes.items()):
+        lines.append(f"{name}.csv is found on:")
+        for _, path in entries:
+            lines.append(f"  {path}")
+    return "\n".join(lines)
+
+
 def download_file(
     name, folders, data_path, remote_folder_name, folder_path, ssh, newName=""
 ):
@@ -411,13 +502,20 @@ def download_file(
     return None
 
 
-def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
+def search_for_cvs_files(
+    configs,
+    useOldFiles=False,
+    forceUpdate=False,
+    debug_download=False,
+    fix_files=False,
+):
     """
     Searches for CSV files corresponding to given configurations in predefined folders.
 
     - If `forceUpdate` is True, returns immediately with no files.
     - Only includes files that are less than 12 hours old unless `useOldFiles` is True.
     - Ensures all search directories exist.
+    - Optionally fixes mixed-header CSVs when `fix_files` is True.
     - Files are considered valid if their "Est_time_remaining" column is 0 or missing.
 
     Returns:
@@ -427,6 +525,8 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
 
     # If forced update, return no files.
     if forceUpdate:
+        if debug_download:
+            print("forceUpdate=True: skipping local cache scan.")
         return [], configs
 
     found_paths: dict[str, str] = {}
@@ -449,13 +549,38 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
 
             if config.name in existing_files:
                 # Read estimated time remaining from CSV file
+                file_mod_time = os.path.getmtime(file_path)
+                age_ok = time.time() - file_mod_time < updateAfterHours * 3600
 
                 try:
-                    fix_mixed_macrodata_csv(file_path, inplace=True)
+                    if fix_files:
+                        fix_mixed_macrodata_csv(file_path, inplace=True)
                     df = pd.read_csv(file_path)
                 except Exception as fix_exc:
-                    print(f"Failed to fix {file_path}: {fix_exc}")
+                    if fix_files:
+                        print(f"Failed to fix {file_path}: {fix_exc}")
+                    else:
+                        print(f"Failed to read {file_path}: {fix_exc}")
+                    if age_ok or useOldFiles:
+                        if debug_download:
+                            age_min = (time.time() - file_mod_time) / 60.0
+                            reason = "parse/fix" if fix_files else "parse"
+                            print(
+                                f"Using local file despite {reason} error (age={age_min:.1f} min): {file_path}"
+                            )
+                        found_paths[config.name] = file_path
                     continue
+
+                if df.empty:
+                    if age_ok or useOldFiles:
+                        if debug_download:
+                            age_min = (time.time() - file_mod_time) / 60.0
+                            print(
+                                f"Using local file despite empty CSV (age={age_min:.1f} min): {file_path}"
+                            )
+                        found_paths[config.name] = file_path
+                    continue
+
                 keys = df.keys()
                 if "est_time_remaining" in keys:
                     est_time_remaining = df["est_time_remaining"]
@@ -469,21 +594,38 @@ def search_for_cvs_files(configs, useOldFiles=False, forceUpdate=False):
 
                 if time_remaining is None or time_remaining > 0:
                     # File might still be processing; check age
-                    file_mod_time = os.path.getmtime(file_path)
-                    if time_remaining is not None and (
-                        time.time() - file_mod_time < updateAfterHours * 3600
-                        or useOldFiles
-                    ):
+                    if age_ok or useOldFiles:
                         # Include if recent enough
+                        if debug_download:
+                            age_min = (time.time() - file_mod_time) / 60.0
+                            print(
+                                f"Using local file (age={age_min:.1f} min, "
+                                f"time_remaining={time_remaining}): {file_path}"
+                            )
                         found_paths[config.name] = file_path
                     else:
                         # Still needs processing
+                        if debug_download:
+                            age_hr = (time.time() - file_mod_time) / 3600.0
+                            print(
+                                f"Skipping local file (age={age_hr:.2f} h, "
+                                f"time_remaining={time_remaining}): {file_path}"
+                            )
                         continue
                 else:
                     # File is done processing
+                    if debug_download:
+                        print(f"Using local file (complete): {file_path}")
                     found_paths[config.name] = file_path
 
     remaining_configs = [c for c in configs if c.name not in found_paths]
+
+    if debug_download and remaining_configs:
+        preview = ", ".join(c.name for c in remaining_configs[:5])
+        suffix = "..." if len(remaining_configs) > 5 else ""
+        print(
+            f"Local cache miss for {len(remaining_configs)} configs: {preview}{suffix}"
+        )
 
     return list(found_paths.values()), remaining_configs
 
@@ -560,7 +702,15 @@ def flattenConfigList(listOfListsOfConfigs):
 # This function searches all the servers for the given config file,
 # downloads the csv file associated with the config file to a temp file,
 # and returns the new local path to the csv
-def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
+def get_csv_files(
+    all_configs,
+    labels=[],
+    useOldFiles=False,
+    forceUpdate=False,
+    fullScan=False,
+    debug_download=False,
+    fix_files=False,
+):
     nested = False
     config_groups = all_configs
     if not isinstance(all_configs[0], SimulationConfig):
@@ -571,6 +721,41 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
 
     completed_servers, nr_files = 0, 0
 
+    if fullScan:
+        candidates = defaultdict(list)
+        _merge_candidate_sources(candidates, _scan_local_csv_candidates(all_configs))
+        if Servers.servers:
+            with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+                future_to_server = {
+                    executor.submit(
+                        _scan_remote_csv_candidates, server, all_configs
+                    ): server
+                    for server in Servers.servers
+                }
+                for future in as_completed(future_to_server):
+                    try:
+                        remote_candidates = future.result()
+                    except Exception as exc:
+                        server = future_to_server[future]
+                        print(f"{server} duplicate scan failed: {exc}")
+                        continue
+                    _merge_candidate_sources(candidates, remote_candidates)
+
+        dupes = {}
+        for name, entries in candidates.items():
+            unique = []
+            seen = set()
+            for source, path in entries:
+                if path in seen:
+                    continue
+                seen.add(path)
+                unique.append((source, path))
+            non_macro = [entry for entry in unique if not _is_macro_path(entry[1])]
+            if len(non_macro) > 1:
+                dupes[name] = unique
+        if dupes:
+            raise RuntimeError(_format_duplicate_sources(dupes))
+
     def _merge_paths(found: dict[str, str], new_paths: list[str]):
         for p in new_paths:
             name = _path_to_config_name(p)
@@ -578,7 +763,11 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
 
     # First check if the files have already been downloaded
     paths, remaining_configs = search_for_cvs_files(
-        all_configs, useOldFiles, forceUpdate
+        all_configs,
+        useOldFiles,
+        forceUpdate,
+        debug_download=debug_download,
+        fix_files=fix_files,
     )
     found_paths: dict[str, str] = {}
     _merge_paths(found_paths, paths)
@@ -600,16 +789,25 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
     _merge_paths(found_paths, localPaths)
     remaining_configs = [c for c in remaining_configs if c.name not in found_paths]
     if len(remaining_configs) == 0:
-        print(f"{len(localPaths)} files found. Not searching servers.")
+        print(f"{len(localPaths)} files found locally. Not searching servers.")
         paths = list(found_paths.values())
         if nested:
             paths, labels = flatToStructure(config_groups, labels, paths)
         return paths, labels
 
-    print("Searching servers for files...")
+    if remaining_configs:
+        print(
+            f"{len(localPaths)} files found locally. Searching servers for {len(remaining_configs)} remaining files."
+        )
+
+    if Servers.servers:
+        server_list = ", ".join(Servers.servers)
+        print(f"Searching {len(Servers.servers)} servers for files: {server_list}")
+    else:
+        print("No servers configured; skipping server search.")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
     # get_csv_from_server(Servers.poincare, configs)
-    nr_threads = 1  # len(Servers.servers)
+    nr_threads = len(Servers.servers) if Servers.servers else 1
     with ThreadPoolExecutor(max_workers=nr_threads) as executor:
         future_to_server = {
             executor.submit(get_csv_from_server, server, remaining_configs): server
@@ -631,7 +829,11 @@ def get_csv_files(all_configs, labels=[], useOldFiles=False, forceUpdate=False):
     remaining_configs = [c for c in all_configs if c.name not in found_paths]
     if remaining_configs and not useOldFiles:
         old_paths, _ = search_for_cvs_files(
-            remaining_configs, useOldFiles=True, forceUpdate=False
+            remaining_configs,
+            useOldFiles=True,
+            forceUpdate=False,
+            debug_download=debug_download,
+            fix_files=fix_files,
         )
         _merge_paths(found_paths, old_paths)
         remaining_configs = [c for c in all_configs if c.name not in found_paths]
@@ -974,7 +1176,7 @@ def plotWindowPowerLaw(paths, Y, show_lambda=False, **kwargs):
     plt.savefig(f"Plots/combined_window_{name}_powerlaw.pdf")
 
 
-def plotAverage(config_groups, labels, useStress=False, **kwargs):
+def plotAverage(config_groups, labels, useStress=False, group_labels=None, **kwargs):
     paths, labels = get_csv_files(
         config_groups, labels=labels, useOldFiles=False, forceUpdate=False
     )
@@ -984,7 +1186,7 @@ def plotAverage(config_groups, labels, useStress=False, **kwargs):
         yColumns.append("avg_RSS")
     print("Plotting...")
     for Y in yColumns:
-        makeAverageComparisonPlot(paths, Y=Y, **kwargs)
+        makeAverageComparisonPlot(paths, Y=Y, group_labels=group_labels, **kwargs)
 
 
 def plotTime(config_groups, labels, **kwargs):

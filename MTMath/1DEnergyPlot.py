@@ -1,4 +1,11 @@
+import os
+import sys
+
+if __name__ == "__main__" and __package__ is None:
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from MTMath.energyFunction import ContiEnergy
+from MTMath.meshUtils import triangle_shape_grads_and_area
 from matplotlib import pyplot as plt
 from matplotlib import animation
 import numpy as np
@@ -47,10 +54,12 @@ def _forces_worker(args):
     x_chunk = np.empty((len(strain_chunk), 3, 2), dtype=float)
     x_chunk[..., 0] = X[None, :, 0] + strain_chunk[:, None] * X[None, :, 1]
     x_chunk[..., 1] = X[None, :, 1]
-    # Compute dN/dx from current coordinates for Eulerian forces
-    dN_dx_chunk = dN_dx_from_coords(x_chunk)
+    # Compute dN/dx and area from current coordinates for Eulerian forces
+    dN_dx_chunk, area_chunk = dN_dx_from_coords(x_chunk)
     f_lag = ContiEnergy.lagrangian_forces_from_simpleShear(strain_chunk, dN_dX_chunk)
-    f_eul = ContiEnergy.eulerian_forces_from_simpleShear(strain_chunk, dN_dx_chunk)
+    f_eul = ContiEnergy.eulerian_forces_from_simpleShear(
+        strain_chunk, dN_dx_chunk, area=area_chunk
+    )
     return f_lag, f_eul, x_chunk
 
 
@@ -88,44 +97,7 @@ def plot_Lagrangian_forces():
 
 
 def dN_dx_from_coords(coords):
-    """
-    Compute dN/dx and area for a linear T3 element using only matrix multiplications.
-
-    Parameters
-    ----------
-    coords : array_like, shape (..., 3, 2)
-        Nodal coordinates [[x1, y1], [x2, y2], [x3, y3]].
-
-    Returns
-    -------
-    dN_dx : ndarray, shape (..., 3, 2)
-        Gradient of shape functions wrt x,y (row i = [∂N_i/∂x, ∂N_i/∂y]).
-    area : ndarray, shape (...)
-        Element area (positive scalar).
-    """
-    coords = np.asarray(coords)
-    assert coords.shape[-2:] == (3, 2), "coords must have shape (..., 3, 2)"
-
-    # Reference (natural) shape function derivatives wrt (ξ, η)
-    dN_dxi = np.array(
-        [
-            [-1.0, -1.0],
-            [1.0, 0.0],
-            [0.0, 1.0],
-        ],
-        dtype=coords.dtype,
-    )  # (3, 2)
-
-    # Jacobian: J = dX/dξ = coords^T @ dN_dxi
-    J = coords.swapaxes(-1, -2) @ dN_dxi  # (..., 2, 2)
-
-    # Inverse Jacobian
-    J_inv = np.linalg.inv(J)  # (..., 2, 2)
-
-    # Transform shape function gradients: dN/dx = dN/dξ @ J^{-1}
-    dN_dx = dN_dxi @ J_inv  # (..., 3, 2)
-
-    return dN_dx
+    return triangle_shape_grads_and_area(coords)
 
 
 def plot_eulerian_forces(coords=None):
@@ -135,9 +107,13 @@ def plot_eulerian_forces(coords=None):
     coords = np.asarray(coords, dtype=float)
     if coords.shape != (3, 2):
         raise ValueError("coords must have shape (3, 2)")
-    # Compute dN_dx and area from coords
-    dN_dx = dN_dx_from_coords(np.tile(coords, (len(strain), 1, 1)))
-    forces = ContiEnergy.eulerian_forces_from_simpleShear(strain, dN_dx)
+    # Compute dN_dx and area from current coordinates under simple shear
+    X = coords
+    x_series = np.empty((len(strain), 3, 2), dtype=float)
+    x_series[..., 0] = X[None, :, 0] + strain[:, None] * X[None, :, 1]
+    x_series[..., 1] = X[None, :, 1]
+    dN_dx, area = dN_dx_from_coords(x_series)
+    forces = ContiEnergy.eulerian_forces_from_simpleShear(strain, dN_dx, area=area)
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4), sharex=True, sharey=True)
     for i, ax in enumerate(axes):
@@ -202,10 +178,12 @@ def animate_nodes_and_forces(
         x_series = np.empty((len(strain), 3, 2), dtype=float)
         x_series[..., 0] = X[None, :, 0] + strain[:, None] * X[None, :, 1]
         x_series[..., 1] = X[None, :, 1]
-        # Compute dN/dx for each frame from current coordinates
-        dN_dx_series = dN_dx_from_coords(x_series)
+        # Compute dN/dx and area for each frame from current coordinates
+        dN_dx_series, area_series = dN_dx_from_coords(x_series)
         f_lag = ContiEnergy.lagrangian_forces_from_simpleShear(strain, dN_dX_batched)
-        f_eul = ContiEnergy.eulerian_forces_from_simpleShear(strain, dN_dx_series)
+        f_eul = ContiEnergy.eulerian_forces_from_simpleShear(
+            strain, dN_dx_series, area=area_series
+        )
 
     # Axis limits
     all_pts = np.vstack([x_series.reshape(-1, 2), X])
@@ -228,13 +206,13 @@ def animate_nodes_and_forces(
         return (arrow_scale / mag_ref) * F
 
     # Figure + artists
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=(10, 4))
-    fig.suptitle("Node Motion and Internal Forces under Simple Shear")
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=(10, 2))
+    #fig.suptitle("Node Motion and Internal Forces under Simple Shear")
 
     for ax in (axL, axR):
         ax.set_xlim([xmin, xmax])
         ax.set_ylim([ymin, ymax])
-        ax.set_aspect("equal", adjustable="box")
+        ax.set_aspect("equal")
         ax.grid(True, linewidth=0.3)
 
     axL.set_title("Reference (Lagrangian)")
@@ -274,9 +252,13 @@ def animate_nodes_and_forces(
         width=0.005,
     )
 
-    txt = fig.text(0.5, 0.02, "", ha="center", va="center")
+    txt = None
+
+    n_frames = len(strain)
 
     def update(k):
+        percent = 100.0 * (k + 1) / n_frames
+        print(f"{percent:.1f}%",end="\r")
         FxL = scaled(f_lag[k, :, 0])
         FyL = scaled(f_lag[k, :, 1])
         qL.set_UVC(FxL, FyL)
@@ -292,8 +274,7 @@ def animate_nodes_and_forces(
         qR.set_offsets(xk)
         qR.set_UVC(FxR, FyR)
 
-        txt.set_text(rf"$\gamma$ = {strain[k]:.3f}")
-        return triL, ptsL, qL, triR, ptsR, qR, txt
+        return triL, ptsL, qL, triR, ptsR, qR
 
     fps = max(1, int(1000 / interval))
     anim = animation.FuncAnimation(
@@ -307,17 +288,18 @@ def animate_nodes_and_forces(
             # respect explicit writer; sensible defaults
             writer_kwargs = dict(fps=fps)
         anim.save(save_path, writer=writer, dpi=dpi, **writer_kwargs)
+        print(f"Animation saved to: {save_path}")
 
     return anim
 
 
 if __name__ == "__main__":
-    # plot_energy()
-    plot_eulerian_forces()
-    plot_Lagrangian_forces()
-    # animate_nodes_and_forces(
-    #     save_path="simple_shear_nodes_forces.mp4",
-    #     interval=30,
-    #     n_procs=1,  # try >1 if ContiEnergy calls are expensive
-    # )
+    #plot_energy()
+    #plot_eulerian_forces()
+    #plot_Lagrangian_forces()
+    animate_nodes_and_forces(
+        save_path="simple_shear_nodes_forces.mp4",
+        interval=30,
+        n_procs=1,  # try >1 if ContiEnergy calls are expensive
+    )
     plt.show()

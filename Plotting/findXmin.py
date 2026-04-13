@@ -55,11 +55,14 @@ def _smooth_dip_distances(xmins, distances, smoothing):
     return smoothed
 
 
-def _save_debug_fig(fig, filename):
+def _save_debug_fig(fig, filename, rect=None):
     debug_path = "Plots/powerLaw/debug/"
     os.makedirs(debug_path, exist_ok=True)
     full_path = f"{debug_path}{filename}"
-    fig.tight_layout()
+    if rect is None:
+        fig.tight_layout()
+    else:
+        fig.tight_layout(rect=rect)
     fig.savefig(full_path)
     print(f"Saved figure to {full_path}")
     plt.close(fig)
@@ -1435,8 +1438,14 @@ def _plot_xmin_debug(
         handles3, labels3 = ax3.get_legend_handles_labels()
         handles += handles3
         labels += labels3
-    legend = ax1.legend(handles, labels, loc="upper right")
-    legend.set_zorder(10)
+    legend_ax = ax2 if ax2 is not None else ax1
+    legend_ax.legend(
+        handles,
+        labels,
+        loc="upper right",
+        ncol=2,
+        frameon=True,
+    )
 
     suffix = _smoothing_suffix(smoothing)
     return _save_debug_fig(fig, f"find_xmin_ks_distance_{suffix}.pdf")

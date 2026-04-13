@@ -155,6 +155,25 @@ class Process:
         # Example path:
         "/data/elundheim/MTS2D_output/simpleShear,s200x200l0.15,0.0002,1.0PBCt3minimizerCGLBFGSEpsg0.0001CGEpsg0.0001eps0.0001s14/simpleShear,s200x200l0.15,0.0002,1.0PBCt3minimizerCGLBFGSEpsg0.0001CGEpsg0.0001eps0.0001s14/macroData.csv"
 
+        def _find_header_override(lines):
+            for line in reversed(lines):
+                s = line.strip()
+                if s.startswith("#HEADER:"):
+                    header_line = s.split(":", 1)[1].strip()
+                    if header_line:
+                        return header_line.split(",")
+            return None
+
+        def _find_last_data_line(lines, expected_len):
+            for line in reversed(lines):
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                ncols = len(s.split(","))
+                if ncols == expected_len:
+                    return s
+            return None
+
         with self.ssh.open_sftp() as sftp:
             with sftp.file(remote_file_path, "r") as file:
                 # Read the first line for headers
@@ -178,12 +197,25 @@ class Process:
                     self.progress = 0
                     return
 
-                # Find the last complete line of data
-                last_line = None
-                for line in reversed(lines):
-                    if len(line.split(",")) == len(headers):
-                        last_line = line
-                        break
+                last_line = _find_last_data_line(lines, len(headers))
+                if last_line is None:
+                    # Try to recover if header changed mid-file
+                    new_headers = _find_header_override(lines)
+                    if new_headers is None:
+                        # Scan whole file for the last #HEADER: line
+                        file.seek(0)
+                        for line in file:
+                            s = line.strip()
+                            if s.startswith("#HEADER:"):
+                                header_line = s.split(":", 1)[1].strip()
+                                if header_line:
+                                    new_headers = header_line.split(",")
+                    if new_headers is not None:
+                        headers = new_headers
+                        header_indices = {
+                            header: idx for idx, header in enumerate(headers)
+                        }
+                        last_line = _find_last_data_line(lines, len(headers))
                 if last_line is None:
                     self.timeEstimation = "N/A"
                     self.progress = 0

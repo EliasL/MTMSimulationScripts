@@ -606,6 +606,7 @@ def reversibilityJob(
     maxLoad=1.0,
     reconnection="edgeFlip",
     loadIncrement=1e-5,
+    LBFGSEpsx=1e-6,
 ):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -618,19 +619,66 @@ def reversibilityJob(
         minimizer="LBFGS",
         loadIncrement=loadIncrement,
         # epsR=1e-14,
-        LBFGSEpsx=1e-6,
+        LBFGSEpsx=LBFGSEpsx,
         # LBFGSEpsg=1e-8,
         scenario="reversibilityProtocolTest",
         reconnectionMethod=reconnection,
         # remesh=1,
         # temp
         energyDropThreshold=1e-5,
-        # logDuringMinimization=1,
+        #logDuringMinimization=1,
     )
     return configs, labels
 
 
-def remeshTest(diagonal="major"):
+def sylvainBatches(
+    batch: int,
+    nrSeeds: int = 4,
+    size: int = 100,
+    threads=3,
+    group_by_seeds: bool = False,
+    reconnection= "none",
+):
+    """
+    Batch plan (all based on reversibilityJob):
+      1) Basic batch (L=100, threads 3/4, reconnection none/edgeFlip, 4 seeds)
+      2) loadIncrement=1e-4
+      3) loadIncrement=5e-5
+      4) loadIncrement=5e-6
+      5) loadIncrement=1e-6
+      6) LBFGSEpsx=1e-4
+      7) LBFGSEpsx=1e-5
+      8) LBFGSEpsx=1e-7
+    """
+    batch_map = {
+        -2: {"loadIncrement": 1e-5, "LBFGSEpsx": [1e-7, 1e-6,1e-5,1e-4][::-1]},
+        -1: {"loadIncrement": [1e-6, 5e-6,1e-5,5e-5, 1e-4][::-1], "LBFGSEpsx": 1e-6},
+        1: {"loadIncrement": 1e-5, "LBFGSEpsx": 1e-6},
+        2: {"loadIncrement": 1e-4, "LBFGSEpsx": 1e-6},
+        3: {"loadIncrement": 5e-5, "LBFGSEpsx": 1e-6},
+        4: {"loadIncrement": 5e-6, "LBFGSEpsx": 1e-6},
+        5: {"loadIncrement": 1e-6, "LBFGSEpsx": 1e-6},
+        6: {"loadIncrement": 1e-5, "LBFGSEpsx": 1e-4},
+        7: {"loadIncrement": 1e-5, "LBFGSEpsx": 1e-5},
+        8: {"loadIncrement": 1e-5, "LBFGSEpsx": 1e-7},
+    }
+    if batch not in batch_map:
+        raise ValueError(f"Unknown batch {batch}. Expected 1..8.")
+
+    params = batch_map[batch]
+    configs, labels = reversibilityJob(
+        nrThreads=threads,
+        nrSeeds=nrSeeds,
+        size=size,
+        group_by_seeds=group_by_seeds,
+        reconnection=reconnection,
+        loadIncrement=params["loadIncrement"],
+        LBFGSEpsx=params["LBFGSEpsx"],
+    )
+    return configs, labels
+
+
+def reconnectTest(diagonal="major", reconnectionMethod="edgeFlip"):
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",
         L=3,
@@ -640,9 +688,23 @@ def remeshTest(diagonal="major"):
         loadIncrement=0.001,
         minimizer="LBFGS",
         scenario="reconnectTest",
+        reconnectionMethod=reconnectionMethod,
     )
     return configs, labels
 
+def reconnectSSTest(diagonal="major", reconnectionMethod="edgeFlip"):
+    configs, labels = ConfigGenerator.generate(
+        usingPBC="true",
+        L=3,
+        meshDiagonal=diagonal,
+        startLoad=0.0,
+        maxLoad=3.0,
+        loadIncrement=0.01,
+        minimizer="LBFGS",
+        scenario="reconnectSSTest",
+        reconnectionMethod=reconnectionMethod,
+    )
+    return configs, labels
 
 def reconnectionJob(L=100):
     configs, labels = ConfigGenerator.generate(

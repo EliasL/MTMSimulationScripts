@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch, Polygon
 from matplotlib.colors import ListedColormap
-from .plotEnergy import plotPoincareDisk, C2Plane
+from .plotEnergy import plotPoincareDisk, C2Plane, generate_poincare_disk
 from matplotlib.colors import BoundaryNorm
 
 
@@ -24,10 +24,12 @@ class DraggableTriangulation:
         self.ax = ax
         self.initial_points = np.copy(points)
         self.points = points
+        self.reference_points = np.copy(points)
         self.ax_g = ax_g  # optional axes for (G11,G22) scatter
         self.poincare_transformation = poincare_transformation
         self.g_scatter = None
         self.g_colors = ["tab:green", "tab:orange"]
+        self.alt_region_lines = []
 
         # Initial triangulation uses diagonal (0, 2): triangles (0,1,2) and (0,2,3)
         self.diagonal_02 = True
@@ -281,34 +283,31 @@ class DraggableTriangulation:
         return [(0, 1, 2), (0, 2, 3)] if d02 else [(1, 2, 3), (1, 3, 0)]
 
     def element_vectors(self):
-        """For each triangle, return (i, j, k, origin_point, a, b, centroid)
-        where a and b are the two *shortest* edge vectors of the triangle,
-        taken from their common vertex as origin.
-        """
+        """For each triangle, return (i, j, k, origin_point, a, b, centroid)."""
         tris = self.triangles(False)
         out = []
         for tri in tris:
             i, j, k = tri
             pi, pj, pk = self.points[i], self.points[j], self.points[k]
 
-            # Squared lengths of the three edges
-            lij = float(np.sum((pi - pj) * (pi - pj)))
-            ljk = float(np.sum((pj - pk) * (pj - pk)))
-            lki = float(np.sum((pk - pi) * (pk - pi)))
+            # Choose fixed vectors from reference configuration
+            ri, rj, rk = (
+                self.reference_points[i],
+                self.reference_points[j],
+                self.reference_points[k],
+            )
+            lij = float(np.sum((ri - rj) * (ri - rj)))
+            ljk = float(np.sum((rj - rk) * (rj - rk)))
+            lki = float(np.sum((rk - ri) * (rk - ri)))
 
             edges = [
-                (lij, (i, j)),  # edge (i,j)
-                (ljk, (j, k)),  # edge (j,k)
-                (lki, (k, i)),  # edge (k,i)
+                (lij, (i, j)),
+                (ljk, (j, k)),
+                (lki, (k, i)),
             ]
-            # pick two shortest edges
             edges.sort(key=lambda t: t[0])
             (_, (u1, v1)), (_, (u2, v2)) = edges[0], edges[1]
 
-            # Determine the shared vertex of the two shortest edges
-            shared = None
-            other_a = None
-            other_b = None
             if u1 == u2 or u1 == v2:
                 shared = u1
                 other_a = v1
@@ -318,8 +317,6 @@ class DraggableTriangulation:
                 other_a = u1
                 other_b = v2 if v1 == u2 else u2
             else:
-                # Fallback (should not happen in a valid triangle):
-                # choose u1 as shared and build with its opposite endpoints
                 shared = u1
                 other_a = v1
                 other_b = u2
@@ -363,6 +360,59 @@ class DraggableTriangulation:
             y = y * zoom * self.grid_size / 2 + self.grid_size / 2
             pts.append([float(x), float(y)])
         return np.asarray(pts, dtype=float)
+
+    def draw_alternative_region(self, ax=None, color="orange", linewidth=1.0, n=200):
+        if ax is None:
+            ax = self.ax_g
+        if ax is None:
+            return
+        for line in self.alt_region_lines:
+            try:
+                line.remove()
+            except Exception:
+                pass
+        self.alt_region_lines = []
+        grid_size = self.grid_size
+        zoom = 1
+        G, r_mask = generate_poincare_disk(
+            grid_size, zoom, returnMask=True, transformation=self.poincare_transformation
+        )
+
+        a = G[..., 0, 0]
+        b = 0.5 * (G[..., 0, 1] + G[..., 1, 0])
+        c = G[..., 1, 1]
+
+        case_ac = a <= c
+        b_lo = np.where(case_ac, -0.5 * a, -0.5 * c)
+        b_hi = np.where(
+            case_ac,
+            np.minimum(1.5 * a, (3.0 * a + c) / 4.0),
+            np.minimum(1.5 * c, (a + 3.0 * c) / 4.0),
+        )
+        region = (b >= b_lo) & (b <= b_hi)
+        region = np.where(r_mask, False, region)
+
+        extent = [
+            (grid_size / 2) * (1 - 1 / zoom),
+            (grid_size / 2) * (1 + 1 / zoom),
+            (grid_size / 2) * (1 - 1 / zoom),
+            (grid_size / 2) * (1 + 1 / zoom),
+        ]
+        cs = ax.contour(
+            region.astype(float),
+            levels=[0.5],
+            colors=color,
+            linewidths=linewidth,
+            origin="lower",
+            extent=extent,
+            zorder=2,
+        )
+        if hasattr(cs, "collections"):
+            self.alt_region_lines.extend(cs.collections)
+        elif hasattr(cs, "artists"):
+            self.alt_region_lines.extend(cs.artists)
+        else:
+            self.alt_region_lines.append(cs)
 
     def update_g_scatter(self):
         """Update the scatter plot of Poincaré disk coordinates for current triangles."""
@@ -662,6 +712,7 @@ def run_reconnection_demo():
         depth=4,
         transformation=dt.poincare_transformation,
     )
+    dt.draw_alternative_region()
 
     plt.show()
 

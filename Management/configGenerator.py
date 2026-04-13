@@ -68,6 +68,7 @@ class SimulationConfig:
         # if npe > ne*t:
         #   save frame
         self.logDuringMinimization = 0  # 0=False, 1=True
+        self.writeDumps = 1  # 0=False, 1=True
         self.plasticityEventThreshold = 0.05
         self.energyDropThreshold = 1e-1
         self.showProgress = 1  # 0=False, 1=True
@@ -425,6 +426,68 @@ class ConfigGenerator:
                 kwargs[key] = value_list
 
         return kwargs
+
+    @staticmethod
+    def group_by_settings(
+        configs,
+        labels=None,
+        exclude=("seed", "name"),
+        label_keys=("loadIncrement", "LBFGSEpsx", "reconnectionMethod", "nrThreads"),
+    ):
+        """
+        Group configs by all settings except those in `exclude`.
+
+        Returns:
+            group_configs: list[list[SimulationConfig]]
+            group_labels_per_config: list[list[str]]
+            group_labels: list[str] (one label per group)
+        """
+        if labels is None:
+            labels = [""] * len(configs)
+
+        def _format_setting_value(value):
+            if isinstance(value, float):
+                if abs(value) < 1e-3 or abs(value) >= 1e3:
+                    return f"{value:.0e}"
+                return f"{value:g}"
+            return str(value)
+
+        grouped = {}
+        grouped_labels = {}
+        for conf, label in zip(configs, labels):
+            key = tuple(
+                (k, getattr(conf, k))
+                for k in sorted(vars(conf))
+                if k not in set(exclude)
+            )
+            grouped.setdefault(key, []).append(conf)
+            grouped_labels.setdefault(key, []).append(label)
+
+        group_configs = []
+        group_labels_per_config = []
+        group_labels = []
+        for key, confs in grouped.items():
+            group_configs.append(confs)
+            group_labels_per_config.append(grouped_labels[key])
+
+            # Try to strip seed from the first label
+            label = ""
+            raw = grouped_labels[key][0] if grouped_labels[key] else ""
+            if raw:
+                parts = [p.strip() for p in raw.split(",") if p.strip()]
+                parts = [p for p in parts if not p.startswith("seed=")]
+                label = ", ".join(parts)
+
+            if not label:
+                base = confs[0]
+                parts = []
+                for k in label_keys:
+                    if hasattr(base, k):
+                        parts.append(f"{k}={_format_setting_value(getattr(base, k))}")
+                label = ", ".join(parts)
+            group_labels.append(label)
+
+        return group_configs, group_labels_per_config, group_labels
 
     @staticmethod
     def generate_over_(argument_name, values, **kwargs):

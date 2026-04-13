@@ -24,6 +24,20 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
     if "noVidoes" in kwargs:
         videoes = not kwargs.pop("noVidoes")
 
+    element_subset = kwargs.pop("element_subset",  None)
+    if element_subset == "none":
+        element_subset = None
+    kwargs["element_subset"] = element_subset
+
+    # poincare: accept explicit bool, otherwise map CLI choice to bool
+    if "poincare_use_C_fix" not in kwargs:
+        poincare_choice = kwargs.pop("poincareC", None)
+        if poincare_choice is not None:
+            kwargs["poincare_use_C_fix"] = poincare_choice == "C_fix"
+
+    video_variants = kwargs.pop("videoVariants", False)
+    video_variants = bool(video_variants)
+
     X = "load"
     ylog = False
 
@@ -178,7 +192,19 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
 
     # makeItterationsPlot(path+macroData, name+"_itterations.pdf")
     if videoes and pvdFile is not None:
-        makeAnimations(path, X=X, **kwargs)
+        if video_variants or True:
+            variant_settings = [
+                {"poincare_use_C_fix": False, "element_subset": None},
+                {"poincare_use_C_fix": True, "element_subset": None},
+                {"poincare_use_C_fix": True, "element_subset": "even"},
+            ]
+            for variant in variant_settings:
+                variant_kwargs = kwargs.copy()
+                variant_kwargs["poincare_use_C_fix"] = variant["poincare_use_C_fix"]
+                variant_kwargs["element_subset"] = variant["element_subset"]
+                makeAnimations(path, X=X, **variant_kwargs)
+        else:
+            makeAnimations(path, X=X, **kwargs)
 
 
 def handle_args_and_plot():
@@ -229,6 +255,24 @@ def handle_args_and_plot():
         choices=[True, False],
         default=True,
         help="Use all images for the process (default: False)",
+    )
+    parser.add_argument(
+        "--elementSubset",
+        dest="element_subset",
+        choices=["odd", "even", "none"],
+        default="none",
+        help="Only plot odd/even elements in mesh/disk videos (default: none).",
+    )
+    parser.add_argument(
+        "--poincareC",
+        choices=["C_fix", "C"],
+        default="C_fix",
+        help="Use C_fix or C for Poincare disk plots (default: C_fix).",
+    )
+    parser.add_argument(
+        "--videoVariants",
+        action="store_true",
+        help="Render videos for C, C_fix, and C_fix with even elements.",
     )
 
     args = parser.parse_args()

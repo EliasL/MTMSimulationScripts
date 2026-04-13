@@ -1,5 +1,8 @@
 import numpy as np
-
+import hashlib
+import os
+import pickle
+from pathlib import Path
 
 from .energyFunction import (
     EnergyFunction,
@@ -8,6 +11,7 @@ from .energyFunction import (
     F_from_C,
 )
 from matplotlib import pyplot as plt
+from matplotlib import ticker
 from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
 from matplotlib import colors
@@ -155,6 +159,148 @@ def generate_stability_min_angle_grid(
             return angle
 
     return generate_grid(minAngle, beta=beta, K=K, lim=energy_lim, **kwargs)
+
+
+def approximate_ellipticity_boundary(
+    E_func: type[EnergyFunction] = ContiEnergy,
+    beta=-0.25,
+    K=4,
+    resolution=200,
+    n_angles=60,
+    zoom=1,
+    transformation=None,
+    loops=1000,
+    eulerian=True,
+    return_all=False,
+    eps=1e-9,
+):
+    """
+    Approximate the ellipticity-loss boundary by contouring the stability field
+    on the Poincare disk. Returns a list of (x, y) points along the boundary
+    curve (longest contour by default).
+
+    If return_all=True, returns a list of curves, each a list of (x, y) points.
+    """
+
+    def _hashable(value):
+        if isinstance(value, (str, int, float, bool, type(None))):
+            return value
+        if isinstance(value, np.ndarray):
+            return ("array", value.shape, value.dtype.str, value.tobytes())
+        if isinstance(value, (list, tuple)):
+            return ("seq", tuple(_hashable(v) for v in value))
+        if isinstance(value, dict):
+            return ("dict", tuple(sorted((k, _hashable(v)) for k, v in value.items())))
+        return repr(value)
+
+    key_payload = {
+        "E_func": f"{E_func.__module__}.{E_func.__name__}",
+        "beta": float(beta),
+        "K": float(K),
+        "resolution": int(resolution),
+        "n_angles": int(n_angles),
+        "zoom": float(zoom),
+        "transformation": _hashable(transformation),
+        "loops": int(loops),
+        "eulerian": bool(eulerian),
+        "eps": float(eps),
+    }
+
+    cache_dir = Path(__file__).resolve().parents[1] / ".cache" / "ellipticity_boundary"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_key = hashlib.sha256(
+        pickle.dumps(key_payload, protocol=5)
+    ).hexdigest()
+    cache_path = cache_dir / f"ellipticity_boundary_{cache_key}.pkl"
+
+    if cache_path.exists():
+        try:
+            with open(cache_path, "rb") as f:
+                cached = pickle.load(f)
+            curves = cached.get("curves", cached)
+            if curves is None:
+                curves = []
+            if return_all:
+                return curves
+            return max(curves, key=len) if curves else []
+        except Exception:
+            pass
+
+    radius = 1.0 / zoom
+    x = np.linspace(-radius, radius, resolution)
+    y = np.linspace(-radius, radius, resolution)
+    X, Y = np.meshgrid(x, y)
+    mask_outside = (X**2 + Y**2) >= (1 - eps)
+
+    X_safe = X.copy()
+    Y_safe = Y.copy()
+    X_safe[mask_outside] = 0.0
+    Y_safe[mask_outside] = 0.0
+
+    C_grid = poincareDisk2C(X_safe, Y_safe, transformation=transformation, eps=eps)
+    C_grid[mask_outside] = np.nan
+
+    F = F_from_C(C_grid)
+
+    theta = np.linspace(0, np.pi, n_angles, endpoint=False)
+    n = np.stack([np.cos(theta), np.sin(theta)], axis=-1)
+
+    stable = E_func.stability(
+        F, n, beta=beta, K=K, loops=loops, eulerian=eulerian
+    )
+    stability_field = np.where(mask_outside, np.nan, stable.astype(float))
+    stability_field = np.ma.masked_invalid(stability_field)
+
+    fig_tmp, ax_tmp = plt.subplots()
+    print(
+        "Computing ellipticity boundary (may take several minutes). "
+        "Result will be cached for future runs."
+    )
+    contour = ax_tmp.contour(X, Y, stability_field, levels=[0.5])
+    paths_vertices = (
+        [np.asarray(seg) for seg in contour.allsegs[0] if seg is not None]
+        if contour.allsegs and contour.allsegs[0]
+        else []
+    )
+    plt.close(fig_tmp)
+    if not paths_vertices:
+        return [] if not return_all else []
+
+    def _clip_to_disk(xv, yv, eps_clip):
+        r2 = xv * xv + yv * yv
+        r = np.sqrt(np.maximum(r2, 0.0))
+        mask = r >= (1 - eps_clip)
+        if np.any(mask):
+            scale = (1 - eps_clip) / np.where(r == 0, 1.0, r)
+            xv = xv.copy()
+            yv = yv.copy()
+            xv[mask] = xv[mask] * scale[mask]
+            yv[mask] = yv[mask] * scale[mask]
+        return xv, yv
+
+    curves = []
+    for verts in paths_vertices:
+        if verts.shape[0] < 2:
+            continue
+        xv, yv = _clip_to_disk(verts[:, 0], verts[:, 1], eps_clip=1e-6)
+        curves.append(np.stack([xv, yv], axis=-1))
+
+    if not curves:
+        return [] if not return_all else []
+
+    try:
+        tmp_path = cache_path.with_suffix(".tmp")
+        with open(tmp_path, "wb") as f:
+            pickle.dump({"curves": curves, "meta": key_payload}, f, protocol=5)
+        os.replace(tmp_path, cache_path)
+    except Exception:
+        pass
+
+    if return_all:
+        return curves
+    # Return the longest curve
+    longest = max(curves, key=len)
+    return longest
 
 
 def generate_cauchy_stress_grid(
@@ -712,6 +858,10 @@ def drawCScatter(
     transformation=None,
     density_method="hist",
     density_grid_size=400,
+    show_colorbar=True,
+    alpha=None,
+    zorder=None,
+    **scatter_kwargs,
 ):
     x, y = C2Plane(C, plane="PoincareDisk", transformation=transformation)
     # Filter out invalid points
@@ -757,9 +907,14 @@ def drawCScatter(
         newcolors[-n:, -1] = np.linspace(1, 0, n) ** (1 / 2)
         cmap = colors.ListedColormap(newcolors)
 
+    if vmax is None:
+        vmax = len(C)
+
     # Check if log scale is to be applied
     norm = None
     if log_scale:
+        # LogNorm requires vmax > vmin (vmin=1)
+        vmax = max(vmax, 2)
         # Use LogNorm for logarithmic scale normalization
         norm = LogNorm(vmin=1, vmax=vmax)
         # We set it to None so that it is not given to the scatter function
@@ -780,6 +935,11 @@ def drawCScatter(
     sizes = min_size + (1.0 - log_density_norm) * (max_size - min_size)
 
     # Plot with scatter, adjusting color based on density
+    extra_kwargs = {}
+    if zorder is not None:
+        extra_kwargs["zorder"] = zorder
+    extra_kwargs.update(scatter_kwargs)
+
     scatter = ax.scatter(
         x * zoom * grid_size / 2 + grid_size / 2,
         y * zoom * grid_size / 2 + grid_size / 2,
@@ -789,12 +949,17 @@ def drawCScatter(
         cmap=cmap,
         norm=norm,
         vmax=vmax,
+        **extra_kwargs,
     )
     if density_method == "kde":
         cbar_label = "Kernel density estimate"
     else:
         cbar_label = "Bin counts"
-    plt.colorbar(scatter, ax=ax, label=cbar_label, pad=-0.0005)
+    scatter.set_alpha(alpha)
+    if show_colorbar:
+        cbar = plt.colorbar(scatter, ax=ax, label=cbar_label, pad=0.01)
+        if hasattr(cbar, "solids") and cbar.solids is not None:
+            cbar.solids.set_alpha(1.0)
 
 
 def getCFundamental(grid_size=200, zoom_val=1, transformation=None, returnMask=False):
@@ -1448,17 +1613,29 @@ def plotEnergyField(
     zoom=1,
     remove_max_color=True,
     scale=1.0,
+    withYieldSurface=True,
+    withGrid=True,
+    minimalTicks=False,
+    transformation=None,
+    yieldSurface_kwargs=None,
 ):
-    # Define the range for x and y based on the unit circle
-    radius = 1.0
-    x_min, x_max = -radius / zoom, radius / zoom
-    y_min, y_max = -radius / zoom, radius / zoom
     grid_size = len(energy_grid)
 
-    # Create the plot
     if fig is None:
         fig = plt.figure(figsize=(8, 6))
         ax = fig.add_subplot()
+
+    prepPoincareFig(
+        grid_size=grid_size,
+        zoom=zoom,
+        ax=ax,
+        withCircle=True,
+        withGrid=withGrid,
+        minimalTicks=minimalTicks,
+        withYieldSurface=withYieldSurface,
+        transformation=transformation,
+        yieldSurface_kwargs=yieldSurface_kwargs,
+    )
 
     max_energy = np.nanmax(energy_grid)
 
@@ -1476,34 +1653,15 @@ def plotEnergyField(
         raise ValueError(f"Scale must be positive. Got {scale}.")
     norm = PowerNorm(gamma=scale)
 
-    img = ax.imshow(energy_grid, cmap=cmap, origin="lower", norm=norm)
-
-    # Add a thin black circle
-    drawUnitCircle(ax, grid_size=grid_size, zoom=zoom)
-
-    # Draw fundamental domain
-    # drawFundamentalDomain(ax, grid_size=grid_size, zoom=zoom)
-
-    # Draw shear path
-    # drawShearPath(ax, grid_size=grid_size, zoom=zoom, linestyle="-")
-
-    # Draw elastic domain
-    # TODO
-
-    # Adjusting ticks
-    ax.set_xticks(
-        np.linspace(0, grid_size - 1, 5),
-        np.linspace(x_min, x_max, 5).round(2),
-    )
-    ax.set_yticks(
-        np.linspace(0, grid_size - 1, 5),
-        np.linspace(y_min, y_max, 5).round(2),
+    img = ax.imshow(
+        energy_grid,
+        cmap=cmap,
+        origin="lower",
+        norm=norm,
+        extent=(0, grid_size , 0, grid_size),
+        zorder=0,
     )
 
-    ax.set_xlim(0, grid_size)
-    ax.set_ylim(0, grid_size)
-
-    # Add colorbar
     cbar = fig.colorbar(img, label="Energy", pad=-0.01)
     vmin, vmax = img.get_clim()
     if np.isfinite(vmin) and np.isfinite(vmax) and vmin < vmax:
@@ -1511,15 +1669,12 @@ def plotEnergyField(
         # Evenly spaced in color space; invert PowerNorm to data space.
         ticks = vmin + (vmax - vmin) * (t ** (1.0 / scale))
         cbar.set_ticks(ticks)
+        cbar.formatter = ticker.FormatStrFormatter("%.2f")
+        cbar.update_ticks()
     default_font_size = plt.rcParams["font.size"]  # Fetch default font size
     cbar.ax.set_title(
         f"Capped at ${max_energy}$", fontsize=default_font_size, loc="left"
     )
-    nbs = "\u00a0"  # non-breaking-space
-    # $P_x$(Length ratio)
-    ax.set_xlabel(f"← Tall {nbs * 6} Wide →")
-    # $P_y$(Length ratio and $\\theta - \\pi/2$)
-    ax.set_ylabel(f"← Large angle {nbs * 6} Small angle →")
     if add_title:
         ax.set_title("Energy field in a Poincaré disk")
 
@@ -1535,7 +1690,15 @@ def plotEnergyField(
 
 
 def prepPoincareFig(
-    grid_size=200, zoom=1, ax=None, withCircle=True, withGrid=True, minimalTicks=False
+    grid_size=200,
+    zoom=1,
+    ax=None,
+    withCircle=True,
+    withGrid=True,
+    minimalTicks=False,
+    withYieldSurface=True,
+    transformation=None,
+    yieldSurface_kwargs=None,
 ):
     # Zoom does not always work properly. Be careful
     if ax is None:
@@ -1563,30 +1726,83 @@ def prepPoincareFig(
             grid_size=grid_size,
             zoom=zoom,
             c="gray",
+            alpha=0.7,
+            zorder=1,
+            transformation=transformation,
         )
-    if minimalTicks:
-        ax.set_xticklabels([])
-        ax.set_yticklabels([])
+    if withYieldSurface:
+        ys_kwargs = {
+            "E_func": ContiEnergy,
+            "beta": -0.25,
+            "K": 4,
+            "resolution": max(80, grid_size),
+            "n_angles": 60,
+            "zoom": zoom,
+            "transformation": transformation,
+        }
+        if yieldSurface_kwargs:
+            ys_kwargs.update(yieldSurface_kwargs)
+        boundary_xy = approximate_ellipticity_boundary(**ys_kwargs)
 
-        # Hide tick marks without disabling the axis
+        if boundary_xy is not None and len(boundary_xy) > 0:
+            xy = np.asarray(boundary_xy)
+            if xy.ndim == 2 and xy.shape[1] == 2:
+                C_boundary = poincareDisk2C(
+                    xy[:, 0],
+                    xy[:, 1],
+                    transformation=transformation,
+                )
+                tile_depth = 4
+                if yieldSurface_kwargs and "tile_depth" in yieldSurface_kwargs:
+                    tile_depth = int(yieldSurface_kwargs["tile_depth"])
+                drawAllVariations(
+                    ax,
+                    C_boundary,
+                    grid_size,
+                    depth=tile_depth,
+                    zoom=zoom,
+                    transformation=transformation,
+                    c="white",
+                    linewidth=0.7,
+                    alpha=0.3,
+                    zorder=10,
+                )
+            else:
+                x_plot = xy[:, 0] * zoom * grid_size / 2 + grid_size / 2
+                y_plot = xy[:, 1] * zoom * grid_size / 2 + grid_size / 2
+                ax.plot(
+                    x_plot,
+                    y_plot,
+                    color="white",
+                    linewidth=0.8,
+                    alpha=0.8,
+                    label="Yield surface",
+                    zorder=10,
+                )
+    center = grid_size / 2 - 0.5
+    half = grid_size / 2
+    tick_pos = np.linspace(center - half, center + half, 5)
+    # Map tick positions back to Poincare coordinates using the same scaling as the data layer
+    tick_lab = ((tick_pos - (grid_size / 2)) / (zoom * (grid_size / 2))).round(2)
+
+    if minimalTicks:
+        ax.set_xticks(tick_pos, [""] * len(tick_pos))
+        ax.set_yticks(tick_pos, [""] * len(tick_pos))
         ax.tick_params(axis="both", which="both", length=0)
         ax.set_frame_on(False)
     else:
-        ax.set_xticks(
-            np.linspace(0, grid_size, 5),
-            np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-        )
-        ax.set_yticks(
-            np.linspace(0, grid_size, 5),
-            np.linspace(-1 / zoom, 1 / zoom, 5).round(2),
-        )
+        ax.set_xticks(tick_pos, tick_lab)
+        ax.set_yticks(tick_pos, tick_lab)
         ax.set_xlabel(r"$x_p$")
         ax.set_ylabel(r"$y_p$")
+
+    ax.set_xlim(center - half, center + half)
+    ax.set_ylim(center - half, center + half)
     ax.set_aspect("equal")
     return fig, ax
 
 
-def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation="none"):
+def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation="none", show=False):
     # Make plot of fundamental domain
     if ax is None:
         fig, ax = prepPoincareFig(grid_size=grid_size, withGrid=False)
@@ -1647,6 +1863,7 @@ def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation=
             os.makedirs("Plots")
         plt.savefig("Plots/poincareDisk.pdf", dpi=500)
         print("Saved plot to Plots/poincareDisk.pdf")
+    if show:
         plt.show()
 
 

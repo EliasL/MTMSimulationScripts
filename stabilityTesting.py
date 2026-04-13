@@ -194,8 +194,15 @@ def plot_moduli_simple_shear(
         y2b = (1.0 - r) * L
     ax2.set_ylim(y1b, y2b)
     ax.set_title("Moduli along simple shear")
-    ax.legend()
-    ax2.legend(loc="lower right")
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax2.legend(
+        handles1 + handles2,
+        labels1 + labels2,
+        loc="upper right",
+        ncol=2,
+        frameon=True,
+    )
     ax.grid(True, alpha=0.3)
     fig.tight_layout()
     plt.show()

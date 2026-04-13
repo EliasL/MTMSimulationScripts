@@ -32,8 +32,10 @@ def safePath(path):
         .replace("__", "_")
         .replace("_-_", "-")
         .replace("mathrm", "")
-        .replace(".00", "")
     )
+    # Only strip ".00" when it is a trailing decimal (e.g. "1.00" -> "1"),
+    # not when it is part of a longer decimal like "0.0001".
+    safe_path = re.sub(r"(?<=\d)\.00(?!\d)", "", safe_path)
     return safe_path
 
 
@@ -383,8 +385,10 @@ def _get_system_size_from_path(path):
 
 
 def get_method(cvs_file_path):
-    if not isinstance(cvs_file_path, str):
+    if isinstance(cvs_file_path, (list, tuple)):
         cvs_file_path = cvs_file_path[0]
+    if isinstance(cvs_file_path, Path):
+        cvs_file_path = str(cvs_file_path)
     if "minimizerFIRE" in cvs_file_path:
         return "FIRE"
 
@@ -425,9 +429,9 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label="", use_avg=None
         }  # Dictionary to store data for each group
         for df in split_dfs:
             # Filter out zero and NaN values
-            df = df[df["nr_plastic_deformations"] > 0]
+            df = df[df["nr_elements_with_m3_fix_change"] > 0]
 
-            group_index = np.floor(np.log2(df["nr_plastic_deformations"])).astype(int)
+            group_index = np.floor(np.log2(df["nr_elements_with_m3_fix_change"])).astype(int)
             group_index = np.clip(
                 group_index, min_group_index, max_group_index
             )  # Clamp the group index
@@ -579,9 +583,22 @@ def makePlot(
     reverse_x_axis=None,
     subtract=None,
 ):
-    if len(csv_file_paths) == 0 or (
-        len(csv_file_paths) > 0 and len(csv_file_paths[0]) == 0
-    ):
+    def _is_grouped_paths(paths):
+        return (
+            isinstance(paths, (list, tuple))
+            and len(paths) > 0
+            and isinstance(paths[0], (list, tuple))
+        )
+
+    if isinstance(csv_file_paths, (str, Path)):
+        csv_file_paths = [csv_file_paths]
+
+    if _is_grouped_paths(csv_file_paths):
+        csv_file_paths = [p for group in csv_file_paths for p in group]
+        if isinstance(labels, (list, tuple)) and _is_grouped_paths(labels):
+            labels = [l for group in labels for l in group]
+
+    if len(csv_file_paths) == 0:
         print("No files provided.")
         return
 
@@ -968,6 +985,7 @@ def makeAverageComparisonPlot(
     grouped_csv_file_paths,
     Y="avg_energy",
     name="",
+    group_labels=None,
     show=False,
     use_title=False,
     use_y_axis_name=True,
@@ -1006,6 +1024,20 @@ def makeAverageComparisonPlot(
 
     crash_count = 0
 
+    default_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    label_color_map = {}
+
+    def _get_color(label, fallback_idx):
+        if label in colors:
+            return colors[label]
+        if label in label_color_map:
+            return label_color_map[label]
+        if not default_cycle:
+            return None
+        color = default_cycle[len(label_color_map) % len(default_cycle)]
+        label_color_map[label] = color
+        return color
+
     # for each configuration
     for i, csv_file_paths in enumerate(grouped_csv_file_paths):
         data = []
@@ -1017,8 +1049,14 @@ def makeAverageComparisonPlot(
             color_index = 0
             line_index += 1
 
+        method_label = get_method(csv_file_paths)
+        if group_labels and i < len(group_labels) and group_labels[i]:
+            label = group_labels[i]
+        else:
+            label = method_label
+
         # Get the current color
-        color = colors[get_method(csv_file_paths)]
+        color = _get_color(label, i)
 
         # For each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
@@ -1064,12 +1102,11 @@ def makeAverageComparisonPlot(
         average = np.divide(
             average, count, out=np.zeros_like(average), where=count != 0
         )
-        label = get_method(csv_file_paths)
         a_kwargs = {
             "fig": fig,
             "ax": ax,
             "label": label,
-            "color": colors[label],
+            "color": color,
             "linestyle": LINE_STYLES[line_index],
             "zorder": -color_index,
             "xlim": xlim,
@@ -1102,7 +1139,7 @@ def makeAverageComparisonPlot(
 
         # fig.savefig(figPath)
         fig.savefig("Plots/" + name + ".pdf")
-        # print(f'Plot saved at: "{figPath}"')
+        print(f'Plot saved at: "Plots/{name}.pdf"')
     if show:
         plt.show()
     return fig, ax
@@ -1138,7 +1175,7 @@ def makeEnergyAvalancheComparison(
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
             df = pd.read_csv(
-                csv_file_path, usecols=[X, Y, "nr_plastic_deformations", "max_energy"]
+                csv_file_path, usecols=[X, Y, "nr_elements_with_m3_fix_change", "max_energy"]
             )
             # Truncate data based on xlim
             df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]

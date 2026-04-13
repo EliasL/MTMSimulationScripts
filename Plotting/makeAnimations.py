@@ -181,6 +181,8 @@ def makeAnimations(
     minTime=7,
     reuseImages=False,
     X="load",
+    element_subset=None,
+    poincare_use_C_fix=False,
 ):
     frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macroData is None:
@@ -219,20 +221,59 @@ def makeAnimations(
         # We will make the video last 7 seconds
         fps = len(vtu_files) / minTime
 
+    subset = element_subset
+    #subset = "even"
+    if isinstance(subset, str):
+        subset = subset.strip().lower()
+    if subset == "none":
+        subset = None
+
+    mesh_disk_names = {
+        "m_diff_mesh",
+        "mesh",
+        "m_mesh",
+        "mesh_with_forces",
+        "disk",
+        "erDisk",
+        "erDisk_velocity",
+    }
+    poincare_names = {"disk", "erDisk", "erDisk_velocity"}
+
+    def _with_suffixes(base_name):
+        name = base_name
+        if base_name in poincare_names:
+            tag = "Cfix" if poincare_use_C_fix else "C"
+            name = f"{name}_{tag}"
+        if subset in ("odd", "even") and base_name in mesh_disk_names:
+            return f"{name}_{subset}_elements"
+        return name
+
+    def _subset_arg(name):
+        if subset in ("odd", "even") and name in mesh_disk_names:
+            return subset
+        return None
+
+    def _poincare_arg(name):
+        if name in poincare_names:
+            return poincare_use_C_fix
+        return None
+
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
-    for function, fileName in [
+    for function, base_name in [
         # (plot_and_save_nodes, "nodes"),
+        #(plot_and_save_mesh_with_force, "mesh_with_forces"),
+        (plot_and_save_in_poincare_disk, "disk"),
+        (plot_and_save_velocity_field_in_e_reduced_poincare_disk, "erDisk_velocity"),
+        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
         (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_plot, "energy_plot"),
         (plot_and_save_plot, "e_drop_plot"),
         (plot_and_save_mesh, "mesh"),
-        # (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
-        # (plot_and_save_mesh_with_force, "mesh_with_forces"),
-        # (plot_and_save_in_poincare_disk, "disk"),
         (plot_and_save_m_mesh, "m_mesh"),
-        # (plot_and_save_velocity_field_in_e_reduced_poincare_disk, "erDisk_velocity"),
     ]:
+        fileName = _with_suffixes(base_name)
+        use_C_fix = _poincare_arg(base_name)
         images = make_images(
             vtu_files,
             macro_data=macroData,
@@ -243,6 +284,8 @@ def makeAnimations(
             X=X,
             reuse_images=reuseImages,
             fileName=fileName,
+            element_subset=_subset_arg(base_name),
+            **({"use_C_fix": use_C_fix} if use_C_fix is not None else {}),
         )
 
         # Path to the output video file
@@ -267,13 +310,29 @@ def makeAnimations(
             pass
     if combineVideos:
         try:
-            combine_videoes(path, "m_diff_mesh", "mesh", "e_drop_plot", "energy_plot")
+            combine_videoes(
+                path,
+                _with_suffixes("m_diff_mesh"),
+                _with_suffixes("mesh"),
+                "e_drop_plot",
+                "energy_plot",
+            )
             # combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
-            combine_videoes(path, "mesh", "energy_plot", vertical=True)
-            combine_videoes(path, "m_mesh", "mesh")
-            combine_videoes(path, "mesh", "disk")
-            combine_videoes(path, "m_mesh", "disk")
-            combine_videoes(path, "mesh", "erDisk")
+            combine_videoes(
+                path, _with_suffixes("mesh"), "energy_plot", vertical=True
+            )
+            combine_videoes(
+                path, _with_suffixes("m_mesh"), _with_suffixes("mesh")
+            )
+            combine_videoes(
+                path, _with_suffixes("mesh"), _with_suffixes("disk")
+            )
+            combine_videoes(
+                path, _with_suffixes("m_mesh"), _with_suffixes("disk")
+            )
+            combine_videoes(
+                path, _with_suffixes("mesh"), _with_suffixes("erDisk")
+            )
         except Exception as e:
             print(e)
 

@@ -284,7 +284,9 @@ class EnergyFunction:
 
         P = cls.P_from_F(F, beta=beta, K=K, noise=noise)
         # f = -P * dN_dX^T
-        forces = -area * np.einsum("...ij,...jk->...ik", P, dN_dX.swapaxes(-1, -2))
+        area_arr = np.asarray(area)
+        scale = area_arr if area_arr.ndim == 0 else area_arr[..., None, None]
+        forces = -scale * np.einsum("...ij,...jk->...ik", P, dN_dX.swapaxes(-1, -2))
 
         # forces is now an ND-array with shape (..., 2, n_nodes)
         # so we swap the last two axes to get forces with shape (..., n_nodes, 2)
@@ -305,8 +307,10 @@ class EnergyFunction:
         assert dN_dx.shape[-2:] == (3, 2), "dN_dx must have shape (...,3,2)"
 
         sigma = cls.cauchy_from_F(F, beta=beta, K=K, noise=noise)  # (...,2,2)
-        # Mirror your Lagrangian pattern: -σ @ (dN_dx)^T, then swap last two axes
-        forces = -area * np.einsum("...ij,...jk->...ik", sigma, dN_dx.swapaxes(-1, -2))
+        # Mirror the Lagrangian pattern: -σ @ (dN_dx)^T, then swap last two axes
+        area_arr = np.asarray(area)
+        scale = area_arr if area_arr.ndim == 0 else area_arr[..., None, None]
+        forces = -scale * np.einsum("...ij,...jk->...ik", sigma, dN_dx.swapaxes(-1, -2))
         return forces.swapaxes(-1, -2)  # (...,3,2)
 
     # Strain is an ND-array of strain values with shape (..., 1)

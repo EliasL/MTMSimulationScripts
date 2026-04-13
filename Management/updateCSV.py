@@ -50,6 +50,11 @@ def update_df_header(
         "avg_sigmaxy":"avg_sigma12",
         "avg_Pxy":"avg_P12",
         "avg_init_sigmaxy":"avg_init_sigma12",
+        "avg_sigmaxy_change_from_init":"avg_sigma12_change_from_init",
+        # Reversibility column rename
+        "rev_d": "rev_u_diff",
+        # More changes
+        "nr_plastic_deformations":"nr_elements_with_m3_fix_change",
     }
 
     # Rename columns if they exist in the DataFrame
@@ -122,11 +127,24 @@ NEW_MACRODATA_HEADER = [
     "min_iter_avg_energy_change",
     "max_energy",
     "max_force",
+    "avg_sigma11",
     "avg_sigma12",
+    "avg_sigma22",
+    "avg_init_sigma11",
     "avg_init_sigma12",
-    "avg_sigmaxy_change_from_init",
+    "avg_init_sigma22",
+    "avg_sigma12_change_from_init",
+    "avg_P11",
     "avg_P12",
-    "nr_plastic_deformations",
+    "avg_P21",
+    "avg_P22",
+    "avg_init_P11",
+    "avg_init_P12",
+    "avg_init_P21",
+    "avg_init_P22",
+    "participationFraction",
+    "m3_participationFraction",
+    "nr_elements_with_m3_fix_change",
     "nr_red_q1",
     "nr_red_q2",
     "nr_red_q3",
@@ -136,10 +154,12 @@ NEW_MACRODATA_HEADER = [
     "nr_red_q3_fixed",
     "nr_red_q4_fixed",
     "max_m3_nr",
+    "sum_m3",
     "max_positive_plastic_jump",
     "max_negative_plastic_jump",
     "nr_iterations",
     "nr_func_evals",
+    "nr_edge_flips",
     "LBFGS_Term_reason",
     "CG_Term_reason",
     "FIRE_Term_reason",
@@ -153,6 +173,17 @@ NEW_MACRODATA_HEADER = [
     "minX",
     "maxY",
     "minY",
+    "is_reversible",
+    "rev_u_diff",
+    "rev_energy_diff",
+    "rev_sigma_12_diff",
+    "rev_sigma_trace_diff",
+    "rev_sigma11_diff",
+    "rev_sigma22_diff",
+    "rev_p11_diff",
+    "rev_p12_diff",
+    "rev_p21_diff",
+    "rev_p22_diff",
 ]
 
 MID_MACRODATA_HEADER = [
@@ -196,6 +227,9 @@ DEFAULT_OLD_TO_NEW_RENAME = {
     "avg_sigmaxy": "avg_sigma12",
     "avg_init_sigmaxy": "avg_init_sigma12",
     "avg_Pxy": "avg_P12",
+    "avg_sigmaxy_change_from_init": "avg_sigma12_change_from_init",
+    "nr_plastic_deformations": "nr_elements_with_m3_fix_change",
+    "rev_d": "rev_u_diff",
 }
 
 SIGMAXY_MACRODATA_HEADER = [
@@ -213,11 +247,24 @@ SIGMAXY_MACRODATA_HEADER = [
     "min_iter_avg_energy_change",
     "max_energy",
     "max_force",
+    "avg_sigma11",
     "avg_sigmaxy",
+    "avg_sigma22",
+    "avg_init_sigma11",
     "avg_init_sigmaxy",
+    "avg_init_sigma22",
     "avg_sigmaxy_change_from_init",
+    "avg_P11",
     "avg_Pxy",
-    "nr_plastic_deformations",
+    "avg_P21",
+    "avg_P22",
+    "avg_init_P11",
+    "avg_init_P12",
+    "avg_init_P21",
+    "avg_init_P22",
+    "participationFraction",
+    "m3_participationFraction",
+    "nr_elements_with_m3_fix_change",
     "nr_red_q1",
     "nr_red_q2",
     "nr_red_q3",
@@ -227,10 +274,12 @@ SIGMAXY_MACRODATA_HEADER = [
     "nr_red_q3_fixed",
     "nr_red_q4_fixed",
     "max_m3_nr",
+    "sum_m3",
     "max_positive_plastic_jump",
     "max_negative_plastic_jump",
     "nr_iterations",
     "nr_func_evals",
+    "nr_edge_flips",
     "LBFGS_Term_reason",
     "CG_Term_reason",
     "FIRE_Term_reason",
@@ -244,6 +293,17 @@ SIGMAXY_MACRODATA_HEADER = [
     "minX",
     "maxY",
     "minY",
+    "is_reversible",
+    "rev_u_diff",
+    "rev_energy_diff",
+    "rev_sigma_12_diff",
+    "rev_sigma_trace_diff",
+    "rev_sigma11_diff",
+    "rev_sigma22_diff",
+    "rev_p11_diff",
+    "rev_p12_diff",
+    "rev_p21_diff",
+    "rev_p22_diff",
 ]
 
 
@@ -259,6 +319,7 @@ def fix_mixed_macrodata_csv(
     nr_elements: int | None = None,
     infer_elements_from_path: bool = True,
     fill_value: str = "0",
+    warn_on_drop: bool = True,
 ) -> Path:
     """
     Fix a macroData.csv where the header changes mid-file.
@@ -410,7 +471,21 @@ def fix_mixed_macrodata_csv(
             row_out[idx_total] = f"{avg_val * nr_elements:.15g}"
         return row_out
 
+    dropped_value_rows = 0
+    dropped_value_cols = 0
+    warned_headers: set[tuple[str, ...]] = set()
+
     def _map_row(row: list[str], mapping: dict[int, int]) -> list[str]:
+        nonlocal dropped_value_rows, dropped_value_cols
+        if warn_on_drop:
+            dropped_cols = [
+                i
+                for i, value in enumerate(row)
+                if i not in mapping and str(value).strip() not in ("", fill_value)
+            ]
+            if dropped_cols:
+                dropped_value_rows += 1
+                dropped_value_cols += len(dropped_cols)
         out = [fill_value] * len(new_header)
         for i, value in enumerate(row):
             idx = mapping.get(i)
@@ -445,6 +520,22 @@ def fix_mixed_macrodata_csv(
             if mapping is not None:
                 current_mapping = mapping
                 current_expected_len = len(row)
+                if warn_on_drop:
+                    header_key = tuple(row_key)
+                    if header_key not in warned_headers:
+                        dropped = [
+                            col
+                            for col in row
+                            if rename_map.get(col, col) not in new_index
+                        ]
+                        if dropped:
+                            preview = ", ".join(dropped[:8])
+                            suffix = "..." if len(dropped) > 8 else ""
+                            print(
+                                f"Warning: dropping {len(dropped)} columns while fixing {csv_path}: "
+                                f"{preview}{suffix}"
+                            )
+                        warned_headers.add(header_key)
                 continue
             if row_key and row_key[0] == "load_step":
                 # Skip any stray header-like line.
@@ -460,6 +551,12 @@ def fix_mixed_macrodata_csv(
                 current_expected_len = row_len
 
             writer.writerow(_map_row(row, mapping))
+
+    if warn_on_drop and dropped_value_rows:
+        print(
+            f"Warning: dropped data in {dropped_value_rows} row(s) "
+            f"while fixing {csv_path} (columns dropped: {dropped_value_cols})."
+        )
 
     if inplace:
         out_path.replace(csv_path)

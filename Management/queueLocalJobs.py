@@ -25,6 +25,8 @@ def get_batch_script(command, job_name, nrThreads, outPath):
 
         # Set OpenMP threads to match cpus-per-task
         export OMP_NUM_THREADS={nrThreads}
+        export OMP_PLACES=cores
+        export OMP_PROC_BIND=close
 
         # Command to run, bound to cores by SLURM
         srun --cpu-bind=cores --distribution=block:block {command}

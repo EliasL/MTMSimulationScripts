@@ -1,3 +1,8 @@
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
 from Management.jobs import (
     loadStepJob,
     stopConditionJob,
@@ -17,12 +22,14 @@ from Management.jobs import (
     longJob,
     reconnectionTest,
     size_scaling_job,
+    sylvainBatches,
 )
 
 from Management.updateCSV import fix_csv_files
 from Management.configGenerator import ConfigGenerator
 from Management.simulationManager import findOutputPath
-from Plotting.makePlots import makePlot, makeSettingComparison
+from Plotting.makePlots import makePlot, makeSettingComparison, makeAverageComparisonPlot
+from Plotting.pyplotFunctions import plot_center_node_forces
 from MTMath.powerlaw_mixed_test import (
     testDist,
     grid_compare_xmin,
@@ -77,6 +84,7 @@ from Plotting.remotePlotting import (
     get_csv_from_server,
 )
 from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.pyplot as plt
 from tqdm import tqdm
 from Management.configGenerator import SimulationConfig
 from Management.connectToCluster import Servers
@@ -145,6 +153,73 @@ def plotLongJob():
         debug=False,
         # xmax=1e-4,
     )
+
+
+def compare_center_node_forces():
+    sim_paths = [
+        "/Volumes/data/MTS2D_output/reconnectSSTest,s3x3l0.0,0.01,3.0PBCt1meshDiagonalminors0",
+        "/Volumes/data/MTS2D_output/reconnectSSTest,s3x3l0.0,0.01,3.0PBCt1s0",
+        "/Volumes/data/MTS2D_output/reconnectSSTest,s3x3l0.0,0.01,3.0PBCedgeFlipt1s0",
+    ]
+    labels = [
+        "minor",
+        "major",
+        "edgeFlip",
+    ]
+    fig, _ = plot_center_node_forces(sim_paths, labels=labels, pvd_file="collection.pvd")
+    os.makedirs("Plots", exist_ok=True)
+    out_path = os.path.join("Plots", "center_node_forces_comparison.pdf")
+    fig.savefig(out_path, bbox_inches="tight")
+    print(f"Saved plot to {out_path}")
+
+
+def compare_energy_three_sims():
+    sim_paths = [
+        "/Volumes/data/MTS2D_output/reconnectSSTest,s3x3l0.0,0.01,3.0PBCt1meshDiagonalminors0",
+        "/Volumes/data/MTS2D_output/reconnectSSTest,s3x3l0.0,0.01,3.0PBCt1s0",
+        "/Volumes/data/MTS2D_output/reconnectSSTest,s3x3l0.0,0.01,3.0PBCedgeFlipt1s0",
+    ]
+    labels = [
+        "minor",
+        "major",
+        "edgeFlip",
+    ]
+    energy_cols = ["avg_energy", "total_energy", "max_energy", "energy"]
+    x_cols = ["load", "strain", "gamma", "load_step"]
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    for path, label in zip(sim_paths, labels):
+        csv_path = os.path.join(path, "macroData.csv")
+        df = pd.read_csv(csv_path)
+
+        x_col = next((c for c in x_cols if c in df.columns), None)
+        if x_col is None:
+            x = np.arange(len(df), dtype=float)
+        else:
+            x = df[x_col].to_numpy(dtype=float)
+
+        y_col = next((c for c in energy_cols if c in df.columns), None)
+        if y_col is None:
+            raise ValueError(f"No energy column found in {csv_path}")
+        y = df[y_col].to_numpy(dtype=float)
+
+        if len(x) > 1:
+            x = x[1:]
+            y = y[1:]
+
+        ax.plot(x, y, label=f"{label} ({y_col})")
+
+    ax.set_yscale("log")
+    ax.set_xlabel(r"$\gamma$")
+    ax.set_ylabel("Energy")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    os.makedirs("Plots", exist_ok=True)
+    out_path = os.path.join("Plots", "energy_comparison_logy.pdf")
+    fig.savefig(out_path, bbox_inches="tight")
+    print(f"Saved plot to {out_path}")
+    plt.show()
+    plt.show()
 
 
 # MDPI Article plot
@@ -246,6 +321,90 @@ def plotThreadTest():
     configs, labels = smallJob(group_by_seeds=True)
     # plotAverage(configs, labels)
     plotTime(configs, labels)
+
+
+def plotSylvainBatches():
+    fast_xmin = True
+    xmin_accuracy = 1.0
+    for batch in [-2, -1]:
+        configs, labels = sylvainBatches(batch)
+        if not configs:
+            continue
+        grouped_configs, grouped_labels, group_labels = ConfigGenerator.group_by_settings(
+            configs, labels=labels
+        )
+        paths, _ = get_csv_files(
+            grouped_configs, labels=grouped_labels, useOldFiles=False, forceUpdate=False,
+        )
+        if not paths:
+            continue
+
+        def _path_to_name(path):
+            base = os.path.basename(path)
+            if base == "macroData.csv":
+                return os.path.basename(os.path.dirname(path))
+            return os.path.splitext(base)[0]
+
+        path_names = {_path_to_name(p) for group in paths for p in group}
+        aligned_group_labels = []
+        for confs, label in zip(grouped_configs, group_labels):
+            if any(c.name in path_names for c in confs):
+                aligned_group_labels.append(label)
+
+        if len(aligned_group_labels) > len(paths):
+            aligned_group_labels = aligned_group_labels[: len(paths)]
+        elif len(aligned_group_labels) < len(paths):
+            for i in range(len(aligned_group_labels), len(paths)):
+                aligned_group_labels.append(f"group_{i}")
+
+        makeAverageComparisonPlot(
+            paths,
+            Y="avg_energy",
+            name=f"sylvain_batch_{batch}_avg_energy",
+            group_labels=aligned_group_labels,
+            use_title=True,
+        )
+
+        flat_paths = []
+        flat_labels = []
+        for group_paths, group_label in zip(paths, aligned_group_labels):
+            if not group_paths:
+                continue
+            flat_paths.extend(group_paths)
+            flat_labels.extend([group_label] * len(group_paths))
+
+        for postRegime, suffix in [(True, "post"), (False, "pre")]:
+            plot_reversibility_histograms(
+                paths,
+                postRegime=postRegime,
+                show=False,
+                save_path=f"Plots/sylvain_batch_{batch}_reversibility_{suffix}.pdf",
+                group_labels=aligned_group_labels,
+            )
+
+            plot_plastic_energy_scatter(
+                flat_paths,
+                labels=flat_labels,
+                postRegime=postRegime,
+                name=f"sylvain_batch_{batch}_plastic_energy_{suffix}",
+                color_by_label=True,
+            )
+
+        for group_idx, (group_paths, group_label) in enumerate(
+            zip(paths, aligned_group_labels)
+        ):
+            if not group_paths:
+                continue
+            display_label = group_label or f"group_{group_idx}"
+            display_label = f"batch={batch}, {display_label}"
+            for postRegime in [True, False]:
+                plot_powerlaw(
+                    group_paths,
+                    group_labels=display_label,
+                    postRegime=postRegime,
+                    fast_xmin=fast_xmin,
+                    xmin_accuracy=xmin_accuracy,
+                )
 
 
 def print_remote_runtimes(load_increment=1e-5):
@@ -610,9 +769,9 @@ def analyseLongData():
 
 if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
-    # plotShearFiniteDifferenceDerivatives()
+    #plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    run_reconnection_demo()
+    #run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
     # test()
@@ -658,4 +817,7 @@ if __name__ == "__main__":
     # testRealData()
     # investigateJobs()
     #print_remote_runtimes()
+    #plotSylvainBatches()
+    #compare_center_node_forces()
+    #compare_energy_three_sims()
     pass

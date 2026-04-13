@@ -4,6 +4,8 @@ import meshio
 import numpy as np
 import re
 
+from MTMath.meshUtils import arrsToMat, CArrsToMat
+
 
 class VTUData:
     def __init__(self, vtu_file_path):
@@ -26,7 +28,7 @@ class VTUData:
         else:
             # We can guess the size by counting the number of elements
             # The number of nodes is not reliable.
-            nrCells = self.get_cell_data("nrm1").shape[0]
+            nrCells = self.get_cell_data("nrm3").shape[0]
             # We assume the mesh is square
             self.size = (int(np.sqrt(nrCells)), int(np.sqrt(nrCells)))
         return self.size
@@ -69,6 +71,14 @@ class VTUData:
         """Return node coordinates as a NumPy array of shape (n_points, 3)."""
         return self.mesh.points
 
+    def get_reference_nodes(self):
+        """Return reference nodes using a displacement field."""
+        nodes = self.get_nodes()
+        disp = self.get_point_data("displacement")
+        ref = nodes.copy()
+        ref[:, : disp.shape[1]] -= disp
+        return ref
+
     def get_force_field(self):
         return self.get_point_data("stress_field")
 
@@ -82,16 +92,57 @@ class VTUData:
         return self.get_point_data("fixed")
 
     def get_m_nr_field(self):
-        nrm1 = self.get_cell_data("nrm1").astype(int)
-        nrm2 = self.get_cell_data("nrm2").astype(int)
+        #nrm1 = self.get_cell_data("nrm1").astype(int)
+        #nrm2 = self.get_cell_data("nrm2").astype(int)
         nrm3 = self.get_cell_data("nrm3").astype(int)
-        return nrm1, nrm2, nrm3
+        return nrm3
 
     def get_m3_nr_field(self):
         return self.get_cell_data("nrm3").astype(int)
 
     def get_m3_change_field(self):
         return self.get_cell_data("deltaNrm3").astype(int)
+    
+    def get_M(self, elastic_M=False):
+        """
+        Returns a 3D array of 2x2 reduction matrices (one per element).
+        If elastic_M=True, undo the final elastic_to_fundamental step using
+        red_quadrant to recover the elastic-domain M.
+        """
+        M11, M12, M21, M22 = [
+            self.get_cell_data(M) for M in ["m11", "m12", "m21", "m22"]
+        ]
+        M = arrsToMat(M11, M12, M21, M22)
+        if not elastic_M:
+            return M
+
+        try:
+            red_quadrant = self.get_cell_data("red_quadrant").astype(int)
+        except KeyError as exc:
+            raise KeyError(
+                "Missing 'red_quadrant' cell data needed for elastic_M."
+            ) from exc
+
+        if red_quadrant.min() == 0:
+            raise ValueError("Should be 1..4!")
+
+        m1 = np.array([[1.0, 0.0], [0.0, -1.0]], dtype=float)
+        m2 = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=float)
+
+        q2 = red_quadrant == 2
+        q3 = red_quadrant == 3
+        q4 = red_quadrant == 4
+
+        # Undo elastic_to_fundamental:
+        # q2: apply m1, q3: apply m2, q4: apply m2 then m1 (reverse order)
+        if np.any(q2):
+            M[q2] = M[q2] @ m1
+        if np.any(q3):
+            M[q3] = M[q3] @ m2
+        if np.any(q4):
+            M[q4] = M[q4] @ m2 @ m1
+
+        return M
 
     def get_C(self):
         """
@@ -112,6 +163,26 @@ class VTUData:
             self.get_cell_data(C) for C in ["C_Fix11", "C_Fix12", "C_Fix22"]
         ]
         return CArrsToMat(C11, C12, C22)
+
+    def get_F(self):
+        """
+        Returns a 3D array where each slice (2x2 matrix) corresponds to the
+        [F11, F12, F21, F22] components.
+        """
+        F11, F12, F21, F22 = [
+            self.get_cell_data(F) for F in ["F11", "F12", "F21", "F22"]
+        ]
+        return arrsToMat(F11, F12, F21, F22)
+
+
+    def get_F_fix(self):
+        """
+        Returns a 3D array for fixed F using stored F_Fix components.
+        """
+        F11, F12, F21, F22 = [
+            self.get_cell_data(F) for F in ["F_Fix11", "F_Fix12", "F_Fix21", "F_Fix22"]
+        ]
+        return arrsToMat(F11, F12, F21, F22)
 
     def get_P(self):
         """
@@ -159,34 +230,33 @@ class VTUData:
         cells_dict = getattr(self.mesh, "cells_dict", None)
         if cells_dict:
             if "triangle" in cells_dict:
-                return cells_dict["triangle"]
+                connectivity = cells_dict["triangle"]
+                return self._normalize_connectivity(connectivity)
             if "quad" in cells_dict:
-                return cells_dict["quad"]
+                connectivity = cells_dict["quad"]
+                return self._normalize_connectivity(connectivity)
             # Fall back to an arbitrary first entry from the dict
             first_key = next(iter(cells_dict))
-            return cells_dict[first_key]
+            connectivity = cells_dict[first_key]
+            return self._normalize_connectivity(connectivity)
 
         # Fallback for older meshio versions: use the first cell block
         cell_type, data = self.mesh.cells[0]
-        return data
+        return self._normalize_connectivity(data)
 
-
-def arrsToMat(A11, A12, A21, A22):
-    assert A11.shape == A12.shape == A21.shape == A22.shape, (
-        "All components should have the same shape"
-    )
-    A = np.zeros((A11.shape[0], 2, 2))
-
-    # Fill the matrix with the corresponding values
-    A[:, 0, 0] = A11  # (1,1) entry
-    A[:, 0, 1] = A12  # (1,2) entry
-    A[:, 1, 0] = A21  # (2,1) entry
-    A[:, 1, 1] = A22  # (2,2) entry
-    return A
-
-
-def CArrsToMat(C11, C12, C22):
-    return arrsToMat(C11, C12, C12, C22)
+    def _normalize_connectivity(self, connectivity):
+        connectivity = np.asarray(connectivity, dtype=int)
+        if connectivity.size == 0:
+            return connectivity
+        n_nodes = self.get_nodes().shape[0]
+        max_idx = int(connectivity.max())
+        if max_idx == n_nodes:
+            return connectivity - 1
+        if max_idx > n_nodes:
+            raise ValueError(
+                f"Connectivity index {max_idx} exceeds node count {n_nodes}."
+            )
+        return connectivity
 
 
 def parse_pvd_file(path, pvd_file):

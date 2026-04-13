@@ -81,9 +81,10 @@ def get_minimizer(df):
     LBFGS = df["LBFGS_Term_reason"].iloc[2]
     CG = df["CG_Term_reason"].iloc[2]
     FIRE = df["FIRE_Term_reason"].iloc[2]
-    assert sum([int(LBFGS) == 0, int(CG) == 0, int(FIRE) == 0]) == 2, (
-        "There is not exactly one non-zero term reason!"
-    )
+    zeros = [int(LBFGS) == 0, int(CG) == 0, int(FIRE) == 0]
+    if all(zeros):
+        return "None"
+    assert sum(zeros) == 2, "There is not exactly one non-zero term reason!"
     if LBFGS != 0:
         return "L-BFGS"
     elif CG != 0:
@@ -200,7 +201,7 @@ def get_energy_drops(
         if onlyStrainedEnergyDrops:
             # We use a negative change between relaxed states as a proxy to
             # distinguish affine relaxation from plastic relaxation.
-            realPlasticDrop = df_local["nr_plastic_deformations"] >= 1
+            realPlasticDrop = df_local["nr_elements_with_m3_fix_change"] >= 1
             mask = mask & realPlasticDrop
 
         drops.extend(-diffs[mask])
@@ -245,7 +246,13 @@ def get_energy_drops(
         ax2.set_ylabel(rf"$-\Delta {avg_delta}$ (Energy Drop)")
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines + lines2, labels + labels2)
+        ax2.legend(
+            lines + lines2,
+            labels + labels2,
+            loc="upper right",
+            ncol=2,
+            frameon=True,
+        )
         # handle drops.max() = NaN case
         if np.isnan(drops.max()):
             ax2.set_ylim(0, 1)
@@ -307,6 +314,7 @@ def get_energy_drops(
         name = safePath(make_title(data_info))
 
         filename = f"{PLOTPATH}debug/{name}_energy_drops_strain{OUTPUTTYPE}"
+        debug_fig.tight_layout(rect=[0, 0, 1, 0.9])
         debug_fig.savefig(filename, dpi=300)
         print(f"Saved figure to {filename}")
         # to save memory, close the figure
@@ -1282,10 +1290,10 @@ def find_start_of_plastic_events(data_info, debug=False, binsPerDecade=5):
     all_data = data_info["df"]
     mask = data_info["mask"]
     drops = data_info["drops"]
-    if "nr_plastic_deformations" in all_data:
-        plastics = all_data["nr_plastic_deformations"][mask].to_numpy()
+    if "nr_elements_with_m3_fix_change" in all_data:
+        plastics = all_data["nr_elements_with_m3_fix_change"][mask].to_numpy()
     else:
-        warnings.warn("nr_plastic_deformations column not found.")
+        warnings.warn("nr_elements_with_m3_fix_change column not found.")
         return None
 
     xmin_loc_min = None
@@ -1366,7 +1374,7 @@ def plot_plastic_counts(
     mask = info.get("mask")
     df = info["df"]
     assert mask is not None
-    plastics = df["nr_plastic_deformations"][mask].to_numpy()
+    plastics = df["nr_elements_with_m3_fix_change"][mask].to_numpy()
     if plastics.size == valid.size:
         plastics = plastics[valid]
 
@@ -1415,17 +1423,17 @@ def plot_plastic_counts(
     ax2.tick_params(axis="y", colors=c_plastic_counts)
     ax2.spines["right"].set_color(c_plastic_counts)
 
-    # Keep ax1 legend above ax2 plot elements
-    ax2.set_zorder(0)
-    ax.set_zorder(1)
-    ax.patch.set_visible(False)
-
     handles1, labels1 = ax.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
-    legend = ax.legend(handles1 + handles2, labels1 + labels2, loc="best")
-    legend.set_zorder(10)
+    ax2.legend(
+        handles1 + handles2,
+        labels1 + labels2,
+        loc="upper right",
+        ncol=2,
+        frameon=True,
+    )
+    fig.tight_layout()
     if save:
-        fig.tight_layout()
         title = make_title_from_data_info(info) if info else "plastic_events"
         safe_title = safePath(title)
         filename = f"{PLOTPATH}debug/{safe_title}_plastic_events.pdf"
@@ -1482,7 +1490,7 @@ def plot_plastic_counts_compare(
         mask = info.get("mask")
         df = info["df"]
         assert mask is not None
-        plastics = df["nr_plastic_deformations"][mask].to_numpy()
+        plastics = df["nr_elements_with_m3_fix_change"][mask].to_numpy()
 
         bin_centers, bin_sums = getHist(
             drops, weights=plastics, density=False, bins_per_decade=binsPerDecade
@@ -1547,6 +1555,7 @@ def plot_plastic_energy_scatter(
     save=True,
     filename=None,
     name=None,
+    color_by_label=False,
 ):
     if isinstance(paths, (str, os.PathLike)):
         paths = [str(paths)]
@@ -1612,13 +1621,15 @@ def plot_plastic_energy_scatter(
     # mu, _ = ContiEnergy.moduli_at_F(np.eye(2))
     mu = 6.08
 
-    blues = mpl.colormaps["Blues"]
-    oranges = mpl.colormaps["Oranges"]
-
-    n_edge = sum("edgeFlip" in str(p) for p in paths)
-    n_norm = len(paths) - n_edge
-    edgeflip_colors = iter(blues(np.linspace(0.3, 0.9, max(1, n_edge))))
-    normal_colors = iter(oranges(np.linspace(0.3, 0.9, max(1, n_norm))))
+    label_color_map = {}
+    default_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not color_by_label:
+        blues = mpl.colormaps["Blues"]
+        oranges = mpl.colormaps["Oranges"]
+        n_edge = sum("edgeFlip" in str(p) for p in paths)
+        n_norm = len(paths) - n_edge
+        edgeflip_colors = iter(blues(np.linspace(0.3, 0.9, max(1, n_edge))))
+        normal_colors = iter(oranges(np.linspace(0.3, 0.9, max(1, n_norm))))
     for path, label in zip(paths, labels):
         base = _base_label(label)
         if base in used_legend_bases:
@@ -1640,8 +1651,8 @@ def plot_plastic_energy_scatter(
 
         mask = info.get("mask")
         assert mask is not None
-        plastics = df["nr_plastic_deformations"][mask].to_numpy()
-        # idx = df["nr_plastic_deformations"][mask].idxmax()
+        plastics = df["nr_elements_with_m3_fix_change"][mask].to_numpy()
+        # idx = df["nr_elements_with_m3_fix_change"][mask].idxmax()
         # print(df.loc[idx])
 
         if plastics.size != drops.size:
@@ -1660,12 +1671,20 @@ def plot_plastic_energy_scatter(
         x_vals = plastics.astype(float) ** 2
         y_vals = drops_pos
 
-        if "edgeFlip" in str(path):
-            marker = "s"
-            color = next(edgeflip_colors)
-        else:
+        if color_by_label:
             marker = "o"
-            color = next(normal_colors)
+            if base not in label_color_map and default_cycle:
+                label_color_map[base] = default_cycle[
+                    len(label_color_map) % len(default_cycle)
+                ]
+            color = label_color_map.get(base, None)
+        else:
+            if "edgeFlip" in str(path):
+                marker = "s"
+                color = next(edgeflip_colors)
+            else:
+                marker = "o"
+                color = next(normal_colors)
 
         ax.scatter(
             x_vals,
@@ -2072,11 +2091,7 @@ def plot_fits_over_xmin(
             alpha=0.7,
         )
 
-    # --- Legend: collect handles from both axes and draw on top ---
-    ax1.set_zorder(1)
-    ax2.set_zorder(0)
-    ax1.patch.set_visible(False)
-
+    # --- Legend: collect handles from both axes ---
     handles1, labels1 = ax1.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
     # handles3, labels3 = ([], [])
@@ -2096,8 +2111,13 @@ def plot_fits_over_xmin(
             handles.append(h)
             labels.append(l)
 
-    legend = ax1.legend(handles, labels, loc="best", frameon=True)
-    legend.set_zorder(100)
+    ax2.legend(
+        handles,
+        labels,
+        loc="upper right",
+        ncol=2,
+        frameon=True,
+    )
     if ax3 is not None:
         fig.tight_layout(rect=[0, 0, 0.82, 1])
     else:
@@ -2196,10 +2216,6 @@ def plot_xmin_fitting(fit, save=True, show=False):
     ax2.tick_params(axis="y", colors=c_a)
     ax2.spines["right"].set_color(c_a)
 
-    ax2.set_zorder(0)
-    ax1.set_zorder(1)
-    ax1.patch.set_visible(False)
-
     # Chosen xmin
     chosen_xmin = getattr(fit, "xmin", None)
     if chosen_xmin is not None and np.isfinite(chosen_xmin):
@@ -2224,7 +2240,13 @@ def plot_xmin_fitting(fit, save=True, show=False):
     # Combine legends from both axes
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
+    ax2.legend(
+        lines1 + lines2,
+        labels1 + labels2,
+        loc="upper right",
+        ncol=2,
+        frameon=True,
+    )
 
     fig.tight_layout()
     if show:
@@ -2325,10 +2347,6 @@ def plot_KS_fitting(fit, save=True, show=False):
     ax2.tick_params(axis="y", colors=c_dd)
     ax2.spines["right"].set_color(c_dd)
 
-    ax2.set_zorder(0)
-    ax1.set_zorder(1)
-    ax1.patch.set_visible(False)
-
     chosen_xmin = getattr(fit, "xmin", None)
     if chosen_xmin is not None and np.isfinite(chosen_xmin):
         ax1.axvline(
@@ -2350,7 +2368,13 @@ def plot_KS_fitting(fit, save=True, show=False):
 
     lines1, labels1 = ax1.get_legend_handles_labels()
     lines2, labels2 = ax2.get_legend_handles_labels()
-    ax1.legend(lines1 + lines2, labels1 + labels2, loc="best")
+    ax2.legend(
+        lines1 + lines2,
+        labels1 + labels2,
+        loc="upper right",
+        ncol=2,
+        frameon=True,
+    )
 
     fig.tight_layout()
     if show:
@@ -2453,6 +2477,9 @@ def plot_powerlaw(
         label=grouped_labels[0],
         postRegime=postRegime,
     )
+    if all_drops is None or len(all_drops) == 0:
+        print("No energy drops found; skipping powerlaw fit.")
+        return None
     # find_xmin_rising_level(all_drops, debug=True)
 
     event_min_xmin = find_start_of_plastic_events(data_info, debug=True)

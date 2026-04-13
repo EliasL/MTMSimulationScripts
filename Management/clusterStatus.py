@@ -1,5 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from .connectToCluster import Servers, connectToCluster, get_server_short_name
+from .connectToCluster import (
+    Servers,
+    connectToCluster,
+    get_server_short_name,
+    getServerUserName,
+)
 from tabulate import tabulate
 
 
@@ -11,6 +16,8 @@ class ServerInfo:
         self.nrFreeCores = 0
         self.nrJobsRunning = 0
         self.nrJobsWaitingInQueue = 0
+        self.nrJobsRunningUser = 0
+        self.nrJobsWaitingUser = 0
         self.totalRAM = 0  # GB
         self.usedRAM = 0  # GB
         self.freeRAM = 0  # GB
@@ -21,19 +28,29 @@ class ServerInfo:
         self.totalScore = 0
 
 
-def get_server_info(ssh_client):
+def get_server_info(ssh_client, server):
     # Create a ServerInfo object
     if ssh_client is None:
         return None
     si = ServerInfo()
+    user = getServerUserName(server)
     # Execute combined command for cores and node information
-    # This returns "jobsRunning\njobsWaiting\nAlocated/Idle/Other/TotalCores"
-    command = "squeue -h -t R | wc -l; squeue -h -t PD | wc -l; sinfo -h -o '%C'"
+    # This returns:
+    # jobsRunning\njobsWaiting\njobsRunningUser\njobsWaitingUser\nAlocated/Idle/Other/TotalCores
+    command = (
+        "squeue -h -t R | wc -l; "
+        "squeue -h -t PD | wc -l; "
+        f"squeue -h -u {user} -t R | wc -l; "
+        f"squeue -h -u {user} -t PD | wc -l; "
+        "sinfo -h -o '%C'"
+    )
     stdin, stdout, stderr = ssh_client.exec_command(command)
     outputs = stdout.read().decode().split("\n")
     si.nrJobsRunning = int(outputs[0])
     si.nrJobsWaitingInQueue = int(outputs[1])
-    alocated, idle, other, total = outputs[2].split("/")
+    si.nrJobsRunningUser = int(outputs[2])
+    si.nrJobsWaitingUser = int(outputs[3])
+    alocated, idle, other, total = outputs[4].split("/")
     si.nrFreeCores = int(idle)
     si.nrUsedCores = int(alocated)
     si.nrTotalCores = int(total)
@@ -138,21 +155,35 @@ def score_and_color_server(info):
 
     # Define the metrics to evaluate
     metrics = {
-        "CPUs": (info.nrFreeCores, info.nrTotalCores, 50, 15),
-        # "Idle Nodes": (info.nrIdleNodes, info.nrNodesTotal, 1, 0),
-        # "GB RAM": (info.freeRAM, info.totalRAM, 50, 15),
-        "Jobs R": (info.nrJobsRunning, None, 2, 10),
-        "Jobs W": (info.nrJobsWaitingInQueue, None, 0, 4),
+        "CPUs": (info.nrFreeCores, info.nrTotalCores, 50, 15, None),
+        # "Idle Nodes": (info.nrIdleNodes, info.nrNodesTotal, 1, 0, None),
+        # "GB RAM": (info.freeRAM, info.totalRAM, 50, 15, None),
+        "Jobs R": (
+            info.nrJobsRunning,
+            None,
+            2,
+            10,
+            f"{info.nrJobsRunningUser}/{info.nrJobsRunning}",
+        ),
+        "Jobs W": (
+            info.nrJobsWaitingInQueue,
+            None,
+            0,
+            4,
+            f"{info.nrJobsWaitingUser}/{info.nrJobsWaitingInQueue}",
+        ),
     }
 
     results = []
     headers = []
 
-    for label, (value, total, good_value, bad_value) in metrics.items():
+    for label, (value, total, good_value, bad_value, display) in metrics.items():
         if total:
             colorized_value, score = colorize(
                 value, good_value, bad_value, f"{value}/{total}"
             )
+        elif display is not None:
+            colorized_value, score = colorize(value, good_value, bad_value, display)
         else:
             colorized_value, score = colorize(value, good_value, bad_value)
         total_score += score
@@ -208,7 +239,7 @@ def display_server_info(server_info):
 
 def task(server):
     ssh = connectToCluster(server, False)
-    info = get_server_info(ssh)
+    info = get_server_info(ssh, server)
     return info
 
 

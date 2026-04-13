@@ -43,10 +43,12 @@ from Management.jobs import (
     longJobStatic,
     size_scaling_job,
     reconnectionJob,
-    remeshTest,
+    reconnectTest,
+    reconnectSSTest,
     initalInstability,
     reconnectionTest,
     reversibilityJob,
+    sylvainBatches,
 )
 
 
@@ -190,6 +192,8 @@ def reconnectingBenchmark():
     # Only reconnect on strained energy drop (03.04.26)
     # 2% RT: 2m 10s  ETR: 1h 41m 4s  Load: 0.167000
 
+    # Working (hopefully) (14.04.26)
+    # 2% RT: 2m 5s   ETR: 1h 19m 25s Load: 0.170380
 
 def parameterExploring():
     # pe.loadingSpeeds()
@@ -436,6 +440,7 @@ def runOnLocalMachine():
     # configs, labels = bigUmutJobWithEliasStop()
     # configs, labels = loadStepJob()
     configs, labels = reversibilityJob()
+    #configs, labels = reconnectSSTest(diagonal="minor", reconnectionMethod="edgeFlip")
     # configs, labels = triangular_edge_flip_job(size=50)
 
     # configs, labels = doubleDislocationTest(
@@ -471,35 +476,22 @@ def runOnLocalMachine():
 
 
 def startJobs():
-    # print("Building on all servers... ")
-    build_on_all_servers(onlyPrefered=ONLYPREFERED)
+    build_on_all_servers(onlyPrefered=False)
 
-    # Make largeProperJob with notFIRE=True to exclude FIRE
-    def notFIRE_largePropperJob():
-        return largePropperJob(notFIRE=True)
+    for batch in range(1, 9):
+        configs, labels = sylvainBatches(batch)
+        if not configs:
+            continue
 
-    # for job in [notFIRE_largePropperJob, size_scaling_job]:
-    for job in [umutJobs, size_scaling_job]:
-        configs, labels = job()
-
-        # Normalize to batches so we handle both a single list of configs
-        # and a list of lists of configs uniformly.
-        if configs and isinstance(configs[0], list):
-            batches = zip(configs, labels)
-        else:
-            batches = [(configs, labels)]
-
-        for c, l in batches:
-            print("Distributing jobs and searching for already existing folders...")
-            servers_confs = distributeConfigs(
-                c, c[0].nrThreads, allowWaiting=True, onlyPrefered=ONLYPREFERED
-            )
-            for server, confs in servers_confs.items():
-                print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
-                if confs:
-                    # Queue jobs (uncomment to actually submit)
-                    queueJobs(server, confs, build=False, jobCopies=20)
-                    pass
+        print(f"Batch {batch}: distributing jobs and searching for existing folders...")
+        servers_confs = distributeConfigs(
+            configs, configs[0].nrThreads, allowWaiting=True, onlyPrefered=False
+        )
+        for server, confs in servers_confs.items():
+            print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
+            if confs:
+                queueJobs(server, confs, build=False, jobCopies=20)
+                pass
 
 
 def stopJobs(configs=None):
@@ -546,13 +538,13 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    runOnLocalMachine()
+    #runOnLocalMachine()
     # sylvainSmallDrop()
     # plotSizeJob()
 
     # stopJobs()
     # cleanData()
-    # startJobs()
+    #startJobs()
 
     # plotPropperJob()
     # plotSizeScaling()
@@ -560,7 +552,7 @@ if __name__ == "__main__":
     # stopConditionJob()
     # threadTest()
     #benchmark()
-    #reconnectingBenchmark()
+    reconnectingBenchmark()
     # resumeSim(
     #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,

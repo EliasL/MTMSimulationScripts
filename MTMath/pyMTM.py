@@ -2,110 +2,11 @@ import numpy as np
 from scipy.optimize import minimize
 
 from MTMath.energyFunction import ContiEnergy
+from MTMath.meshUtils import _build_triangular_elements, _compute_dN_dX, _compute_F
 from tqdm import tqdm
 import multiprocessing as mp
 
 
-def _build_triangular_elements(shape):
-    """
-    Build a list of triangular elements for an (nx, ny) grid of nodes.
-
-    Each quadrilateral cell is split into two triangles:
-    [bl, br, tr] and [bl, tr, tl].
-    """
-    nx, ny = shape
-    element_indices: list[list[int]] = []
-    for i in range(ny - 1):
-        for j in range(nx - 1):
-            bl = i * nx + j
-            br = i * nx + (j + 1)
-            tl = (i + 1) * nx + j
-            tr = (i + 1) * nx + (j + 1)
-            element_indices.append([bl, br, tr])
-            element_indices.append([bl, tr, tl])
-    return np.asarray(element_indices, dtype=int)
-
-
-def _compute_dN_dX(
-    ref_positions: np.ndarray, element_indices: np.ndarray
-) -> np.ndarray:
-    """
-    Numerically compute dN/dX for each linear triangular element.
-
-    Parameters
-    ----------
-    ref_positions : (N_nodes, 2) array
-        Reference coordinates X of all nodes.
-    element_indices : (n_elements, 3) int array
-        Node indices for each element.
-
-    Returns
-    -------
-    dN_dX_values : (n_elements, 3, 2) array
-        Gradients of the three shape functions w.r.t. X for each element.
-    """
-    # Natural-coordinate gradients for a linear triangle with nodes
-    # (0,0), (1,0), (0,1)
-    dN_dxi = np.array(
-        [
-            [-1.0, -1.0],  # grad N1
-            [1.0, 0.0],  # grad N2
-            [0.0, 1.0],  # grad N3
-        ],
-        dtype=float,
-    )  # (3,2)
-
-    # Element-wise reference coordinates (n_elements, 3, 2)
-    elem_X = ref_positions[element_indices]  # X1, X2, X3
-    X1 = elem_X[:, 0, :]  # (E,2)
-    X2 = elem_X[:, 1, :]
-    X3 = elem_X[:, 2, :]
-
-    # Jacobian J = [X2 - X1, X3 - X1] (E, 2, 2)
-    v1 = X2 - X1
-    v2 = X3 - X1
-    J = np.stack([v1, v2], axis=-1)  # (E,2,2)
-
-    J_inv = np.linalg.inv(J)  # (E,2,2)
-
-    # dN/dX = dN/dxi @ J^{-1}  -> (E,3,2)
-    dN_dX_values = np.einsum("ai,eij->eaj", dN_dxi, J_inv)
-    return dN_dX_values
-
-
-def _compute_F(
-    ref_positions: np.ndarray,
-    u: np.ndarray,
-    shear: float,
-    element_indices: np.ndarray,
-    dN_dX_values: np.ndarray,
-) -> np.ndarray:
-    """
-    Compute deformation gradients F for all elements, numerically.
-
-    Parameters
-    ----------
-    ref_positions : (N_nodes, 2)
-    u             : (N_nodes, 2) displacement field
-    shear         : scalar shear parameter
-    element_indices : (n_elements, 3)
-    dN_dX_values  : (n_elements, 3, 2)
-
-    Returns
-    -------
-    F_vals : (n_elements, 2, 2)
-    """
-    n_nodes = ref_positions.shape[0]
-    # Macroscopic simple shear displacement: u_shear = [gamma * Y, 0]
-    u_shear = np.zeros_like(ref_positions)
-    u_shear[:, 0] = shear * ref_positions[:, 1]
-
-    x_nodes = ref_positions + u_shear + u  # (N_nodes, 2)
-    x_elem = x_nodes[element_indices]  # (E,3,2)
-
-    # F_e(i,J) = sum_a x_a(i) * dN_dX_a(J)
-    F_vals = np.einsum("eai,eaj->eij", x_elem, dN_dX_values)  # (E,2,2)
-    return F_vals
 
 
 def _compute_energies_parallel(F_vals: np.ndarray, n_procs: int | None):

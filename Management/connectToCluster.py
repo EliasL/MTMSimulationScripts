@@ -39,7 +39,7 @@ class Servers:
         # descartes,
         legendre,
         duchemin,
-        # cauchy,  # richard wants cauchy
+        #cauchy,  # richard wants cauchy
         # mesopsl,
         # jeanZay,
     ]
