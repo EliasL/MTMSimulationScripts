@@ -139,7 +139,7 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
             "nr_iterations",
             "nr_func_evals",
             "est_time_remaining",
-            "avg_P12",
+            "avg_sigma12-avg_P12",
         ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
             try:
                 # if Y == "est_time_remaining":

@@ -2,7 +2,7 @@
 from .reduction import elastic_reduction
 from .energyFunction import SShear
 import matplotlib.pyplot as plt
-from .plotEnergy import (
+from .poincareEnergy import (
     prepPoincareFig,
     drawC,
 )

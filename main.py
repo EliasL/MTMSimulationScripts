@@ -11,6 +11,7 @@ from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
 from Management.dataManager import DataManager
 from Management.simulationManager import findOutputPath
 from Management.jobs import (
+    referenceStateTestJob,
     loadStepJob,
     cyclicLoading,
     fixedBoundaries,
@@ -194,6 +195,8 @@ def reconnectingBenchmark():
 
     # Working (hopefully) (14.04.26)
     # 2% RT: 2m 5s   ETR: 1h 19m 25s Load: 0.170380
+    # PGO (not worth it)
+    # 2% RT: 1m 59s  ETR: 1h 37m 50s Load: 0.167000
 
 def parameterExploring():
     # pe.loadingSpeeds()
@@ -204,7 +207,7 @@ def parameterExploring():
 def plotBigJob():
     nrThreads = 3
     nrSeeds = 40
-    configs, labels = bigJob(nrThreads, nrSeeds, group_by_seeds=True)
+    configs, labels = bigJob(nrThreads, nrSeeds, group_by_variant=True)
     # Energy
 
     # Powerlaw
@@ -276,7 +279,7 @@ def plotPropperJob():
     size = 200
     mini = ["LBFGS", "CG"]  # , "FIRE"]
     configs, labels = propperJob(
-        nrThreads, nrSeeds, group_by_seeds=True, size=size, minimizer=mini
+        nrThreads, nrSeeds, group_by_variant=True, size=size, minimizer=mini
     )
 
     # Energy
@@ -379,7 +382,7 @@ def lotsOThreads():
     nrThreads = 64
     nrSeeds = 3
     size = 150
-    configs, labels = propperJob(nrThreads, nrSeeds, size=size, group_by_seeds=True)
+    configs, labels = propperJob(nrThreads, nrSeeds, size=size, group_by_variant=True)
     # xlim = [0.25, 0.55]
     plotLog(
         configs,
@@ -428,7 +431,7 @@ def runReconnectionJob(L=20):
 
 
 def runOnLocalMachine():
-    configs, labels = propperJob(3, nrSeeds=10, size=200, group_by_seeds=False)
+    configs, labels = propperJob(3, nrSeeds=10, size=200, group_by_variant=False)
     # configs, labels = allPlasticEventsJob()
     dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,3.0PBCt8epsR1e-05LBFGSEpsg1e-08s0/dumps/dump_l3.0.xml.gz"
     dump = "/Volumes/data/MTS2D_output/cyclicSimpleShear,s200x200l0.15,1e-05,1.0PBCt3epsR1e-06s0/dumps/dump_l0.28.xml.gz"
@@ -439,12 +442,13 @@ def runOnLocalMachine():
     # configs, labels = bigUmutJob()
     # configs, labels = bigUmutJobWithEliasStop()
     # configs, labels = loadStepJob()
-    configs, labels = reversibilityJob()
+    #configs, labels = reversibilityJob()
+    # configs, labels = loadStepJob(reconnection="edgeFlip")
     #configs, labels = reconnectSSTest(diagonal="minor", reconnectionMethod="edgeFlip")
     # configs, labels = triangular_edge_flip_job(size=50)
-
+    configs, labels = referenceStateTestJob()
     # configs, labels = doubleDislocationTest(
-    #     nrThreads=1, nrSeeds=1, L=100, diagonal="minor", reconnecting=True
+    #     nrThreads=1, nrSeeds=1, L=30, 
     # )
 
     # configs, labels = remeshTest(diagonal="major")
@@ -476,10 +480,10 @@ def runOnLocalMachine():
 
 
 def startJobs():
-    build_on_all_servers(onlyPrefered=False)
+    #build_on_all_servers(onlyPrefered=False)
 
     for batch in range(1, 9):
-        configs, labels = sylvainBatches(batch)
+        configs, labels = sylvainBatches(batch, reconnection="edgeFlip")
         if not configs:
             continue
 
@@ -527,6 +531,68 @@ def cleanData():
     # dm.delete_data_from_configs(configs, dryRun=False)
 
 
+def cleanServer(server, configs, dryRun=True, force=False):
+    if not configs:
+        print("No configs provided.")
+        return
+
+    server_label = get_server_short_name(server)
+    config_names = {conf.name for conf in configs}
+
+    j = JobManager()
+    try:
+        j.slurmJobs = j.find_slurm_jobs_on_server(server) or []
+    except Exception as exc:
+        print(f"Failed to query Slurm jobs on {server_label}: {exc}")
+        j.slurmJobs = []
+
+    matching_jobs = [
+        job
+        for job in j.slurmJobs
+        if str(job.get("job_name", "")) in config_names
+    ]
+    if not matching_jobs:
+        print(f"No matching Slurm jobs found on {server_label}.")
+    else:
+        job_ids = [job["job_id"] for job in matching_jobs]
+        print(f"Matched {len(job_ids)} jobs on {server_label} for cancelation.")
+        if dryRun:
+            print("Dry run: not canceling jobs.")
+        else:
+            if not force:
+                if input("Cancel these jobs? yes/no: ") != "yes":
+                    print("Aborted job cancelation.")
+                else:
+                    j.cancel_jobs_on_server(server, job_ids, force=True)
+            else:
+                j.cancel_jobs_on_server(server, job_ids, force=True)
+
+    dm = DataManager()
+    folders_and_sizes = dm.find_data_on_server(server, silent=True)
+    if not folders_and_sizes or isinstance(folders_and_sizes, str):
+        print(f"No data found on {server_label} (or failed to read).")
+        return
+
+    folders, sizes, _ = folders_and_sizes
+    matched_folders = [
+        folder for folder in folders if folder.split("/")[-1] in config_names
+    ]
+    if not matched_folders:
+        print(f"No matching folders found on {server_label}.")
+        return
+
+    print(f"Matched {len(matched_folders)} folders on {server_label} for deletion.")
+    dm.delete_data_on_server(server, matched_folders, dryRun=dryRun)
+
+
+def cleanDescartes(dryRun=True, force=False):
+    configs = []
+    for batch in range(1, 9):
+        batch_configs, _ = sylvainBatches(batch, reconnection="edgeFlip")
+        configs.extend(batch_configs)
+    cleanServer(Servers.descartes, configs, dryRun=dryRun, force=force)
+
+
 if __name__ == "__main__":
     ONLYPREFERED = False
     # build_on_all_servers(onlyPrefered=ONLYPREFERED)
@@ -538,7 +604,6 @@ if __name__ == "__main__":
     # runOnServer()
     # parameterExploring()
     # runReconnectionJob()
-    #runOnLocalMachine()
     # sylvainSmallDrop()
     # plotSizeJob()
 
@@ -546,13 +611,15 @@ if __name__ == "__main__":
     # cleanData()
     #startJobs()
 
+    runOnLocalMachine()
+
     # plotPropperJob()
     # plotSizeScaling()
     # plotBigJob()
     # stopConditionJob()
     # threadTest()
     #benchmark()
-    reconnectingBenchmark()
+    #reconnectingBenchmark()
     # resumeSim(
     #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,

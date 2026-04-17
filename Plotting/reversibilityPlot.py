@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 import matplotlib as mpl
 
 from Management.configGenerator import SimulationConfig
-from Management.updateCSV import update_df_header
+from Management.updateCSV import update_df_header, read_macrodata_csv
 from Plotting.remotePlotting import get_csv_files
 from Plotting.makePlots import maybe_avg
 from Plotting.plotPowerLaw import get_energy_drops, getHist, get_system_size
@@ -43,8 +43,7 @@ def _collect_reversibility_data(csv_paths, strainLim="auto", postRegime=True):
     has_rev_u = True
 
     for csv_path in csv_paths:
-        df = pd.read_csv(csv_path)
-        df = update_df_header(df, L=L)
+        df = read_macrodata_csv(csv_path, L=L)
 
         rev_col = "is_reversible"
         if rev_col not in df:

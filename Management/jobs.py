@@ -36,10 +36,10 @@ def CGconfs(nrThreads, nrSeeds):
     return configs, labels
 
 
-def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
+def bigJob(nrThreads, nrSeeds, size=200, group_by_variant=False):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         rows=size,
         cols=size,
         startLoad=0.15,
@@ -58,7 +58,7 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_seeds=False):
 def allPlasticEventsJob():
     configs, labels = ConfigGenerator.generate(
         seed=[0],
-        group_by_seeds=False,
+        group_by_variant=False,
         rows=100,
         cols=100,
         startLoad=0.15,
@@ -81,7 +81,7 @@ def allPlasticEventsJob():
 def initalInstability():
     configs, labels = ConfigGenerator.generate(
         seed=[0],
-        group_by_seeds=False,
+        group_by_variant=False,
         rows=200,
         cols=200,
         startLoad=0.12,
@@ -101,7 +101,7 @@ def initalInstability():
 
 
 def propperJob(
-    nrThreads, nrSeeds=0, size=100, group_by_seeds=False, seeds=None, minimizer=None
+    nrThreads, nrSeeds=0, size=100, group_by_variant=False, seeds=None, minimizer=None
 ):
     if minimizer is None:
         minimizer = ["LBFGS", "CG", "FIRE"]
@@ -111,7 +111,7 @@ def propperJob(
         seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(
         seed=seeds,
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         rows=size,
         cols=size,
         startLoad=0.15,
@@ -162,15 +162,15 @@ def largePropperJob(FIREOnly=False, notFIRE=False, **kwargs):
 
 
 def propperJobFIRE():
-    return propperJob(3, nrSeeds=10, size=200, group_by_seeds=False, minimizer=["FIRE"])
+    return propperJob(3, nrSeeds=10, size=200, group_by_variant=False, minimizer=["FIRE"])
 
 
 def basicJob(
-    nrThreads, nrSeeds, size=100, group_by_seeds=False, maxLoad=1.0, reconnection="none"
+    nrThreads, nrSeeds, size=100, group_by_variant=False, maxLoad=1.0, reconnection="none"
 ):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         rows=size,
         cols=size,
         startLoad=0.15,
@@ -195,13 +195,13 @@ def debugJob(
     nrThreads=1,
     nrSeeds=1,
     size=20,
-    group_by_seeds=False,
+    group_by_variant=False,
     maxLoad=1.0,
     reconnection="edgeFlip",
 ):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         rows=size,
         cols=size,
         startLoad=0.2,
@@ -219,10 +219,10 @@ def debugJob(
     return configs, labels
 
 
-def longJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+def longJob(nrThreads, nrSeeds, size=100, group_by_variant=False):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         rows=size,
         cols=size,
         startLoad=0.15,
@@ -239,10 +239,10 @@ def longJob(nrThreads, nrSeeds, size=100, group_by_seeds=False):
     return configs, labels
 
 
-def longJobStatic(nrThreads, nrSeeds, size=100, group_by_seeds=False):
+def longJobStatic(nrThreads, nrSeeds, size=100, group_by_variant=False):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         rows=size,
         cols=size,
         startLoad=0.15,
@@ -269,7 +269,7 @@ def largeAvalanche(nrThreads, nrSeeds=1, seeds=None, LBFGSEpsg=1e-8):
     dump = "/Volumes/data/KeepSafe/large_avalanche_dump_simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0_l0.62787.mtsb"
     configs, labels = ConfigGenerator.generate(
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         rows=100,
         cols=100,
         startLoad=0.62787,
@@ -293,7 +293,7 @@ def smallAvalanches(nrThreads, nrSeeds=1, seeds=None):
     LBFGSEpsg = [1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3]
     kwargs = {
         "seed": seeds,
-        "group_by_seeds": False,
+        "group_by_variant": False,
         "rows": 100,
         "cols": 100,
         "startLoad": 0.62787,
@@ -321,7 +321,7 @@ def avalanches(nrThreads, nrSeeds=1, seeds=None, size=100):
     LBFGSEpsg = [1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3]
     kwargs = {
         "seed": seeds,
-        "group_by_seeds": False,
+        "group_by_variant": False,
         "rows": size,
         "cols": size,
         "startLoad": 0.15,
@@ -337,7 +337,7 @@ def avalanches(nrThreads, nrSeeds=1, seeds=None, size=100):
     epsR = [1e-6, 1e-5, 1e-4, 1e-3]
     kwargs = {
         "seed": seeds,
-        "group_by_seeds": False,
+        "group_by_variant": False,
         "rows": size,
         "cols": size,
         "startLoad": 0.15,
@@ -365,7 +365,7 @@ def backwards(nrThreads, nrSeeds=1, seeds=None, LBFGSEpsg=1e-8):
         seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         rows=100,
         cols=100,
         startLoad=-0.15,
@@ -384,7 +384,7 @@ def cyclicLoading(nrThreads, nrSeeds=1, seeds=None):
         seeds = range(nrSeeds)
     configs, labels = ConfigGenerator.generate(
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         rows=100,
         cols=100,
         startLoad=0.15,
@@ -408,7 +408,7 @@ def findMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
 
     configs, labels = ConfigGenerator.generate(
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         L=L,
         startLoad=0.15,
         maxLoad=1.0,
@@ -432,7 +432,7 @@ def compareWithOldStoppingCriteria(nrSeeds=5, seeds=None):
     configs, labels = ConfigGenerator.generate(
         LBFGSEpsg=LBFGSEpsg,
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         L=L,
         startLoad=0.15,
         maxLoad=1.0,
@@ -444,7 +444,7 @@ def compareWithOldStoppingCriteria(nrSeeds=5, seeds=None):
     configsx, labelsx = ConfigGenerator.generate(
         LBFGSEpsx=LBFGSEpsx,
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         L=L,
         startLoad=0.15,
         maxLoad=1.0,
@@ -498,7 +498,7 @@ def fixedBoundaries(nrThreads, nrSeeds=1, seeds=None, L=40, fixed=True):
     configs, labels = ConfigGenerator.generate(
         usingPBC=usingPBC,
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         rows=L,
         cols=L,
         startLoad=0.15,
@@ -525,7 +525,7 @@ def showMinimizationCriteriaJobs(nrSeeds=5, seeds=None):
 
     configs, labels = ConfigGenerator.generate(
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         L=L,
         startLoad=0.15,
         maxLoad=0.16,
@@ -550,7 +550,7 @@ def doubleDislocationTest(
     seeds=None,
     L=10,
     diagonal=["major", "minor"],
-    reconnecton="none",
+    reconnecton=["none", "edgeFlip"],
 ):
     if seeds is None:
         seeds = range(nrSeeds)
@@ -559,11 +559,11 @@ def doubleDislocationTest(
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         L=L,
         startLoad=0.0,
         maxLoad=4.0,
-        loadIncrement=1e-3,
+        loadIncrement=1e-2,
         nrThreads=nrThreads,
         minimizer="LBFGS",
         epsR=1e-6,
@@ -584,7 +584,7 @@ def singleDislocationTest(
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",
         seed=seeds,
-        group_by_seeds=False,
+        group_by_variant=False,
         L=L,
         startLoad=0.0,
         maxLoad=1.0,
@@ -602,7 +602,7 @@ def reversibilityJob(
     nrThreads=4,
     nrSeeds=1,
     size=150,
-    group_by_seeds=False,
+    group_by_variant=False,
     maxLoad=1.0,
     reconnection="edgeFlip",
     loadIncrement=1e-5,
@@ -610,7 +610,7 @@ def reversibilityJob(
 ):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         rows=size,
         cols=size,
         startLoad=0.14,
@@ -636,7 +636,7 @@ def sylvainBatches(
     nrSeeds: int = 4,
     size: int = 100,
     threads=3,
-    group_by_seeds: bool = False,
+    group_by_variant: bool = False,
     reconnection= "none",
 ):
     """
@@ -670,7 +670,7 @@ def sylvainBatches(
         nrThreads=threads,
         nrSeeds=nrSeeds,
         size=size,
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         reconnection=reconnection,
         loadIncrement=params["loadIncrement"],
         LBFGSEpsx=params["LBFGSEpsx"],
@@ -724,7 +724,7 @@ def reconnectionJob(L=100):
     return configs, labels
 
 
-def umutTestJob(group_by_seeds=False):
+def umutTestJob(group_by_variant=False):
     configs, labels = ConfigGenerator.generate(
         seed=0,
         L=100,
@@ -736,7 +736,7 @@ def umutTestJob(group_by_seeds=False):
         minimizer="LBFGS",
         LBFGSEpsg=1e-5,
         scenario="simpleShear",
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
     )
     return configs, labels
 
@@ -745,7 +745,7 @@ def umutJob(
     L,
     loadIncrement: float | list[float] = 2e-5,
     EliasStop=False,
-    group_by_seeds=False,
+    group_by_variant=False,
     reconnecton: str | list[str] = "none",
 ):
     if EliasStop:
@@ -762,19 +762,19 @@ def umutJob(
         loadIncrement=loadIncrement,
         minimizer="LBFGS",
         scenario="simpleShear",
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         reconnectionMethod=reconnecton,
         **stop,
     )
     return configs, labels
 
 
-def bigUmutJob(group_by_seeds=False):
-    return umutJob(500, EliasStop=False, group_by_seeds=group_by_seeds)
+def bigUmutJob(group_by_variant=False):
+    return umutJob(500, EliasStop=False, group_by_variant=group_by_variant)
 
 
-def bigUmutJobWithEliasStop(group_by_seeds=False):
-    return umutJob(500, EliasStop=True, group_by_seeds=group_by_seeds)
+def bigUmutJobWithEliasStop(group_by_variant=False):
+    return umutJob(500, EliasStop=True, group_by_variant=group_by_variant)
 
 
 def stopConditionJob():
@@ -787,12 +787,12 @@ def stopConditionJob():
     return c, labs
 
 
-def loadStepJob(group_by_seeds=False):
+def loadStepJob(group_by_variant=True, reconnection=["none", "edgeFlip"]):
     return umutJob(
         L=150,
         loadIncrement=[5e-6, 1e-5, 2e-5, 4e-5],
-        group_by_seeds=group_by_seeds,
-        reconnecton=["none", "edgeFlip"],
+        group_by_variant=group_by_variant,
+        reconnecton=reconnection,
     )
 
 
@@ -863,13 +863,13 @@ def size_scaling_job():
 
 def triangular_edge_flip_job(
     size=200,
-    group_by_seeds=False,
+    group_by_variant=False,
     maxLoad=1.0,
     reconnection="edgeFlip",
 ):
     configs, labels = ConfigGenerator.generate(
         seed=range(1),
-        group_by_seeds=group_by_seeds,
+        group_by_variant=group_by_variant,
         rows=size,
         cols=size,
         startLoad=0.29,
@@ -887,5 +887,24 @@ def triangular_edge_flip_job(
         # temp
         # energyDropThreshold=1e-10,
         # logDuringMinimization=1,
+    )
+    return configs, labels
+ 
+def referenceStateTestJob(startLoad=[1, 2, 4, 8, 16, 32], reconnection="none", group_by_variant=True):
+    size=3
+    maxLoad=1.0
+    configs, labels = ConfigGenerator.generate(
+        seed=range(1),
+        group_by_variant=group_by_variant,
+        rows=size,
+        cols=size,
+        startLoad=list(map(float,startLoad)),
+        maxLoad=maxLoad,
+        nrThreads=1,
+        minimizer="LBFGS",
+        loadIncrement=1e-2,
+        LBFGSEpsx=1e-6,
+        scenario="simpleShearReferenceTest",
+        reconnectionMethod=reconnection,
     )
     return configs, labels

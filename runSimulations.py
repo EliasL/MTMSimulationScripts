@@ -13,6 +13,25 @@ def task(config, **kwargs):
 
 
 def run_many_locally(configs, taskNames=None, build=True, **kwargs):
+    def _is_grouped(items):
+        return (
+            isinstance(items, (list, tuple))
+            and len(items) > 0
+            and isinstance(items[0], (list, tuple))
+        )
+
+    if _is_grouped(configs):
+        grouped_configs = list(configs)
+        configs = [c for group in grouped_configs for c in group]
+        if taskNames is not None:
+            if _is_grouped(taskNames):
+                taskNames = [t for group in taskNames for t in group]
+            elif len(taskNames) == len(grouped_configs):
+                expanded_names = []
+                for group_name, group in zip(taskNames, grouped_configs):
+                    expanded_names.extend([group_name] * len(group))
+                taskNames = expanded_names
+
     # Ensure taskNames is a list of correct length
     if taskNames is None:
         taskNames = [None] * len(configs)
@@ -31,12 +50,14 @@ def run_many_locally(configs, taskNames=None, build=True, **kwargs):
     with concurrent.futures.ThreadPoolExecutor() as executor:
         # Partial function with additional kwargs
         def task_with_name(config, taskName):
+            local_kwargs = dict(kwargs)
             if taskName:
-                kwargs["taskName"] = taskName
-            task(config, **kwargs)
+                local_kwargs["taskName"] = taskName
+            task(config, **local_kwargs)
 
         # Run the tasks in parallel with corresponding names
-        executor.map(task_with_name, configs, taskNames)
+        # Force iteration so task exceptions are surfaced.
+        list(executor.map(task_with_name, configs, taskNames))
 
 
 if __name__ == "__main__":

@@ -48,7 +48,7 @@ def distributeConfigs(
 
     # A dictionary with server names as keys, and all configs that should be run on that server
     serverConfigDict = {}
-    for s in Servers.servers:
+    for s in Servers.run_servers:
         serverConfigDict[s] = []
 
     remaining_configs = []

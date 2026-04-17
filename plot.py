@@ -3,32 +3,16 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from Management.jobs import (
-    loadStepJob,
-    stopConditionJob,
-    smallJob,
-    umutJobs,
-    allPlasticEventsJob,
-    reversibilityJob,
-    bigUmutJob,
-    bigUmutJobWithEliasStop,
-    propperJob,
-    largePropperJob,
-    avalanches,
-    findMinimizationCriteriaJobs,
-    compareWithOldStoppingCriteria,
-    basicJob,
-    showMinimizationCriteriaJobs,
-    longJob,
-    reconnectionTest,
-    size_scaling_job,
-    sylvainBatches,
-)
+from Management.jobs import *
 
 from Management.updateCSV import fix_csv_files
 from Management.configGenerator import ConfigGenerator
 from Management.simulationManager import findOutputPath
-from Plotting.makePlots import makePlot, makeSettingComparison, makeAverageComparisonPlot
+from Plotting.makePlots import (
+    makePlot,
+    makeSettingComparison,
+    makeAverageComparisonPlot,
+)
 from Plotting.pyplotFunctions import plot_center_node_forces
 from MTMath.powerlaw_mixed_test import (
     testDist,
@@ -67,13 +51,15 @@ from MTMath.poincareTiling import (
     drawRotation2ExplanationFigs,
 )
 from MTMath.decomposeElasticPlastic import showDecomposition
-from MTMath.plotEnergy import generate_cauchy_stress_grid, generate_energy_grid
+from MTMath.poincareEnergy import generate_cauchy_stress_grid, generate_energy_grid
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     plotLog2,
+    plotLogCompare,
     plotPlasticCounts,
     get_csv_files,
     plotEnergy,
+    plotStress,
     stressPlotWithImages,
     energyPlotWithImages,
     plotLog,
@@ -93,9 +79,9 @@ from Management.connectToCluster import Servers
 def plotPropperJob():
     nrThreads = 3
     nrSeeds = 40
-    # configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
-    configs, labels = largePropperJob(group_by_seeds=True)  # , FIREOnly=True)
-    configs, labels = bigUmutJob(group_by_seeds=True)
+    # configs, labels = propperJob(nrThreads, nrSeeds, group_by_variant=True)
+    configs, labels = largePropperJob(group_by_variant=True)  # , FIREOnly=True)
+    configs, labels = bigUmutJob(group_by_variant=True)
     # xlim = [0.25, 0.55]
     startLoad = configs[0][0].startLoad
     maxLoad = configs[0][0].maxLoad
@@ -166,7 +152,9 @@ def compare_center_node_forces():
         "major",
         "edgeFlip",
     ]
-    fig, _ = plot_center_node_forces(sim_paths, labels=labels, pvd_file="collection.pvd")
+    fig, _ = plot_center_node_forces(
+        sim_paths, labels=labels, pvd_file="collection.pvd"
+    )
     os.makedirs("Plots", exist_ok=True)
     out_path = os.path.join("Plots", "center_node_forces_comparison.pdf")
     fig.savefig(out_path, bbox_inches="tight")
@@ -225,7 +213,7 @@ def compare_energy_three_sims():
 # MDPI Article plot
 def energyField():
     from matplotlib import pyplot as plt
-    from MTMath.plotEnergy import (
+    from MTMath.poincareEnergy import (
         generate_energy_grid,
         make3DEnergyField,
         plotEnergyField,
@@ -249,13 +237,13 @@ def energyField():
 
 
 def showPoincareDisk():
-    from MTMath.plotEnergy import plotPoincareDisk
+    from MTMath.poincareEnergy import plotPoincareDisk
 
     plotPoincareDisk(depth=8)
 
 
 def showInstabilityAngle():
-    from MTMath.plotEnergy import generate_stability_min_angle_grid, prepPoincareFig
+    from MTMath.poincareEnergy import generate_stability_min_angle_grid, prepPoincareFig
 
     res = 100
     # fig, ax = prepPoincareFig(
@@ -277,7 +265,7 @@ def showInstabilityAngle():
 
 
 def oneDPlot():
-    from MTMath.plotEnergy import oneDPotential, oneDPotentialDissordered
+    from MTMath.poincareEnergy import oneDPotential, oneDPotentialDissordered
 
     oneDPotential()
 
@@ -289,7 +277,7 @@ def oneDPlot():
 def plotSampleRuns():
     nrThreads = 3
     nrSeeds = 40
-    configs, labels = propperJob(nrThreads, nrSeeds, group_by_seeds=True)
+    configs, labels = propperJob(nrThreads, nrSeeds, group_by_variant=True)
     seedNr = 3
     configs = [c[seedNr] for c in configs]
     labels = [lab[seedNr] for lab in labels]
@@ -317,8 +305,8 @@ def plotThreadTest():
     nrThreads = 1  # [1, 2, 4, 8, 16, 32, 64]
     nrSeeds = 1
     size = 100
-    configs, labels = basicJob(nrThreads, nrSeeds, size, group_by_seeds=True)
-    configs, labels = smallJob(group_by_seeds=True)
+    configs, labels = basicJob(nrThreads, nrSeeds, size, group_by_variant=True)
+    configs, labels = smallJob(group_by_variant=True)
     # plotAverage(configs, labels)
     plotTime(configs, labels)
 
@@ -330,11 +318,14 @@ def plotSylvainBatches():
         configs, labels = sylvainBatches(batch)
         if not configs:
             continue
-        grouped_configs, grouped_labels, group_labels = ConfigGenerator.group_by_settings(
-            configs, labels=labels
+        grouped_configs, grouped_labels, group_labels = (
+            ConfigGenerator.group_by_settings(configs, labels=labels)
         )
         paths, _ = get_csv_files(
-            grouped_configs, labels=grouped_labels, useOldFiles=False, forceUpdate=False,
+            grouped_configs,
+            labels=grouped_labels,
+            useOldFiles=False,
+            forceUpdate=False,
         )
         if not paths:
             continue
@@ -592,10 +583,13 @@ def compareStep():
     c, l = loadStepJob()
     fast_xmin = True
     xmin_accuracy = 0.1
-    plotPlasticCounts(c, l, postRegime=True)
-    plotPlasticCounts(c, l, postRegime=False)
-    plotLog2(
-        c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
+    # plotPlasticCounts(c, l, postRegime=True)
+    # plotPlasticCounts(c, l, postRegime=False)
+    # plotLog2(
+    #     c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
+    # )
+    plotLogCompare(
+        c, l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
     )
 
 
@@ -622,44 +616,57 @@ def plotReversibility():
 
 
 def plotLogAnalasys():
-    # configs, labels = bigUmutJob(group_by_seeds=True)
-    configs, labels = umutJobs(loadIncrement=2e-5)
+    drop_type = "energy"
+    # configs, labels = bigUmutJob(group_by_variant=True)
+    configs, labels = umutJobs(loadIncrement=1e-5)
     configs, labels = ConfigGenerator.filter(configs, labels, ["L=200"])
+    matching_groups = [
+        (group, group_labels) for group, group_labels in zip(configs, labels) if group
+    ]
+    if len(matching_groups) != 1:
+        raise ValueError(
+            f"Expected exactly one non-empty L=200 group, found {len(matching_groups)}."
+        )
+    our_configs, our_labels = matching_groups[0]
     # # Powerlaw
-    # plotEnergy(configs, labels=labels)
+    plotEnergy(configs, labels=labels)
 
     # # Find split
     fast_xmin = True
+    min_xmin = 1e-2
     useCDF = False
     plotLog2(
-        configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, useCDF=useCDF
+        configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, min_xmin=min_xmin, useCDF=useCDF,drop_type=drop_type
     )
     plotLog2(
-        configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, useCDF=useCDF
+        configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, min_xmin=min_xmin,  useCDF=useCDF,drop_type=drop_type
     )
     # p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
-    p = [
-        [
-            "/Users/eliaslundheim/Downloads/s200x200_energy_stress_log.csv",
-            "/Users/eliaslundheim/Downloads/s200x200_energy_stress_log2.csv",
-        ]
-    ]
-    lab = [["umut", "umut"]]
-    plot_powerlaw(
-        p,
-        group_labels=lab,
-        postRegime=True,
-        fast_xmin=fast_xmin,
-        useCDF=useCDF,
-    )
-    plot_powerlaw(
-        p,
-        group_labels=lab,
-        postRegime=False,
-        fast_xmin=fast_xmin,
-        useCDF=useCDF,
-    )
-    return
+    # p = [
+    #     our_configs,
+    #     [
+    #         "/Users/eliaslundheim/work/PhD/Umut/UmutData/200x200DelaunayReconnecting/s200x200_energy_stress_log1.csv",
+    #         "/Users/eliaslundheim/work/PhD/Umut/UmutData/200x200DelaunayReconnecting/s200x200_energy_stress_log2.csv",
+    #     ]
+    # ]
+
+    # lab = [our_labels,["umut", "umut"]]
+    # plotLogCompare(p, lab,postRegime=True, fast_xmin=fast_xmin,
+    # )
+    # plot_powerlaw(
+    #     p,
+    #     group_labels=lab,
+    #     postRegime=True,
+    #     fast_xmin=fast_xmin,
+    #     useCDF=useCDF,
+    # )
+    # plot_powerlaw(
+    #     p,
+    #     group_labels=lab,
+    #     postRegime=False,
+    #     fast_xmin=fast_xmin,
+    #     useCDF=useCDF,
+    # )
 
     # p = [
     #     [
@@ -675,32 +682,40 @@ def plotLogAnalasys():
     #         "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop4.csv",
     #     ],
     # ]
-    # lab = [["umut_noRe_1"], ["umut_noRe_2"], ["umut_noRe_3"], ["umut_noRe_4"]]
+    # lab = [["umut_noRe_seed=1"], ["umut_noRe_seed=2"], ["umut_noRe_seed=3"], ["umut_noRe_seed=4"]]
 
-    p = [
-        [
-            "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop1.csv",
-            "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop2.csv",
-            "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop3.csv",
-            "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop4.csv",
-        ]
-    ]
-    lab = [["umut_noRe_1", "umut_noRe_2", "umut_noRe_3", "umut_noRe_4"]]
+    # p = [
+    #     [
+    #     "/Volumes/data/MTS2D_output/simpleShear,s500x500l0.138,2e-05,1.0PBCt8initialGuessNoise0.04epsR1e-05s0/macroData.csv"
+    #     ],
+    #     # [
+    #     #     "/Users/eliaslundheim/work/PhD/Umut/UmutData/400x400NoReconnect/s400x400_alpha_energy_drop1.csv",
+    #     #     "/Users/eliaslundheim/work/PhD/Umut/UmutData/400x400NoReconnect/s400x400_alpha_energy_drop2.csv",
+    #     #     "/Users/eliaslundheim/work/PhD/Umut/UmutData/400x400NoReconnect/s400x400_alpha_energy_drop3.csv",
+    #     #     "/Users/eliaslundheim/work/PhD/Umut/UmutData/400x400NoReconnect/s400x400_alpha_energy_drop4.csv",
+    #     # ]
+    # ]
+    # lab = [
+    #     ["500x500EliasR"],
+    #     #["umut_noRe"] * 4
+    # ]
 
-    plot_powerlaw(
-        p,
-        group_labels=lab,
-        postRegime=True,
-        fast_xmin=fast_xmin,
-        useCDF=useCDF,
-    )
-    plot_powerlaw(
-        p,
-        group_labels=lab,
-        postRegime=False,
-        fast_xmin=fast_xmin,
-        useCDF=useCDF,
-    )
+    # plot_powerlaw(
+    #     p,
+    #     group_labels=lab,
+    #     postRegime=True,
+    #     fast_xmin=fast_xmin,
+    #     useCDF=useCDF,
+    #     drop_type=drop_type,
+    # )
+    # plot_powerlaw(
+    #     p,
+    #     group_labels=lab,
+    #     postRegime=False,
+    #     fast_xmin=fast_xmin,
+    #     useCDF=useCDF,
+    #     drop_type=drop_type,
+    # )
 
 
 def syntheticDataPlotting():
@@ -766,12 +781,17 @@ def analyseLongData():
     # plotLog2(configs, labels, xmin_range=1e-1)
     # plotLog2(configs, labels, xmin_range=1e-4)
 
+def plotReferenceTest():
+    configs, labels = referenceStateTestJob()
+    plotStress(configs, labels)
+    
+
 
 if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
-    #plotShearFiniteDifferenceDerivatives()
+    # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    #run_reconnection_demo()
+    # run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
     # test()
@@ -807,17 +827,18 @@ if __name__ == "__main__":
     # elasticReductionPlots()
     # showDecomposition()
     # compareStop()
-    #compareStep()
-    #plotReversibility()
+    # compareStep()
+    # plotReversibility()
+    plotReferenceTest()
     #plotLogAnalasys()
     # analyseLongData()
     # testSamplePiecewise(alpha=1.35, xmin=1e-5, xlow=1e-7)
-    #syntheticDataPlotting()
+    # syntheticDataPlotting()
     # testDist()
     # testRealData()
     # investigateJobs()
-    #print_remote_runtimes()
-    #plotSylvainBatches()
-    #compare_center_node_forces()
-    #compare_energy_three_sims()
+    # print_remote_runtimes()
+    # plotSylvainBatches()
+    # compare_center_node_forces()
+    # compare_energy_three_sims()
     pass

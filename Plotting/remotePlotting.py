@@ -22,24 +22,26 @@ from tqdm import tqdm
 import numpy as np
 from Plotting.plotPowerLaw import (
     plot_powerlaw,
+    plot_powerlaw_compare,
     plot_plastic_counts_compare,
     plot_plastic_energy_scatter,
     get_group_structure,
 )
-from Management.updateCSV import fix_csv_files
+from Management.updateCSV import fix_csv_files, read_macrodata_csv
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 # Now we can import from Management
 from Management.connectToCluster import connectToCluster, Servers, download_folders
 from Management.configGenerator import ConfigGenerator, SimulationConfig
-from Management.updateCSV import fix_mixed_macrodata_csv
 
 FOLDER_PATH = "/Users/elias/Work/PhD/Code/remoteData"
 FOLDER_PATH = "/Users/eliaslundheim/work/PhD/remoteData"
 MACRO_PATH = os.path.join(FOLDER_PATH, "macro")
 PLOTS_PATH = os.path.join(FOLDER_PATH, "plots")
 RAW_DATA_PATH = os.path.join(FOLDER_PATH, "data")
+REMOTE_FOLDER_NAME = "MTS2D_output"
+CACHE_UPDATE_AFTER_HOURS = 12
 
 OLD_TO_NEW_KEYS = {
     "Line nr": None,  # Probably an index or redundant
@@ -139,11 +141,10 @@ def smart_read_csv(file_path):
 
 
 def handleLocalPath(dataPath, configs, returnCsv=True):
-    local_data_folder_name = "MTS2D_output"
     names = [config.generate_name(False) for config in configs]
 
     existing_paths = []  # This will store the paths to existing data files
-    base_path = os.path.join(dataPath, local_data_folder_name)
+    base_path = os.path.join(dataPath, REMOTE_FOLDER_NAME)
 
     for name in names:
         # Construct the path to the specific data folder for this configuration
@@ -296,37 +297,21 @@ def get_csv_from_server(server, configs):
         print(f"Searching local data path: {server}")
         return handleLocalPath(server, configs)
 
-    # Connect to the server
     ssh = connectToCluster(server, False)
+    if ssh is None:
+        return []
 
-    user = getServerUserName(server)
-
-    # Discover all base paths (/data and /data2) that contain this user directory
-    discover_cmd = (
-        f"for base in /data /data2; do "
-        f'  if [ -d "$base" ] && [ -d "$base/{user}" ]; then '
-        f"    printf '%s\\n' \"$base/{user}\"; "
-        f"  fi; "
-        f"done"
-    )
-    stdin, stdout, stderr = ssh.exec_command(discover_cmd)
-    data_paths = [
-        line.strip() for line in stdout.read().decode().splitlines() if line.strip()
-    ]
-
-    if not data_paths:
-        raise RuntimeError(
-            f"No data directory found for user '{user}' under /data or /data2 on {server}."
-        )
-
-    remote_folder_name = "MTS2D_output"
     names = [config.generate_name(False) for config in configs]
     newPaths = []
-
-    # Ensure the local output folder exists
     os.makedirs(MACRO_PATH, exist_ok=True)
 
-    print(f"Searching {server} in {', '.join(data_paths)}.")
+    try:
+        data_paths = _discover_remote_data_paths(ssh, server)
+        if not data_paths:
+            print(f"No data directory found on {server}.")
+            return []
+
+        print(f"Searching {server} in {', '.join(data_paths)}.")
 
         # TEMP PART
         # DANGEROUS DOUBLE CHECK BEFORE MAKING LIVE
@@ -336,53 +321,36 @@ def get_csv_from_server(server, configs):
         # Delete the folder
         # delete_double_folders(data_paths, ssh, server)
 
-    # Go through each user directory we found (/data/<user>, /data2/<user>, ...)
-    for data_path in data_paths:
-        # List all folders within the remote MTS2D output folder for this user
-        command = (
-            f"cd /{data_path}/{remote_folder_name} 2>/dev/null && "
-            f"ls -d */ 2>/dev/null || true"
-        )
-        stdin, stdout, stderr = ssh.exec_command(command)
-        raw = stdout.read().strip().decode()
+        for data_path in data_paths:
+            folders = _list_remote_output_folders(ssh, data_path)
+            if not folders:
+                continue
 
-        if not raw:
-            # No output folder or no subfolders for this base path
-            # print(f"No folders found in /{data_path}/{remote_folder_name} on {server}")
-            continue
+            with ThreadPoolExecutor(max_workers=7) as executor:
+                future_to_name = {
+                    executor.submit(
+                        download_file,
+                        name,
+                        folders,
+                        data_path,
+                        REMOTE_FOLDER_NAME,
+                        MACRO_PATH,
+                        ssh,
+                    ): name
+                    for name in names
+                }
 
-        folders = [folder.rstrip("/") for folder in raw.split("\n") if folder]
+                for future in as_completed(future_to_name):
+                    result = future.result()
+                    if result:
+                        print(f"Found {result.split('/')[-1]} on {server}")
+                        newPaths.append(result)
+                        with lock:
+                            nr_files += 1
 
-        # Using ThreadPoolExecutor to download files in parallel for this user path
-        with ThreadPoolExecutor(max_workers=7) as executor:
-            future_to_name = {
-                executor.submit(
-                    download_file,
-                    name,
-                    folders,
-                    data_path,
-                    remote_folder_name,
-                    MACRO_PATH,
-                    ssh,
-                    # server + data_path.split("/")[1],
-                ): name
-                for name in names
-            }
-
-            for future in as_completed(future_to_name):
-                result = future.result()
-                if result:
-                    print(f"Found {result.split('/')[-1]} on {server}")
-                    newPaths.append(result)
-                    with lock:  # Safe update
-                        nr_files += 1
-                    # update_progress(len(names))
-
-    # Apply header updates on all new files
-    # for path in newPaths:
-    #    unused_update_headers_in_file(path)
-
-    return newPaths
+        return newPaths
+    finally:
+        ssh.close()
 
 
 def _merge_candidate_sources(target, source_dict):
@@ -395,6 +363,75 @@ def _is_macro_path(path):
         return os.path.commonpath([MACRO_PATH, path]) == MACRO_PATH
     except ValueError:
         return False
+
+
+def _normalize_remote_path(*parts):
+    cleaned_parts = [str(part).strip("/") for part in parts if part]
+    return "/" + "/".join(cleaned_parts)
+
+
+def _discover_remote_data_paths(ssh, server):
+    user = getServerUserName(server)
+    discover_cmd = (
+        f"for base in /data /data2; do "
+        f'  if [ -d "$base" ] && [ -d "$base/{user}" ]; then '
+        f"    printf '%s\\n' \"$base/{user}\"; "
+        f"  fi; "
+        f"done"
+    )
+    stdin, stdout, stderr = ssh.exec_command(discover_cmd)
+    return [line.strip() for line in stdout.read().decode().splitlines() if line.strip()]
+
+
+def _list_remote_output_folders(ssh, data_path):
+    remote_root = _normalize_remote_path(data_path, REMOTE_FOLDER_NAME)
+    command = f'cd "{remote_root}" 2>/dev/null && ls -d */ 2>/dev/null || true'
+    stdin, stdout, stderr = ssh.exec_command(command)
+    raw = stdout.read().strip().decode()
+    if not raw:
+        return []
+    return [folder.rstrip("/") for folder in raw.split("\n") if folder]
+
+
+def _merge_found_paths(found_paths, new_paths):
+    for path in new_paths:
+        name = _path_to_config_name(path)
+        found_paths[name] = path
+
+
+def _get_remaining_configs(configs, found_paths):
+    return [config for config in configs if config.name not in found_paths]
+
+
+def _count_matched_paths(paths):
+    if not paths:
+        return 0
+    if isinstance(paths[0], list):
+        return sum(len(group) for group in paths)
+    return len(paths)
+
+
+def _can_rematch_labels(configs, labels):
+    return len(labels) == len(configs)
+
+
+def _finalize_csv_matches(all_configs, labels, nested, config_groups, found_paths):
+    raw_paths = list(found_paths.values())
+    if nested:
+        matched_paths, matched_labels = flatToStructure(config_groups, labels, raw_paths)
+    elif _can_rematch_labels(all_configs, labels):
+        matched_paths, matched_labels = rematchPathsAndLabels(
+            all_configs, labels, raw_paths
+        )
+    else:
+        matched_paths, matched_labels = raw_paths, labels
+
+    matched_count = _count_matched_paths(matched_paths)
+    missing_count = len(all_configs) - matched_count
+    if missing_count:
+        print(f"Still missing {missing_count} requested files.")
+
+    return matched_paths, matched_labels
 
 
 def _scan_local_csv_candidates(configs):
@@ -424,46 +461,30 @@ def _scan_remote_csv_candidates(server, configs):
         return candidates
 
     ssh = connectToCluster(server, False)
-    user = getServerUserName(server)
-
-    discover_cmd = (
-        f"for base in /data /data2; do "
-        f'  if [ -d "$base" ] && [ -d "$base/{user}" ]; then '
-        f"    printf '%s\\n' \"$base/{user}\"; "
-        f"  fi; "
-        f"done"
-    )
-    stdin, stdout, stderr = ssh.exec_command(discover_cmd)
-    data_paths = [
-        line.strip() for line in stdout.read().decode().splitlines() if line.strip()
-    ]
-
-    if not data_paths:
+    if ssh is None:
         return candidates
 
-    remote_folder_name = "MTS2D_output"
-    names = {config.name for config in configs}
+    try:
+        data_paths = _discover_remote_data_paths(ssh, server)
+        if not data_paths:
+            return candidates
 
-    for data_path in data_paths:
-        command = (
-            f"cd /{data_path}/{remote_folder_name} 2>/dev/null && "
-            f"ls -d */ 2>/dev/null || true"
-        )
-        stdin, stdout, stderr = ssh.exec_command(command)
-        raw = stdout.read().strip().decode()
-        if not raw:
-            continue
-        folders = {folder.rstrip("/") for folder in raw.split("\n") if folder}
-        matches = names & folders
-        if not matches:
-            continue
-        for name in matches:
-            remote_path = (
-                f"{server}:{data_path}/{remote_folder_name}/{name}/macroData.csv"
-            )
-            candidates[name].append((f"remote:{server}", remote_path))
+        names = {config.name for config in configs}
 
-    return candidates
+        for data_path in data_paths:
+            folders = set(_list_remote_output_folders(ssh, data_path))
+            matches = names & folders
+            if not matches:
+                continue
+            for name in matches:
+                remote_path = (
+                    f"{server}:{_normalize_remote_path(data_path, REMOTE_FOLDER_NAME, name, 'macroData.csv')}"
+                )
+                candidates[name].append((f"remote:{server}", remote_path))
+
+        return candidates
+    finally:
+        ssh.close()
 
 
 def _format_duplicate_sources(dupes):
@@ -507,7 +528,7 @@ def search_for_cvs_files(
     useOldFiles=False,
     forceUpdate=False,
     debug_download=False,
-    fix_files=False,
+    fix_files=True,
 ):
     """
     Searches for CSV files corresponding to given configurations in predefined folders.
@@ -530,12 +551,9 @@ def search_for_cvs_files(
         return [], configs
 
     found_paths: dict[str, str] = {}
-    remaining_configs = []
-    # If an incomplete file is older than x hours, we update it
-    updateAfterHours = 12
     search_folders = ["/tmp/MTS2D", MACRO_PATH]  # Directories to search in
 
-    for i, folder in enumerate(search_folders):
+    for folder in search_folders:
         os.makedirs(folder, exist_ok=True)  # Ensure folder exists
         # Get existing CSV file names (without extensions) for quick lookup
         existing_files = {
@@ -550,23 +568,22 @@ def search_for_cvs_files(
             if config.name in existing_files:
                 # Read estimated time remaining from CSV file
                 file_mod_time = os.path.getmtime(file_path)
-                age_ok = time.time() - file_mod_time < updateAfterHours * 3600
+                age_ok = time.time() - file_mod_time < CACHE_UPDATE_AFTER_HOURS * 3600
 
                 try:
-                    if fix_files:
-                        fix_mixed_macrodata_csv(file_path, inplace=True)
-                    df = pd.read_csv(file_path)
+                    df = read_macrodata_csv(
+                        file_path,
+                        fix_mixed=True,
+                        update_header=False,
+                        warn_on_dtype=True,
+                    )
                 except Exception as fix_exc:
-                    if fix_files:
-                        print(f"Failed to fix {file_path}: {fix_exc}")
-                    else:
-                        print(f"Failed to read {file_path}: {fix_exc}")
+                    print(f"Failed to read {file_path}: {fix_exc}")
                     if age_ok or useOldFiles:
                         if debug_download:
                             age_min = (time.time() - file_mod_time) / 60.0
-                            reason = "parse/fix" if fix_files else "parse"
                             print(
-                                f"Using local file despite {reason} error (age={age_min:.1f} min): {file_path}"
+                                f"Using local file despite parse error (age={age_min:.1f} min): {file_path}"
                             )
                         found_paths[config.name] = file_path
                     continue
@@ -618,7 +635,7 @@ def search_for_cvs_files(
                         print(f"Using local file (complete): {file_path}")
                     found_paths[config.name] = file_path
 
-    remaining_configs = [c for c in configs if c.name not in found_paths]
+    remaining_configs = _get_remaining_configs(configs, found_paths)
 
     if debug_download and remaining_configs:
         preview = ", ".join(c.name for c in remaining_configs[:5])
@@ -634,6 +651,8 @@ def search_for_cvs_files(
 # config with the path is is most likely to corespond to.
 # If a config could match with two paths, the first path found is chosen
 def configToPath(config, paths=None):
+    if isinstance(config, (str, os.PathLike)):
+        return os.fspath(config)
     if paths is not None:
         # Search for the coresponding path and config
         matches = [path for path in paths if config.name in path]
@@ -669,6 +688,14 @@ def rematchPathsAndLabels(configs, labels, paths):
     matched_labels = []
     assert len(configs) == len(labels)
     for config, label in zip(configs, labels):
+        if isinstance(config, (str, os.PathLike)):
+            path = os.fspath(config)
+            if os.path.isfile(path):
+                matched_paths.append(path)
+                matched_labels.append(label)
+            else:
+                raise FileNotFoundError(f"Explicit path does not exist: {path}")
+            continue
         path = configToPath(config, paths)
         if path and os.path.isfile(path):
             matched_paths.append(path)
@@ -676,6 +703,76 @@ def rematchPathsAndLabels(configs, labels, paths):
         else:
             print(f"Warning: missing file:\n{config.name}")
     return matched_paths, matched_labels
+
+
+def _split_requested_inputs(all_configs):
+    if isinstance(all_configs, (SimulationConfig, str, os.PathLike)):
+        nested = False
+        item = os.fspath(all_configs) if isinstance(all_configs, os.PathLike) else all_configs
+        config_groups = [[item]]
+    else:
+        all_configs = list(all_configs)
+        if len(all_configs) == 0:
+            return False, [], [], []
+        nested = any(isinstance(item, (list, tuple, np.ndarray)) for item in all_configs)
+        if nested:
+            groups = [
+                group if isinstance(group, (list, tuple, np.ndarray)) else [group]
+                for group in all_configs
+            ]
+            config_groups = [
+                [os.fspath(item) if isinstance(item, os.PathLike) else item for item in group]
+                for group in groups
+            ]
+        else:
+            config_groups = [[
+                os.fspath(item) if isinstance(item, os.PathLike) else item
+                for item in all_configs
+            ]]
+
+    all_items = [item for group in config_groups for item in group]
+    configs = []
+    for item in all_items:
+        if isinstance(item, SimulationConfig):
+            configs.append(item)
+        elif isinstance(item, str):
+            if not os.path.isfile(item):
+                raise FileNotFoundError(f"Explicit path does not exist: {item}")
+        else:
+            raise TypeError(
+                "get_csv_files expects SimulationConfig objects or existing file paths."
+            )
+
+    return nested, config_groups, all_items, configs
+
+
+def _normalize_requested_labels(labels, config_groups, nested):
+    if labels is None:
+        labels = []
+    elif isinstance(labels, (str, os.PathLike)):
+        labels = [str(labels)]
+    else:
+        labels = list(labels)
+
+    if not nested:
+        target_len = len(config_groups[0]) if config_groups else 0
+        return labels[:target_len] + [""] * max(0, target_len - len(labels))
+
+    if not labels:
+        return [[""] * len(group) for group in config_groups]
+    if isinstance(labels[0], (list, tuple, np.ndarray)):
+        normalized = []
+        for group, group_labels in zip(config_groups, labels):
+            group_labels = list(group_labels)
+            normalized.append(
+                group_labels[: len(group)] + [""] * max(0, len(group) - len(group_labels))
+            )
+        while len(normalized) < len(config_groups):
+            normalized.append([""] * len(config_groups[len(normalized)]))
+        return normalized
+    if len(labels) == len(config_groups):
+        return [[label] * len(group) for label, group in zip(labels, config_groups)]
+    return [[""] * len(group) for group in config_groups]
 
 
 def _path_to_config_name(path: str) -> str:
@@ -709,28 +806,27 @@ def get_csv_files(
     forceUpdate=False,
     fullScan=False,
     debug_download=False,
-    fix_files=False,
+    fix_files=True,
 ):
-    nested = False
-    config_groups = all_configs
-    if not isinstance(all_configs[0], SimulationConfig):
-        nested = True
-        all_configs = [config for sublist in config_groups for config in sublist]
+    nested, config_groups, all_items, configs = _split_requested_inputs(all_configs)
+    normalized_labels = _normalize_requested_labels(labels, config_groups, nested)
+    if not all_items:
+        return [], []
 
     global completed_servers, nr_files
 
     completed_servers, nr_files = 0, 0
 
-    if fullScan:
+    if fullScan and configs:
         candidates = defaultdict(list)
-        _merge_candidate_sources(candidates, _scan_local_csv_candidates(all_configs))
-        if Servers.servers:
-            with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+        _merge_candidate_sources(candidates, _scan_local_csv_candidates(configs))
+        if Servers.search_servers:
+            with ThreadPoolExecutor(max_workers=len(Servers.search_servers)) as executor:
                 future_to_server = {
                     executor.submit(
-                        _scan_remote_csv_candidates, server, all_configs
+                        _scan_remote_csv_candidates, server, configs
                     ): server
-                    for server in Servers.servers
+                    for server in Servers.search_servers
                 }
                 for future in as_completed(future_to_server):
                     try:
@@ -756,29 +852,38 @@ def get_csv_files(
         if dupes:
             raise RuntimeError(_format_duplicate_sources(dupes))
 
-    def _merge_paths(found: dict[str, str], new_paths: list[str]):
-        for p in new_paths:
-            name = _path_to_config_name(p)
-            found[name] = p
+    if not configs:
+        print(f"Using {len(all_items)} explicit file paths.")
+        return _finalize_csv_matches(
+            all_items,
+            normalized_labels,
+            nested,
+            config_groups,
+            {},
+        )
 
     # First check if the files have already been downloaded
     paths, remaining_configs = search_for_cvs_files(
-        all_configs,
+        configs,
         useOldFiles,
         forceUpdate,
         debug_download=debug_download,
         fix_files=fix_files,
     )
     found_paths: dict[str, str] = {}
-    _merge_paths(found_paths, paths)
+    _merge_found_paths(found_paths, paths)
     if len(remaining_configs) == 0:
         print("All files already downloaded.")
-        if nested:
-            paths, labels = flatToStructure(config_groups, labels, paths)
-        return paths, labels
+        return _finalize_csv_matches(
+            all_items,
+            normalized_labels,
+            nested,
+            config_groups,
+            found_paths,
+        )
     elif len(paths) != 0:
         print(
-            f"{len(paths)} files found, searching for the remaining {len(remaining_configs)}."
+            f"Using {len(paths)} cached files. Searching for {len(remaining_configs)} remaining files."
         )
     if len(paths) == 0 and useOldFiles:
         print("No files found!")
@@ -786,32 +891,35 @@ def get_csv_files(
 
     # Second check local path to see if we can avoid checking the servers
     localPaths = get_csv_from_server(Servers.local_path_mac, remaining_configs)
-    _merge_paths(found_paths, localPaths)
-    remaining_configs = [c for c in remaining_configs if c.name not in found_paths]
+    _merge_found_paths(found_paths, localPaths)
+    remaining_configs = _get_remaining_configs(remaining_configs, found_paths)
     if len(remaining_configs) == 0:
         print(f"{len(localPaths)} files found locally. Not searching servers.")
-        paths = list(found_paths.values())
-        if nested:
-            paths, labels = flatToStructure(config_groups, labels, paths)
-        return paths, labels
+        return _finalize_csv_matches(
+            all_items,
+            normalized_labels,
+            nested,
+            config_groups,
+            found_paths,
+        )
 
     if remaining_configs:
         print(
-            f"{len(localPaths)} files found locally. Searching servers for {len(remaining_configs)} remaining files."
+            f"Found {len(localPaths)} files in {Servers.local_path_mac}. Searching servers for {len(remaining_configs)} remaining files."
         )
 
-    if Servers.servers:
-        server_list = ", ".join(Servers.servers)
-        print(f"Searching {len(Servers.servers)} servers for files: {server_list}")
+    if Servers.search_servers:
+        server_list = ", ".join(Servers.search_servers)
+        print(f"Searching {len(Servers.search_servers)} servers for files: {server_list}")
     else:
         print("No servers configured; skipping server search.")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
     # get_csv_from_server(Servers.poincare, configs)
-    nr_threads = len(Servers.servers) if Servers.servers else 1
+    nr_threads = len(Servers.search_servers) if Servers.search_servers else 1
     with ThreadPoolExecutor(max_workers=nr_threads) as executor:
         future_to_server = {
             executor.submit(get_csv_from_server, server, remaining_configs): server
-            for server in Servers.servers
+            for server in Servers.search_servers
         }
         for future in as_completed(future_to_server):
             server = future_to_server[future]
@@ -821,12 +929,12 @@ def get_csv_files(
             try:
                 server_paths = future.result()
                 if server_paths:
-                    _merge_paths(found_paths, server_paths)
+                    _merge_found_paths(found_paths, server_paths)
             except Exception as exc:
-                print(f"\n{server} generated an exception: {exc}")
+                print(f"{server} search failed: {exc}")
                 print("Continuing with remaining servers.")
 
-    remaining_configs = [c for c in all_configs if c.name not in found_paths]
+    remaining_configs = _get_remaining_configs(configs, found_paths)
     if remaining_configs and not useOldFiles:
         old_paths, _ = search_for_cvs_files(
             remaining_configs,
@@ -835,20 +943,17 @@ def get_csv_files(
             debug_download=debug_download,
             fix_files=fix_files,
         )
-        _merge_paths(found_paths, old_paths)
-        remaining_configs = [c for c in all_configs if c.name not in found_paths]
+        _merge_found_paths(found_paths, old_paths)
+        remaining_configs = _get_remaining_configs(configs, found_paths)
         if remaining_configs:
             print(f"Missing {len(remaining_configs)} files after fallback.")
-    print("")  # New line from progress indicator
-    print(f"Found {len(found_paths)} files.")
-    paths = list(found_paths.values())
-    if nested:
-        paths, labels = flatToStructure(config_groups, labels, paths)
-    else:
-        # The paths are returned in psedu random order, so we need to
-        # match them with their correct label again
-        paths, labels = rematchPathsAndLabels(all_configs, labels, paths)
-    return paths, labels
+    return _finalize_csv_matches(
+        all_items,
+        normalized_labels,
+        nested,
+        config_groups,
+        found_paths,
+    )
 
 
 def get_csv_from_folder(folderPath):
@@ -864,10 +969,10 @@ def get_folders_from_servers(configs, fix=True):
     print("Searching servers for folders...")
     # Use ThreadPoolExecutor to execute find_data_on_server in parallel across all servers
     pathsAndConfig = []
-    with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+    with ThreadPoolExecutor(max_workers=len(Servers.search_servers)) as executor:
         future_to_server = {
             executor.submit(download_folders, server, configs, RAW_DATA_PATH): server
-            for server in Servers.servers
+            for server in Servers.search_servers
         }
         for future in as_completed(future_to_server):
             pAndC = future.result()
@@ -1240,6 +1345,8 @@ def plotEnergy(configs, labels, name="Energy", **kwargs):
     )
     plt.close(fig)
 
+def plotStress(configs, labels, name="Stress", **kwargs):
+    plotEnergy(configs, labels, name=name, Y="avg_sigma12", **kwargs)
 
 def plotLog(config_groups, labels, **kwargs):
     paths, labels = get_csv_files(
@@ -1287,7 +1394,7 @@ def plotLogCompare(config_groups, labels, **kwargs):
     paths = fix_csv_files(paths)
     paths, labels = get_group_structure(paths, labels)
 
-    plot_powerlaw(paths, labels, **kwargs)
+    plot_powerlaw_compare(paths, labels, **kwargs)
 
 def plotPlasticCounts(config_groups, labels, **kwargs):
     paths, labels = get_csv_files(

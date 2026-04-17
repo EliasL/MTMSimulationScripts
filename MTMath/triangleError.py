@@ -1,6 +1,6 @@
 import numpy as np
 from typing import Dict, Optional, Tuple
-from MTMath.plotEnergy import (
+from MTMath.poincareEnergy import (
     generate_poincare_disk,
     drawTriangularElasticDomain,
     drawShearPath,

@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 from matplotlib import colormaps
 from matplotlib.colors import ListedColormap
-from .plotEnergy import (
+from .poincareEnergy import (
     plotPoincarePointMapping,
     plotPoincareCTiling,
     plotPoincareFTiling,

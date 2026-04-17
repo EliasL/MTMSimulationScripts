@@ -243,7 +243,7 @@ def task(server):
     return info
 
 
-def get_all_server_info(servers=Servers.servers):
+def get_all_server_info(servers=Servers.search_servers):
     # A dictionary to hold server information, keyed by server
     server_info = {}
     nr_theads = len(servers)

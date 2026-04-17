@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrowPatch, Polygon
 from matplotlib.colors import ListedColormap
-from .plotEnergy import plotPoincareDisk, C2Plane, generate_poincare_disk
+from .poincareEnergy import plotPoincareDisk, C2Plane, generate_poincare_disk
 from matplotlib.colors import BoundaryNorm
 
 

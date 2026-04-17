@@ -913,7 +913,7 @@ def _nan_mask_and_det2x2(M: np.ndarray):
     return nan_mask, J
 
 
-def _assert_physical_det(M: np.ndarray, context: str):
+def _assert_physical_det(M: np.ndarray, context: str="M"):
     """Check det(M) > 0 where defined; raise if non-physical."""
     nan_mask, J = _nan_mask_and_det2x2(M)
     if np.any((J < 0) & ~np.isnan(J)):

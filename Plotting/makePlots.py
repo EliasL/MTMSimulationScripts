@@ -14,8 +14,8 @@ import json
 from simplification.cutil import simplify_coords_vwp
 from tqdm import tqdm
 from pathlib import Path
-from .dataFunctions import get_data_from_name
-from Management.updateCSV import update_df_header
+from .dataFunctions import get_data_from_name, extract_force_contribution_magnitude_series
+from Management.updateCSV import update_df_header, read_macrodata_csv
 from collections import defaultdict
 
 # in Plotting/makePlots.py
@@ -46,6 +46,25 @@ def maybe_avg(text, use_avg=None):
     if use_avg is None:
         use_avg = USE_AVG_ENERGY
     return rf"\langle {text} \rangle" if use_avg else text
+
+
+def energy_drop_symbol(energy_type=None, stress_corrected=False):
+    if stress_corrected:
+        return "E_S"
+    if energy_type is None:
+        return "E"
+    et = str(energy_type).lower()
+    if "stress_corrected" in et:
+        return "E_S"
+    if "change_from_init" in et:
+        return "E_R"
+    if "energy_change" in et or "inter-strain" in et or "inter_strain" in et:
+        return "E_I"
+    return "E"
+
+
+def energy_drop_label(energy_type=None, stress_corrected=False, use_avg=None):
+    return maybe_avg(energy_drop_symbol(energy_type, stress_corrected), use_avg)
 
 
 def enable_strict_runtimewarnings():
@@ -406,6 +425,7 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label="", use_avg=None
         else:
             use_avg = USE_AVG_ENERGY
     e = "avg_energy" if use_avg else "energy"
+    drop_label = energy_drop_label("energy_change", use_avg=use_avg)
     pre_yield_df = [df[0 : np.argmax(df[e]) + 1] for df in dfs]
     post_yield_df = [df[np.argmax(df[e]) + 1 :] for df in dfs]
 
@@ -483,9 +503,9 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label="", use_avg=None
             # ax.xaxis.set_major_locator(MaxNLocator(3))
             # Remove axis names for inner axes
             if i % 3 == 0:  # Not the first column
-                ax.set_ylabel(rf"$P>{maybe_avg('E', use_avg)}$")
+                ax.set_ylabel(rf"$P>{drop_label}$")
             if i >= 6:  # Not the bottom row
-                ax.set_xlabel(rf"$-\Delta {maybe_avg('E', use_avg)}$")
+                ax.set_xlabel(rf"$-\Delta {drop_label}$")
 
     return fig, axs
 
@@ -539,6 +559,61 @@ def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True, use_av
     return x_name, y_name
 
 
+def _coerce_series_numeric(series):
+    if len(series) == 0:
+        return series
+    non_null = series.dropna()
+    if len(non_null) == 0:
+        return series
+    if isinstance(non_null.iloc[0], str):
+        return pd.Series(
+            durations_to_seconds(series), index=series.index, name=series.name
+        )
+    return series
+
+
+def _resolve_y_series(df, y_name):
+    if y_name in df.columns:
+        return _coerce_series_numeric(df[y_name])
+
+    if not isinstance(y_name, str):
+        raise KeyError(f"Unsupported Y type: {type(y_name)}")
+
+    operators = [op for op in "+-*/" if op in y_name]
+    operator_count = sum(y_name.count(op) for op in "+-*/")
+    if operator_count != 1 or len(operators) != 1:
+        raise KeyError(
+            f"Y='{y_name}' not found. Expected exactly one operator expression like 'colA-colB'."
+        )
+
+    op = operators[0]
+    left, right = [part.strip() for part in y_name.split(op, 1)]
+    if not left or not right:
+        raise KeyError(
+            f"Invalid Y expression '{y_name}'. Expected format 'colA{op}colB'."
+        )
+    if left not in df.columns or right not in df.columns:
+        missing = [name for name in (left, right) if name not in df.columns]
+        raise KeyError(
+            f"Could not evaluate Y='{y_name}'. Missing column(s): {', '.join(missing)}"
+        )
+
+    a = _coerce_series_numeric(df[left])
+    b = _coerce_series_numeric(df[right])
+    if op == "+":
+        out = a + b
+    elif op == "-":
+        out = a - b
+    elif op == "*":
+        out = a * b
+    elif op == "/":
+        out = a / b
+    else:
+        raise KeyError(f"Unsupported operator '{op}' in Y expression '{y_name}'.")
+
+    return pd.Series(out, index=df.index, name=y_name)
+
+
 def makePlot(
     csv_file_paths,
     ax=None,
@@ -581,7 +656,7 @@ def makePlot(
     plot_post_yield=True,
     dist="truncated_power_law",
     reverse_x_axis=None,
-    subtract=None,
+    subtractFile=None,
 ):
     def _is_grouped_paths(paths):
         return (
@@ -617,18 +692,26 @@ def makePlot(
     data = []
     dfs = []
     xData = []
+    y_targets = [Y] if isinstance(Y, str) else list(Y)
+
+    sub_df = None
+    if subtractFile is not None:
+        if isinstance(subtractFile, str):
+            sub_df = pd.read_csv(subtractFile)
+        elif isinstance(subtractFile, int):
+            sub_df = pd.read_csv(csv_file_paths[subtractFile])
+        else:
+            raise ValueError("Invalid type for subtractFile. Must be path or int.")
 
     line_index = 0
     for i, csv_file_path in enumerate(csv_file_paths):
-        if i == subtract:
+        if i == subtractFile:
             continue
         if X is None:
-            breakpoint
-        df = pd.read_csv(csv_file_path)
-        df = update_df_header(df, L=_get_system_size_from_path(csv_file_path))
-        # If it is a string, we assume it is a time that we can convert to seconds
-        if isinstance(df[Y][0], str):
-            df[Y] = durations_to_seconds(df[Y])
+            raise ValueError("X cannot be None in makePlot.")
+        df = read_macrodata_csv(csv_file_path, L=_get_system_size_from_path(csv_file_path))
+        for Y_ in y_targets:
+            df[Y_] = _resolve_y_series(df, Y_)
         # Truncate data based on Lims
         # if xlim:
         #    df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
@@ -645,15 +728,10 @@ def makePlot(
             else:
                 reverse_x_axis = False
 
-        if subtract is not None:
-            if isinstance(subtract, str):
-                sub_df = pd.read_csv(subtract, usecols=[Y])
-            elif isinstance(subtract, int):
-                sub_df = pd.read_csv(csv_file_paths[subtract], usecols=[Y])
-            else:
-                raise ValueError("Invalid type for subtract. Must be path or int.")
-
-            df[Y] -= sub_df[Y].reindex(df.index, fill_value=0)
+        if sub_df is not None:
+            for Y_ in y_targets:
+                sub_y = _resolve_y_series(sub_df, Y_)
+                df[Y_] -= sub_y.reindex(df.index, fill_value=0)
 
         data.append(df[Y].values)
         xData.append(df[X].values)
@@ -675,11 +753,11 @@ def makePlot(
             else:
                 kwargs["linestyle"] = linestyles[i]
 
-        for Y_ in [Y] if isinstance(Y, str) else Y:
+        for Y_ in y_targets:
             if len(df[Y_]) == 0:
                 continue
             if labels is None:
-                kwargs["label"] = Y
+                kwargs["label"] = Y_
             else:
                 kwargs["label"] = labels[i]  # getPrettyLabel(labels[i])
                 # +((" - " + Y_) if not isinstance(Y, str) else "")
@@ -702,9 +780,7 @@ def makePlot(
                             if labels is None:
                                 true_label = "True remaining"
                             else:
-                                true_label = (
-                                    f"{labels[i]} (true)" if j == 0 else "_nolegend_"
-                                )
+                                true_label = f"{labels[i]} (true)"
                             ax.plot(
                                 x_vals[:n],
                                 true_remaining,
@@ -851,6 +927,96 @@ def add_mark(ax, mark, x, y, color="black", fontsize=30):
         ha="left",
         color=color,
     )
+
+
+def plot_force_contribution_magnitudes(
+    vtu_sources,
+    labels=None,
+    fig=None,
+    ax=None,
+    name="force_contribution_magnitude_vs_strain.pdf",
+    add_std=True,
+    std_alpha=0.2,
+    show=False,
+    save=True,
+    use_tqdm=False,
+    **kwargs,
+):
+    """
+    Plot average element-force-contribution magnitude vs strain from VTU files.
+
+    vtu_sources can be:
+    - path to simulation folder (with collection.pvd or data/*.vtu)
+    - path to .pvd
+    - list of .vtu paths (single curve)
+    - list of the above (multiple curves)
+    """
+
+    if isinstance(vtu_sources, (str, Path)):
+        sources = [vtu_sources]
+    elif (
+        isinstance(vtu_sources, (list, tuple, np.ndarray))
+        and len(vtu_sources) > 0
+        and all(str(item).endswith(".vtu") for item in vtu_sources)
+    ):
+        sources = [list(vtu_sources)]
+    else:
+        sources = list(vtu_sources)
+
+    if labels is None:
+        labels = []
+        for src in sources:
+            if isinstance(src, (list, tuple, np.ndarray)):
+                src0 = Path(src[0]) if len(src) > 0 else Path("series")
+                labels.append(src0.parent.parent.name if src0.parent.name == "data" else src0.parent.name)
+            else:
+                labels.append(Path(src).stem)
+
+    if len(labels) != len(sources):
+        raise ValueError("Length of labels must match number of VTU source series.")
+
+    if fig is None or ax is None:
+        assert fig is None and ax is None
+        fig, ax = plt.subplots()
+
+    for source, label in zip(sources, labels):
+        strain, mean_mag, std_mag = extract_force_contribution_magnitude_series(
+            source, use_tqdm=use_tqdm
+        )
+        line = ax.plot(strain, mean_mag, label=label, **kwargs)[0]
+        if add_std:
+            ax.fill_between(
+                strain,
+                np.clip(mean_mag - std_mag, 0, None),
+                mean_mag + std_mag,
+                color=line.get_color(),
+                alpha=std_alpha,
+                linewidth=0,
+                label="_nolegend_",
+            )
+
+    ax.set_xlabel(r"Strain $\gamma$")
+    ax.set_ylabel(r"$\langle |F_{ei}| \rangle$")
+    ax.legend(loc="best")
+
+    if save:
+        output_path = Path(name)
+        if output_path.suffix == "":
+            output_path = output_path.with_suffix(".pdf")
+        if not output_path.is_absolute():
+            base = sources[0][0] if isinstance(sources[0], (list, tuple, np.ndarray)) else sources[0]
+            base_path = Path(base)
+            if base_path.is_file():
+                output_path = base_path.parent / output_path
+            else:
+                output_path = base_path / output_path
+        fig.tight_layout()
+        fig.savefig(output_path)
+        print(f'Plot saved at: "{output_path}"')
+
+    if show:
+        plt.show()
+    return fig, ax
 
 
 def addImagesToPlot(

@@ -7,7 +7,6 @@ import sys
 import platform
 import glob
 import re
-import shlex
 
 
 # Add Management to sys.path (used to import files)
@@ -22,7 +21,6 @@ class SimulationManager:
         configObj,
         outputPath=None,
         debugBuild=False,
-        usePGO=True,
         useProfiling=False,
         overwriteData=False,
         taskName=None,
@@ -44,42 +42,21 @@ class SimulationManager:
         self.debugBuild = debugBuild
         self.release_build_folder = "build-release/"
         self.profile_build_folder = "build/"
-        self.pgo_gen_build_folder = "build-pgo-gen/"
-        self.pgo_use_build_folder = "build-pgo-use/"
-        self.usePGO = usePGO and not debugBuild and not useProfiling
-
-        if self.debugBuild:
-            self.build_folder = self.profile_build_folder
-        elif self.usePGO:
-            self.build_folder = self.pgo_use_build_folder
-        else:
-            self.build_folder = self.release_build_folder
+        self.build_folder = (
+            self.profile_build_folder if debugBuild else self.release_build_folder
+        )
         run_command(f"mkdir -p {self.build_folder}")
         # Build path
         self.build_path = os.path.join(self.project_path, self.build_folder)
-        self.pgo_dir = os.path.join(
-            self.project_path, self.pgo_gen_build_folder, "pgo"
-        )
-        self.pgo_profraw = os.path.join(self.pgo_dir, "default.profraw")
-        self.pgo_profdata = os.path.join(self.pgo_dir, "default.profdata")
 
         # I think it is better to always use release
         if self.debugBuild or self.useProfiling:
             build_type = "Debug"
-            self.build_command = (
-                f"cd {self.build_folder} && cmake -DCMAKE_BUILD_TYPE={build_type} .. && make -j4"
-            )
-        elif self.usePGO:
-            build_type = "Release"
-            self.build_command = (
-                f"cd {self.build_folder} && cmake -DCMAKE_BUILD_TYPE={build_type} "
-                f"-DPGO_MODE=USE -DPGO_DIR={shlex.quote(self.pgo_dir)} .. && make -j4"
-            )
         else:
             build_type = "Release"
-            self.build_command = (
-                f"cd {self.build_folder} && cmake -DCMAKE_BUILD_TYPE={build_type} .. && make -j4"
-            )
+        self.build_command = (
+            f"cd {self.build_folder} && cmake -DCMAKE_BUILD_TYPE={build_type} .. && make -j4"
+        )
 
         # Program path
         self.program_path = self.build_path + "MTS2D"
@@ -91,97 +68,6 @@ class SimulationManager:
         self.simulation_command = f"{self.program_path} -c {self.conf_file} -o {self.outputPath} {' -r' if overwriteData else ''}"
         if self.useProfiling and platform.system() == "Linux":
             self.simulation_command = f"LD_PRELOAD=/usr/lib/gcc/x86_64-linux-gnu/7/libasan.so valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes {self.simulation_command}"
-
-    def clearPGO(self, removeBuilds=False):
-        """Delete generated PGO profile data (and optionally build folders)."""
-        if os.path.exists(self.pgo_dir):
-            shutil.rmtree(self.pgo_dir)
-            print(f"Removed PGO profile data: {self.pgo_dir}")
-        else:
-            print(f"PGO profile data does not exist: {self.pgo_dir}")
-
-        if removeBuilds:
-            for build_dir in [self.pgo_gen_build_folder, self.pgo_use_build_folder]:
-                build_dir_path = os.path.join(self.project_path, build_dir)
-                if os.path.exists(build_dir_path):
-                    shutil.rmtree(build_dir_path)
-                    print(f"Removed PGO build directory: {build_dir_path}")
-
-    def _find_llvm_profdata(self):
-        if platform.system() == "Darwin":
-            try:
-                result = subprocess.check_output(
-                    ["xcrun", "-f", "llvm-profdata"],
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                ).strip()
-                if result:
-                    return result
-            except Exception:
-                pass
-        return shutil.which("llvm-profdata")
-
-    def _merge_profraw(self, moduleCommand=None):
-        if not os.path.isfile(self.pgo_profraw):
-            return False
-        profdata_tool = self._find_llvm_profdata()
-        if not profdata_tool:
-            print("llvm-profdata not found; cannot merge PGO profraw.")
-            return False
-        cmd = (
-            f"{shlex.quote(profdata_tool)} merge -output={shlex.quote(self.pgo_profdata)} "
-            f"{shlex.quote(self.pgo_profraw)}"
-        )
-        if moduleCommand:
-            cmd = moduleCommand + cmd
-        run_command(cmd, taskName=self.taskName)
-        return os.path.isfile(self.pgo_profdata)
-
-    def _pgo_profile_ready(self, moduleCommand=None):
-        # Clang: need default.profdata (merge from profraw if needed)
-        if os.path.isfile(self.pgo_profdata):
-            return True
-        if os.path.isfile(self.pgo_profraw):
-            if self._merge_profraw(moduleCommand=moduleCommand):
-                return True
-        # GCC: .gcda files in pgo dir
-        gcda_files = glob.glob(
-            os.path.join(self.pgo_dir, "**", "*.gcda"), recursive=True
-        )
-        return len(gcda_files) > 0
-
-    def _ensure_pgo_profile(self, autoClean=False, moduleCommand=None):
-        if self._pgo_profile_ready(moduleCommand=moduleCommand):
-            return
-
-        print("PGO profile missing; generating profile data...")
-        build_gen_cmd = (
-            f"mkdir -p {self.pgo_gen_build_folder} && "
-            f"cd {self.pgo_gen_build_folder} && "
-            f"cmake -DCMAKE_BUILD_TYPE=Release -DPGO_MODE=GEN .. && make -j4"
-        )
-        if moduleCommand:
-            build_gen_cmd = moduleCommand + build_gen_cmd
-        error = run_command(build_gen_cmd, taskName=self.taskName)
-        if error != 0:
-            if autoClean:
-                Warning("PGO GEN build failed! Attempting to clear PGO and rebuild")
-                self.clearPGO(removeBuilds=True)
-                error = run_command(build_gen_cmd, taskName=self.taskName)
-            if error != 0:
-                raise Exception(f"PGO GEN build error! Error code {error}")
-
-        run_pgo_cmd = f"cd {self.pgo_gen_build_folder} && cmake --build . --target pgo-run"
-        if moduleCommand:
-            run_pgo_cmd = moduleCommand + run_pgo_cmd
-        error = run_command(run_pgo_cmd, taskName=self.taskName)
-        if error != 0:
-            raise Exception(f"PGO training run failed! Error code {error}")
-
-        self._merge_profraw(moduleCommand=moduleCommand)
-
-        if not self._pgo_profile_ready(moduleCommand=moduleCommand):
-            raise Exception("PGO profiling failed: profile data not found.")
 
     def runSimulation(self, build=True, resumeIfPossible=True, silent=False):
         if self.taskIsRunning():
@@ -478,8 +364,6 @@ class SimulationManager:
         if moduleCommand:
             build_command = moduleCommand + build_command
         print("Building...")
-        if self.usePGO:
-            self._ensure_pgo_profile(autoClean=autoClean, moduleCommand=moduleCommand)
         error = run_command(build_command, taskName=self.taskName)
         if error != 0:
             if autoClean:

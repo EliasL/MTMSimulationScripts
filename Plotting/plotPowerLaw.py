@@ -8,8 +8,9 @@ from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law
 from powerlaw import Distribution
-from Management.updateCSV import update_df_header
-from .makePlots import safePath, maybe_avg
+from Management.updateCSV import update_df_header, read_macrodata_csv
+from .makePlots import safePath, maybe_avg, energy_drop_label
+from .dataFunctions import get_metadata
 import os
 import glob
 import tempfile
@@ -24,6 +25,18 @@ OUTPUTTYPE = ".png"
 os.makedirs(PLOTPATH, exist_ok=True)
 os.makedirs(PLOTPATH + "debug/", exist_ok=True)
 MINIMIZER_COLORS = {"L-BFGS": "#56BD94", "CG": "#9456BD", "FIRE": "#BD9456"}
+
+
+def _make_json_serializable(value):
+    if isinstance(value, np.ndarray):
+        return [_make_json_serializable(v) for v in value.tolist()]
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {k: _make_json_serializable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_make_json_serializable(v) for v in value]
+    return value
 
 
 def _resolve_fast_xmin(fast_xmin=None, fit=None, fits=None):
@@ -46,6 +59,29 @@ def ks_tag(*, fast_xmin=None, fit=None, fits=None, lower=False):
     return "SKS" if use_fast else "KS"
 
 
+def get_lowest_distance_xmin(xmin_results):
+    if not xmin_results:
+        return None
+
+    xmins = np.asarray(xmin_results.get("xmins", []), dtype=float)
+    distances = np.asarray(xmin_results.get("distances", []), dtype=float)
+    if xmins.size == 0 or distances.size == 0 or xmins.shape != distances.shape:
+        return None
+
+    mask = np.isfinite(xmins) & np.isfinite(distances) & (xmins > 0)
+    valid_fits = xmin_results.get("valid_fits", None)
+    if valid_fits is not None:
+        valid_fits = np.asarray(valid_fits, dtype=bool)
+        if valid_fits.shape == mask.shape:
+            mask &= valid_fits
+    if not np.any(mask):
+        return None
+
+    masked_indices = np.flatnonzero(mask)
+    best_idx = masked_indices[int(np.argmin(distances[mask]))]
+    return float(xmins[best_idx])
+
+
 def _append_sample_suffix(name, n_samples):
     if n_samples is None:
         return name
@@ -54,6 +90,119 @@ def _append_sample_suffix(name, n_samples):
     except (TypeError, ValueError):
         return name
     return f"{name}_n{n_int}"
+
+
+def strip_seed_from_label(label):
+    if label is None:
+        return ""
+    tokens = [tok.strip() for tok in str(label).split(",") if tok.strip()]
+    tokens = [token for token in tokens if not token.startswith("seed=")]
+    return ", ".join(tokens)
+
+
+def pretty_variant_label(label):
+    if label is None:
+        return ""
+
+    tokens = [tok.strip() for tok in str(label).split(",") if tok.strip()]
+    pretty_tokens = []
+    for token in tokens:
+        if token.startswith("seed=") or token.startswith("s="):
+            continue
+        if token.startswith("loadIncrement="):
+            value = token.split("=", 1)[1]
+            pretty_tokens.append(rf"$\delta \gamma$: {value}")
+            continue
+        if token.startswith("reconnectionMethod="):
+            value = token.split("=", 1)[1]
+            pretty_tokens.append(f"re.met: {value}")
+            continue
+        pretty_tokens.append(token)
+
+    return ", ".join(pretty_tokens)
+
+
+def fit_equation_label(dist_name):
+    if dist_name == "truncated_power_law":
+        return r"Fit: $p(x) = x^{-\alpha} e^{-\lambda x}$"
+    if dist_name == "power_law":
+        return r"Fit: $p(x) = x^{-\alpha}$"
+    return f"Fit: {pretty_text(dist_name, addEquation=False)}"
+
+
+def fit_parameter_label(dist):
+    parameter_names = list(getattr(dist, "parameter_names", []))
+    if not parameter_names:
+        return ""
+
+    symbol_map = {
+        "alpha": r"\alpha",
+        "Lambda": r"\lambda",
+        "mu": r"\mu",
+        "sigma": r"\sigma",
+        "beta": r"\beta",
+    }
+    fixed_point_params = {"alpha", "mu", "sigma", "beta"}
+    parts = []
+    for name in parameter_names:
+        value = getattr(dist, name, np.nan)
+        if not np.isfinite(value):
+            continue
+        symbol = symbol_map.get(name, name)
+        if name in fixed_point_params:
+            parts.append(rf"{symbol}={value:.2f}")
+        else:
+            parts.append(rf"{symbol}={value:.2e}")
+
+    if not parts:
+        return ""
+    return "$" + ", ".join(parts) + "$"
+
+
+def _count_fit_drops(fit):
+    data = _clean_positive_data(fit.data_original)
+    return int(np.count_nonzero(data >= fit.xmin))
+
+
+def _format_drop_count(nr_drops):
+    if nr_drops < 1e4:
+        return str(int(nr_drops))
+    return f"{float(nr_drops):.1e}"
+
+
+def compare_legend_label(label, fit, nr_samples=None, nr_drops=None):
+    dist = dist_from_fit(fit)
+    variant_label = pretty_variant_label(label)
+    params = fit_parameter_label(dist)
+    stats = []
+    if nr_samples is not None:
+        stats.append(f"S:{int(nr_samples)}")
+    if nr_drops is not None:
+        stats.append(f"D:{float(nr_drops):.1e}")
+    stats_label = ", ".join(stats)
+
+    parts = [part for part in [variant_label, stats_label, params] if part]
+    if parts:
+        return "; ".join(parts)
+    return pretty_text(dist.name, addEquation=False)
+
+
+def _make_fit_x_grid(data, xmin=None, num=256):
+    data = np.asarray(data, dtype=float)
+    data = data[np.isfinite(data)]
+    data = data[data > 0]
+    if data.size == 0:
+        return np.asarray([], dtype=float)
+
+    x_max = float(np.max(data))
+    x_min = float(np.min(data)) if xmin is None else float(xmin)
+    if not np.isfinite(x_min) or not np.isfinite(x_max) or x_min <= 0 or x_max <= 0:
+        return np.asarray([], dtype=float)
+    if x_max < x_min:
+        return np.asarray([], dtype=float)
+    if np.isclose(x_min, x_max):
+        return np.asarray([x_min], dtype=float)
+    return np.logspace(np.log10(x_min), np.log10(x_max), num=num)
 
 
 # def ax.figure -> mpl.figure.Figure:
@@ -96,26 +245,96 @@ def get_minimizer(df):
 
 
 def get_system_size(csvPaths):
-    import re
-
     sizes = set()
     for path in csvPaths:
-        match = re.search(r"(\d+)x(\d+)", str(path))
-        if match:
-            n1, n2 = match.groups()
-            if n1 != n2:
-                return -1
-            else:
-                sizes.add(int(n1))
-        else:
+        meta = get_metadata(path)
+        L = meta.get("L")
+        if L is None:
+            dims = meta.get("dims") or meta.get("N")
+            if dims:
+                n1, n2 = dims
+                if n1 != n2:
+                    return -1
+                L = n1
+        if L is None:
             print("Not able to find system size")
-            re
+            continue
+        sizes.add(int(L))
     if len(sizes) > 1:
         print("More than one size!")
         return -1
     else:
         return sizes.pop()
 
+
+def _resolve_drop_label(info=None, *, energy_type=None, stress_corrected=False, averageEnergy=None):
+    if info is not None and "drop_label" in info:
+        return info["drop_label"]
+    return energy_drop_label(
+        energy_type=energy_type,
+        stress_corrected=stress_corrected,
+        use_avg=averageEnergy,
+    )
+
+
+def _infer_energy_column(df, averageEnergy=False):
+    if averageEnergy is True:
+        candidates = ["avg_energy"]
+    elif averageEnergy is False:
+        candidates = ["total_energy", "energy"]
+    elif averageEnergy is None:
+        candidates = ["total_energy", "avg_energy", "energy"]
+    for col in candidates:
+        if col in df:
+            return col
+    raise KeyError("No energy column found")
+
+
+def _infer_sigma_column(df):
+    sigma_col="avg_sigma12"
+    P_col="avg_P12"
+    if sigma_col in df:
+        if not np.all(df[sigma_col]==0):
+            return sigma_col
+    if P_col in df:
+        print("Warning: Using Piola-Kirchhoff stress instead of Cauchy stress!")
+        return P_col
+    raise KeyError("No stress column found")
+
+
+def _is_piola_sigma_column(sigma_col):
+    return str(sigma_col).endswith("P12")
+
+
+def _stress_corrected_drop_label(use_piola=False, use_avg=None):
+    symbol = "E_{SP}" if use_piola else "E_S"
+    return maybe_avg(symbol, use_avg)
+
+
+def _get_volume_from_meta(meta):
+    if "L" in meta and meta["L"]:
+        L = int(meta["L"])
+        return float(L * L)
+    dims = meta.get("dims") or meta.get("N")
+    if dims:
+        n1, n2 = dims
+        return float(n1 * n2)
+    return None
+
+
+def get_elastic_mu(report=False):
+    mu, _ = ContiEnergy.moduli_at_F(np.eye(2))
+    mu = float(np.asarray(mu, dtype=float).reshape(-1)[0])
+    if report:
+        print(f"Using mu: {mu:.2f}")
+    return mu
+
+def get_mu(df):
+    sigma_col = _infer_sigma_column(df)
+    sigma = df[sigma_col]
+    delta_gamma = np.diff(df["load"])
+    mu = np.diff(sigma)/delta_gamma
+    return mu
 
 def _resolve_strain_lim(strainLim, *, df, postRegime):
     """
@@ -143,6 +362,7 @@ def get_energy_drops(
     postRegime=True,
     energy_type="e_change_from_init",
     averageEnergy=False,
+    stress_corrected=True,
 ):
     """
     Strain energy drop data from CSV, filter by strain limits, and return drops.
@@ -165,13 +385,22 @@ def get_energy_drops(
         prefix = "avg_" if averageEnergy else "total_"
     # energyType = "e_change_from_init"
     # energyType = "energy_change"
-    energy_key = prefix + energy_type
+    energy_type_key = energy_type
+    if isinstance(energy_type, str) and energy_type.lower() in {
+        "inter-strain",
+        "inter_strain",
+        "interstrain",
+    }:
+        energy_type_key = "energy_change"
+    energy_key = prefix + energy_type_key
+    drop_label = None
+    used_piola_stress = False
+    use_average_label = averageEnergy
 
     for singlePath in csvPaths:
         resolved_strain_lim = strainLim
         if read_from_paths:
-            df_local = pd.read_csv(singlePath)
-            df_local = update_df_header(df_local, L=L)
+            df_local = read_macrodata_csv(singlePath, L=L)
             dfs.append(df_local)
         else:
             df_local = df
@@ -180,35 +409,92 @@ def get_energy_drops(
                 resolved_strain_lim, df=df_local, postRegime=postRegime
             )
 
-        diffs = df_local[energy_key]
+        energy_col = None
+        signed_step_change = None
+        if stress_corrected:
+            meta = get_metadata(singlePath)
+            V = _get_volume_from_meta(meta)
+            if V is None:
+                raise ValueError(f"Could not infer system size from {singlePath}")
+            delta_gamma = np.diff(df_local["load"])
+            sigma_col = _infer_sigma_column(df_local)
+            used_piola_stress = used_piola_stress or _is_piola_sigma_column(sigma_col)
+            energy_col = _infer_energy_column(df_local, averageEnergy)
+            energy = df_local[energy_col]
+            sigma = df_local[sigma_col]
+            use_average = averageEnergy
+            if use_average is None:
+                use_average = energy_col.startswith("avg_")
+            if use_average_label is None:
+                use_average_label = use_average
+            energy_total = energy * V if use_average else energy
+            energy_total_arr = np.asarray(energy_total, dtype=float)
+            sigma_arr = np.asarray(sigma, dtype=float)
+            step_drop = energy_total_arr[:-1] - energy_total_arr[1:]+ V * sigma_arr[:-1] * delta_gamma
+            if use_average:
+                step_drop = step_drop / V
+            signed_step_change = np.zeros(len(energy_total_arr), dtype=float)
+            # Convention: drops are negative in signed_step_change.
+            signed_step_change[1:] = -step_drop
+            signed_step_change[0] = 0.0
+            energy_key = (
+                "avg_stress_corrected_energy_drop"
+                if use_average
+                else "total_stress_corrected_energy_drop"
+            )
+        else:
+            signed_step_change = np.asarray(df_local[energy_key], dtype=float)
+            if drop_label is None:
+                drop_label = energy_drop_label(
+                    energy_type=energy_type,
+                    stress_corrected=False,
+                    use_avg=averageEnergy,
+                )
 
-        if np.all(diffs >= 0):
+        signed_step_change = np.asarray(signed_step_change, dtype=float)
+
+        if np.all(signed_step_change >= 0):
             # Umut code compatability: I'm just assuming if all the drops are positive
             # they should probably be flipped.
-            diffs = -diffs
+            signed_step_change = -signed_step_change
 
         strain = df_local["load"]
 
         # The first minimization always has a unaturally large jump
         # set the diff at load step 1 = 0
         if "load_step" in df_local and df_local["load_step"].iloc[0] == 1:
-            diffs.iloc[0] = 0
+            signed_step_change[0] = 0
 
         lim_mask = (strain > resolved_strain_lim[0]) & (strain < resolved_strain_lim[1])
-        drop_mask = diffs < 0
+        drop_mask = signed_step_change < 0
         mask = drop_mask & lim_mask
 
         if onlyStrainedEnergyDrops:
             # We use a negative change between relaxed states as a proxy to
             # distinguish affine relaxation from plastic relaxation.
-            realPlasticDrop = df_local["nr_elements_with_m3_fix_change"] >= 1
+            realPlasticDrop = (
+                df_local["nr_elements_with_m3_fix_change"] >= 1
+            )
             mask = mask & realPlasticDrop
 
-        drops.extend(-diffs[mask])
+        drops.extend(-signed_step_change[mask])
         masks.append(mask)
 
     drops = np.array(drops)
     concat_df = pd.concat(dfs, ignore_index=True) if read_from_paths else df
+
+    if drop_label is None:
+        if stress_corrected:
+            drop_label = _stress_corrected_drop_label(
+                use_piola=used_piola_stress,
+                use_avg=use_average_label,
+            )
+        else:
+            drop_label = energy_drop_label(
+                energy_type=energy_type,
+                stress_corrected=stress_corrected,
+                use_avg=averageEnergy,
+            )
 
     data_info = get_energy_drops_info(
         csvPaths=csvPaths,
@@ -218,6 +504,7 @@ def get_energy_drops(
         strainLim=resolved_strain_lim,
         label=label,
         masks=masks,
+        drop_label=drop_label,
     )
 
     if debug:
@@ -226,8 +513,11 @@ def get_energy_drops(
             return drops, data_info
 
         strain_limited = strain[1:][lim_mask[1:]]
-        plotDrops = np.clip(-diffs[1:][lim_mask[1:]], 0, np.inf)
-        e = df_local[energy_key]
+        plotDrops = np.clip(-signed_step_change[1:][lim_mask[1:]], 0, np.inf)
+        if stress_corrected:
+            e = df_local[energy_col]
+        else:
+            e = df_local[energy_key]
         debug_fig, ax1 = plt.subplots()
         avg_label = maybe_avg("E", averageEnergy)
         ax1.plot(strain, e, label=rf"${avg_label}$")
@@ -235,15 +525,14 @@ def get_energy_drops(
         ax1.set_xlabel(r"$\gamma$")
         ax2 = ax1.twinx()
         ax2.plot([])  # advance color cycle
-        if averageEnergy:
-            pre_post = maybe_avg("E_{\\mathrm{pre}-E_{\\mathrm{post}}}", True)
-            label = rf"$- {pre_post}$"
-        else:
-            delta_e = maybe_avg("E", False)
-            label = rf"$-\Delta {delta_e}$"
+        drop_label_local = drop_label or energy_drop_label(
+            energy_type=energy_type,
+            stress_corrected=stress_corrected,
+            use_avg=averageEnergy,
+        )
+        label = rf"$-\Delta {drop_label_local}$"
         ax2.plot(strain_limited, plotDrops, label=label)
-        avg_delta = maybe_avg("E", averageEnergy)
-        ax2.set_ylabel(rf"$-\Delta {avg_delta}$ (Energy Drop)")
+        ax2.set_ylabel(rf"$-\Delta {drop_label_local}$ (Energy Drop)")
         lines, labels = ax1.get_legend_handles_labels()
         lines2, labels2 = ax2.get_legend_handles_labels()
         ax2.legend(
@@ -267,7 +556,10 @@ def get_energy_drops(
         zoom_mask = (strain >= x1) & (strain <= x2)
 
         # find energy‐axis extents in that slice
-        y1, y2 = (-diffs[zoom_mask]).min(), (-diffs[zoom_mask]).max()
+        y1, y2 = (
+            (-signed_step_change[zoom_mask]).min(),
+            (-signed_step_change[zoom_mask]).max(),
+        )
         zoomWidth = np.clip(x2 - x1, 0.01, None)
         zoomHeight = y2 - y1
 
@@ -322,6 +614,81 @@ def get_energy_drops(
 
     return drops, data_info
 
+def get_stress_drops(
+    csvPaths,
+    df=None,
+    strainLim: str | list[float] = "auto",
+    label=None,
+    postRegime=True
+):
+    """
+    Stress drops defined as
+        Δσ = σ_n − σ_{n+1} + μ δγ
+    keeping only positive drops inside the requested strain window.
+    """
+    if isinstance(csvPaths, str):
+        csvPaths = [csvPaths]
+
+    drops = []
+    masks = []
+    dfs = []
+    L = get_system_size(csvPaths)
+    read_from_paths = df is None
+    mu = get_elastic_mu(report=False)
+
+    for singlePath in csvPaths:
+        resolved_strain_lim = strainLim
+        if read_from_paths:
+            df_local = read_macrodata_csv(singlePath, L=L)
+            dfs.append(df_local)
+        else:
+            df_local = df
+
+        if resolved_strain_lim in ("auto", "all", None):
+            resolved_strain_lim = _resolve_strain_lim(
+                strainLim, df=df_local, postRegime=postRegime
+            )
+
+        sigma_col = _infer_sigma_column(df_local)
+        sigma_arr = np.asarray(df_local[sigma_col], dtype=float)
+        load_arr = np.asarray(df_local["load"], dtype=float)
+        delta_gamma_arr = np.diff(load_arr)
+        if delta_gamma_arr.ndim == 0:
+            delta_gamma_arr = np.full(len(df_local) - 1, float(delta_gamma_arr))
+        elif delta_gamma_arr.ndim != 1 or delta_gamma_arr.size != len(df_local) - 1:
+            raise ValueError(
+                f"loadIncrement for {singlePath} must be scalar or have "
+                f"length len(df)-1={len(df_local) - 1}, got shape {delta_gamma_arr.shape}."
+            )
+
+        stress_drop = sigma_arr[:-1] - sigma_arr[1:] + mu * delta_gamma_arr
+        strain = load_arr[1:]
+        mask = (
+            (stress_drop > 0)
+            & (strain > resolved_strain_lim[0])
+            & (strain < resolved_strain_lim[1])
+        )
+
+        drops.extend(stress_drop[mask])
+        full_mask = np.zeros(len(df_local), dtype=bool)
+        full_mask[1:] = mask
+        masks.append(full_mask)
+
+    drops = np.asarray(drops, dtype=float)
+    concat_df = pd.concat(dfs, ignore_index=True) if read_from_paths else df
+    data_info = get_energy_drops_info(
+        csvPaths=csvPaths,
+        drops=drops,
+        energy_key="stress_drop",
+        df=concat_df,
+        strainLim=resolved_strain_lim,
+        label=label,
+        masks=masks,
+        drop_label=r"\sigma",
+    )
+    data_info["mu"] = float(mu)
+    return drops, data_info
+
 
 def get_energy_drops_info(
     csvPaths,
@@ -332,6 +699,7 @@ def get_energy_drops_info(
     strainLim=None,
     label=None,
     masks=None,
+    drop_label=None,
 ):
     """
     Collect metadata for energy-drop data without recomputing the drops.
@@ -352,6 +720,8 @@ def get_energy_drops_info(
         info["label"] = label
     if masks is not None:
         info["masks"] = masks
+    if drop_label is not None:
+        info["drop_label"] = drop_label
     if df is not None and masks:
         if isinstance(masks, (list, tuple)):
             if len(masks) == 1:
@@ -411,6 +781,98 @@ def getHist(data, weights=None, density=True, bins_per_decade=5):
     return bin_centers, hist_vals
 
 
+def _clean_positive_data(data):
+    data = np.asarray(data)
+    data = data[np.isfinite(data)]
+    data = data[data > 0]
+    if data.size == 0:
+        return data
+    return np.sort(data)
+
+
+def _drop_quantity_label(drop_label):
+    if drop_label == r"\sigma":
+        return r"\Delta \sigma"
+    return rf"-\Delta {drop_label}"
+
+
+def _drop_quantity_name(drop_label):
+    if drop_label == r"\sigma":
+        return "Stress Drop"
+    return "Energy Drop"
+
+
+def _set_distribution_axes(
+    ax,
+    *,
+    drop_label=None,
+    y_mode="pdf",
+    title=None,
+    set_title=False,
+    show_legend=True,
+):
+    if drop_label is None:
+        drop_label = maybe_avg("E")
+    quantity_label = _drop_quantity_label(drop_label)
+    quantity_name = _drop_quantity_name(drop_label)
+
+    ax.set_xscale("log")
+    ax.set_xlabel(rf"${quantity_label}$ ({quantity_name})")
+
+    if y_mode == "pdf":
+        ax.set_yscale("log")
+        ax.set_ylabel(rf"$p({quantity_label})$")
+    elif y_mode == "ccdf":
+        ax.set_yscale("log")
+        ax.set_ylabel(r"$P(X > x)$")
+    elif y_mode == "cdf":
+        ax.set_ylabel(r"$P(X \leq x)$")
+    else:
+        raise ValueError(f"Unknown y_mode: {y_mode}")
+
+    if set_title:
+        ax.set_title("" if title is None else title)
+    if show_legend:
+        ax.legend()
+    return ax
+
+
+def _get_fit_curve_data(fit: Fit, *, use_ccdf=True, x_grid_mode="data", xmin_only=False):
+    dist = dist_from_fit(fit)
+
+    data = _clean_positive_data(fit.data_original)
+    if data.size == 0:
+        return dist, np.array([]), np.array([])
+
+    tail_frac = float((data >= fit.xmin).mean())
+
+    if x_grid_mode == "data":
+        x_vals = np.unique(data)
+    elif x_grid_mode == "smooth":
+        x_vals = _make_fit_x_grid(data, xmin=fit.xmin if xmin_only else None)
+    else:
+        raise ValueError(f"Unknown x_grid_mode: {x_grid_mode}")
+
+    x_vals = x_vals[x_vals > 0]
+    if xmin_only:
+        x_vals = x_vals[x_vals >= fit.xmin]
+    if x_vals.size == 0:
+        return dist, np.array([]), np.array([])
+
+    if use_ccdf is None:
+        f = dist._pdf_base_function(x_vals)
+        C = dist._pdf_continuous_normalizer
+        y_vals = f * C * tail_frac
+    else:
+        model_ccdf = dist.ccdf(x_vals)
+        if use_ccdf:
+            y_vals = model_ccdf * tail_frac
+        else:
+            y_vals = 1.0 - model_ccdf * tail_frac
+
+    return dist, x_vals, y_vals
+
+
 def plot_data_pdf(
     ax,
     data,
@@ -418,6 +880,8 @@ def plot_data_pdf(
     edgecolor="black",
     alpha=1,
     color=None,
+    drop_label=None,
+    show_legend=True,
 ):
     """
     Plot the empirical PDF of the data on log–log axes using logarithmic bins.
@@ -425,8 +889,7 @@ def plot_data_pdf(
     If `fit` is provided and `data` is None, use `fit.data_original`.
     """
 
-    data = np.asarray(data)
-    data = data[np.isfinite(data) & (data > 0)]
+    data = _clean_positive_data(data)
     if data.size == 0:
         return
 
@@ -458,12 +921,12 @@ def plot_data_pdf(
         **plot_kwargs,
     )
 
-    # Set log–log axes
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
-    ax.set_ylabel(rf"$p(-\Delta {maybe_avg('E')})$")
-    ax.legend()
+    _set_distribution_axes(
+        ax,
+        drop_label=drop_label,
+        y_mode="pdf",
+        show_legend=show_legend,
+    )
 
 
 def plot_data_cdf(
@@ -473,10 +936,10 @@ def plot_data_cdf(
     color=None,
     alpha=1,
     use_ccdf=True,
+    drop_label=None,
+    show_legend=True,
 ):
-    data = np.asarray(data)
-    data = data[np.isfinite(data)]
-    data = data[data > 0]
+    data = _clean_positive_data(data)
     if data.size == 0:
         return
 
@@ -506,12 +969,12 @@ def plot_data_cdf(
 
     ax.step(sorted_data, y_vals, **plot_kwargs)
 
-    ax.set_xscale("log")
-    if use_ccdf:
-        ax.set_yscale("log")
-    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
-    ax.set_ylabel(ylabel)
-    ax.legend()
+    _set_distribution_axes(
+        ax,
+        drop_label=drop_label,
+        y_mode="ccdf" if use_ccdf else "cdf",
+        show_legend=show_legend,
+    )
 
 
 def plot_ks_distance_marker(
@@ -558,48 +1021,53 @@ def plot_fit_pdf(
     linestyle="-",
     pre_label=None,
     add_ks_marker=False,
+    drop_label=None,
+    label=None,
+    show_legend=True,
+    set_title=True,
+    x_grid_mode="data",
+    xmin_only=False,
+    linewidth=None,
 ):
-    dist = dist_from_fit(fit)
+    dist, bins_for_model, likelihoods = _get_fit_curve_data(
+        fit,
+        use_ccdf=None,
+        x_grid_mode=x_grid_mode,
+        xmin_only=xmin_only,
+    )
+    if bins_for_model.size == 0:
+        return ax
 
-    # Work on a copy to avoid mutating fit.data_original in-place
-    data = np.asarray(fit.data_original).copy()
-    data.sort()
+    if label is None:
+        label = (pre_label or "") + pretty_text(dist.name)
 
-    # Fraction of samples in the fitted tail; used to scale the tail PDF to the
-    # full-data density (to visually align with the empirical PDF computed on all data).
-    tail_frac = float((data >= fit.xmin).mean())
-
-    # Evaluate the model on a monotone x-grid. Using unique values avoids repeated
-    # x-points when aggregating many simulations.
-    bins_for_model = np.unique(data)
-
-    # Guard against non-positive values on log axes.
-    bins_for_model = bins_for_model[bins_for_model > 0]
-
-    # Evaluate the fitted PDF at the plotting grid (NOT at the full, duplicated data).
-    f = dist._pdf_base_function(bins_for_model)
-    C = dist._pdf_continuous_normalizer
-    likelihoods = f * C * tail_frac
+    plot_kwargs = {
+        "label": label,
+        "color": color,
+        "alpha": alpha,
+        "linestyle": linestyle,
+    }
+    if linewidth is not None:
+        plot_kwargs["linewidth"] = linewidth
 
     ax.plot(
         bins_for_model,
         likelihoods,
-        label=(pre_label or "") + pretty_text(dist.name),
-        color=color,
-        alpha=alpha,
-        linestyle=linestyle,
+        **plot_kwargs,
     )
     if add_ks_marker:
         annotate_ks_distance_pdf(
             ax, fit.xmin_fitting_results["xmins"][dist.D_i], dist.D, fit=fit
         )
 
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
-    ax.set_ylabel(rf"$p(-\Delta {maybe_avg('E')})$")
-    ax.set_title(title)
-    ax.legend()
+    _set_distribution_axes(
+        ax,
+        drop_label=drop_label,
+        y_mode="pdf",
+        title=title,
+        set_title=set_title,
+        show_legend=show_legend,
+    )
     return ax
 
 
@@ -612,47 +1080,49 @@ def plot_fit_cdf(
     linestyle="-",
     pre_label=None,
     use_ccdf=True,
+    drop_label=None,
+    label=None,
+    show_legend=True,
+    set_title=True,
+    x_grid_mode="data",
+    xmin_only=True,
+    linewidth=None,
 ):
-    dist = dist_from_fit(fit)
-
-    data = np.asarray(fit.data_original).copy()
-    data = data[np.isfinite(data)]
-    data = data[data > 0]
-    if data.size == 0:
-        return ax
-    data.sort()
-
-    tail_frac = float((data >= fit.xmin).mean())
-    bins_for_model = np.unique(data)
-    bins_for_model = bins_for_model[bins_for_model > 0]
-    bins_for_model = bins_for_model[bins_for_model >= fit.xmin]
+    dist, bins_for_model, y_vals = _get_fit_curve_data(
+        fit,
+        use_ccdf=use_ccdf,
+        x_grid_mode=x_grid_mode,
+        xmin_only=xmin_only,
+    )
     if bins_for_model.size == 0:
         return ax
 
-    model_ccdf = dist.ccdf(bins_for_model)
-    if use_ccdf:
-        y_vals = model_ccdf * tail_frac
-        ylabel = r"$P(X > x)$"
-    else:
-        y_vals = 1.0 - model_ccdf * tail_frac
-        ylabel = r"$P(X \leq x)$"
+    if label is None:
+        label = (pre_label or "") + pretty_text(dist.name)
+
+    plot_kwargs = {
+        "label": label,
+        "color": color,
+        "alpha": alpha,
+        "linestyle": linestyle,
+    }
+    if linewidth is not None:
+        plot_kwargs["linewidth"] = linewidth
 
     ax.plot(
         bins_for_model,
         y_vals,
-        label=(pre_label or "") + pretty_text(dist.name),
-        color=color,
-        alpha=alpha,
-        linestyle=linestyle,
+        **plot_kwargs,
     )
 
-    ax.set_xscale("log")
-    if use_ccdf:
-        ax.set_yscale("log")
-    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$ (Energy Drop)")
-    ax.set_ylabel(ylabel)
-    ax.set_title(title)
-    ax.legend()
+    _set_distribution_axes(
+        ax,
+        drop_label=drop_label,
+        y_mode="ccdf" if use_ccdf else "cdf",
+        title=title,
+        set_title=set_title,
+        show_legend=show_legend,
+    )
     return ax
 
 
@@ -689,8 +1159,7 @@ def findPrePostSplit(csvPath="", df=None):
     # Return strain value where the stress is the largest
     # Uses P12 (off diagonal of first piola kirchhoff stress)
     if df is None:
-        df = pd.read_csv(csvPath)
-        df = update_df_header(df, L=get_system_size([csvPath]))
+        df = read_macrodata_csv(csvPath, L=get_system_size([csvPath]))
     if "avg_P12" in df:
         i = df["avg_P12"].argmax()
     elif "avg_sigma12" in df:
@@ -710,8 +1179,7 @@ def get_drops_in_windows(
     label=None,
 ):
     if df is None:
-        df = pd.read_csv(csvPath)
-        df = update_df_header(df, L=get_system_size([csvPath]))
+        df = read_macrodata_csv(csvPath, L=get_system_size([csvPath]))
 
     strain = df["load"]
     if strainLim is not None:
@@ -770,13 +1238,6 @@ def make_title_from_fit(fit: Fit):
 
 
 def make_title_from_data_info(data_info):
-    def _strip_seed(label):
-        if label is None:
-            return ""
-        tokens = [tok.strip() for tok in str(label).split(",") if tok.strip()]
-        tokens = [t for t in tokens if not t.startswith("seed=")]
-        return ", ".join(tokens)
-
     if "customTitle" in data_info:
         return data_info["customTitle"]
     strainLim = data_info["strainLim"]
@@ -791,17 +1252,16 @@ def make_title_from_data_info(data_info):
     if "label" in data_info:
         l = data_info["label"]
         if isinstance(l, list):
-            normalized = [_strip_seed(item) for item in l]
+            normalized = [strip_seed_from_label(item) for item in l]
             normalized_non_empty = [item for item in normalized if item]
             if normalized_non_empty and len(set(normalized_non_empty)) == 1:
                 title += normalized_non_empty[0]
             else:
-                assert len(set(normalized)) == 1, (
-                    f"Labels in group are different: {set(normalized)}"
-                )  # Which should we use?
+                if(not len(set(normalized)) == 1):
+                    print(f"Labels in group are different: {set(normalized)}")
                 title += normalized[0]
         else:
-            title += _strip_seed(l)
+            title += strip_seed_from_label(l)
     title = title.strip().replace("  ", " ")
     return title
 
@@ -815,6 +1275,17 @@ def make_title(data_info=None, fit: Fit | None = None):
             title += " "
         title += make_title_from_fit(fit)
     return title
+
+
+def make_compare_title_from_data_info(data_info):
+    if "customTitle" in data_info:
+        return data_info["customTitle"]
+    strainLim = data_info["strainLim"]
+    L = data_info["L"]
+    title = rf"{L}x{L} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f}"
+    if data_info["minimizer"] != "Unknown":
+        title = rf"{data_info['minimizer']} " + title
+    return title.strip().replace("  ", " ")
 
 
 def plot_data_and_fit(
@@ -836,17 +1307,32 @@ def plot_data_and_fit(
     else:
         fig = ax.figure
 
+    drop_label = data_info.get("drop_label") if data_info else None
+    fit_drop_count = _count_fit_drops(fit)
+    fit_drop_count_label = _format_drop_count(fit_drop_count)
     if useCDF:
-        plot_data_cdf(ax, fit.data_original, use_ccdf=useCCDF)
+        dist_label = "CCDF" if useCCDF else "CDF"
+        plot_data_cdf(
+            ax,
+            fit.data_original,
+            label=f"{dist_label} of {fit_drop_count_label} drops in fit",
+            use_ccdf=useCCDF,
+            drop_label=drop_label,
+        )
     else:
-        plot_data_pdf(ax, fit.data_original)
+        plot_data_pdf(
+            ax,
+            fit.data_original,
+            label=f"PDF of {fit_drop_count_label} drops in fit",
+            drop_label=drop_label,
+        )
 
     # plot the fit
     if addFit:
         if useCDF:
-            plot_fit_cdf(ax, fit, color=color, use_ccdf=useCCDF)
+            plot_fit_cdf(ax, fit, color=color, use_ccdf=useCCDF, drop_label=drop_label)
         else:
-            plot_fit_pdf(ax, fit, color=color)
+            plot_fit_pdf(ax, fit, color=color, drop_label=drop_label)
 
         # Add shaded fit region with formula in label
         if fit.xmax is None:
@@ -986,7 +1472,8 @@ def plot_ks_distance(
     )
     ax.set_xscale("log")
     # ax.set_yscale("log")
-    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
+    drop_label = _resolve_drop_label(data_info)
+    ax.set_xlabel(rf"${_drop_quantity_label(drop_label)}$")
     ax.set_ylabel(r"$P(X > x)$")
     tag = ks_tag(fast_xmin=fast_xmin)
     title = rf"{tag} Distance $E_{{\mathrm{{min}}}}$={xmin:.2e}" + (
@@ -1173,6 +1660,7 @@ def find_best_xmin(
     use_memmap=True,
     memmap_min_size=5e4,
     memmap_dir=None,
+    selected_xmin=None,
 ):
     """
     We scan many possible xmin values. We try to identify a plateau region
@@ -1276,6 +1764,8 @@ def find_best_xmin(
         title=title,
         xmin_results=xmin_results,
         fast_xmin=fast_xmin,
+        selected_xmin=selected_xmin,
+        ks_xmin=get_lowest_distance_xmin(xmin_results),
     )
     setattr(best_fit, "xmin_plot_path", xmin_plot_path)
 
@@ -1354,13 +1844,14 @@ def plot_plastic_counts(
             postRegime=postRegime,
         )
 
+    drop_label = _resolve_drop_label(info)
     drops = np.asarray(drops)
     valid = np.isfinite(drops) & (drops > 0)
     if not np.any(valid):
         if ax is None:
             fig, ax = plt.subplots()
             ax.set_title("Energy-drop PDF and plasticity vs drop size")
-            ax.set_xlabel(rf"$-\Delta {maybe_avg('W')}$")
+            ax.set_xlabel(rf"$-\Delta {drop_label}$")
             ax.set_ylabel("Density (normalized)")
         return ax
 
@@ -1390,9 +1881,9 @@ def plot_plastic_counts(
     c_plastic_counts = "tab:orange"
 
     # 1) Energy-drop PDF (normalized) on ax1
-    plot_data_pdf(ax, drops)
+    plot_data_pdf(ax, drops, drop_label=drop_label)
     ax.set_title("Energy-drop PDF and plasticity vs drop size")
-    ax.set_xlabel(rf"$-\Delta {maybe_avg('W')}$")
+    ax.set_xlabel(rf"$-\Delta {drop_label}$")
     ax.set_ylabel("Density (normalized)", color=c_drop_pdf)
     ax.tick_params(axis="y", colors=c_drop_pdf)
     ax.spines["left"].set_color(c_drop_pdf)
@@ -1519,8 +2010,9 @@ def plot_plastic_counts_compare(
         print("No data found for plastic count plotting.")
         return None
 
+    drop_label = _resolve_drop_label(info)
     ax.set_xscale("log")
-    ax.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
+    ax.set_xlabel(rf"$-\Delta {drop_label}$")
     ax.set_ylabel("Nr plastic events")
     handles, labels = ax.get_legend_handles_labels()
     if labels:
@@ -1618,8 +2110,7 @@ def plot_plastic_energy_scatter(
         fig = ax.figure
 
     # For scaling model
-    # mu, _ = ContiEnergy.moduli_at_F(np.eye(2))
-    mu = 6.08
+    mu = get_elastic_mu()
 
     label_color_map = {}
     default_cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
@@ -1638,8 +2129,7 @@ def plot_plastic_energy_scatter(
             plot_label = legend_label_for_base.get(base, base)
             used_legend_bases.add(base)
 
-        df = pd.read_csv(path)
-        df = update_df_header(df, L=get_system_size([path]))
+        df = read_macrodata_csv(path, L=get_system_size([path]))
         drops, info = get_energy_drops(
             [path],
             df=df,
@@ -1722,7 +2212,8 @@ def plot_plastic_energy_scatter(
         return None
 
     ax.set_xlabel(r"Nr plastic events$^2$, ($N_p^2$)")
-    ax.set_ylabel(rf"$-\Delta {maybe_avg('E')}$")
+    drop_label = _resolve_drop_label(info)
+    ax.set_ylabel(rf"$-\Delta {drop_label}$")
     ax.legend(loc="best")
     ax.loglog()
     if name:
@@ -1777,6 +2268,7 @@ def make_fit(
     fast_xmin=False,
     xmin_accuracy=1.0,
     parallel_xmin=None,
+    debug=False,
 ) -> Fit:
     """
     This is a wrapper for the Fit function. Finding xmin takes a long
@@ -1833,16 +2325,23 @@ def make_fit(
         try:
             with gzip.open(cache_path + ".gz", "wt", encoding="utf-8") as f:
                 json.dump(
-                    {
+                    _make_json_serializable(
+                        {
                         "xmin": fitObj.xmin,
                         "xmin_fitting_results": fitObj.xmin_fitting_results,
-                    },
+                        }
+                    ),
                     f,
                 )
         except Exception as e:
             # don't fail the computation if saving fails
             print(e)
-
+    if debug:
+        y = fitObj.xmin_fitting_results["distances"]
+        x = fitObj.xmin_fitting_results["xmins"]
+        plt.plot(x, y)
+        plt.xscale("log")
+        plt.show()
     return fitObj
 
 
@@ -1899,7 +2398,14 @@ def get_attribute(label):
 
 
 def plot_fits_over_xmin(
-    fits, best_fit=None, savePath=None, title=None, xmin_results=None, fast_xmin=None
+    fits,
+    best_fit=None,
+    savePath=None,
+    title=None,
+    xmin_results=None,
+    fast_xmin=None,
+    selected_xmin=None,
+    ks_xmin=None,
 ):
     """
     Plot KS p-value and exponent (with std error bars) versus xmin.
@@ -1928,7 +2434,7 @@ def plot_fits_over_xmin(
         linestyle="-",
         linewidth=1.8,
         markersize=5,
-        label=f"{tag} p-value",
+        label="KS-distance / p-value",
         color=c_p,
         elinewidth=1.0,
         capsize=3,
@@ -1945,7 +2451,7 @@ def plot_fits_over_xmin(
         zorder=1,
     )
     ax1.set_xlabel(r"$E_{\mathrm{min}}$")
-    ax1.set_ylabel(f"{tag} p-value", color=c_p)
+    ax1.set_ylabel("KS-distance / p-value", color=c_p)
     ax1.tick_params(axis="y", colors=c_p)
     ax1.spines["left"].set_color(c_p)
     ax1.set_ylim(0, 1)
@@ -1963,18 +2469,6 @@ def plot_fits_over_xmin(
             mask &= valid_fits
         max_xmin_filter = (xmins < np.nanmax(x)) & (np.isfinite(distances))
         if mask.any():
-            # Filtered (optionally-valid) KS minimum
-            x_d = xmins[mask]
-            d = distances[mask]
-            order = np.argsort(x_d)
-            x_d = x_d[order]
-            d = d[order]
-            ks_xmin_filtered = float(x_d[np.argmin(d)])
-
-            # Global KS minimum
-            global_idx = np.argmin(distances[max_xmin_filter])
-            ks_xmin_global = xmins[max_xmin_filter][global_idx]
-
             # KS distance curve (plotted over the range used for the p/alpha curves)
             ax1.plot(
                 xmins[max_xmin_filter],
@@ -1983,80 +2477,9 @@ def plot_fits_over_xmin(
                 linewidth=1.2,
                 color="0.5",
                 alpha=0.7,
-                label=f"{tag} distance",
+                label="KS distance",
                 zorder=0,
             )
-
-            # # Log-derivative of KS distance on a third axis
-            # if np.any(max_xmin_filter):
-            #     x_k = xmins[max_xmin_filter]
-            #     d_k = distances[max_xmin_filter]
-            #     order_k = np.argsort(x_k)
-            #     x_k = x_k[order_k]
-            #     d_k = d_k[order_k]
-            #     if x_k.size >= 2:
-            #         logx = np.log10(x_k)
-            #         dD = np.gradient(d_k, logx)
-            #         ax3 = ax1.twinx()
-            #         ax3.spines["right"].set_position(("axes", 1.15))
-            #         c_dd = "tab:green"
-            #         ax3.plot(
-            #             x_k,
-            #             dD,
-            #             marker="^",
-            #             linestyle=":",
-            #             linewidth=1.2,
-            #             markersize=4,
-            #             label=r"$dD/d\log_{10}(x_{\min})$",
-            #             color=c_dd,
-            #             markerfacecolor="none",
-            #             markeredgecolor=c_dd,
-            #             zorder=1,
-            #         )
-            #         ax3.set_ylabel(r"$dD/d\log_{10}(x_{\min})$", color=c_dd)
-            #         ax3.tick_params(axis="y", colors=c_dd)
-            #         ax3.spines["right"].set_color(c_dd)
-
-            # Only draw both markers if they actually differ.
-            if np.isclose(ks_xmin_filtered, ks_xmin_global, rtol=1e-12, atol=0.0):
-                ax1.axvline(
-                    ks_xmin_global,
-                    color="0.5",
-                    linestyle="-.",
-                    linewidth=1,
-                    label=f"Global {tag} xmin: {ks_xmin_global:.2e}",
-                    zorder=-1,
-                    alpha=0.7,
-                )
-            else:
-                ax1.axvline(
-                    ks_xmin_filtered,
-                    color="0.5",
-                    linestyle="-",
-                    linewidth=1,
-                    label=f"Filtered {tag} xmin: {ks_xmin_filtered:.2e}",
-                    zorder=-1,
-                    alpha=0.7,
-                )
-                ax1.axvline(
-                    ks_xmin_global,
-                    color="0.5",
-                    linestyle="-.",
-                    linewidth=1,
-                    label=f"Global {tag} xmin: {ks_xmin_global:.2e}",
-                    zorder=-1,
-                    alpha=0.7,
-                )
-            if xmin_results.get("plateau_xmin", None):
-                ax1.axvline(
-                    xmin_results["plateau_xmin"],
-                    color="0.5",
-                    linestyle="-.",
-                    linewidth=1,
-                    label=f"Plateau xmin: {xmin_results['plateau_xmin']:.2e}",
-                    zorder=-1,
-                    alpha=0.7,
-                )
 
     # --- Right axis: alpha (+ error bars) ---
     ax2 = ax1.twinx()
@@ -2080,14 +2503,38 @@ def plot_fits_over_xmin(
     ax2.tick_params(axis="y", colors=c_a)
     ax2.spines["right"].set_color(c_a)
 
-    if best_fit:
+    if selected_xmin is not None and np.isfinite(selected_xmin):
         ax1.axvline(
-            best_fit.xmin,
+            selected_xmin,
             color="red",
             linestyle="--",
             linewidth=1.2,
-            label=rf"Best $p$-xmin: {best_fit.xmin:.2e}",
+            label=f"{tag} xmin: {selected_xmin:.2e}",
             zorder=-1,
+            alpha=0.7,
+        )
+    if (
+        ks_xmin is not None
+        and np.isfinite(ks_xmin)
+        and (selected_xmin is None or not np.isclose(ks_xmin, selected_xmin, rtol=1e-12, atol=0.0))
+    ):
+        ax1.axvline(
+            ks_xmin,
+            color="tab:green",
+            linestyle="-.",
+            linewidth=1.2,
+            label=f"KS xmin: {ks_xmin:.2e}",
+            zorder=-0.95,
+            alpha=0.7,
+        )
+    if best_fit and np.isfinite(best_fit.xmin):
+        ax1.axvline(
+            best_fit.xmin,
+            color="tab:purple",
+            linestyle=":",
+            linewidth=1.2,
+            label=rf"$p$-fit xmin: {best_fit.xmin:.2e}",
+            zorder=-0.9,
             alpha=0.7,
         )
 
@@ -2223,7 +2670,7 @@ def plot_xmin_fitting(fit, save=True, show=False):
             chosen_xmin,
             linestyle=":",
             linewidth=1.5,
-            label=rf"Chosen $x_{{\min}}$ = {chosen_xmin:.2e}",
+            label=f"{tag} xmin: {chosen_xmin:.2e}",
             alpha=0.9,
         )
 
@@ -2353,7 +2800,7 @@ def plot_KS_fitting(fit, save=True, show=False):
             chosen_xmin,
             linestyle=":",
             linewidth=1.5,
-            label=rf"Chosen $x_{{\min}}$ = {chosen_xmin:.2e}",
+            label=f"{tag} xmin: {chosen_xmin:.2e}",
             alpha=0.9,
         )
 
@@ -2447,6 +2894,228 @@ def get_group_structure(group_paths, group_labels):
     return normalized_paths, normalized_labels
 
 
+def plot_powerlaw_compare(
+    group_paths=None,
+    group_labels=None,
+    strainLim: str | list[float] = "auto",
+    postRegime=True,
+    xmin_range=None,
+    debug=False,
+    show=False,
+    evaluate=True,
+    distType: type[Distribution] = Truncated_Power_Law,
+    save=True,
+    addFit=True,
+    fast_xmin=True,
+    min_xmin=1e-5,
+    xmin_accuracy=1.0,
+    csvPaths=None,
+    useCDF=False,
+    drop_type="energy",
+):
+    if group_paths is None and csvPaths is not None:
+        group_paths = csvPaths
+    if drop_type not in {"energy", "stress"}:
+        raise ValueError(
+            f"Unsupported drop_type: {drop_type!r}. Use 'energy' or 'stress'."
+        )
+
+    grouped_paths, grouped_labels = get_group_structure(group_paths, group_labels)
+    if len(grouped_paths) <= 1:
+        return plot_powerlaw(
+            group_paths=grouped_paths,
+            group_labels=grouped_labels,
+            strainLim=strainLim,
+            postRegime=postRegime,
+            xmin_range=xmin_range,
+            debug=debug,
+            show=show,
+            evaluate=evaluate,
+            distType=distType,
+            save=save,
+            addFit=addFit,
+            fast_xmin=fast_xmin,
+            min_xmin=min_xmin,
+            xmin_accuracy=xmin_accuracy,
+            useCDF=useCDF,
+            drop_type=drop_type,
+        )
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not colors:
+        colors = list(MINIMIZER_COLORS.values())
+
+    selected_tag = ks_tag(fast_xmin=fast_xmin)
+    compare_infos = []
+    legend_handles = []
+    equation_entry = None
+
+    for idx, (paths, labels) in enumerate(zip(grouped_paths, grouped_labels)):
+        if drop_type == "stress":
+            drops, data_info = get_stress_drops(
+                paths,
+                strainLim=strainLim,
+                label=labels,
+                postRegime=postRegime,
+            )
+        else:
+            drops, data_info = get_energy_drops(
+                paths,
+                strainLim=strainLim,
+                debug=debug,
+                label=labels,
+                postRegime=postRegime,
+            )
+        if drops is None or len(drops) == 0:
+            print(f"No {drop_type} drops found for compare group {idx}; skipping.")
+            continue
+
+        group_xmin_range = xmin_range
+        if group_xmin_range is None and not fast_xmin:
+            group_xmin_range = [min_xmin, None]
+
+        fit = make_fit(
+            data=drops,
+            xmin_range=group_xmin_range,
+            distType=distType,
+            fast_xmin=fast_xmin,
+            xmin_accuracy=xmin_accuracy,
+        )
+        if evaluate:
+            fit.evaluate_fit()
+
+        color = colors[idx % len(colors)]
+        source_label = labels[0] if labels else ""
+        group_name = pretty_variant_label(source_label) or f"group {idx + 1}"
+        legend_label = compare_legend_label(
+            source_label,
+            fit,
+            nr_samples=data_info.get("nrSimulations"),
+            nr_drops=_count_fit_drops(fit),
+        )
+        drop_label = data_info.get("drop_label")
+        if equation_entry is None:
+            equation_entry = fit_equation_label(dist_from_fit(fit).name)
+
+        if useCDF:
+            plot_data_cdf(
+                ax,
+                fit.data_original,
+                label="_nolegend_",
+                color=color,
+                alpha=0.9,
+                use_ccdf=True,
+                drop_label=drop_label,
+                show_legend=False,
+            )
+            if addFit:
+                plot_fit_cdf(
+                    ax,
+                    fit,
+                    label="_nolegend_",
+                    color=color,
+                    use_ccdf=True,
+                    drop_label=drop_label,
+                    show_legend=False,
+                    set_title=False,
+                    x_grid_mode="smooth",
+                    xmin_only=True,
+                    linewidth=1.8,
+                )
+        else:
+            plot_data_pdf(
+                ax,
+                fit.data_original,
+                label="_nolegend_",
+                color=color,
+                alpha=0.9,
+                drop_label=drop_label,
+                show_legend=False,
+            )
+            if addFit:
+                plot_fit_pdf(
+                    ax,
+                    fit,
+                    label="_nolegend_",
+                    color=color,
+                    drop_label=drop_label,
+                    show_legend=False,
+                    set_title=False,
+                    x_grid_mode="smooth",
+                    xmin_only=True,
+                    linewidth=1.8,
+                )
+
+        ax.axvline(
+            fit.xmin,
+            color=color,
+            linestyle=":",
+            linewidth=1.2,
+            alpha=0.45,
+            label="_nolegend_",
+        )
+
+        print(f"{selected_tag} xmin ({group_name}): {fit.xmin}")
+        legend_handles.append(
+            mpl.lines.Line2D(
+                [],
+                [],
+                color=color,
+                linewidth=1.8,
+                linestyle="-",
+                marker=None if useCDF else "o",
+                markersize=5,
+                label=legend_label,
+            )
+        )
+        compare_infos.append(data_info)
+
+    if not compare_infos:
+        plt.close(fig)
+        print("No valid groups found for powerlaw comparison.")
+        return None
+
+    shared_info = dict(compare_infos[0])
+    shared_info.pop("label", None)
+    shared_info["nrSimulations"] = sum(
+        info.get("nrSimulations", 0) for info in compare_infos
+    )
+    title = make_compare_title_from_data_info(shared_info).strip()
+    if title:
+        title += f" {selected_tag} compare"
+    else:
+        title = f"{selected_tag}_powerlaw_compare"
+
+    ax.set_title(title)
+    if equation_entry:
+        legend_handles = [
+            mpl.lines.Line2D(
+                [],
+                [],
+                color="none",
+                linestyle="none",
+                label=equation_entry,
+            )
+        ] + legend_handles
+    ax.legend(handles=legend_handles, loc="best")
+    fig.tight_layout()
+
+    if show:
+        plt.show()
+    if save:
+        suffix = "_ccdf" if useCDF else "_pdf"
+        filename = f"{PLOTPATH}{safePath(title)}{suffix}.pdf"
+        fig.savefig(filename, format="pdf", bbox_inches="tight")
+        print(f"Saved figure to {filename}")
+        setattr(fig, "path", filename)
+        plt.close(fig)
+    else:
+        setattr(fig, "path", None)
+
+    return fig
+
+
 def plot_powerlaw(
     group_paths=None,
     group_labels=None,
@@ -2460,49 +3129,99 @@ def plot_powerlaw(
     save=True,
     addFit=True,
     fast_xmin=True,
+    min_xmin=1e-5,
     xmin_accuracy=1.0,
     csvPaths=None,
     useCDF=False,
+    drop_type="energy",
 ):
     if group_paths is None and csvPaths is not None:
         group_paths = csvPaths
+    if drop_type not in {"energy", "stress"}:
+        raise ValueError(
+            f"Unsupported drop_type: {drop_type!r}. Use 'energy' or 'stress'."
+        )
 
     grouped_paths, grouped_labels = get_group_structure(group_paths, group_labels)
+    if len(grouped_paths) > 1:
+        return plot_powerlaw_compare(
+            group_paths=grouped_paths,
+            group_labels=grouped_labels,
+            strainLim=strainLim,
+            postRegime=postRegime,
+            xmin_range=xmin_range,
+            debug=debug,
+            show=show,
+            evaluate=evaluate,
+            distType=distType,
+            save=save,
+            addFit=addFit,
+            fast_xmin=fast_xmin,
+            min_xmin=min_xmin,
+            xmin_accuracy=xmin_accuracy,
+            useCDF=useCDF,
+            drop_type=drop_type,
+        )
 
     # We only deal with one group
-    all_drops, data_info = get_energy_drops(
-        grouped_paths[0],
-        strainLim=strainLim,
-        debug=debug,
-        label=grouped_labels[0],
-        postRegime=postRegime,
-    )
+    if drop_type == "stress":
+        all_drops, data_info = get_stress_drops(
+            grouped_paths[0],
+            strainLim=strainLim,
+            label=grouped_labels[0],
+            postRegime=postRegime,
+        )
+    else:
+        all_drops, data_info = get_energy_drops(
+            grouped_paths[0],
+            strainLim=strainLim,
+            debug=debug,
+            label=grouped_labels[0],
+            postRegime=postRegime,
+        )
     if all_drops is None or len(all_drops) == 0:
-        print("No energy drops found; skipping powerlaw fit.")
+        print(f"No {drop_type} drops found; skipping powerlaw fit.")
         return None
     # find_xmin_rising_level(all_drops, debug=True)
 
-    event_min_xmin = find_start_of_plastic_events(data_info, debug=True)
+    #event_min_xmin = find_start_of_plastic_events(data_info, debug=True)
 
     if xmin_range is None and not fast_xmin:
         # Not using fast_xmin is brutally slow. We add a default range here
-        xmin_range = [1e-9, 1]
-    KS_fit = make_fit(
+        xmin_range = [min_xmin, None]
+    selected_fit = make_fit(
         data=all_drops,
         xmin_range=xmin_range,
         distType=distType,
         fast_xmin=fast_xmin,
         xmin_accuracy=xmin_accuracy,
     )
+    selected_tag = ks_tag(fast_xmin=fast_xmin)
+    print(f"{selected_tag} xmin:", selected_fit.xmin)
     if evaluate:
-        KS_fit.evaluate_fit()
+        selected_fit.evaluate_fit()
+
+    ks_fit = None
+    ks_xmin = None
+    if fast_xmin:
+        ks_xmin = get_lowest_distance_xmin(getattr(selected_fit, "xmin_fitting_results", None))
+        if ks_xmin is not None:
+            ks_fit = Fit(
+                all_drops,
+                xmin=ks_xmin,
+                xmin_distribution=distType.name,
+            )
+            if evaluate:
+                ks_fit.evaluate_fit()
+            print(f"KS xmin: {ks_fit.xmin}")
 
     p_fit = find_best_xmin(
         all_drops,
         debug=debug,
         data_info=data_info,
-        xmin_results=getattr(KS_fit, "xmin_fitting_results", None),
+        xmin_results=getattr(selected_fit, "xmin_fitting_results", None),
         fast_xmin=fast_xmin,
+        selected_xmin=selected_fit.xmin,
     )
 
     d = dist_from_fit(p_fit)
@@ -2531,41 +3250,49 @@ def plot_powerlaw(
             if p < t:
                 break
 
-        print(f"Number of drops: {len(all_drops)}")
+        print(f"Number of drops in fit: {_count_fit_drops(p_fit)}")
         print(f"{attribute}: P value: {p:.2f} ({r}), exp: {d.alpha}, std: {exp_std}")
 
-    tag = ks_tag(fast_xmin=fast_xmin)
-    if event_min_xmin:
-        plot_ks_distance(
-            all_drops,
-            event_min_xmin,
-            data_info=data_info,
-            name="event-min-fit",
-            fast_xmin=fast_xmin,
-        )
+    tag = selected_tag
+    # if event_min_xmin:
+    #     plot_ks_distance(
+    #         all_drops,
+    #         event_min_xmin,
+    #         data_info=data_info,
+    #         name="event-min-fit",
+    #         fast_xmin=fast_xmin,
+    #     )
 
-    min_drop = np.min(all_drops)
-    # We exclude the first two decades.
-    exclude_factor = 100
-    rmEnd_xmin = min_drop * exclude_factor
-    plot_ks_distance(
-        all_drops,
-        rmEnd_xmin,
-        data_info=data_info,
-        name=f"rmEnd{exclude_factor}",
-        fast_xmin=fast_xmin,
-    )
+    #min_drop = np.min(all_drops)
+    # # We exclude the first two decades.
+    # exclude_factor = 100
+    # rmEnd_xmin = min_drop * exclude_factor
+    # plot_ks_distance(
+    #     all_drops,
+    #     rmEnd_xmin,
+    #     data_info=data_info,
+    #     name=f"rmEnd{exclude_factor}",
+    #     fast_xmin=fast_xmin,
+    # )
 
     plot_ks_distance(
         all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit", fast_xmin=fast_xmin
     )
     plot_ks_distance(
         all_drops,
-        KS_fit.xmin,
+        selected_fit.xmin,
         data_info=data_info,
         name=f"{tag}-fit",
         fast_xmin=fast_xmin,
     )
+    if ks_fit is not None:
+        plot_ks_distance(
+            all_drops,
+            ks_fit.xmin,
+            data_info=data_info,
+            name="KS-fit",
+            fast_xmin=False,
+        )
 
     title = make_title(data_info=data_info, fit=p_fit)
     if attribute and attribute not in title:
@@ -2573,15 +3300,17 @@ def plot_powerlaw(
     plot_data_and_fit(
         p_fit,
         title=title,
+        data_info=data_info,
         color=color,
         addFit=addFit,
         save=save,
         show=show,
         useCDF=useCDF,
     )
-    title = make_title(data_info=data_info, fit=KS_fit)
+    title = make_title(data_info=data_info, fit=selected_fit)
     plot_data_and_fit(
-        KS_fit,
+        selected_fit,
+        data_info=data_info,
         title=title + f"_{tag}_xmin",
         color=color,
         addFit=addFit,
@@ -2589,6 +3318,18 @@ def plot_powerlaw(
         show=show,
         useCDF=useCDF,
     )
+    if ks_fit is not None:
+        title = make_title(data_info=data_info, fit=ks_fit)
+        plot_data_and_fit(
+            ks_fit,
+            data_info=data_info,
+            title=title + "_KS_xmin",
+            color=color,
+            addFit=addFit,
+            save=save,
+            show=show,
+            useCDF=useCDF,
+        )
 
     # rmEnd_fit = Fit(all_drops, xmin=rmEnd_xmin, xmin_distribution=distType.name)
     # if evaluate:

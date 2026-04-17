@@ -5,57 +5,58 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 
+HEADER_RENAME_MAP = {
+    "Load": "load",
+    "Avg energy": "avg_energy",
+    "Max energy": "max_energy",
+    "Avg RSS": "avg_RSS",
+    "Nr plastic deformations": "nr_plastic_deformations",
+    "Nr FIRE iterations": "nr_iterations",
+    "Nr LBFGS iterations": "nr_iterations",
+    "Nr CG iterations": "nr_iterations",
+    "Nr FIRE func evals": "nr_func_evals",
+    "Nr LBFGS func evals": "nr_func_evals",
+    "Nr CG iterations.1": "nr_func_evals",
+    "FIRE Term reason": "FIRE_Term_reason",
+    "LBFGS Term reason": "LBFGS_Term_reason",
+    "CG Term reason": "CG_Term_reason",
+    "Run time": "run_time",
+    "Est time remaining": "est_time_remaining",
+    "maxX": "maxX",
+    "minX": "minX",
+    "maxY": "maxY",
+    "minY": "minY",
+    #
+    "avg_init_energy_change": "avg_e_change_from_init",
+    "avg_RSS": "avg_P12",
+    "max_plastic_deformation": "max_m3_nr",
+    # Umut headers (Note energy is NOT averaged)
+    "Alpha": "load",
+    "PreEnergy": "init_energy",
+    "PostEnergy": "energy",
+    "PreStress": "avg_init_sigma12",
+    "PostStress": "avg_sigma12",
+    "EnergyChange": "total_e_change_from_init",
+    "StressChange": "avg_sigma_change_from_init",
+    # Change from xy to 12
+    "avg_sigmaxy":"avg_sigma12",
+    "avg_Pxy":"avg_P12",
+    "avg_init_sigmaxy":"avg_init_sigma12",
+    "avg_sigmaxy_change_from_init":"avg_sigma12_change_from_init",
+    # Reversibility column rename
+    "rev_d": "rev_u_diff",
+    # More changes
+    "nr_plastic_deformations":"nr_elements_with_m3_fix_change",
+}
+
 def update_df_header(
     df: pd.DataFrame,
     add_total_columns: bool = True,
-    add_extrap_energy:bool =True,
     L: int | None = None,
     nr_elements: int | None = None,
 ):
     # Mapping of old column names to new column names
-    rename_map = {
-        "Load": "load",
-        "Avg energy": "avg_energy",
-        "Max energy": "max_energy",
-        "Avg RSS": "avg_RSS",
-        "Nr plastic deformations": "nr_plastic_deformations",
-        "Nr FIRE iterations": "nr_iterations",
-        "Nr LBFGS iterations": "nr_iterations",
-        "Nr CG iterations": "nr_iterations",
-        "Nr FIRE func evals": "nr_func_evals",
-        "Nr LBFGS func evals": "nr_func_evals",
-        "Nr CG iterations.1": "nr_func_evals",
-        "FIRE Term reason": "FIRE_Term_reason",
-        "LBFGS Term reason": "LBFGS_Term_reason",
-        "CG Term reason": "CG_Term_reason",
-        "Run time": "run_time",
-        "Est time remaining": "est_time_remaining",
-        "maxX": "maxX",
-        "minX": "minX",
-        "maxY": "maxY",
-        "minY": "minY",
-        #
-        "avg_init_energy_change": "avg_e_change_from_init",
-        "avg_RSS": "avg_P12",
-        "max_plastic_deformation": "max_m3_nr",
-        # Umut headers (Note energy is NOT averaged)
-        "Alpha": "load",
-        "PreEnergy": "init_energy",
-        "PostEnergy": "energy",
-        "PreStress": "avg_init_sigma12",
-        "PostStress": "avg_sigma12",
-        "EnergyChange": "total_e_change_from_init",
-        "StressChange": "avg_sigma_change_from_init",
-        # Change from xy to 12
-        "avg_sigmaxy":"avg_sigma12",
-        "avg_Pxy":"avg_P12",
-        "avg_init_sigmaxy":"avg_init_sigma12",
-        "avg_sigmaxy_change_from_init":"avg_sigma12_change_from_init",
-        # Reversibility column rename
-        "rev_d": "rev_u_diff",
-        # More changes
-        "nr_plastic_deformations":"nr_elements_with_m3_fix_change",
-    }
+    rename_map = dict(HEADER_RENAME_MAP)
 
     # Rename columns if they exist in the DataFrame
     df = df.rename(columns=rename_map)
@@ -69,15 +70,75 @@ def update_df_header(
                     total_col = "total_" + col[4:]
                     if total_col not in df.columns:
                         df[total_col] = df[col] * nr_elements
-    
-    if add_extrap_energy:
-        # This energy uses the two previous local minima energies to estimate
-        # the energy increase over the strain step. 
-        # See equation 5 in Avalanches in the Athermal Quasistatic Limit of Sheared Amorphous Solids: An Atomistic Perspective
-        # ΔE = En − E_n+1 + V σ_n δγ
-        del_gamma = np.diff(df["load"])
-        sigma = df["avg_sigma12"]
 
+    return df
+
+
+def get_fixed_csv_path(path: str | Path) -> Path:
+    path = Path(path)
+    if path.stem.endswith("_fixed"):
+        return path
+    return path.with_name(f"{path.stem}_fixed{path.suffix}")
+
+
+
+
+def read_macrodata_csv(
+    csv_path,
+    *,
+    fix_mixed=True,
+    update_header=True,
+    warn_on_dtype=True,
+    **update_kwargs,
+):
+    import warnings
+    from pandas.errors import DtypeWarning
+
+    csv_path = Path(csv_path)
+    if fix_mixed and not csv_path.stem.endswith("_fixed"):
+        fixed_path = get_fixed_csv_path(csv_path)
+        try:
+            if fixed_path.exists():
+                if not csv_path.exists():
+                    csv_path = fixed_path
+                else:
+                    fixed_mtime = fixed_path.stat().st_mtime
+                    src_mtime = csv_path.stat().st_mtime
+                    if fixed_mtime >= src_mtime:
+                        csv_path = fixed_path
+        except OSError:
+            pass
+
+    def _read():
+        with warnings.catch_warnings(record=True) as warn_list:
+            if warn_on_dtype:
+                warnings.simplefilter("always", DtypeWarning)
+            df_local = pd.read_csv(csv_path)
+        has_dtype_warning = any(
+            issubclass(w.category, DtypeWarning) for w in warn_list
+        )
+        return df_local, has_dtype_warning
+
+    effective_path = csv_path
+    try:
+        df, dtype_warn = _read()
+    except Exception:
+        if not fix_mixed:
+            raise
+        effective_path = fix_mixed_macrodata_csv(csv_path, inplace=False)
+        csv_path = effective_path
+        df, dtype_warn = _read()
+
+    if dtype_warn and warn_on_dtype:
+        print(f"Mixed dtypes detected in {csv_path}")
+        if fix_mixed:
+            effective_path = fix_mixed_macrodata_csv(csv_path, inplace=False)
+            csv_path = effective_path
+            df, dtype_warn = _read()
+            if dtype_warn:
+                print(f"Mixed dtypes persist after fix in {csv_path}")
+    if update_header:
+        df = update_df_header(df, **update_kwargs)
     return df
 
 
@@ -220,17 +281,7 @@ MID_MACRODATA_HEADER = [
     "minY",
 ]
 
-DEFAULT_OLD_TO_NEW_RENAME = {
-    "avg_init_energy_change": "avg_e_change_from_init",
-    "avg_RSS": "avg_P12",
-    "max_plastic_deformation": "max_m3_nr",
-    "avg_sigmaxy": "avg_sigma12",
-    "avg_init_sigmaxy": "avg_init_sigma12",
-    "avg_Pxy": "avg_P12",
-    "avg_sigmaxy_change_from_init": "avg_sigma12_change_from_init",
-    "nr_plastic_deformations": "nr_elements_with_m3_fix_change",
-    "rev_d": "rev_u_diff",
-}
+DEFAULT_OLD_TO_NEW_RENAME = dict(HEADER_RENAME_MAP)
 
 SIGMAXY_MACRODATA_HEADER = [
     "load_step",
@@ -311,7 +362,7 @@ def fix_mixed_macrodata_csv(
     csv_path: str | Path,
     out_path: str | Path | None = None,
     *,
-    inplace: bool = True,
+    inplace: bool = False,
     old_header: list[str] | None = None,
     new_header: list[str] | None = None,
     rename_map: dict[str, str] | None = None,
@@ -329,15 +380,14 @@ def fix_mixed_macrodata_csv(
     `fill_value`.
     """
     csv_path = Path(csv_path)
+
     if out_path is None:
         if inplace:
             out_path = csv_path.with_suffix(".tmp.csv")
         else:
-            out_path = csv_path.with_name(f"{csv_path.stem}_fixed{csv_path.suffix}")
+            out_path = get_fixed_csv_path(csv_path)
     out_path = Path(out_path)
 
-    old_header = list(old_header or OLD_MACRODATA_HEADER)
-    new_header = list(new_header or NEW_MACRODATA_HEADER)
     if rename_map is None:
         rename_map = dict(DEFAULT_OLD_TO_NEW_RENAME)
     else:
@@ -355,208 +405,192 @@ def fix_mixed_macrodata_csv(
         elif L is not None:
             nr_elements = int(L) * int(L) * 2
 
-    new_index = {name: i for i, name in enumerate(new_header)}
+    parser_error = None
+    try:
+        df = pd.read_csv(csv_path)
+    except pd.errors.ParserError as exc:
+        parser_error = exc
+        df = None
 
-    def _header_key(row: list[str]) -> list[str]:
-        return [c.strip().lower().replace(" ", "_") for c in row]
+    if df is not None:
+        df = update_df_header(
+            df,
+            add_total_columns=False,
+            
+            nr_elements=nr_elements,
+        )
+        df.to_csv(out_path, index=False)
+        print(f"Fixed CSV written to {out_path}")
+        if inplace:
+            out_path.replace(csv_path)
+            return csv_path
+        return out_path
 
-    def _build_mapping(header: list[str]) -> dict[int, int]:
-        mapping: dict[int, int] = {}
-        for i, col in enumerate(header):
-            new_col = rename_map.get(col, col)
-            idx = new_index.get(new_col)
-            if idx is not None:
-                mapping[i] = idx
-        return mapping
+    header_line_idx = None
+    header_line = None
+    first_header = None
+    rows_before: list[list[str]] = []
+    rows_after: list[list[str]] = []
+    pending_bad_row: tuple[int, int, int] | None = None
 
-    default_old_mapping = _build_mapping(old_header)
-    default_mid_mapping = _build_mapping(MID_MACRODATA_HEADER)
-    default_new_mapping = _build_mapping(new_header)
-    default_sigmaxy_mapping = _build_mapping(SIGMAXY_MACRODATA_HEADER)
-    header_len_map = {
-        len(old_header): default_old_mapping,
-        len(MID_MACRODATA_HEADER): default_mid_mapping,
-        len(new_header): default_new_mapping,
-    }
+    def _normalize_header(header_row: list[str]) -> list[str]:
+        return [h.strip() for h in header_row if h.strip()]
 
-    known_headers: dict[tuple[str, ...], dict[int, int]] = {}
-    for header, mapping in (
-        (old_header, default_old_mapping),
-        (MID_MACRODATA_HEADER, default_mid_mapping),
-        (SIGMAXY_MACRODATA_HEADER, default_sigmaxy_mapping),
-        (new_header, default_new_mapping),
-    ):
-        key = tuple(_header_key(header))
-        known_headers[key] = mapping
+    def _parse_header_token(token_row: list[str]) -> list[str]:
+        header_first = token_row[0].split(":", 1)[1]
+        return _normalize_header([header_first] + token_row[1:])
 
-    def _try_float(value: str | None) -> float | None:
-        if value is None:
-            return None
-        try:
-            return float(value)
-        except Exception:
-            return None
+    def _append_row(rows: list[list[str]], row: list[str], expected_len: int, line_no: int) -> None:
+        if len(row) != expected_len:
+            raise ValueError(
+                f"Row length mismatch in {csv_path} at line {line_no}: "
+                f"expected {expected_len}, got {len(row)}."
+            )
+        rows.append(row)
 
-    def _fill_totals_from_avgs(row_out: list[str]) -> list[str]:
-        if nr_elements is None:
-            return row_out
-        energy_avg_cols = [
-            "avg_energy",
-            "avg_energy_change",
-            "avg_init_energy",
-            "avg_e_change_from_init",
-        ]
-        energy_total_cols = [
-            "total_energy",
-            "total_energy_change",
-            "total_init_energy",
-            "total_e_change_from_init",
-        ]
-
-        def _maybe_rescale_energy_avgs() -> None:
-            if nr_elements is None:
-                return 
-            idx_avg = new_index.get("avg_energy")
-            idx_max = new_index.get("max_energy")
-            if idx_avg is None or idx_max is None:
-                return
-            avg_val = _try_float(row_out[idx_avg])
-            max_val = _try_float(row_out[idx_max])
-            if avg_val is None or max_val is None or max_val <= 0:
-                return
-            # If "avg_energy" is orders of magnitude larger than max element energy,
-            # it is likely a total value written under the old header.
-            if avg_val <= max_val * 10:
-                return
-            for col in energy_avg_cols:
-                idx = new_index.get(col)
-                if idx is None or idx >= len(row_out):
-                    continue
-                v = _try_float(row_out[idx])
-                if v is None:
-                    continue
-                row_out[idx] = f"{v / nr_elements:.15g}"
-            # Clear totals so they get recomputed from corrected averages.
-            for col in energy_total_cols:
-                idx = new_index.get(col)
-                if idx is None or idx >= len(row_out):
-                    continue
-                row_out[idx] = fill_value
-
-        _maybe_rescale_energy_avgs()
-        total_from_avg = {
-            "avg_energy": "total_energy",
-            "avg_energy_change": "total_energy_change",
-            "avg_init_energy": "total_init_energy",
-            "avg_e_change_from_init": "total_e_change_from_init",
-        }
-        for avg_col, total_col in total_from_avg.items():
-            idx_avg = new_index.get(avg_col)
-            idx_total = new_index.get(total_col)
-            if idx_avg is None or idx_total is None:
-                continue
-            if idx_avg >= len(row_out) or idx_total >= len(row_out):
-                continue
-            avg_val = _try_float(row_out[idx_avg])
-            if avg_val is None:
-                continue
-            total_raw = row_out[idx_total]
-            total_str = "" if total_raw is None else str(total_raw).strip()
-            if total_str not in ("", str(fill_value)):
-                # Already has a total value.
-                continue
-            if total_str == str(fill_value) and avg_val == 0.0:
-                # Preserve explicit zeros when avg is zero.
-                continue
-            row_out[idx_total] = f"{avg_val * nr_elements:.15g}"
-        return row_out
-
-    dropped_value_rows = 0
-    dropped_value_cols = 0
-    warned_headers: set[tuple[str, ...]] = set()
-
-    def _map_row(row: list[str], mapping: dict[int, int]) -> list[str]:
-        nonlocal dropped_value_rows, dropped_value_cols
-        if warn_on_drop:
-            dropped_cols = [
-                i
-                for i, value in enumerate(row)
-                if i not in mapping and str(value).strip() not in ("", fill_value)
-            ]
-            if dropped_cols:
-                dropped_value_rows += 1
-                dropped_value_cols += len(dropped_cols)
-        out = [fill_value] * len(new_header)
-        for i, value in enumerate(row):
-            idx = mapping.get(i)
-            if idx is None:
-                continue
-            out[idx] = value
-        return _fill_totals_from_avgs(out)
-
-    def _coerce_length(row: list[str], length: int) -> list[str]:
-        if len(row) < length:
-            return row + [fill_value] * (length - len(row))
-        if len(row) > length:
-            return row[:length]
-        return row
-
-    current_mapping: dict[int, int] | None = None
-    current_expected_len: int | None = None
-    with (
-        open(csv_path, "r", newline="") as f_in,
-        open(out_path, "w", newline="") as f_out,
-    ):
+    with open(csv_path, "r", newline="") as f_in:
         reader = csv.reader(f_in)
-        writer = csv.writer(f_out)
-        writer.writerow(new_header)
-
-        for row in reader:
+        for line_no, row in enumerate(reader, start=1):
             if not row:
                 continue
-
-            row_key = _header_key(row)
-            mapping = known_headers.get(tuple(row_key))
-            if mapping is not None:
-                current_mapping = mapping
-                current_expected_len = len(row)
-                if warn_on_drop:
-                    header_key = tuple(row_key)
-                    if header_key not in warned_headers:
-                        dropped = [
-                            col
-                            for col in row
-                            if rename_map.get(col, col) not in new_index
-                        ]
-                        if dropped:
-                            preview = ", ".join(dropped[:8])
-                            suffix = "..." if len(dropped) > 8 else ""
-                            print(
-                                f"Warning: dropping {len(dropped)} columns while fixing {csv_path}: "
-                                f"{preview}{suffix}"
-                            )
-                        warned_headers.add(header_key)
+            token = row[0].strip()
+            if token.lower().startswith("#header:"):
+                header_line_idx = line_no
+                header_line = _parse_header_token(row)
                 continue
-            if row_key and row_key[0] == "load_step":
-                # Skip any stray header-like line.
+            if first_header is None:
+                first_header = _normalize_header(row)
                 continue
+            if header_line is None:
+                if pending_bad_row is not None:
+                    prev_line, expected_len, got_len = pending_bad_row
+                    raise ValueError(
+                        f"Row length mismatch in {csv_path} at line {prev_line}: "
+                        f"expected {expected_len}, got {got_len}. "
+                        f"Encountered additional data at line {line_no} without a #HEADER line. "
+                        "Only a corrupted final row is allowed in this mode."
+                    )
+                if len(row) != len(first_header):
+                    pending_bad_row = (line_no, len(first_header), len(row))
+                    continue
+                rows_before.append(row)
+            else:
+                _append_row(rows_after, row, len(header_line), line_no)
 
-            mapping = current_mapping
-            row_len = len(row)
-            if mapping is None or (
-                current_expected_len is not None and row_len != current_expected_len
-            ):
-                mapping = header_len_map.get(row_len, default_new_mapping)
-                current_mapping = mapping
-                current_expected_len = row_len
-
-            writer.writerow(_map_row(row, mapping))
-
-    if warn_on_drop and dropped_value_rows:
-        print(
-            f"Warning: dropped data in {dropped_value_rows} row(s) "
-            f"while fixing {csv_path} (columns dropped: {dropped_value_cols})."
+    if header_line is not None and pending_bad_row is not None:
+        bad_line, expected_len, got_len = pending_bad_row
+        raise ValueError(
+            f"Row length mismatch in {csv_path} at line {bad_line}: "
+            f"expected {expected_len}, got {got_len}. "
+            "A #HEADER line was found later, so this mismatch is unexpected."
         )
+
+    if header_line is None:
+        if pending_bad_row is None:
+            raise ValueError(
+                f"Parser error while reading {csv_path}, but no #HEADER line found. "
+                "No single corrupted final row was detected."
+            )
+        bad_line, expected_len, got_len = pending_bad_row
+        if first_header is None:
+            raise ValueError(
+                f"Parser error while reading {csv_path}, but no header line found."
+            )
+        print(
+            f"Warning: dropping corrupted final row in {csv_path} "
+            f"(line {bad_line}, expected {expected_len}, got {got_len})."
+        )
+        df = pd.DataFrame(rows_before, columns=first_header)
+        df = update_df_header(
+            df,
+            add_total_columns=False,
+            
+            nr_elements=nr_elements,
+        )
+        df.to_csv(out_path, index=False)
+        print(f"Fixed CSV written to {out_path}")
+        if inplace:
+            out_path.replace(csv_path)
+            return csv_path
+        return out_path
+
+    old_header = old_header or first_header or []
+    new_header = new_header or header_line
+
+    def _rename_headers(headers: list[str]) -> list[str]:
+        return [rename_map.get(col, col) for col in headers]
+
+    old_header_renamed = _rename_headers(old_header)
+    new_header_renamed = _rename_headers(new_header)
+    missing = [col for col in old_header_renamed if col not in new_header_renamed]
+    if missing:
+        missing_str = ", ".join(missing)
+        print(f"Error: missing mapped columns from new header in {csv_path}: {missing_str}")
+        raise ValueError(
+            f"Unable to map old header into new header for {csv_path}. "
+            f"Missing columns: {missing_str}"
+        )
+
+    df_first = pd.DataFrame(rows_before, columns=old_header)
+    df_second = pd.DataFrame(rows_after, columns=new_header)
+
+    df_first = update_df_header(
+        df_first,
+        add_total_columns=False,
+        
+        nr_elements=nr_elements,
+    )
+    df_second = update_df_header(
+        df_second,
+        add_total_columns=False,
+        
+        nr_elements=nr_elements,
+    )
+
+    for col in df_second.columns:
+        if col not in df_first.columns:
+            df_first[col] = fill_value
+
+    extra_cols = [col for col in df_first.columns if col not in df_second.columns]
+    if extra_cols:
+        extra_str = ", ".join(extra_cols)
+        print(
+            f"Error: unmatched columns from early header in {csv_path}: {extra_str}"
+        )
+        raise ValueError(
+            f"Unable to merge headers for {csv_path}. "
+            f"Unmatched columns: {extra_str}"
+        )
+
+    df_first = df_first[df_second.columns]
+    df_out = pd.concat([df_first, df_second], ignore_index=True)
+    if not df_out.empty:
+        time_cols = {
+            "run_time",
+            "minimization_time",
+            "write_time",
+            "est_time_remaining",
+        }
+
+        def _is_numeric(val) -> bool:
+            if val is None:
+                return True
+            s = str(val).strip()
+            if s == "" or s == fill_value:
+                return True
+            try:
+                float(s)
+                return True
+            except ValueError:
+                return False
+
+        numeric_cols = [col for col in df_out.columns if col not in time_cols]
+        last_row = df_out.iloc[-1]
+        if any(not _is_numeric(last_row[col]) for col in numeric_cols):
+            print(f"Warning: dropping corrupted final row in {csv_path}")
+            df_out = df_out.iloc[:-1]
+    df_out.to_csv(out_path, index=False)
+    print(f"Fixed CSV written to {out_path}")
 
     if inplace:
         out_path.replace(csv_path)
@@ -570,6 +604,18 @@ def fix_csv_files(paths):
             return [_fix_entry(item) for item in entry]
         if isinstance(entry, tuple):
             return tuple(_fix_entry(item) for item in entry)
-        return fix_mixed_macrodata_csv(entry, inplace=False)
+        path = Path(entry)
+        if path.stem.endswith("_fixed"):
+            return path
+        fixed_path = get_fixed_csv_path(path)
+        try:
+            if fixed_path.exists():
+                if not path.exists():
+                    return fixed_path
+                if fixed_path.stat().st_mtime >= path.stat().st_mtime:
+                    return fixed_path
+        except OSError:
+            pass
+        return fix_mixed_macrodata_csv(path, inplace=False)
 
     return _fix_entry(paths)

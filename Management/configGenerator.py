@@ -233,7 +233,7 @@ class SimulationConfig:
 
 class ConfigGenerator:
     @staticmethod
-    def generate(group_by_seeds=False, **kwargs):
+    def generate(group_by_variant=False, **kwargs):
         """
         This function creates all combinations of configurations. If a config
         object is given where the method, seeds and steps are lists like so:
@@ -250,7 +250,7 @@ class ConfigGenerator:
             [(CG,    1,0.1), (CG,    1,0.2), (CG,    2,0.1), (CG,    2,0.2)],
         ]
 
-        If group_by_seeds is True, the groups are instead decided by the seed
+        If group_by_variant is True, the groups are instead decided by the seed
 
         [
             [(LBFGS, 1,0.1), (LBFGS, 1,0.2), (CG, 1,0.1), (CG, 1,0.2)], # seed 1
@@ -308,7 +308,7 @@ class ConfigGenerator:
             configs.append(config)
             labels.append(label)
 
-        if group_by_seeds:
+        if group_by_variant:
             grouped_configs = []
             grouped_labels = []
             num_combos = len(non_seed_combinations)
@@ -327,7 +327,7 @@ class ConfigGenerator:
         Filter configs/labels by requiring each key to be present in the label.
 
         Supports both flat lists and grouped (nested) lists as returned by
-        ConfigGenerator.generate(group_by_seeds=True).
+        ConfigGenerator.generate(group_by_variant=True).
         """
 
         # Normalize keys

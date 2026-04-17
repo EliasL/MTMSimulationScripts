@@ -3,6 +3,7 @@ import os
 import meshio
 import numpy as np
 import re
+from pathlib import Path
 
 from MTMath.meshUtils import arrsToMat, CArrsToMat
 
@@ -273,19 +274,231 @@ def parse_pvd_file(path, pvd_file):
     return vtu_files
 
 
-def get_data_from_name(nameOrPath):
-    # Split the filename by underscores
-    if not isinstance(nameOrPath, str):
-        nameOrPath = str(nameOrPath)
-    fileName = nameOrPath.split("/")[-1]
-    if fileName == "macroData.csv":
-        fileName = nameOrPath.split("/")[-2]
-    # Initialize an empty dictionary
+def _vtu_step_from_name(vtu_file):
+    match = re.search(r"\.(\d+)\.vtu$", Path(vtu_file).name)
+    return int(match.group(1)) if match else None
+
+
+def _vtu_sort_key(vtu_file):
+    step = _vtu_step_from_name(vtu_file)
+    if step is None:
+        return (np.inf, Path(vtu_file).name)
+    return (step, Path(vtu_file).name)
+
+
+def _resolve_vtu_files(vtu_source, pvd_name="collection.pvd"):
+    if isinstance(vtu_source, (list, tuple, np.ndarray)):
+        vtu_files = [str(p) for p in vtu_source if str(p).endswith(".vtu")]
+        if not vtu_files:
+            raise ValueError("No VTU files found in provided list.")
+        return sorted(vtu_files, key=_vtu_sort_key)
+
+    path = Path(vtu_source)
+    if path.suffix.lower() == ".vtu":
+        return [str(path)]
+
+    if path.suffix.lower() == ".pvd":
+        return sorted(parse_pvd_file(str(path.parent), str(path)), key=_vtu_sort_key)
+
+    if path.suffix.lower() == ".csv":
+        path = path.parent
+
+    if path.is_dir():
+        pvd_path = path / pvd_name
+        if pvd_path.exists():
+            return sorted(
+                parse_pvd_file(str(path), str(pvd_path)),
+                key=_vtu_sort_key,
+            )
+
+        data_dir = path / "data"
+        vtu_files = sorted(data_dir.glob("*.vtu"), key=_vtu_sort_key)
+        if not vtu_files:
+            vtu_files = sorted(path.glob("*.vtu"), key=_vtu_sort_key)
+        if not vtu_files:
+            raise FileNotFoundError(f"No VTU files found in {path}.")
+        return [str(p) for p in vtu_files]
+
+    raise ValueError(f"Unsupported VTU source: {vtu_source!r}")
+
+
+def _infer_strain_from_vtu(vtu_file):
+    """
+    Infer strain directly from VTU naming metadata.
+    Priority:
+    1) explicit `_load=<value>` token
+    2) reconstructed from `startLoad + (load_step-1)*loadIncrement`
+       using simulation folder naming convention.
+    """
+    path_str = str(vtu_file)
+
+    load_match = re.search(r"(?:^|[_/,])load=([-+0-9.eE]+)", path_str)
+    if load_match:
+        try:
+            return float(load_match.group(1))
+        except ValueError:
+            pass
+
+    step = _vtu_step_from_name(vtu_file)
+    if step is None:
+        return None
+
+    candidates = [
+        Path(vtu_file).parent.parent.name,
+        Path(vtu_file).parent.name,
+        path_str,
+    ]
+    for candidate in candidates:
+        sim_match = re.search(
+            r"s\d+x\d+l([-+0-9.eE]+),([-+0-9.eE]+),([-+0-9.eE]+)(?:NPBC|PBC)",
+            candidate,
+        )
+        if not sim_match:
+            continue
+        try:
+            start_load = float(sim_match.group(1))
+            load_increment = float(sim_match.group(2))
+            return start_load + (step - 1) * load_increment
+        except ValueError:
+            continue
+    return None
+
+
+def extract_force_contribution_magnitude_series(vtu_source, use_tqdm=False):
+    """
+    Compute mean/std of |F_ei| for each available VTU frame.
+    Returns arrays (strain, mean_magnitude, std_magnitude).
+    """
+    vtu_files = _resolve_vtu_files(vtu_source)
+    strains, means, stds = [], [], []
+    skipped_missing_strain = 0
+    skipped_bad_vtu = 0
+
+    if use_tqdm:
+        from tqdm import tqdm
+
+        iterator = tqdm(vtu_files, desc="Force contribution series")
+    else:
+        iterator = vtu_files
+
+    for vtu_file in iterator:
+        strain = _infer_strain_from_vtu(vtu_file)
+        if strain is None or not np.isfinite(strain):
+            skipped_missing_strain += 1
+            continue
+
+        try:
+            force_contributions = np.asarray(
+                VTUData(vtu_file).get_force_contributions(), dtype=float
+            )
+        except Exception as exc:
+            print(f"Warning: failed reading {vtu_file}: {exc}")
+            skipped_bad_vtu += 1
+            continue
+
+        if force_contributions.ndim != 3 or force_contributions.shape[1] < 2:
+            print(
+                f"Warning: unexpected force contribution shape {force_contributions.shape} in {vtu_file}."
+            )
+            skipped_bad_vtu += 1
+            continue
+
+        # force_contributions shape: (n_elements, 2, 3)
+        # Magnitudes for all element-node contributions in this frame.
+        magnitudes = np.linalg.norm(force_contributions[:, :2, :], axis=1).reshape(-1)
+        magnitudes = magnitudes[np.isfinite(magnitudes)]
+        if magnitudes.size == 0:
+            continue
+
+        strains.append(float(strain))
+        means.append(float(np.mean(magnitudes)))
+        stds.append(float(np.std(magnitudes)))
+
+    if not strains:
+        raise ValueError("No valid VTU frames with strain and force contributions found.")
+
+    order = np.argsort(np.asarray(strains))
+    strains = np.asarray(strains, dtype=float)[order]
+    means = np.asarray(means, dtype=float)[order]
+    stds = np.asarray(stds, dtype=float)[order]
+
+    if skipped_missing_strain > 0:
+        print(f"Skipped {skipped_missing_strain} VTU frames without inferable strain.")
+    if skipped_bad_vtu > 0:
+        print(f"Skipped {skipped_bad_vtu} VTU frames due to read/shape issues.")
+
+    return strains, means, stds
+
+
+def _resolve_macrodata_csv_path(nameOrPath):
+    path_str = str(nameOrPath)
+    path = Path(path_str)
+    if path.suffix.lower() == ".csv":
+        return path
+    if path.exists():
+        if path.is_dir():
+            return path / "macroData.csv"
+        return path.parent / "macroData.csv"
+    if os.sep in path_str:
+        if path.suffix:
+            return path.parent / "macroData.csv"
+        return path / "macroData.csv"
+    return None
+
+
+def _infer_constant_load_increment(nameOrPath):
+    csv_path = _resolve_macrodata_csv_path(nameOrPath)
+    if csv_path is None:
+        raise ValueError(
+            f"loadIncrement not found in file name, and no CSV path could be "
+            f"resolved from {nameOrPath!r}."
+        )
+
+    from Management.updateCSV import read_macrodata_csv
+
+    df = read_macrodata_csv(csv_path)
+    if "load" not in df:
+        raise ValueError(
+            f"loadIncrement not found in file name, and {csv_path} has no 'load' column."
+        )
+
+    load = df["load"].to_numpy(dtype=float)
+    if load.size < 2:
+        raise ValueError(
+            f"loadIncrement not found in file name, and {csv_path} has fewer than "
+            "two load entries."
+        )
+
+    diffs = np.diff(load)
+    if not np.all(np.isfinite(diffs)):
+        raise ValueError(
+            f"loadIncrement not found in file name, and non-finite load differences "
+            f"were found in {csv_path}."
+        )
+
+    inferred_increment = float(diffs[0])
+    if np.isclose(inferred_increment, 0.0, rtol=0.0, atol=1e-15):
+        raise ValueError(
+            f"loadIncrement not found in file name, and the inferred load increment "
+            f"from {csv_path} is zero."
+        )
+
+    if not np.allclose(diffs, inferred_increment, rtol=1e-9, atol=1e-12):
+        return diffs
+
+    return inferred_increment
+
+
+def _parse_name_metadata(raw_name):
     result = {}
+    if not raw_name:
+        return result
+
+    base_name = str(raw_name)
+    known_suffixes = (".csv", ".conf", ".pvd", ".xml", ".gz", ".mtsb")
 
     # Strip extensions and optional load-step suffix so parsing is robust to
     # flags like "_minimal" or minStep values that contain dots.
-    base_name = fileName
     if base_name.endswith(".vtu"):
         base_name = base_name[:-4]
         if "." in base_name:
@@ -293,10 +506,15 @@ def get_data_from_name(nameOrPath):
             if maybe_step.isdigit():
                 result["load_step"] = int(maybe_step)
                 base_name = base_name.rsplit(".", 1)[0]
-    elif base_name.endswith(".csv"):
-        base_name = base_name[:-4]
+    else:
+        for suffix in known_suffixes:
+            if base_name.endswith(suffix):
+                base_name = base_name[: -len(suffix)]
+                break
 
     parts = base_name.split("_")
+    if not parts or not parts[0]:
+        return result
 
     result["name"] = parts[0]
     for part in parts[1:]:
@@ -307,7 +525,6 @@ def get_data_from_name(nameOrPath):
             result[part] = True
             continue
         key, value = part.split("=", 1)
-        # Add the key-value pair to the dictionary
 
         # minStep is special. It has the format iterations.func_evals
         if key == "minStep":
@@ -329,7 +546,6 @@ def get_data_from_name(nameOrPath):
             except ValueError:
                 result[key] = value
 
-    # We can now extract some extra stuff from the name
     try:
         # It will for example have the form:
         # resettingSimpleShearPeriodicBoundary,s60x60l0.15,1e-05,10PBCt4s0
@@ -353,13 +569,47 @@ def get_data_from_name(nameOrPath):
             result["maxLoad"] = float(load_parts[2].split("PBC")[0])
             result["BC"] = "PBC"
     except IndexError:
-        # Sometimes we load a vtu file that doesn't have the name format we expect
+        # Sometimes we load a file that doesn't have the name format we expect
         pass
+    except ValueError:
+        pass
+
+    return result
+
+
+def _metadata_score(metadata):
+    informative_keys = ("dims", "seed", "BC", "startLoad", "loadIncrement", "maxLoad")
+    return sum(key in metadata for key in informative_keys)
+
+
+def get_data_from_name(nameOrPath):
+    if not isinstance(nameOrPath, str):
+        nameOrPath = str(nameOrPath)
+    path = Path(nameOrPath)
+    fileName = path.name
+    is_csv = fileName.endswith(".csv")
+
+    file_result = _parse_name_metadata(fileName)
+    parent_result = {}
+    if path.parent.name:
+        parent_result = _parse_name_metadata(path.parent.name)
+
+    if _metadata_score(parent_result) > _metadata_score(file_result):
+        result = dict(parent_result)
+        fallback = file_result
+    else:
+        result = dict(file_result)
+        fallback = parent_result
+
+    for key, value in fallback.items():
+        if key not in result:
+            result[key] = value
 
     # There are some values that we want to have even if they are there, but we
     # give a warning
     if "load" not in result:
-        print("Warning: load not found in file name")
+        if not is_csv:
+            print("Warning: load not found in file name")
         result["load"] = 0.0
     if "BC" not in result:
         print("Warning: BC not found in file name")
@@ -368,10 +618,21 @@ def get_data_from_name(nameOrPath):
         print("Warning: seed not found in file name")
         result["seed"] = 0
     if "loadIncrement" not in result:
-        print("Warning: loadIncrement not found in file name")
-        result["loadIncrement"] = 1e-5
+        inferred_load_increment = _infer_constant_load_increment(nameOrPath)
+        if (
+            not is_csv
+            and isinstance(inferred_load_increment, np.ndarray)
+            and "load_step" in result
+            and inferred_load_increment.size > 0
+        ):
+            step_idx = max(int(result["load_step"]) - 1, 0)
+            step_idx = min(step_idx, inferred_load_increment.size - 1)
+            result["loadIncrement"] = float(inferred_load_increment[step_idx])
+        else:
+            result["loadIncrement"] = inferred_load_increment
     if "nrM" not in result:
-        print("Warning: nrM not found in file name")
+        if not is_csv:
+            print("Warning: nrM not found in file name")
         result["nrM"] = 0.0
 
     # Extract size information in the form sLxL
@@ -382,6 +643,10 @@ def get_data_from_name(nameOrPath):
         if N1 == N2:
             result["L"] = N1
     return result
+
+
+def get_metadata(nameOrPath):
+    return get_data_from_name(nameOrPath)
 
 
 def get_file_number(vtu_file):

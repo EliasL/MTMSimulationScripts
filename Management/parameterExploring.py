@@ -174,7 +174,7 @@ def loadingSpeeds():
     nrSeeds = 40
     size = 60
     configs, labels = ConfigGenerator.generate(
-        group_by_seeds=True,
+        group_by_variant=True,
         seed=range(nrSeeds),
         rows=size,
         cols=size,
@@ -250,7 +250,7 @@ def FIRELoading():
     nrSeeds = 40
     size = 60
     configs, labels = ConfigGenerator.generate(
-        group_by_seeds=True,
+        group_by_variant=True,
         seed=range(nrSeeds),
         rows=size,
         cols=size,
@@ -289,7 +289,7 @@ def CGLoading():
     nrSeeds = 40
     size = 60
     configs, labels = ConfigGenerator.generate(
-        group_by_seeds=True,
+        group_by_variant=True,
         seed=range(nrSeeds),
         rows=size,
         cols=size,

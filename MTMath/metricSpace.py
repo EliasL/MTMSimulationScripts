@@ -669,7 +669,7 @@ def makeCleanPoincare(addEnergyBackground=False):
         ax.plot(x2D, y2D, color=color, linewidth=linewidth, linestyle=linestyle)
 
     if addEnergyBackground:
-        from plotEnergy import generate_energy_grid
+        from MTMath.poincareEnergy import generate_energy_grid
 
         energy_grid = generate_energy_grid(resolution=400, zeroReference=True)
         extent = (-1, 1, -1, 1)

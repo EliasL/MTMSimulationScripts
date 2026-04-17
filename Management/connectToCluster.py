@@ -27,7 +27,7 @@ class Servers:
     local_path_mac = "/Volumes/data/"
 
     # List of server variables for iteration or list-like access
-    servers = [
+    search_servers = [
         galois,
         pascal,
         schwartz,
@@ -35,8 +35,24 @@ class Servers:
         condorcet,
         dalembert,
         poincare,
-        # fourier,
-        # descartes,
+        #fourier,
+        #descartes,
+        legendre,
+        duchemin,
+        cauchy,  # richard wants cauchy
+        # mesopsl,
+        # jeanZay,
+    ]
+    run_servers = [
+        galois,
+        pascal,
+        schwartz,
+        lagrange,
+        condorcet,
+        dalembert,
+        poincare,
+        #fourier,
+        #descartes,
         legendre,
         duchemin,
         #cauchy,  # richard wants cauchy
@@ -44,11 +60,12 @@ class Servers:
         # jeanZay,
     ]
 
+
     # These servers get some extra points in priority
     preferedServers = [legendre, duchemin]  # , cauchy]  # Richard wants cauchy
 
     # If we want to search all the servers including the local storage, we can do that
-    serversAndLocal = servers + [local_path_mac]
+    serversAndLocal = search_servers + [local_path_mac]
 
     # Default server
     default = pascal

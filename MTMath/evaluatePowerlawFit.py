@@ -4,7 +4,7 @@ from powerlaw import Truncated_Power_Law as Original_Truncated_Power_Law
 import numpy as np
 from scipy import special
 from numpy import nan
-
+from matplotlib import pyplot as plt
 # For checking how many processes are available
 import os
 import tempfile
@@ -175,6 +175,23 @@ def _upper_incomplete_gamma(a, x):
 def dist_from_fit(fit: powerlaw.Fit) -> Distribution:
     dist = getattr(fit, fit.xmin_distribution.name)
     return dist
+
+
+def _extract_fit_param_vals(fit: powerlaw.Fit):
+    parameter_names = list(
+        getattr(getattr(fit, "xmin_distribution", None), "parameter_names", [])
+    )
+
+    data = getattr(fit, "data", None)
+    if data is None or not hasattr(data, "__len__") or len(data) == 0:
+        return [np.nan] * len(parameter_names)
+
+    try:
+        dist = dist_from_fit(fit)
+    except (AttributeError, ValueError):
+        return [np.nan] * len(parameter_names)
+
+    return [getattr(dist, p, np.nan) for p in parameter_names]
 
 
 class Truncated_Power_Law(Original_Truncated_Power_Law):
@@ -642,15 +659,71 @@ def evaluate_xmin(
     return test_fits
 
 
-def my_find_xmin(drops, debug=False, samples_per_decade=30, **kwargs):
+def _find_post_drop_knee(x, D, recovery_frac=0.25, use_recovery_frac=False):
+    logx = np.log10(x)
+    dip_d1 = np.gradient(D, logx)
+    dip_d2 = np.gradient(dip_d1, logx)
+
+    if not np.isfinite(dip_d1).any():
+        return float(x[0]), dip_d1, dip_d2
+
+    idx_drop = int(np.nanargmin(dip_d1))
+    if idx_drop >= len(x) - 1:
+        return float(x[idx_drop]), dip_d1, dip_d2
+
+    recovery_threshold = None
+    if use_recovery_frac:
+        steepest_slope = dip_d1[idx_drop]
+        recovery_threshold = recovery_frac * steepest_slope
+
+    for i in range(max(idx_drop + 1, 1), len(x) - 1):
+        if not (
+            np.isfinite(dip_d2[i - 1])
+            and np.isfinite(dip_d2[i])
+            and np.isfinite(dip_d2[i + 1])
+        ):
+            continue
+        is_local_max_d2 = dip_d2[i] >= dip_d2[i - 1] and dip_d2[i] >= dip_d2[i + 1]
+        if not is_local_max_d2:
+            continue
+        if use_recovery_frac:
+            if not np.isfinite(dip_d1[i]) or dip_d1[i] < recovery_threshold:
+                continue
+        return float(x[i]), dip_d1, dip_d2
+
+    if use_recovery_frac:
+        recovered = np.flatnonzero(
+            (np.arange(len(x)) > idx_drop)
+            & np.isfinite(dip_d1)
+            & (dip_d1 >= recovery_threshold)
+        )
+        if recovered.size:
+            return float(x[int(recovered[0])]), dip_d1, dip_d2
+
+    right_side = np.arange(idx_drop + 1, len(x))
+    finite_d2_right = right_side[np.isfinite(dip_d2[right_side])]
+    if finite_d2_right.size:
+        best_i = int(finite_d2_right[np.nanargmax(dip_d2[finite_d2_right])])
+        return float(x[best_i]), dip_d1, dip_d2
+
+    return float(x[idx_drop]), dip_d1, dip_d2
+
+
+def my_dip_find_xmin(
+    drops,
+    debug=False,
+    samples_per_decade=30,
+    recovery_frac=0.25,
+    use_recovery_frac=False,
+    **kwargs,
+):
     log_min_xmin = np.log10(min(drops))
     log_max_xmin = np.log10(max(drops))
-    log_mid_xmin = log_min_xmin + 0.5 * (log_max_xmin - log_min_xmin)
 
-    decades = max(log_mid_xmin - log_min_xmin, 0.0)
+    decades = max(log_max_xmin - log_min_xmin, 0.0)
     nr_first_evaluation = int(max(20, np.ceil(decades * samples_per_decade)))
     # Coarse grid (downsampled) to find dip_d1
-    coarse_xmin_values = np.logspace(log_min_xmin, log_mid_xmin, nr_first_evaluation)
+    coarse_xmin_values = np.logspace(log_min_xmin, log_max_xmin, nr_first_evaluation)
     fits = evaluate_xmin(drops, coarse_xmin_values, **kwargs)
     distances = np.asarray([f.D for f in fits], dtype=float)
 
@@ -662,39 +735,64 @@ def my_find_xmin(drops, debug=False, samples_per_decade=30, **kwargs):
         return np.nan
     x = x[mask]
     D = D[mask]
-    logx = np.log10(x)
-    dip_d1 = np.gradient(D, logx)
-    # We now find the steapest part on the right side of the curve
-    xmin_search_start = x[np.argmin(dip_d1)]
-
-    # Then we try xmins from there until we find a local minimum (coarse grid)
-    start_idx = int(np.searchsorted(x, xmin_search_start, side="left"))
-    xmin_local_min = np.nan
-    for i in range(max(start_idx, 1), len(D) - 1):
-        if D[i] <= D[i - 1] and D[i] <= D[i + 1]:
-            xmin_local_min = float(x[i])
-            break
-    if not np.isfinite(xmin_local_min):
-        # Fallback: smallest D after start
-        if start_idx < len(D):
-            xmin_local_min = float(x[start_idx + int(np.nanargmin(D[start_idx:]))])
-        else:
-            return np.nan
-    param_vals = [
-        [
-            getattr(fit, p, np.nan)
-            for p in list(getattr(fit.xmin_distribution, "parameter_names", []))
-        ]
-        for fit in fits
-    ]
+    xmin, dip_d1, dip_d2 = _find_post_drop_knee(
+        x,
+        D,
+        recovery_frac=recovery_frac,
+        use_recovery_frac=use_recovery_frac,
+    )
+    param_vals = [_extract_fit_param_vals(fit) for fit in fits]
+    param_vals = [vals for vals, keep in zip(param_vals, mask) if keep]
     xmin_fitting_results = {
         "distances": D,
         "param_vals": param_vals,
         "xmins": x,
     }
+    if debug:
+        plt.plot(x, D)
+        plt.xscale("log")
+        plt.vlines([x[np.nanargmin(dip_d1)]], min(D), max(D), colors="tab:green", linestyles="--")
+        plt.vlines([xmin], min(D), max(D), colors="tab:red", linestyles=":")
+        plt.show()
+
+    return xmin, xmin_fitting_results
+
+
+def my_coarse_find_xmin(drops, debug=False, samples_per_decade=30, **kwargs):
+    log_min_xmin = np.log10(min(drops))
+    log_max_xmin = np.log10(max(drops))
+
+    decades = log_max_xmin - log_min_xmin
+    nr_first_evaluation = int(max(20, np.ceil(decades * samples_per_decade)))
+    coarse_xmin_values = np.logspace(log_min_xmin, log_max_xmin, nr_first_evaluation)
+    fits = evaluate_xmin(drops, coarse_xmin_values, **kwargs)
+    distances = np.asarray([f.D for f in fits], dtype=float)
+
+    x = coarse_xmin_values
+    D = distances
+    mask = np.isfinite(x) & np.isfinite(D) & (x > 0)
+    if mask.sum() < 3:
+        warnings.warn("Not enough finite KS distances to find a local minimum.")
+        return np.nan
+    x = x[mask]
+    D = D[mask]
+    
+    xmin_local_min = float(x[int(np.nanargmin(D))])
+
+    param_vals = [_extract_fit_param_vals(fit) for fit in fits]
+    param_vals = [vals for vals, keep in zip(param_vals, mask) if keep]
+    xmin_fitting_results = {
+        "distances": D,
+        "param_vals": param_vals,
+        "xmins": x,
+    }
+    if debug:
+        plt.plot(x, D)
+        plt.xscale("log")
+        plt.vlines([xmin_local_min], min(D), max(D))
+        plt.show()
 
     return xmin_local_min, xmin_fitting_results
-
 
 class Fit(powerlaw.Fit):
     def __init__(
@@ -749,9 +847,10 @@ class Fit(powerlaw.Fit):
 
     def find_xmin(self):
         if not self.fast_xmin:
+
             return super().find_xmin()
 
-        xmin, xmin_fitting_results = my_find_xmin(self.data)
+        xmin, xmin_fitting_results = my_dip_find_xmin(self.data)
 
         # Set the Fit's xmin to the optimal xmin
         self.xmin = xmin

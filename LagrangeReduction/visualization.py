@@ -16,7 +16,7 @@ from .LagrangeReduction import (
     lagrange_reduction_visualization,
 )
 from .vectorPair import VectorPair
-from MTMath.plotEnergy import (
+from MTMath.poincareEnergy import (
     generate_grid,
     generate_energy_grid,
     generate_cauchy_stress_grid,

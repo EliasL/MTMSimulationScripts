@@ -11,7 +11,7 @@ from multiprocessing import Pool
 from pathlib import Path
 
 import threading
-from MTMath.plotEnergy import (
+from MTMath.poincareEnergy import (
     plotEnergyField,
     generate_energy_grid,
     drawCScatter,
@@ -31,7 +31,7 @@ from MTMath.meshUtils import (
     perfect_grid_nodes,
     grid_index,
 )
-from .makePlots import makePlot
+from .makePlots import makePlot, energy_drop_label
 from .remotePlotting import get_csv_files
 from .dataFunctions import (
     get_data_from_name,
@@ -40,7 +40,7 @@ from .dataFunctions import (
     parse_pvd_file,
 )
 from .plotPowerLaw import plot_plastic_counts, get_energy_drops
-from Management.updateCSV import update_df_header
+from Management.updateCSV import update_df_header, read_macrodata_csv
 # matplotlib.use("Agg")  # Use a non-interactive backend
 
 # We get almost all variables dynamically, but we choose to set the force scale
@@ -465,6 +465,7 @@ def base_plot(
     remove_ticks=True,
     dpi=250,
     stress_label=None,
+    energy_drop_label=None,
     **kwargs,
 ):
     quality = 1
@@ -505,11 +506,13 @@ def base_plot(
 
         if stress_label is None:
             stress_label = r"\sigma"
+        if energy_drop_label is None:
+            energy_drop_label = "E"
 
         if delta_title:
             data_row = [
                 rf"$\Delta\gamma$: {delx:.1e}",
-                rf"$\Delta E $: {energyDrop:.2e}",
+                rf"$\Delta {energy_drop_label}$: {energyDrop:.2e}",
                 rf"$\Delta\langle {stress_label} \rangle$: {delAvgRSS:.2e}",
             ]
         else:
@@ -1737,6 +1740,7 @@ def get_corresponding_energy_and_rss(
     X="load",
     energy_type="e_change_from_init",
     averageEnergy=False,
+    stress_corrected=False,
 ):
     """
     Extracts the corresponding "avg_energy" and stress values for each load in vtu_files,
@@ -1757,6 +1761,7 @@ def get_corresponding_energy_and_rss(
         label=None,
         energy_type=energy_type,
         averageEnergy=averageEnergy,
+        stress_corrected=stress_corrected,
     )
     df = drops_info["df"]
     energy_key = drops_info["key"]
@@ -1846,8 +1851,7 @@ def get_previous_energy_and_rss(
     energy_col="total_energy",
     stress_col="avg_sigma12",
 ):
-    df = pd.read_csv(macro_data)
-    df = update_df_header(df, add_extrap_energy=False)
+    df = read_macrodata_csv(macro_data)
     # Check if current_line is an integer
     if isinstance(current_line, int):
         # Select the previous row relative to current_line
@@ -1882,6 +1886,7 @@ def make_images(vtu_files, num_processes=-2, use_tqdm=True, X="load", **kwargs):
         e_lims[1] = min(e_lims[1], 0.3)  # optional custom limit
         energy_type = kwargs.get("energy_type", "e_change_from_init")
         averageEnergy = kwargs.get("averageEnergy", False)
+        stress_corrected = kwargs.get("stress_corrected", False)
         (
             totalEnergy,
             avgRSS,
@@ -1896,6 +1901,12 @@ def make_images(vtu_files, num_processes=-2, use_tqdm=True, X="load", **kwargs):
             X,
             energy_type=energy_type,
             averageEnergy=averageEnergy,
+            stress_corrected=stress_corrected,
+        )
+        kwargs["energy_drop_label"] = energy_drop_label(
+            energy_type=energy_type,
+            stress_corrected=stress_corrected,
+            use_avg=averageEnergy,
         )
         if isinstance(plastic_limits, dict):
             if "max_plastic" in plastic_limits and "max_plastic" not in kwargs:
