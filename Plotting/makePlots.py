@@ -14,7 +14,12 @@ import json
 from simplification.cutil import simplify_coords_vwp
 from tqdm import tqdm
 from pathlib import Path
-from .dataFunctions import get_data_from_name, extract_force_contribution_magnitude_series
+from .dataFunctions import (
+    get_data_from_name,
+    extract_force_contribution_magnitude_series,
+    extract_true_force_contribution_magnitude_series,
+    resolve_vtu_files,
+)
 from Management.updateCSV import update_df_header, read_macrodata_csv
 from collections import defaultdict
 
@@ -56,8 +61,8 @@ def energy_drop_symbol(energy_type=None, stress_corrected=False):
     et = str(energy_type).lower()
     if "stress_corrected" in et:
         return "E_S"
-    if "change_from_init" in et:
-        return "E_R"
+    if "change_from_init" in et: 
+        return "E_R" # Relaxation energy drop
     if "energy_change" in et or "inter-strain" in et or "inter_strain" in et:
         return "E_I"
     return "E"
@@ -342,6 +347,7 @@ def time_to_seconds(duration_str):
 def plotColumns(cvs_files, Y, labels, fig=None, ax=None):
     if fig is None or ax is None:
         fig, ax = plt.subplots()
+    sigma_ax = ax.twinx()
 
     values = []
     for path in cvs_files:
@@ -929,17 +935,76 @@ def add_mark(ax, mark, x, y, color="black", fontsize=30):
     )
 
 
+def _extract_group_values_from_label(label):
+    text = str(label)
+    if not text:
+        return None, None
+    clean = text.replace("$", "").replace("\\", "")
+    number = r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+    gp1_patterns = [
+        rf"gamma_?0\s*=\s*{number}",
+        rf"\bgp1\s*=\s*{number}",
+    ]
+    gp2_patterns = [
+        rf"\bd\s*=\s*{number}",
+        rf"\bgp2\s*=\s*{number}",
+    ]
+
+    def _find_value(patterns):
+        for pattern in patterns:
+            match = re.search(pattern, clean, re.IGNORECASE)
+            if match is None:
+                continue
+            try:
+                return float(match.group(1))
+            except ValueError:
+                continue
+        return None
+
+    return _find_value(gp1_patterns), _find_value(gp2_patterns)
+
+
+def _build_auto_series_styles(labels):
+    parsed = [_extract_group_values_from_label(label) for label in labels]
+    gp1_values = sorted({gp1 for gp1, _ in parsed if gp1 is not None})
+    gp2_values = sorted({gp2 for _, gp2 in parsed if gp2 is not None})
+    if not gp1_values and not gp2_values:
+        return None, None
+
+    marker_pool = ["o", "s", "^", "D", "P", "X", "v", "<", ">"]
+    marker_by_gp1 = {
+        gp1: marker_pool[idx % len(marker_pool)] for idx, gp1 in enumerate(gp1_values)
+    }
+
+    color_pool = [plt.cm.tab10(i % 10) for i in range(max(10, len(gp2_values)))]
+    color_by_gp2 = {
+        gp2: color_pool[idx % len(color_pool)] for idx, gp2 in enumerate(gp2_values)
+    }
+
+    colors = []
+    markers = []
+    for gp1, gp2 in parsed:
+        colors.append(color_by_gp2.get(gp2, None))
+        markers.append(marker_by_gp1.get(gp1, "o"))
+    return colors, markers
+
+
 def plot_force_contribution_magnitudes(
     vtu_sources,
     labels=None,
     fig=None,
     ax=None,
     name="force_contribution_magnitude_vs_strain.pdf",
-    add_std=True,
-    std_alpha=0.2,
     show=False,
     save=True,
     use_tqdm=False,
+    plot_mode="line",
+    series_colors=None,
+    series_markers=None,
+    marker_size=26,
+    connect_points=True,
+    auto_style=True,
+    compare_true_force=True,
     **kwargs,
 ):
     """
@@ -977,27 +1042,135 @@ def plot_force_contribution_magnitudes(
 
     if fig is None or ax is None:
         assert fig is None and ax is None
-        fig, ax = plt.subplots()
+        if compare_true_force:
+            fig, axes = plt.subplots(1, 2, sharex=True, sharey=True, figsize=(10, 4))
+        else:
+            fig, ax = plt.subplots()
+            axes = [ax]
+    else:
+        if compare_true_force:
+            raise ValueError(
+                "compare_true_force=True requires fig and ax to be omitted."
+            )
+        axes = [ax]
 
-    for source, label in zip(sources, labels):
-        strain, mean_mag, std_mag = extract_force_contribution_magnitude_series(
+    plot_mode = str(plot_mode).lower()
+    if plot_mode not in {"line", "scatter"}:
+        raise ValueError("plot_mode must be 'line' or 'scatter'.")
+
+    def _resolve_style(spec, idx, label, default=None):
+        if spec is None:
+            return default
+        if isinstance(spec, dict):
+            return spec.get(label, default)
+        if isinstance(spec, (list, tuple, np.ndarray)):
+            if len(spec) == 0:
+                return default
+            return spec[idx % len(spec)]
+        return spec
+
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    auto_colors = None
+    auto_markers = None
+    if auto_style:
+        auto_colors, auto_markers = _build_auto_series_styles(labels)
+    n_series = len(sources)
+    if n_series <= 1:
+        marker_sizes = np.array([float(marker_size)], dtype=float)
+    else:
+        size_scales = np.linspace(1.5, 0.5, n_series)
+        marker_sizes = float(marker_size) * size_scales
+
+    def _plot_series(ax_obj, xvals, yvals, *, label, color, marker, size, zorder):
+        if plot_mode == "scatter":
+            if connect_points:
+                ax_obj.plot(
+                    xvals,
+                    yvals,
+                    color=color,
+                    linewidth=0.9,
+                    alpha=0.35,
+                    label="_nolegend_",
+                    zorder=zorder - 0.1,
+                )
+            ax_obj.scatter(
+                xvals,
+                yvals,
+                label=label,
+                marker=marker,
+                s=float(size),
+                facecolors="none",
+                edgecolors=color,
+                linewidths=0.9,
+                zorder=zorder,
+                **kwargs,
+            )
+        else:
+            line_kwargs = dict(kwargs)
+            line_kwargs.setdefault("color", color)
+            line_kwargs.setdefault("marker", marker)
+            line_kwargs.setdefault("markerfacecolor", "none")
+            line_kwargs.setdefault("markeredgecolor", color)
+            ax_obj.plot(xvals, yvals, label=label, **line_kwargs)[0]
+
+    for idx, (source, label) in enumerate(zip(sources, labels)):
+        strain_umut, mean_umut, _ = extract_force_contribution_magnitude_series(
             source, use_tqdm=use_tqdm
         )
-        line = ax.plot(strain, mean_mag, label=label, **kwargs)[0]
-        if add_std:
-            ax.fill_between(
-                strain,
-                np.clip(mean_mag - std_mag, 0, None),
-                mean_mag + std_mag,
-                color=line.get_color(),
-                alpha=std_alpha,
-                linewidth=0,
-                label="_nolegend_",
+        strain_umut = np.asarray(strain_umut[1:], dtype=float)
+        mean_umut = np.asarray(mean_umut[1:], dtype=float)
+
+        if compare_true_force:
+            strain_true, mean_true, _ = extract_true_force_contribution_magnitude_series(
+                source, use_tqdm=use_tqdm
+            )
+            strain_true = np.asarray(strain_true[1:], dtype=float)
+            mean_true = np.asarray(mean_true[1:], dtype=float)
+
+        default_color = default_colors[idx % len(default_colors)] if default_colors else None
+        color = _resolve_style(series_colors, idx, label, default=None)
+        if color is None and auto_colors is not None:
+            color = auto_colors[idx]
+        if color is None:
+            color = default_color
+
+        marker = _resolve_style(series_markers, idx, label, default=None)
+        if marker is None and auto_markers is not None:
+            marker = auto_markers[idx]
+        if marker is None:
+            marker = "o"
+
+        series_zorder = 2 + idx
+        _plot_series(
+            axes[0],
+            strain_umut,
+            mean_umut,
+            label=label,
+            color=color,
+            marker=marker,
+            size=marker_sizes[idx],
+            zorder=series_zorder,
+        )
+
+        if compare_true_force:
+            _plot_series(
+                axes[1],
+                strain_true,
+                mean_true,
+                label=label,
+                color=color,
+                marker=marker,
+                size=marker_sizes[idx],
+                zorder=series_zorder,
             )
 
-    ax.set_xlabel(r"Strain $\gamma$")
-    ax.set_ylabel(r"$\langle |F_{ei}| \rangle$")
-    ax.legend(loc="best")
+    axes[0].set_xlabel(r"Strain $\gamma$")
+    axes[0].set_ylabel(r"$\langle |F_{ei}| \rangle$")
+    axes[0].legend(loc="best")
+    if compare_true_force:
+        axes[0].set_title("Umut F")
+        axes[1].set_title("True F")
+        axes[1].set_xlabel(r"Strain $\gamma$")
 
     if save:
         output_path = Path(name)
@@ -1011,6 +1184,350 @@ def plot_force_contribution_magnitudes(
             else:
                 output_path = base_path / output_path
         fig.tight_layout()
+        fig.savefig(output_path)
+        print(f'Plot saved at: "{output_path}"')
+
+    if show:
+        plt.show()
+    if compare_true_force:
+        return fig, axes
+    return fig, axes[0]
+
+
+def compute_predicted_next_energy(csv_file_path):
+    """
+    Compute predicted next-step total energy using
+        E_{i+1}^{pred} = E_i + V * sigma_i * delta_gamma_i
+    and compare to measured E_{i+1}.
+    """
+    csv_path = Path(csv_file_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(f"CSV file not found: {csv_path}")
+
+    df = read_macrodata_csv(csv_path)
+    if "load" not in df.columns:
+        raise KeyError(f"Missing 'load' column in {csv_path}")
+
+    load = np.asarray(df["load"], dtype=float)
+    if load.ndim != 1 or load.size < 2:
+        raise ValueError(f"'load' in {csv_path} must be 1D with at least 2 points.")
+
+    meta = get_data_from_name(str(csv_path))
+    volume = None
+    if "L" in meta and meta["L"] is not None:
+        L = float(meta["L"])
+        volume = float(L * L)
+    elif "dims" in meta and meta["dims"] is not None:
+        n1, n2 = meta["dims"]
+        volume = float(n1 * n2)
+    elif "N" in meta and meta["N"] is not None:
+        n1, n2 = meta["N"]
+        volume = float(n1 * n2)
+    if volume is None:
+        raise ValueError(f"Could not infer system volume from metadata for {csv_path}")
+
+    sigma_col = None
+    if "avg_sigma12" in df.columns:
+        sigma_candidate = np.asarray(df["avg_sigma12"], dtype=float)
+        if not np.all(sigma_candidate == 0):
+            sigma_col = "avg_sigma12"
+    if sigma_col is None and "avg_P12" in df.columns:
+        sigma_col = "avg_P12"
+    if sigma_col is None:
+        raise KeyError(f"Missing stress column ('avg_sigma12' or 'avg_P12') in {csv_path}")
+
+    sigma = np.asarray(df[sigma_col], dtype=float)
+    if sigma.shape != load.shape:
+        raise ValueError(
+            f"Stress shape mismatch in {csv_path}: {sigma.shape} vs load {load.shape}"
+        )
+
+    converted_avg_energy = False
+    if "total_energy" in df.columns:
+        energy_col = "total_energy"
+        energy_total = np.asarray(df[energy_col], dtype=float)
+    elif "energy" in df.columns:
+        energy_col = "energy"
+        energy_total = np.asarray(df[energy_col], dtype=float)
+    elif "avg_energy" in df.columns:
+        energy_col = "avg_energy"
+        energy_total = np.asarray(df[energy_col], dtype=float) * volume
+        converted_avg_energy = True
+    else:
+        raise KeyError(
+            f"Missing energy column ('total_energy', 'energy', or 'avg_energy') in {csv_path}"
+        )
+
+    if energy_total.shape != load.shape:
+        raise ValueError(
+            f"Energy shape mismatch in {csv_path}: {energy_total.shape} vs load {load.shape}"
+        )
+
+    load_i = load[:-1]
+    load_ip1 = load[1:]
+    delta_gamma = np.diff(load)
+    sigma_i = sigma[:-1]
+    e_i = energy_total[:-1]
+    e_real_next = energy_total[1:]
+    finite_pairs = (
+        np.isfinite(load_i)
+        & np.isfinite(load_ip1)
+        & np.isfinite(delta_gamma)
+        & np.isfinite(sigma_i)
+        & np.isfinite(e_i)
+        & np.isfinite(e_real_next)
+    )
+    if not np.any(finite_pairs):
+        raise ValueError(f"No finite prediction pairs found in {csv_path}")
+
+    load_i = load_i[finite_pairs]
+    load_ip1 = load_ip1[finite_pairs]
+    delta_gamma = delta_gamma[finite_pairs]
+    sigma_i = sigma_i[finite_pairs]
+    e_i = e_i[finite_pairs]
+    e_real_next = e_real_next[finite_pairs]
+    e_pred_next = e_i + volume * sigma_i * delta_gamma
+
+    prediction_error = e_real_next - e_pred_next
+    abs_prediction_error = np.abs(prediction_error)
+    relative_prediction_error = np.full_like(abs_prediction_error, np.nan)
+    denom = np.abs(e_real_next)
+    nonzero = denom > 0
+    relative_prediction_error[nonzero] = abs_prediction_error[nonzero] / denom[nonzero]
+
+    result_df = pd.DataFrame(
+        {
+            "load_i": load_i,
+            "load_ip1": load_ip1,
+            "delta_gamma": delta_gamma,
+            "sigma_i": sigma_i,
+            "E_i": e_i,
+            "E_ip1_pred": e_pred_next,
+            "E_ip1_real": e_real_next,
+            "prediction_error": prediction_error,
+            "abs_prediction_error": abs_prediction_error,
+            "relative_prediction_error": relative_prediction_error,
+        }
+    )
+    info = {
+        "csv_path": str(csv_path),
+        "volume": volume,
+        "sigma_col": sigma_col,
+        "energy_col": energy_col,
+        "converted_avg_energy_to_total": converted_avg_energy,
+    }
+    return result_df, info
+
+
+def plot_predicted_energy_error(
+    csv_file_paths,
+    labels=None,
+    fig=None,
+    ax=None,
+    name="pristine_crystal_energy_prediction_error.pdf",
+    error_metric="prediction_error",
+    property_keys=("L", "loadIncrement"),
+    use_color_matrix_legend=True,
+    y_log=True,
+    strain_lim=(0.001, 0.01),
+    show_sigma=False,
+    show=False,
+    save=True,
+):
+    if isinstance(csv_file_paths, (str, Path)):
+        csv_paths = [str(csv_file_paths)]
+    else:
+        csv_paths = [str(path) for path in csv_file_paths]
+    if not csv_paths:
+        raise ValueError("No CSV paths provided.")
+
+    if labels is None:
+        labels = [Path(path).parent.name for path in csv_paths]
+    else:
+        labels = list(labels)
+    if len(labels) != len(csv_paths):
+        raise ValueError("Length of labels must match length of csv_file_paths.")
+
+    allowed_metrics = {
+        "prediction_error",
+        "abs_prediction_error",
+        "relative_prediction_error",
+    }
+    if error_metric not in allowed_metrics:
+        raise ValueError(
+            f"Unknown error_metric '{error_metric}'. Expected one of {sorted(allowed_metrics)}."
+        )
+
+    if strain_lim is not None:
+        if len(strain_lim) != 2:
+            raise ValueError("strain_lim must be None or a two-value sequence.")
+        strain_min, strain_max = strain_lim
+    else:
+        strain_min, strain_max = None, None
+
+    if fig is None or ax is None:
+        fig, ax = plt.subplots()
+    sigma_ax = ax.twinx() if show_sigma else None
+
+    metric_label_map = {
+        "prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred}}$",
+        "abs_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred}}|$",
+        "relative_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred}}| / |E_{i+1}^{\mathrm{real}}|$",
+    }
+
+    def _sample_points(mask, delta_gamma):
+        indices = np.flatnonzero(mask)
+        if indices.size == 0:
+            return indices
+
+        positive_steps = delta_gamma[np.isfinite(delta_gamma) & (delta_gamma > 0)]
+        if positive_steps.size == 0:
+            return indices
+
+        representative_step = float(np.median(positive_steps))
+        target = max(1, int(round(20 * -np.log(representative_step))))
+        if target >= indices.size:
+            return indices
+
+        sampled = np.linspace(0, indices.size - 1, target)
+        return indices[np.unique(np.round(sampled).astype(int))]
+
+    colors = [None] * len(csv_paths)
+    marker_pool = ["o", "s", "^", "v", "D", "p", "h", "<", ">"]
+    markers = [marker_pool[i % len(marker_pool)] for i in range(len(csv_paths))]
+    marker_matrix = None
+    if use_color_matrix_legend:
+        if property_keys is None or len(property_keys) == 0:
+            raise ValueError(
+                "property_keys must be provided when use_color_matrix_legend=True."
+            )
+        prop1_values, prop2_values, _ = parse_labels(labels, property_keys)
+        if np.any(pd.isna(prop1_values)):
+            raise ValueError(
+                f"Could not parse key '{property_keys[0]}' from all labels."
+            )
+        if len(property_keys) > 1 and np.any(pd.isna(prop2_values)):
+            raise ValueError(
+                f"Could not parse key '{property_keys[1]}' from all labels."
+            )
+        color_matrix, unique_p1, unique_p2 = create_color_matrix(
+            prop1_values,
+            prop2_values,
+        )
+        marker_matrix = np.empty(color_matrix.shape[:2], dtype=object)
+        marker_matrix[:] = None
+        cell_markers = {}
+        for i in range(len(csv_paths)):
+            row = (
+                np.where(unique_p2 == prop2_values[i])[0][0]
+                if unique_p2 is not None
+                else 0
+            )
+            col = np.where(unique_p1 == prop1_values[i])[0][0]
+            colors[i] = color_matrix[row, col]
+            cell = (row, col)
+            if cell not in cell_markers:
+                cell_markers[cell] = marker_pool[len(cell_markers) % len(marker_pool)]
+            markers[i] = cell_markers[cell]
+            marker_matrix[row, col] = markers[i]
+
+    for i, (csv_path, label) in enumerate(zip(csv_paths, labels)):
+        prediction_df, _ = compute_predicted_next_energy(csv_path)
+        x = np.asarray(prediction_df["load_ip1"], dtype=float)
+        y_raw = np.asarray(prediction_df[error_metric], dtype=float)
+        sigma = np.asarray(prediction_df["sigma_i"], dtype=float)
+
+        if y_log and error_metric == "prediction_error":
+            y = np.abs(y_raw)
+        else:
+            y = y_raw
+
+        finite = np.isfinite(x) & np.isfinite(y)
+        if strain_min is not None:
+            finite &= x >= strain_min
+        if strain_max is not None:
+            finite &= x <= strain_max
+        if y_log:
+            finite &= y > 0
+        if not np.any(finite):
+            print(
+                f"No plottable points for '{error_metric}' in {csv_path} "
+                f"(after strain_lim={strain_lim} and y_log={y_log} filtering). Skipping."
+            )
+            continue
+
+        if show_sigma:
+            sigma_finite = np.isfinite(x) & np.isfinite(sigma)
+            if strain_min is not None:
+                sigma_finite &= x >= strain_min
+            if strain_max is not None:
+                sigma_finite &= x <= strain_max
+            if np.any(sigma_finite):
+                sigma_ax.plot(
+                    x[sigma_finite],
+                    sigma[sigma_finite],
+                    color="0.45",
+                    linestyle="--",
+                    linewidth=0.8,
+                    alpha=0.65,
+                    label="_nolegend_",
+                )
+
+        plot_indices = _sample_points(
+            finite, np.asarray(prediction_df["delta_gamma"], dtype=float)
+        )
+        color = colors[i] if colors[i] is not None else f"C{i % 10}"
+        legend_label = getPrettyLabel(label) if label else Path(csv_path).parent.name
+        ax.scatter(
+            x[plot_indices],
+            y[plot_indices],
+            label=legend_label,
+            marker=markers[i],
+            s=22,
+            facecolors="none",
+            edgecolors=color,
+            linewidths=0.9,
+        )
+
+    if error_metric == "prediction_error" and not y_log:
+        ax.axhline(0.0, color="black", linestyle="--", linewidth=0.8, alpha=0.6)
+
+    ax.set_xlabel(r"Strain $\gamma_{i+1}$")
+    if y_log and error_metric == "prediction_error":
+        ax.set_ylabel(metric_label_map["abs_prediction_error"])
+    else:
+        ax.set_ylabel(metric_label_map[error_metric])
+    if y_log:
+        ax.set_yscale("log")
+        ax.set_ylim(None, 1e2)
+    if show_sigma:
+        sigma_ax.set_ylabel(r"$\sigma_{12}$", color="0.35")
+        sigma_ax.tick_params(axis="y", colors="0.35")
+    ax.set_title(r"Energy Prediction Error: $E_{i+1}^{pred} = E_i + V \sigma_i \delta\gamma_i$")
+
+    if use_color_matrix_legend:
+        plot_color_matrix(
+            ax,
+            color_matrix,
+            unique_p1,
+            unique_p2,
+            property_keys=property_keys,
+            loc="upper left",
+            bbox_to_anchor=(0.1, -0.05, 1, 1),
+            marker_matrix=marker_matrix,
+            marker_color="lower_left_white",
+        )
+    else:
+        ax.legend(loc="best")
+    fig.tight_layout()
+
+    if save:
+        output_path = Path(name)
+        if output_path.suffix == "":
+            output_path = output_path.with_suffix(".pdf")
+        if not output_path.is_absolute():
+            output_path = Path("Plots") / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(output_path)
         print(f'Plot saved at: "{output_path}"')
 
@@ -1032,29 +1549,16 @@ def addImagesToPlot(
 ):
     from .pyplotFunctions import plot_mesh
 
-    # First we get the folder with vtu_files
-    framesPath = Path(csv_file_path).parent / "data"
+    # Get ordered VTU files for this simulation.
+    vtu_files = resolve_vtu_files(Path(csv_file_path).parent)
+    if len(vtu_files) == 0:
+        raise ValueError(f"No VTU files found for {csv_file_path}")
 
-    # Define the regex pattern to match the file names and find the number between the dots
-    pattern = re.compile(r".*\.(\d*)\.vtu")
-
-    # Get all files in the folder matching the pattern and extract both the number and full path
-    matching_files = [
-        (
-            int(pattern.match(f.name).group(1)),
-            f,
-        )  # Create a tuple with the number and the full path
-        for f in framesPath.iterdir()
-        if f.is_file() and pattern.match(f.name)
-    ]
-
-    # Sort the list of tuples by the number (the first element of the tuple)
-    matching_files.sort(key=lambda x: x[0])
-
-    # Extract the paths for the first, middle, and last files
-    first_file = matching_files[0][1]
-    middle_file = matching_files[int(len(matching_files) * 0.45)][1]
-    last_file = matching_files[-1][1]
+    # Extract the paths for the first, middle, and last files.
+    middle_idx = int(len(vtu_files) * 0.45)
+    first_file = vtu_files[0]
+    middle_file = vtu_files[middle_idx]
+    last_file = vtu_files[-1]
 
     if not isinstance(size, list):
         size = [size] * 3
@@ -1482,6 +1986,8 @@ def plot_color_matrix(
     height="25%",
     loc="upper left",
     bbox_to_anchor=None,
+    marker_matrix=None,
+    marker_color="black",
 ):
     """Inset a color matrix inside the main plot."""
 
@@ -1497,6 +2003,42 @@ def plot_color_matrix(
         bbox_transform=ax.transAxes,
     )
     inset_ax.matshow(color_matrix.transpose((0, 1, 2)), origin="upper", aspect="auto")
+    if marker_matrix is not None:
+        marker_matrix = np.asarray(marker_matrix, dtype=object)
+        if marker_matrix.shape != color_matrix.shape[:2]:
+            raise ValueError("marker_matrix must match the first two color_matrix dimensions.")
+        marker_color_matrix = None
+        if not isinstance(marker_color, str) and not callable(marker_color):
+            marker_color_matrix = np.asarray(marker_color, dtype=object)
+            if marker_color_matrix.shape != marker_matrix.shape:
+                raise ValueError("marker_color matrix must match marker_matrix shape.")
+        row_cut = int(np.ceil(marker_matrix.shape[0] / 2))
+        col_cut = int(np.ceil(marker_matrix.shape[1] / 2))
+        for row in range(marker_matrix.shape[0]):
+            for col in range(marker_matrix.shape[1]):
+                marker = marker_matrix[row, col]
+                if marker is None:
+                    continue
+                if marker_color == "lower_left_white":
+                    this_marker_color = (
+                        "white" if row < row_cut and col < col_cut else "black"
+                    )
+                elif callable(marker_color):
+                    this_marker_color = marker_color(row, col)
+                elif marker_color_matrix is not None:
+                    this_marker_color = marker_color_matrix[row, col]
+                else:
+                    this_marker_color = marker_color
+                inset_ax.plot(
+                    col,
+                    row,
+                    marker=marker,
+                    linestyle="None",
+                    markerfacecolor="none",
+                    markeredgecolor=this_marker_color,
+                    markeredgewidth=1.1,
+                    markersize=5.5,
+                )
     inset_ax.set_xticks(range(len(unique_p1)))
     if fmt_p1 is None:
         fmt_p1 = sci_format

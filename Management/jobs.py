@@ -20,8 +20,7 @@ def CGconfs(nrThreads, nrSeeds):
     size = 60
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
-        rows=size,
-        cols=size,
+        L=size,
         startLoad=0.15,
         nrThreads=nrThreads,
         minimizer="CG",
@@ -40,8 +39,7 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_variant=False):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
         group_by_variant=group_by_variant,
-        rows=size,
-        cols=size,
+        L=size,
         startLoad=0.15,
         nrThreads=nrThreads,
         minimizer=["LBFGS", "CG", "FIRE"],
@@ -59,8 +57,7 @@ def allPlasticEventsJob():
     configs, labels = ConfigGenerator.generate(
         seed=[0],
         group_by_variant=False,
-        rows=100,
-        cols=100,
+        L=100,
         startLoad=0.15,
         # initialGuessNoise=0.000001,
         nrThreads=20,
@@ -82,8 +79,7 @@ def initalInstability():
     configs, labels = ConfigGenerator.generate(
         seed=[0],
         group_by_variant=False,
-        rows=200,
-        cols=200,
+        L=200,
         startLoad=0.12,
         loadIncrement=1e-5,
         maxLoad=0.2,
@@ -96,6 +92,22 @@ def initalInstability():
         # eps=1e-8,
         usingPBC="false",
         scenario="simpleShearFixedBoundary",
+    )
+    return configs, labels
+
+def pristineCrystal(size=[100,200, 300], loadIncrement=[1e-4, 1e-5, 1e-6], group_by_variant=True, reconnection="none"):
+    configs, labels = ConfigGenerator.generate(
+        seed=0,
+        group_by_variant=group_by_variant,
+        L=size,
+        startLoad=0.0,
+        maxLoad=0.01,
+        nrThreads=1,
+        minimizer="LBFGS",
+        loadIncrement=loadIncrement,
+        LBFGSEpsx=1e-7,
+        scenario="simpleShear",
+        reconnectionMethod=reconnection,
     )
     return configs, labels
 
@@ -166,7 +178,7 @@ def propperJobFIRE():
 
 
 def basicJob(
-    nrThreads, nrSeeds, size=100, group_by_variant=False, maxLoad=1.0, reconnection="none"
+    nrThreads, nrSeeds, size=100, group_by_variant=False, maxLoad=1.0, reconnection="none", logDuringMinimization=0,loadIncrement=1e-5
 ):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -177,7 +189,7 @@ def basicJob(
         maxLoad=maxLoad,
         nrThreads=nrThreads,
         minimizer="LBFGS",
-        loadIncrement=1e-5,
+        loadIncrement=loadIncrement,
         # epsR=1e-6,
         LBFGSEpsx=1e-6,
         # LBFGSEpsg=1e-8,
@@ -186,7 +198,7 @@ def basicJob(
         # remesh=1,
         # temp
         energyDropThreshold=1e-4,
-        #logDuringMinimization=1,
+        logDuringMinimization=logDuringMinimization,
     )
     return configs, labels
 
@@ -692,7 +704,8 @@ def reconnectTest(diagonal="major", reconnectionMethod="edgeFlip"):
     )
     return configs, labels
 
-def reconnectSSTest(diagonal="major", reconnectionMethod="edgeFlip"):
+def reconnectSSTest(diagonal="major", reconnectionMethod="edgeFlip",
+                    refConfig=[0.0,1.0,2.0, 4.0], disp=[0.0, 1e-2, 1e-1], vertLoad=False):
     configs, labels = ConfigGenerator.generate(
         usingPBC="true",
         L=3,
@@ -703,6 +716,9 @@ def reconnectSSTest(diagonal="major", reconnectionMethod="edgeFlip"):
         minimizer="LBFGS",
         scenario="reconnectSSTest",
         reconnectionMethod=reconnectionMethod,
+        GP1=refConfig,
+        GP2=disp,
+        GP3=float(vertLoad),
     )
     return configs, labels
 
@@ -890,21 +906,3 @@ def triangular_edge_flip_job(
     )
     return configs, labels
  
-def referenceStateTestJob(startLoad=[1, 2, 4, 8, 16, 32], reconnection="none", group_by_variant=True):
-    size=3
-    maxLoad=1.0
-    configs, labels = ConfigGenerator.generate(
-        seed=range(1),
-        group_by_variant=group_by_variant,
-        rows=size,
-        cols=size,
-        startLoad=list(map(float,startLoad)),
-        maxLoad=maxLoad,
-        nrThreads=1,
-        minimizer="LBFGS",
-        loadIncrement=1e-2,
-        LBFGSEpsx=1e-6,
-        scenario="simpleShearReferenceTest",
-        reconnectionMethod=reconnection,
-    )
-    return configs, labels

@@ -5,13 +5,15 @@ import matplotlib.pyplot as plt
 
 from Management.jobs import *
 
-from Management.updateCSV import fix_csv_files
+from Management.updateCSV import fix_csv_files, read_macrodata_csv
 from Management.configGenerator import ConfigGenerator
 from Management.simulationManager import findOutputPath
 from Plotting.makePlots import (
     makePlot,
     makeSettingComparison,
     makeAverageComparisonPlot,
+    plot_force_contribution_magnitudes,
+    plot_predicted_energy_error,
 )
 from Plotting.pyplotFunctions import plot_center_node_forces
 from MTMath.powerlaw_mixed_test import (
@@ -57,6 +59,7 @@ from Plotting.remotePlotting import (
     plotLog2,
     plotLogCompare,
     plotPlasticCounts,
+    plotReversibilityEnergyDropCorrelation,
     get_csv_files,
     plotEnergy,
     plotStress,
@@ -74,7 +77,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from Management.configGenerator import SimulationConfig
 from Management.connectToCluster import Servers
-
+from pathlib import Path
 
 def plotPropperJob():
     nrThreads = 3
@@ -316,11 +319,14 @@ def plotSylvainBatches():
     xmin_accuracy = 1.0
     for batch in [-2, -1]:
         configs, labels = sylvainBatches(batch)
+        
         if not configs:
             continue
         grouped_configs, grouped_labels, group_labels = (
             ConfigGenerator.group_by_settings(configs, labels=labels)
         )
+        plotReversibilityEnergyDropCorrelation(grouped_configs, grouped_labels, xAxisCol="rev_energy_diff")
+
         paths, _ = get_csv_files(
             grouped_configs,
             labels=grouped_labels,
@@ -615,6 +621,11 @@ def plotReversibility():
     plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
 
 
+
+
+
+
+
 def plotLogAnalasys():
     drop_type = "energy"
     # configs, labels = bigUmutJob(group_by_variant=True)
@@ -782,16 +793,87 @@ def analyseLongData():
     # plotLog2(configs, labels, xmin_range=1e-4)
 
 def plotReferenceTest():
-    configs, labels = referenceStateTestJob()
+
+    configs, labels = reconnectSSTest(reconnectionMethod="none")
     plotStress(configs, labels)
-    
+    flat_configs = (
+        [c for group in configs for c in group]
+        if configs and isinstance(configs[0], list)
+        else list(configs)
+    )
+    if not flat_configs:
+        print("No reference-test configs found.")
+        return
+
+    csv_paths, _ = get_csv_files(
+        flat_configs, labels=None, useOldFiles=False, forceUpdate=False
+    )
+    if not csv_paths:
+        print("No CSV files found for reference-test plots.")
+        return
+
+    label_by_name = {
+        cfg.name: rf"$\gamma_0$={cfg.GP1:g}, $d$={cfg.GP2:g}"
+        for cfg in flat_configs
+    }
+
+    sim_paths = []
+    sim_labels = []
+    for csv_path in csv_paths:
+        sim_dir = str(Path(csv_path).parent)
+        sim_name = Path(sim_dir).name
+        sim_paths.append(sim_dir)
+        sim_labels.append(label_by_name.get(sim_name, sim_name))
+
+    force_contrib_out = (
+        Path.cwd() / "Plots" / "reference_test_force_contrib_vs_strain.pdf"
+    )
+    plot_force_contribution_magnitudes(
+        sim_paths,
+        labels=sim_labels,
+        name=str(force_contrib_out),
+        plot_mode="scatter",
+        marker_size=80,
+        connect_points=False,
+        show=True,
+    )
+
+
+def plotPristineCrystalPredictionError():
+    configs, labels = pristineCrystal(group_by_variant=True)
+    paths, labels = get_csv_files(
+        configs, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    if not paths:
+        print("No CSV files found for pristineCrystal.")
+        return
+
+    paths = fix_csv_files(paths)
+    paths, labels = get_group_structure(paths, labels)
+    flat_paths = [path for group in paths for path in group]
+    flat_labels = [label for group in labels for label in group]
+    if not flat_paths:
+        print("No valid CSV paths found for pristineCrystal.")
+        return
+
+    output_path = Path.cwd() / "Plots" / "pristine_crystal_energy_prediction_error.pdf"
+    plot_predicted_energy_error(
+        flat_paths,
+        labels=flat_labels,
+        name=str(output_path),
+        show=False,
+        error_metric="abs_prediction_error",
+        property_keys=("L", "loadIncrement"),
+        use_color_matrix_legend=True,
+        y_log=True,
+    )
 
 
 if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    # run_reconnection_demo()
+    run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
     # test()
@@ -829,7 +911,7 @@ if __name__ == "__main__":
     # compareStop()
     # compareStep()
     # plotReversibility()
-    plotReferenceTest()
+    #plotReferenceTest()
     #plotLogAnalasys()
     # analyseLongData()
     # testSamplePiecewise(alpha=1.35, xmin=1e-5, xlow=1e-7)
@@ -838,7 +920,8 @@ if __name__ == "__main__":
     # testRealData()
     # investigateJobs()
     # print_remote_runtimes()
-    # plotSylvainBatches()
+    #plotSylvainBatches()
+    #plotPristineCrystalPredictionError()
     # compare_center_node_forces()
     # compare_energy_three_sims()
     pass

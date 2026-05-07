@@ -427,12 +427,22 @@ def get_energy_drops(
                 use_average = energy_col.startswith("avg_")
             if use_average_label is None:
                 use_average_label = use_average
-            energy_total = energy * V if use_average else energy
+            energy_total = energy * 2*V if use_average else energy # Nr elements=2xLxL
             energy_total_arr = np.asarray(energy_total, dtype=float)
             sigma_arr = np.asarray(sigma, dtype=float)
             step_drop = energy_total_arr[:-1] - energy_total_arr[1:]+ V * sigma_arr[:-1] * delta_gamma
+            #plt.plot(V * sigma_arr[:-1] * delta_gamma, label="stress correction")
+            #plt.plot( sigma_arr[:-1], label="raw stress correction")
+            #plt.plot(energy_total_arr[:-1] - energy_total_arr[1:], label="energy drop")
+            # Run simulation of perfect crystal and check stress correction prediction
+            print(df_local.columns)
+            plt.plot(-df_local["total_e_change_from_init"], label=r"$E_R$")
+            plt.plot(step_drop, label="corrected energy drop")
+            #plt.yscale("log")
+            plt.legend()
+            plt.show()
             if use_average:
-                step_drop = step_drop / V
+                step_drop = step_drop / (2*V)
             signed_step_change = np.zeros(len(energy_total_arr), dtype=float)
             # Convention: drops are negative in signed_step_change.
             signed_step_change[1:] = -step_drop
@@ -451,11 +461,12 @@ def get_energy_drops(
                     use_avg=averageEnergy,
                 )
 
-        signed_step_change = np.asarray(signed_step_change, dtype=float)
+        signed_step_change = np.array(signed_step_change, dtype=float, copy=True)
 
         if np.all(signed_step_change >= 0):
             # Umut code compatability: I'm just assuming if all the drops are positive
             # they should probably be flipped.
+            print("Flipped for umut code!")
             signed_step_change = -signed_step_change
 
         strain = df_local["load"]
@@ -477,6 +488,7 @@ def get_energy_drops(
             )
             mask = mask & realPlasticDrop
 
+        mask = np.asarray(mask, dtype=bool)
         drops.extend(-signed_step_change[mask])
         masks.append(mask)
 
@@ -619,7 +631,7 @@ def get_stress_drops(
     df=None,
     strainLim: str | list[float] = "auto",
     label=None,
-    postRegime=True
+    postRegime=True,
 ):
     """
     Stress drops defined as
@@ -791,8 +803,6 @@ def _clean_positive_data(data):
 
 
 def _drop_quantity_label(drop_label):
-    if drop_label == r"\sigma":
-        return r"\Delta \sigma"
     return rf"-\Delta {drop_label}"
 
 
@@ -1245,7 +1255,7 @@ def make_title_from_data_info(data_info):
     n = data_info["nrSimulations"]
     samples_string = f"{n} sample{'s' if n != 1 else ''}"
     title = (
-        rf"{L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f}"
+        rf"{L}x{L} {samples_string} $\gamma$: {strainLim[0]:.2f} - {strainLim[1]:.2f} "
     )
     if data_info["minimizer"] != "Unknown":
         title = rf"{data_info['minimizer']} " + title
@@ -1255,7 +1265,8 @@ def make_title_from_data_info(data_info):
             normalized = [strip_seed_from_label(item) for item in l]
             normalized_non_empty = [item for item in normalized if item]
             if normalized_non_empty and len(set(normalized_non_empty)) == 1:
-                title += normalized_non_empty[0]
+                if normalized_non_empty[0] != f"L={L}":
+                    title += normalized_non_empty[0]
             else:
                 if(not len(set(normalized)) == 1):
                     print(f"Labels in group are different: {set(normalized)}")
@@ -1347,6 +1358,19 @@ def plot_data_and_fit(
             alpha=0.2,
             label=rf"Fit region. $\alpha={dist.alpha:.2f}, \lambda=$ {dist.Lambda:.2e}",
         )
+
+        # Mark x = 1/lambda with a dashed vertical line through the full plot height.
+        lambda_val = float(getattr(dist, "Lambda", np.nan))
+        if np.isfinite(lambda_val) and lambda_val > 0.0:
+            x_inv_lambda = 1.0 / lambda_val
+            ax.axvline(
+                x_inv_lambda,
+                color="tab:green",
+                linestyle="--",
+                linewidth=1.2,
+                alpha=0.9,
+                label=r"$1/\lambda$",
+            )
 
     ax.legend()
     if title == "" and data_info is not None:
@@ -1660,7 +1684,7 @@ def find_best_xmin(
     use_memmap=True,
     memmap_min_size=5e4,
     memmap_dir=None,
-    selected_xmin=None,
+    selected_fit=None,
 ):
     """
     We scan many possible xmin values. We try to identify a plateau region
@@ -1673,6 +1697,8 @@ def find_best_xmin(
     path_name = _append_sample_suffix(path_name, len(drops))
 
     print(f"Testing xmins for {title}")
+
+    selected_xmin = selected_fit.xmin
 
     if parallel and len(drops) > 5e4 and not use_memmap:
         parallel = False
@@ -1692,6 +1718,22 @@ def find_best_xmin(
         memmap_min_size=memmap_min_size,
         memmap_dir=memmap_dir,
     )
+
+    # Ensure selected_fit is represented in the sampled fit list (for plotting and comparison).
+    if selected_fit is not None and selected_xmin is not None:
+        has_eval_attrs = all(
+            hasattr(selected_fit, attr) for attr in ("p", "p_std", "alpha_std")
+        )
+        if not has_eval_attrs:
+            desc = f"xmin:{selected_xmin:.2e}: selected fit"
+            selected_fit.evaluate_fit(parallel=False, tqdmDesc=desc)
+
+        test_fits = [
+            f
+            for f in test_fits
+            if not np.isclose(f.xmin, selected_xmin, rtol=1e-12, atol=0.0)
+        ]
+        test_fits.append(selected_fit)
 
     # We now have a rough sample on possible xmin values
     # exponents = [dist_from_fit(f).alpha for f in test_fits]
@@ -1754,6 +1796,15 @@ def find_best_xmin(
         best_fit = new_fits[local_max_idx]
 
         test_fits.extend(new_fits)
+
+    # Keep selected_fit in the final collection (the refinement window may have removed it).
+    if selected_fit is not None and selected_xmin is not None:
+        test_fits = [
+            f
+            for f in test_fits
+            if not np.isclose(f.xmin, selected_xmin, rtol=1e-12, atol=0.0)
+        ]
+        test_fits.append(selected_fit)
 
     # Plot p and exponent
     xmin_plot_path = f"{PLOTPATH}{extraPath}{path_name}_xMins.pdf"
@@ -2408,21 +2459,26 @@ def plot_fits_over_xmin(
     ks_xmin=None,
 ):
     """
-    Plot KS p-value and exponent (with std error bars) versus xmin.
+    Plot KS distance/p-value, exponent alpha, and inverse cutoff 1/lambda versus xmin.
     """
     fits.sort(key=lambda f: f.xmin)
     tag = ks_tag(fits=fits, fast_xmin=fast_xmin)
     x = np.array([f.xmin for f in fits], dtype=float)
     pvals = np.array([f.p for f in fits], dtype=float)
     p_stds = np.array([f.p_std for f in fits], dtype=float)
-    alphas = np.array([dist_from_fit(f).alpha for f in fits], dtype=float)
+    dists = [dist_from_fit(f) for f in fits]
+    alphas = np.array([d.alpha for d in dists], dtype=float)
     alpha_stds = np.array([f.alpha_std for f in fits], dtype=float)
+    lambdas = np.array([getattr(d, "Lambda", np.nan) for d in dists], dtype=float)
+    inv_lambda = np.full_like(lambdas, np.nan, dtype=float)
+    positive_lambda = np.isfinite(lambdas) & (lambdas > 0.0)
+    inv_lambda[positive_lambda] = 1.0 / lambdas[positive_lambda]
 
     # Colors assigned per axis (consistent with Matplotlib defaults)
     c_p = "tab:blue"  # left axis (p-values)
     c_a = "tab:orange"  # right axis (alpha)
 
-    fig, ax1 = plt.subplots()
+    fig, ax1 = plt.subplots(figsize=(8,4))
     ax1.set_xscale("log")
 
     # --- Left axis: p-values ---
@@ -2481,7 +2537,43 @@ def plot_fits_over_xmin(
                 zorder=0,
             )
 
+    if np.isfinite(inv_lambda).any():
+        c_l = "tab:green"
+        ax3 = ax1.twinx()
+        ax3.spines["right"].set_position(("axes", 1.14))
+        ax3.spines["right"].set_visible(True)
+        ax3.plot(
+            x,
+            inv_lambda,
+            marker="^",
+            linestyle="-",
+            linewidth=1.6,
+            markersize=5,
+            color=c_l,
+            label=r"Inverse cutoff $1/\lambda$",
+        )
+        ax3.set_ylabel(r"Inverse cutoff $1/\lambda$", color=c_l)
+        ax3.set_yscale("log")
+        finite_inv = inv_lambda[np.isfinite(inv_lambda) & (inv_lambda > 0.0)]
+        if finite_inv.size > 0:
+            inv_min = float(np.min(finite_inv))
+            inv_max = float(np.max(finite_inv))
+            # Keep log scaling, but use plain float tick labels in a human range.
+            if inv_min >= 0.1 and inv_max <= 99.0:
+                if inv_max / inv_min < 10.0:
+                    ax3.yaxis.set_major_locator(
+                        mpl.ticker.LogLocator(base=10.0, subs=np.arange(1.0, 10.0))
+                    )
+                ax3.yaxis.set_major_formatter(
+                    mpl.ticker.FuncFormatter(lambda val, _pos: f"{val:g}")
+                )
+        ax3.tick_params(axis="y", colors=c_l, which="both")
+        ax3.spines["right"].set_color(c_l)
+        ax3.yaxis.label.set_color(c_l)
+        ax3.yaxis.get_offset_text().set_color(c_l)
+
     # --- Right axis: alpha (+ error bars) ---
+    # Keep this axis creation after ax3 so alpha/legend remain on top.
     ax2 = ax1.twinx()
     ax2.errorbar(
         x,
@@ -2497,7 +2589,6 @@ def plot_fits_over_xmin(
         elinewidth=1.0,
         capsize=3,
         capthick=1.0,
-        zorder=1,
     )
     ax2.set_ylabel(r"Exponent $\alpha$", color=c_a)
     ax2.tick_params(axis="y", colors=c_a)
@@ -2541,9 +2632,9 @@ def plot_fits_over_xmin(
     # --- Legend: collect handles from both axes ---
     handles1, labels1 = ax1.get_legend_handles_labels()
     handles2, labels2 = ax2.get_legend_handles_labels()
-    # handles3, labels3 = ([], [])
-    # if ax3 is not None:
-    #     handles3, labels3 = ax3.get_legend_handles_labels()
+    handles3, labels3 = ([], [])
+    if ax3 is not None:
+        handles3, labels3 = ax3.get_legend_handles_labels()
 
     # Deduplicate by label while preserving order
     seen = set()
@@ -2551,7 +2642,7 @@ def plot_fits_over_xmin(
     labels = []
     for h, l in (
         list(zip(handles1, labels1)) + list(zip(handles2, labels2))
-        # + list(zip(handles3, labels3))
+        + list(zip(handles3, labels3))
     ):
         if l not in seen and l != "":
             seen.add(l)
@@ -3221,7 +3312,7 @@ def plot_powerlaw(
         data_info=data_info,
         xmin_results=getattr(selected_fit, "xmin_fitting_results", None),
         fast_xmin=fast_xmin,
-        selected_xmin=selected_fit.xmin,
+        selected_fit=selected_fit,
     )
 
     d = dist_from_fit(p_fit)
@@ -3275,16 +3366,16 @@ def plot_powerlaw(
     #     fast_xmin=fast_xmin,
     # )
 
-    plot_ks_distance(
-        all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit", fast_xmin=fast_xmin
-    )
-    plot_ks_distance(
-        all_drops,
-        selected_fit.xmin,
-        data_info=data_info,
-        name=f"{tag}-fit",
-        fast_xmin=fast_xmin,
-    )
+    # plot_ks_distance(
+    #     all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit", fast_xmin=fast_xmin
+    # )
+    # plot_ks_distance(
+    #     all_drops,
+    #     selected_fit.xmin,
+    #     data_info=data_info,
+    #     name=f"{tag}-fit",
+    #     fast_xmin=fast_xmin,
+    # )
     if ks_fit is not None:
         plot_ks_distance(
             all_drops,

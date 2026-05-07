@@ -17,7 +17,7 @@ from .pyplotFunctions import (
     plot_and_save_velocity_field_in_e_reduced_poincare_disk,
     plot_and_save_mesh_with_force,
 )
-from .dataFunctions import parse_pvd_file, get_data_from_name
+from .dataFunctions import resolve_vtu_files, get_data_from_name
 from .makePvd import create_collection
 
 from datetime import datetime, timedelta
@@ -198,7 +198,8 @@ def makeAnimations(
         print("Creating pvd file...")
         create_collection(os.path.join(path, settings["DATAFOLDERPATH"]))
 
-    vtu_files = parse_pvd_file(path, pvdFile)
+    vtu_source = pvdFile if os.path.exists(pvdFile) else path
+    vtu_files = resolve_vtu_files(vtu_source)
 
     # we don't want every frame to be created, so in order to find out what
     # frames should be drawn, we first check how much load change there is

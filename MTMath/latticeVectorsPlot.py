@@ -683,11 +683,143 @@ def four_lattices_translation_rotation(
     plt.show()
 
 
+def lagrange_reduction_bases_row(
+    save_path: str | Path = "Plots/LagrangeReductionBasesRow.pdf",
+    show: bool = True,
+):
+    """Plot e^0 -> e^1 -> e^2 -> e~ for the Lagrange reduction example."""
+
+    # Basis matrices (columns are basis vectors).
+    e0 = np.array([[1.0, 0.0], [-1.0, 1.0]])
+    m1 = np.array([[1.0, 0.0], [0.0, -1.0]])
+    m2 = np.array([[0.0, 1.0], [1.0, 0.0]])
+    m3 = np.array([[1.0, -1.0], [0.0, 1.0]])
+
+    e1 = e0 @ m1
+    e2 = e1 @ m2
+    e_tildebar = e2 @ m3
+
+    # Keep these strict so accidental convention changes fail loudly.
+    if not np.array_equal(e1, np.array([[1.0, 0.0], [-1.0, -1.0]])):
+        raise ValueError("Unexpected e^1 basis from e^0 m1.")
+    if not np.array_equal(e2, np.array([[0.0, 1.0], [-1.0, -1.0]])):
+        raise ValueError("Unexpected e^2 basis from e^1 m2.")
+    if not np.array_equal(e_tildebar, np.array([[0.0, 1.0], [-1.0, 0.0]])):
+        raise ValueError("Unexpected reduced basis from e^2 m3.")
+
+    bases = [e0, e1, e2, e_tildebar]
+    titles = [
+        r"$\bar{\mathbf{e}}^0$",
+        r"$\bar{\mathbf{e}}^1$",
+        r"$\bar{\mathbf{e}}^2$",
+        r"$\tilde{\bar{\mathbf{e}}}$",
+    ]
+
+    max_abs = float(np.max(np.abs(np.hstack(bases))))
+    lim = max_abs + 0.3
+    common_limits = (-lim, lim, -lim, lim)
+
+    fig, axes = plt.subplots(1, 4, figsize=(8, 2), sharex=True, sharey=True)
+    title_y = 1.02
+    for i, (ax, basis, title) in enumerate(zip(axes, bases, titles)):
+        e1_vec = tuple(basis[:, 0])
+        e2_vec = tuple(basis[:, 1])
+        x=-0.1 
+        e1_label_pos = [(x,0),(x,0),(x,0),(0.0, -0.2)][i]
+        e2_label_pos = [(x,0),(x,0),(x,0),(-0.12, 0.0)][i]
+        label_base = (
+            r"\bar{\mathbf{e}}"
+            if i < 3
+            else r"\tilde{\bar{\mathbf{e}}}"
+        )
+        lf = LatticeFigure(
+            ax,
+            limits=common_limits,
+            basis=(e1_vec, e2_vec),
+            font_size=16,
+            margin=0.2,
+        )
+        # Closure edges only (dashed) so e1/e2 arrows can be color-coded clearly.
+        lf.draw_vector(
+            e1_vec,
+            origin=e2_vec,
+            color="0.55",
+            headwidth=0,
+            headlength=0,
+            headaxislength=0,
+            linestyle="--",
+            linewidth=1.6,
+        )
+        lf.draw_vector(
+            e2_vec,
+            origin=e1_vec,
+            color="0.55",
+            headwidth=0,
+            headlength=0,
+            headaxislength=0,
+            linestyle="--",
+            linewidth=1.6,
+        )
+        lf.draw_vector(
+            e1_vec,
+            label=rf"${label_base}_1^{i}$",
+            label_pos=e1_label_pos,
+            color="tab:red",
+            linewidth=2.0,
+            ha="left" if i < 2 else "right",
+            va="bottom",
+        )
+        lf.draw_vector(
+            e2_vec,
+            label=rf"${label_base}_2^{i}$",
+            label_pos=e2_label_pos,
+            color="tab:blue",
+            linewidth=2.0,
+            ha="right" if i < 2 else "left",
+            va="bottom",
+        )
+        lf.style_axis(
+            set_ax_lims=True,
+            draw_grid=True,
+            draw_points=True,
+            maxDepth=6,
+            hide_ticklabels=True,
+        )
+        ax.set_title(title, fontsize=17, y=title_y, pad=0)
+
+    # Place transform labels between neighboring panels, aligned with title level.
+    transition_labels = [
+        r"$\times \mathbf{m}_1 \rightarrow$",
+        r"$\times \mathbf{m}_2 \rightarrow$",
+        r"$\times \mathbf{m}_3 \rightarrow$",
+    ]
+    for i, text in enumerate(transition_labels):
+        axes[i].text(
+            1.03,
+            title_y+0.05,
+            text,
+            transform=axes[i].transAxes,
+            ha="center",
+            va="center",
+            fontsize=16,
+        )
+
+    fig.tight_layout()
+    out = Path(save_path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, bbox_inches="tight")
+    print(f"Fig saved to : {out}")
+    if show:
+        plt.show()
+    return fig, axes
+
+
 if __name__ == "__main__":
     # integer_shear_examples()
     # three_bases_same_lattice()
     # two_lattices_side_by_side()
-    four_lattices_translation_rotation()
+    #four_lattices_translation_rotation()
+    lagrange_reduction_bases_row()
 
     # f = np.array(((1, 0), (0.25, 1)))
     # v = np.array((8, 0))
@@ -695,3 +827,4 @@ if __name__ == "__main__":
     # v2 = np.array((3, 0.25))
     # print(f @ v1)
     # print(f @ v2)
+    pass 

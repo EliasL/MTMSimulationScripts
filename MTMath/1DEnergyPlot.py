@@ -129,6 +129,59 @@ def plot_eulerian_forces(coords=None):
     fig.tight_layout()
 
 
+def plot_stress_tensor_components(strain=None, beta=-1 / 4, K=4, noise=1):
+    """
+    Plot all 2x2 components of PK1 (P) and Cauchy (sigma) stresses
+    for simple shear in a single figure.
+    """
+    if strain is None:
+        strain = np.linspace(-1.0, 5.0, 1000)
+    strain = np.asarray(strain, dtype=float)
+    if strain.ndim != 1:
+        raise ValueError("strain must be a 1D array.")
+
+    F = np.tile(np.eye(2), (len(strain), 1, 1)).astype(float)
+    F[:, 0, 1] = strain
+
+    P = ContiEnergy.P_from_F(F, beta=beta, K=K, noise=noise)
+    sigma = ContiEnergy.cauchy_from_F(F, beta=beta, K=K, noise=noise)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    comp_ids = [(0, 0), (0, 1), (1, 0), (1, 1)]
+    piola_levels = np.linspace(0.35, 0.85, len(comp_ids))
+    cauchy_levels = np.linspace(0.35, 0.85, len(comp_ids))
+
+    for (i, j), level in zip(comp_ids, piola_levels):
+        ax.plot(
+            strain,
+            P[:, i, j],
+            color=plt.cm.Blues(level),
+            linestyle="-",
+            linewidth=1.6,
+            zorder=2,
+            label=rf"$P_{{{i+1}{j+1}}}$ (Piola)",
+        )
+
+    for (i, j), level in zip(comp_ids, cauchy_levels):
+        ax.plot(
+            strain,
+            sigma[:, i, j],
+            color=plt.cm.Reds(level),
+            linestyle="--",
+            linewidth=1.8,
+            zorder=4,
+            label=rf"$\sigma_{{{i+1}{j+1}}}$ (Cauchy)",
+        )
+
+    ax.set_xlabel(r"$\gamma$ (Strain)")
+    ax.set_ylabel("Stress")
+    ax.set_title("PK1 and Cauchy Stress Components in Simple Shear")
+    ax.grid(True, alpha=0.25)
+    ax.legend(ncol=2)
+    fig.tight_layout()
+    return fig, ax
+
+
 # ---------- animation with auto writer + optional multiprocessing ----------
 def animate_nodes_and_forces(
     coords_ref=None,
@@ -297,9 +350,10 @@ if __name__ == "__main__":
     #plot_energy()
     #plot_eulerian_forces()
     #plot_Lagrangian_forces()
-    animate_nodes_and_forces(
-        save_path="simple_shear_nodes_forces.mp4",
-        interval=30,
-        n_procs=1,  # try >1 if ContiEnergy calls are expensive
-    )
+    plot_stress_tensor_components()
+    # animate_nodes_and_forces(
+    #     save_path="simple_shear_nodes_forces.mp4",
+    #     interval=30,
+    #     n_procs=1,  # try >1 if ContiEnergy calls are expensive
+    # )
     plt.show()

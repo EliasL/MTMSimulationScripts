@@ -385,12 +385,12 @@ class JobManager:
         return slurm_jobs
 
     # Generalized method for executing a command on all servers in parallel
-    def execute_command_on_servers(self, command_function):
+    def execute_command_on_servers(self, command_function, servers=Servers.search_servers):
         results = []
-        with ThreadPoolExecutor(max_workers=len(Servers.servers)) as executor:
+        with ThreadPoolExecutor(max_workers=len(servers)) as executor:
             future_to_server = {
                 executor.submit(command_function, server): server
-                for server in Servers.servers
+                for server in servers
             }
             for future in as_completed(future_to_server):
                 server = future_to_server[future]

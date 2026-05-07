@@ -1,5 +1,7 @@
 import os
 import sys
+import hashlib
+import re
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
@@ -13,9 +15,12 @@ from .makePlots import (
     makeAverageComparisonPlot,
     add_power_law_line,
     duration_to_seconds,
+    safePath,
+    energy_drop_symbol,
 )
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
+from matplotlib.lines import Line2D
 from .fixLineNumbers import fix_csv_files_in_data_folder
 from Management.connectToCluster import getServerUserName
 from tqdm import tqdm
@@ -26,6 +31,11 @@ from Plotting.plotPowerLaw import (
     plot_plastic_counts_compare,
     plot_plastic_energy_scatter,
     get_group_structure,
+    get_energy_drops,
+    get_stress_drops,
+    _drop_quantity_label,
+    pretty_variant_label,
+    strip_seed_from_label,
 )
 from Management.updateCSV import fix_csv_files, read_macrodata_csv
 
@@ -1403,6 +1413,286 @@ def plotPlasticCounts(config_groups, labels, **kwargs):
 
     plot_plastic_counts_compare(paths, labels, **kwargs)
 
+
+def _pretty_reversibility_axis_label(x_axis_col):
+    if not isinstance(x_axis_col, str):
+        return str(x_axis_col)
+
+    match = re.fullmatch(r"rev_(.+)_diff", x_axis_col)
+    if not match:
+        return x_axis_col
+
+    quantity = match.group(1)
+    quantity_lower = quantity.lower()
+    symbol_map = {
+        "u": r"\mathbf{u}",
+        "sigma": r"\sigma",
+        "stress": r"\sigma",
+        "sigma12": r"\sigma_{12}",
+        "p12": r"P_{12}",
+    }
+    symbol = symbol_map.get(quantity_lower)
+    if symbol is None:
+        if quantity_lower in {"energy", "avg_energy", "total_energy"}:
+            symbol = energy_drop_symbol("energy")
+        else:
+            escaped = quantity.replace("_", r"\_")
+            symbol = rf"\mathrm{{{escaped}}}"
+
+    return rf"$\Delta_{{\mathrm{{rev}}}} {symbol}$"
+
+
+def plotReversibilityEnergyDropCorrelation(
+    configs,
+    labels=None,
+    show=False,
+    save=True,
+    includeStressDrops=True,
+    xAxisCol="rev_u_diff",
+    strainLim="auto",
+    postRegime=True,
+    averageEnergy=False,
+    name="reversibility_energyDrop_correlation",
+):
+    if postRegime not in (True, False, None):
+        raise ValueError(
+            f"postRegime must be True (post-yield), False (pre-yield), or None (all); got {postRegime!r}"
+        )
+
+    paths, _ = get_csv_files(
+        configs, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    paths, labels = get_group_structure(paths, labels)
+    if not paths:
+        raise RuntimeError("No CSV paths found for reversibility job.")
+
+    energy_drop_specs = [
+        {
+            "key": "stress_corrected_energy",
+            "fn": get_energy_drops,
+            "marker": "o",
+            "kwargs": dict(
+                strainLim=strainLim,
+                postRegime=postRegime,
+                averageEnergy=averageEnergy,
+                stress_corrected=True,
+            ),
+            "fallback_label": "Stress-corrected energy drop",
+        },
+        {
+            "key": "inter_strain_energy",
+            "fn": get_energy_drops,
+            "marker": "s",
+            "kwargs": dict(
+                strainLim=strainLim,
+                postRegime=postRegime,
+                averageEnergy=averageEnergy,
+                stress_corrected=False,
+                energy_type="energy_change",
+            ),
+            "fallback_label": "Inter-strain energy drop",
+        },
+        {
+            "key": "relaxation_energy",
+            "fn": get_energy_drops,
+            "marker": "^",
+            "kwargs": dict(
+                strainLim=strainLim,
+                postRegime=postRegime,
+                averageEnergy=averageEnergy,
+                stress_corrected=False,
+                energy_type="e_change_from_init",
+            ),
+            "fallback_label": "Relaxation energy drop",
+        },
+    ]
+    stress_drop_specs = [
+        {
+            "key": "stress_drop",
+            "fn": get_stress_drops,
+            "marker": "v",
+            "kwargs": dict(strainLim=strainLim, postRegime=postRegime),
+            "fallback_label": "Stress drop",
+        }
+    ]
+
+    n_groups = len(paths)
+    blue_cmap = plt.get_cmap("Blues")
+    if n_groups <= 1:
+        shade_vals = np.array([0.75])
+    else:
+        shade_vals = np.linspace(0.45, 0.9, n_groups)
+    group_colors = [blue_cmap(v) for v in shade_vals]
+
+    group_display_labels = []
+    for idx, group_labels in enumerate(labels):
+        cleaned = [strip_seed_from_label(lbl) for lbl in group_labels if lbl]
+        cleaned = [lbl for lbl in cleaned if lbl]
+        if not cleaned:
+            group_display_labels.append(f"group {idx + 1}")
+            continue
+        unique_cleaned = list(dict.fromkeys(cleaned))
+        base_label = unique_cleaned[0]
+        group_display_labels.append(pretty_variant_label(base_label) or base_label)
+
+    regime_tag = (
+        "postYield" if postRegime is True else "preYield" if postRegime is False else "allYield"
+    )
+    base = os.path.splitext(name)[0] if name else "reversibility_energyDrop_correlation"
+    flat_paths = [str(path) for group in paths for path in group]
+    signature = hashlib.sha1("|".join(flat_paths).encode("utf-8")).hexdigest()[:10]
+    x_axis_label = _pretty_reversibility_axis_label(xAxisCol)
+
+    def _plot_drop_specs(drop_specs, *, title, y_label, file_suffix):
+        fig, ax = plt.subplots(figsize=(7, 5))
+        plotted = 0
+        shape_labels = {}
+
+        for group_idx, group_paths in enumerate(paths):
+            if not group_paths:
+                continue
+            group_color = group_colors[group_idx]
+            for spec in drop_specs:
+                drops, info = spec["fn"](group_paths, **spec["kwargs"])
+                df_info = info.get("df")
+                if df_info is None:
+                    raise ValueError(
+                        "data_info['df'] is missing; cannot extract x-axis values."
+                    )
+                if xAxisCol not in df_info:
+                    raise KeyError(
+                        f"Missing xAxisCol '{xAxisCol}' in data_info['df']."
+                    )
+                if "mask" in info:
+                    combined_mask = np.asarray(info["mask"], dtype=bool)
+                else:
+                    masks = info.get("masks")
+                    if not masks:
+                        raise ValueError(
+                            "data_info does not contain 'mask' or 'masks'."
+                        )
+                    if isinstance(masks, (list, tuple)):
+                        combined_mask = np.concatenate(
+                            [np.asarray(mask, dtype=bool) for mask in masks]
+                        )
+                    else:
+                        combined_mask = np.asarray(masks, dtype=bool)
+                x_all = np.asarray(df_info[xAxisCol], dtype=float)
+                if x_all.shape[0] != combined_mask.shape[0]:
+                    raise ValueError(
+                        f"x-axis length mismatch: len(df['{xAxisCol}'])={x_all.shape[0]} "
+                        f"but mask length={combined_mask.shape[0]}"
+                    )
+                x_vals = x_all[combined_mask]
+                y_vals = np.asarray(drops, dtype=float)
+                if x_vals.shape[0] != y_vals.shape[0]:
+                    raise ValueError(
+                        f"Drop/reversibility length mismatch: "
+                        f"drops={y_vals.shape[0]}, {xAxisCol}={x_vals.shape[0]}"
+                    )
+
+                valid = (
+                    np.isfinite(x_vals)
+                    & np.isfinite(y_vals)
+                    & (x_vals > 0)
+                    & (y_vals > 0)
+                )
+                x_vals = x_vals[valid]
+                y_vals = y_vals[valid]
+                if x_vals.size == 0:
+                    continue
+
+                drop_label = info.get("drop_label")
+                if drop_label is not None and spec["key"] not in shape_labels:
+                    shape_labels[spec["key"]] = rf"${_drop_quantity_label(drop_label)}$"
+
+                ax.scatter(
+                    x_vals,
+                    y_vals,
+                    marker=spec["marker"],
+                    s=18,
+                    facecolors="none",
+                    edgecolors=group_color,
+                    linewidths=1.0,
+                )
+                plotted += 1
+
+        if plotted == 0:
+            raise RuntimeError("No valid reversibility/drop data points were found.")
+
+        color_handles = [
+            Line2D(
+                [],
+                [],
+                marker="o",
+                linestyle="None",
+                markerfacecolor="none",
+                markeredgecolor=group_colors[i],
+                markersize=6,
+                label=group_display_labels[i],
+            )
+            for i in range(len(group_display_labels))
+        ]
+        shape_handles = []
+        for spec in drop_specs:
+            label_text = shape_labels.get(spec["key"], spec["fallback_label"])
+            shape_handles.append(
+                Line2D(
+                    [],
+                    [],
+                    marker=spec["marker"],
+                    linestyle="None",
+                    markerfacecolor="none",
+                    markeredgecolor="black",
+                    markersize=6,
+                    label=label_text,
+                )
+            )
+        legend_handles = [
+            Line2D([], [], linestyle="None", label="Settings (color)"),
+            *color_handles,
+            Line2D([], [], linestyle="None", label="Drop Type (shape)"),
+            *shape_handles,
+        ]
+
+        ax.set_xlabel(x_axis_label)
+        ax.set_ylabel(y_label)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.set_title(title)
+        ax.legend(handles=legend_handles, loc="upper left", ncol=2, frameon=True)
+        fig.tight_layout()
+
+        if save:
+            suffix = f"_{safePath(file_suffix)}" if file_suffix else ""
+            xaxis_tag = safePath(f"x_{xAxisCol}")
+            save_name = (
+                f"{safePath(base)}{suffix}_{xaxis_tag}_{regime_tag}_{signature}.png"
+            )
+            save_path = os.path.join("Plots", save_name)
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            fig.savefig(save_path, dpi=300)
+            print(f"Saved figure to {save_path}")
+        return fig, ax
+
+    fig, ax = _plot_drop_specs(
+        energy_drop_specs,
+        title="Reversibility vs energy-drop correlation",
+        y_label="Energy drop magnitude",
+        file_suffix=None,
+    )
+
+    if includeStressDrops:
+        _plot_drop_specs(
+            stress_drop_specs,
+            title="Reversibility vs stress-drop correlation",
+            y_label="Stress drop magnitude",
+            file_suffix="stressOnly",
+        )
+
+    if show:
+        plt.show()
+    return fig, ax
 
 if __name__ == "__main__":
     seeds = range(0, 60)

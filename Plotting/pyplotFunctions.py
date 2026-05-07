@@ -37,7 +37,9 @@ from .dataFunctions import (
     get_data_from_name,
     VTUData,
     get_previous_data,
-    parse_pvd_file,
+    resolve_vtu_files,
+    infer_strain_from_vtu,
+    match_vtu_to_macro_row,
 )
 from .plotPowerLaw import plot_plastic_counts, get_energy_drops
 from Management.updateCSV import update_df_header, read_macrodata_csv
@@ -80,7 +82,7 @@ def extract_center_node_force_series(sim_path, pvd_file="collection.pvd"):
     if not os.path.exists(pvd_path):
         raise FileNotFoundError(f"PVD file not found: {pvd_path}")
 
-    vtu_files = parse_pvd_file(sim_path, pvd_path)
+    vtu_files = resolve_vtu_files(pvd_path)
     if not vtu_files:
         raise ValueError(f"No VTU files found in {pvd_path}")
 
@@ -103,8 +105,10 @@ def extract_center_node_force_series(sim_path, pvd_file="collection.pvd"):
     loads = []
     forces = []
     for vtu_file in vtu_files:
-        meta = get_data_from_name(vtu_file)
-        load = meta.get("load", np.nan)
+        load = infer_strain_from_vtu(vtu_file)
+        if load is None or not np.isfinite(load):
+            meta = get_data_from_name(vtu_file)
+            load = meta.get("load", np.nan)
         loads.append(load)
 
         force_field = VTUData(vtu_file).get_force_field()
@@ -125,7 +129,7 @@ def extract_center_node_conti_force_series(sim_path, pvd_file="collection.pvd"):
     if not os.path.exists(pvd_path):
         raise FileNotFoundError(f"PVD file not found: {pvd_path}")
 
-    vtu_files = parse_pvd_file(sim_path, pvd_path)
+    vtu_files = resolve_vtu_files(pvd_path)
     if not vtu_files:
         raise ValueError(f"No VTU files found in {pvd_path}")
 
@@ -142,8 +146,11 @@ def extract_center_node_conti_force_series(sim_path, pvd_file="collection.pvd"):
     lag_forces = []
     eul_forces = []
     for vtu_file in vtu_files:
-        meta = get_data_from_name(vtu_file)
-        loads.append(meta.get("load", np.nan))
+        load = infer_strain_from_vtu(vtu_file)
+        if load is None or not np.isfinite(load):
+            meta = get_data_from_name(vtu_file)
+            load = meta.get("load", np.nan)
+        loads.append(load)
 
         data = VTUData(vtu_file)
         connectivity = data.get_connectivity()
@@ -491,7 +498,9 @@ def base_plot(
 
     if add_title:
         metaData = get_data_from_name(vtu_file)
-        load = metaData["load"]
+        load = infer_strain_from_vtu(vtu_file)
+        if load is None or not np.isfinite(load):
+            load = metaData["load"]
         load_step = metaData["loadIncrement"]
         nrPlasticEvents = metaData["nrM"]
         if "nr_func_evals" in metaData:
@@ -499,7 +508,9 @@ def base_plot(
         else:
             nr_func_evals = None
         if previous_frame_vtu_file:
-            previous_load = get_data_from_name(previous_frame_vtu_file)["load"]
+            previous_load = infer_strain_from_vtu(previous_frame_vtu_file)
+            if previous_load is None or not np.isfinite(previous_load):
+                previous_load = get_data_from_name(previous_frame_vtu_file)["load"]
             steps_since_last_frame = int((load - previous_load) / load_step)
         else:
             steps_since_last_frame = 0
@@ -1313,7 +1324,8 @@ def plot_velocity_field_in_poincare_disk(
     strain_step = kwargs.get("velocity_strain_step")
     if strain_step is None:
         try:
-            strain_step = get_data_from_name(vtu_file).get("loadIncrement")
+            vtu_meta = get_data_from_name(vtu_file)
+            strain_step = vtu_meta.get("loadIncrement")
         except Exception:
             strain_step = None
     if velocity_color_max is None:
@@ -1456,10 +1468,13 @@ def plot_velocity_field_in_poincare_disk(
     if velocity_mode == "velocity":
         if delx_val is None or not np.isfinite(delx_val) or delx_val == 0:
             try:
-                delx_val = (
-                    get_data_from_name(vtu_file)["load"]
-                    - get_data_from_name(ref_frame_vtu_file)["load"]
-                )
+                current_load = infer_strain_from_vtu(vtu_file)
+                previous_load = infer_strain_from_vtu(ref_frame_vtu_file)
+                if current_load is None or not np.isfinite(current_load):
+                    current_load = get_data_from_name(vtu_file)["load"]
+                if previous_load is None or not np.isfinite(previous_load):
+                    previous_load = get_data_from_name(ref_frame_vtu_file)["load"]
+                delx_val = current_load - previous_load
             except Exception:
                 delx_val = 1.0
         if not np.isfinite(delx_val) or delx_val == 0:
@@ -1777,47 +1792,11 @@ def get_corresponding_energy_and_rss(
     x_list = []
 
     for vtu_file in vtu_files:
-        metaData = get_data_from_name(vtu_file)
-
-        if "load_step" in df.columns:
-            n = metaData["load_step"]
-            matching_rows = df[df["load_step"] == n]
-            if len(matching_rows) != 1:
-                # raise ValueError(
-                #     f"Error in file {vtu_file}:\nload_step value '{n}' is not unique or not found. Found {len(matching_rows)} matches."
-                # )
-                print(
-                    f"Warning: in file {vtu_file}:\nload_step value '{n}' is not unique or not found. Found {len(matching_rows)} matches."
-                )
-                print(
-                    "Try moving/deleting vtu files that are further ahead than the csv file."
-                )
-                pass
-        elif "load" in df.columns:
-            load = metaData["load"]
-            matching_rows = df[df["load"] == load]
-            if len(matching_rows) != 1:
-                pass
-                # raise ValueError(
-                #     f"Error in file {vtu_file}:\nload value '{load}' is not unique or not found. Found {len(matching_rows)} matches."
-                # )
-            if len(matching_rows) == 0:
-                print(f"Warning: load {load} not found!")
-                matching_rows = df.iloc[[0]]
-        else:
-            raise ValueError(
-                "Neither 'load_step' nor 'load' columns found in DataFrame."
-            )
-
-        x = metaData[X]
+        matching_row, matching_row_index, x = match_vtu_to_macro_row(
+            df, vtu_file, X=X
+        )
         x_list.append(x)
-
-        # Get the index (line number) of the matching row
-        matching_row_index = matching_rows.index[0]
         line_numbers.append(matching_row_index)
-
-        # Extract the matching row as a Series
-        matching_row = matching_rows.iloc[0]
 
         # Append the extracted values to the respective lists
         total_energy_list.append(matching_row["total_energy"])

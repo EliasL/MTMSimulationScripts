@@ -11,7 +11,7 @@ from Management.multiServerJob import distributeConfigs, JobManager, queueJobs
 from Management.dataManager import DataManager
 from Management.simulationManager import findOutputPath
 from Management.jobs import (
-    referenceStateTestJob,
+    pristineCrystal,
     loadStepJob,
     cyclicLoading,
     fixedBoundaries,
@@ -147,7 +147,7 @@ def benchmark():
 
 
 def reconnectingBenchmark():
-    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection="edgeFlip")
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=20, reconnection="edgeFlip", logDuringMinimization=1, loadIncrement=1e-3)
     run_locally(configs[0], resume=False)
     """
         - Config File: /Users/eliaslundheim/work/PhD/MTS2D/build-release/simpleShear,s50x50l0.15,1e-05,1.0PBCReCONt3LBFGSEpsx1e-06s0.conf
@@ -197,6 +197,10 @@ def reconnectingBenchmark():
     # 2% RT: 2m 5s   ETR: 1h 19m 25s Load: 0.170380
     # PGO (not worth it)
     # 2% RT: 1m 59s  ETR: 1h 37m 50s Load: 0.167000
+    # Sylvain optimization (20.04.26)
+    # 2% RT: 1m 57s  ETR: 1h 17m 40s Load: 0.170270
+    # Deformation history (29.04.26)
+    # 2% RT: 1m 55s  ETR: 1h 22m 28s Load: 0.167000
 
 def parameterExploring():
     # pe.loadingSpeeds()
@@ -444,9 +448,10 @@ def runOnLocalMachine():
     # configs, labels = loadStepJob()
     #configs, labels = reversibilityJob()
     # configs, labels = loadStepJob(reconnection="edgeFlip")
-    #configs, labels = reconnectSSTest(diagonal="minor", reconnectionMethod="edgeFlip")
+    #configs, labels = reconnectSSTest(reconnectionMethod="none")
+    #configs, labels = pristineCrystal()
     # configs, labels = triangular_edge_flip_job(size=50)
-    configs, labels = referenceStateTestJob()
+    #configs, labels = referenceStateTestJob()
     # configs, labels = doubleDislocationTest(
     #     nrThreads=1, nrSeeds=1, L=30, 
     # )
@@ -611,7 +616,7 @@ if __name__ == "__main__":
     # cleanData()
     #startJobs()
 
-    runOnLocalMachine()
+    #runOnLocalMachine()
 
     # plotPropperJob()
     # plotSizeScaling()
@@ -619,7 +624,7 @@ if __name__ == "__main__":
     # stopConditionJob()
     # threadTest()
     #benchmark()
-    #reconnectingBenchmark()
+    reconnectingBenchmark()
     # resumeSim(
     #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,

@@ -286,7 +286,7 @@ def _vtu_sort_key(vtu_file):
     return (step, Path(vtu_file).name)
 
 
-def _resolve_vtu_files(vtu_source, pvd_name="collection.pvd"):
+def resolve_vtu_files(vtu_source, pvd_name="collection.pvd"):
     if isinstance(vtu_source, (list, tuple, np.ndarray)):
         vtu_files = [str(p) for p in vtu_source if str(p).endswith(".vtu")]
         if not vtu_files:
@@ -321,8 +321,7 @@ def _resolve_vtu_files(vtu_source, pvd_name="collection.pvd"):
 
     raise ValueError(f"Unsupported VTU source: {vtu_source!r}")
 
-
-def _infer_strain_from_vtu(vtu_file):
+def infer_strain_from_vtu(vtu_file):
     """
     Infer strain directly from VTU naming metadata.
     Priority:
@@ -331,7 +330,6 @@ def _infer_strain_from_vtu(vtu_file):
        using simulation folder naming convention.
     """
     path_str = str(vtu_file)
-
     load_match = re.search(r"(?:^|[_/,])load=([-+0-9.eE]+)", path_str)
     if load_match:
         try:
@@ -364,12 +362,85 @@ def _infer_strain_from_vtu(vtu_file):
     return None
 
 
-def extract_force_contribution_magnitude_series(vtu_source, use_tqdm=False):
+def match_vtu_to_macro_row(df, vtu_file, X="load", fallback_first_on_missing_load=True):
     """
-    Compute mean/std of |F_ei| for each available VTU frame.
-    Returns arrays (strain, mean_magnitude, std_magnitude).
+    Match a VTU frame to one row in a macro-data dataframe.
+
+    Matching priority:
+    1) `load_step` if available in both VTU metadata and dataframe
+    2) `load` otherwise
+
+    Returns:
+        (matching_row, matching_row_index, x_value)
     """
-    vtu_files = _resolve_vtu_files(vtu_source)
+    meta = get_data_from_name(vtu_file)
+
+    if "load_step" in df.columns and "load_step" in meta:
+        n = meta["load_step"]
+        matching_rows = df[df["load_step"] == n]
+        if len(matching_rows) != 1:
+            print(
+                f"Warning: in file {vtu_file}:\n"
+                f"load_step value '{n}' is not unique or not found. "
+                f"Found {len(matching_rows)} matches."
+            )
+            print(
+                "Try moving/deleting vtu files that are further ahead than the csv file."
+            )
+    elif "load" in df.columns:
+        load = infer_strain_from_vtu(vtu_file)
+        if load is None or not np.isfinite(load):
+            load = meta.get("load", np.nan)
+        matching_rows = df[df["load"] == load]
+        if len(matching_rows) == 0:
+            print(f"Warning: load {load} not found!")
+            if fallback_first_on_missing_load:
+                matching_rows = df.iloc[[0]]
+    else:
+        raise ValueError("Neither 'load_step' nor 'load' columns found in DataFrame.")
+
+    if len(matching_rows) == 0:
+        raise ValueError(f"No matching macro-data row found for {vtu_file}.")
+
+    matching_row_index = matching_rows.index[0]
+    matching_row = matching_rows.iloc[0]
+
+    if X == "load":
+        x_value = infer_strain_from_vtu(vtu_file)
+        if x_value is None or not np.isfinite(x_value):
+            x_value = meta.get("load", np.nan)
+    else:
+        x_value = meta.get(X, np.nan)
+    return matching_row, matching_row_index, x_value
+
+
+def _flatten_force_contribution_magnitudes(force_contributions):
+    force_contributions = np.asarray(force_contributions, dtype=float)
+    if force_contributions.ndim != 3:
+        raise ValueError(
+            f"Expected 3D force contribution array, got {force_contributions.shape}."
+        )
+
+    # Accept both conventions:
+    # - (n_elements, 2, 3)
+    # - (n_elements, 3, 2)
+    if force_contributions.shape[-1] == 2:
+        magnitudes = np.linalg.norm(force_contributions, axis=-1).reshape(-1)
+    elif force_contributions.shape[1] == 2:
+        magnitudes = np.linalg.norm(force_contributions, axis=1).reshape(-1)
+    else:
+        raise ValueError(
+            f"Unexpected force contribution shape {force_contributions.shape}."
+        )
+
+    magnitudes = magnitudes[np.isfinite(magnitudes)]
+    if magnitudes.size == 0:
+        raise ValueError("No finite force-contribution magnitudes found.")
+    return magnitudes
+
+
+def _extract_force_contribution_magnitude_series(vtu_source, contribution_getter, *, use_tqdm=False, series_name="force contributions"):
+    vtu_files = resolve_vtu_files(vtu_source)
     strains, means, stds = [], [], []
     skipped_missing_strain = 0
     skipped_bad_vtu = 0
@@ -377,37 +448,22 @@ def extract_force_contribution_magnitude_series(vtu_source, use_tqdm=False):
     if use_tqdm:
         from tqdm import tqdm
 
-        iterator = tqdm(vtu_files, desc="Force contribution series")
+        iterator = tqdm(vtu_files, desc=f"{series_name} series")
     else:
         iterator = vtu_files
 
     for vtu_file in iterator:
-        strain = _infer_strain_from_vtu(vtu_file)
+        strain = infer_strain_from_vtu(vtu_file)
         if strain is None or not np.isfinite(strain):
             skipped_missing_strain += 1
             continue
 
         try:
-            force_contributions = np.asarray(
-                VTUData(vtu_file).get_force_contributions(), dtype=float
-            )
+            force_contributions = contribution_getter(vtu_file)
+            magnitudes = _flatten_force_contribution_magnitudes(force_contributions)
         except Exception as exc:
-            print(f"Warning: failed reading {vtu_file}: {exc}")
+            print(f"Warning: failed {series_name} extraction for {vtu_file}: {exc}")
             skipped_bad_vtu += 1
-            continue
-
-        if force_contributions.ndim != 3 or force_contributions.shape[1] < 2:
-            print(
-                f"Warning: unexpected force contribution shape {force_contributions.shape} in {vtu_file}."
-            )
-            skipped_bad_vtu += 1
-            continue
-
-        # force_contributions shape: (n_elements, 2, 3)
-        # Magnitudes for all element-node contributions in this frame.
-        magnitudes = np.linalg.norm(force_contributions[:, :2, :], axis=1).reshape(-1)
-        magnitudes = magnitudes[np.isfinite(magnitudes)]
-        if magnitudes.size == 0:
             continue
 
         strains.append(float(strain))
@@ -415,7 +471,7 @@ def extract_force_contribution_magnitude_series(vtu_source, use_tqdm=False):
         stds.append(float(np.std(magnitudes)))
 
     if not strains:
-        raise ValueError("No valid VTU frames with strain and force contributions found.")
+        raise ValueError(f"No valid VTU frames with {series_name} found.")
 
     order = np.argsort(np.asarray(strains))
     strains = np.asarray(strains, dtype=float)[order]
@@ -428,6 +484,51 @@ def extract_force_contribution_magnitude_series(vtu_source, use_tqdm=False):
         print(f"Skipped {skipped_bad_vtu} VTU frames due to read/shape issues.")
 
     return strains, means, stds
+
+
+def extract_force_contribution_magnitude_series(vtu_source, use_tqdm=False):
+    """
+    Compute mean/std of |F_ei| from VTU force contributions ("Umut F").
+    Returns arrays (strain, mean_magnitude, std_magnitude).
+    """
+    return _extract_force_contribution_magnitude_series(
+        vtu_source,
+        lambda vtu_file: VTUData(vtu_file).get_force_contributions(),
+        use_tqdm=use_tqdm,
+        series_name="Umut F contributions",
+    )
+
+
+def _true_force_contributions_from_F(vtu_file):
+    from MTMath.energyFunction import ContiEnergy
+    from MTMath.meshUtils import triangle_shape_grads_and_area
+
+    data = VTUData(vtu_file)
+    connectivity = data.get_connectivity()
+    ref_nodes = data.get_reference_nodes()
+
+    if connectivity.size and connectivity.max() >= len(ref_nodes):
+        raise ValueError(
+            f"Connectivity max index {connectivity.max()} exceeds reference node count {len(ref_nodes)}."
+        )
+
+    ref_elem_coords = ref_nodes[connectivity][:, :, :2]
+    dN_dX, area_ref = triangle_shape_grads_and_area(ref_elem_coords)
+    F = data.get_F()
+    return ContiEnergy.lagrangian_forces_from_F(F, dN_dX, area=area_ref)
+
+
+def extract_true_force_contribution_magnitude_series(vtu_source, use_tqdm=False):
+    """
+    Compute mean/std of |F_ei| by recomputing Lagrangian element-node forces from F ("True F").
+    Returns arrays (strain, mean_magnitude, std_magnitude).
+    """
+    return _extract_force_contribution_magnitude_series(
+        vtu_source,
+        _true_force_contributions_from_F,
+        use_tqdm=use_tqdm,
+        series_name="True F contributions",
+    )
 
 
 def _resolve_macrodata_csv_path(nameOrPath):

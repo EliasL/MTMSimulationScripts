@@ -24,7 +24,6 @@ class DraggableTriangulation:
         self.ax = ax
         self.initial_points = np.copy(points)
         self.points = points
-        self.reference_points = np.copy(points)
         self.ax_g = ax_g  # optional axes for (G11,G22) scatter
         self.poincare_transformation = poincare_transformation
         self.g_scatter = None
@@ -285,45 +284,17 @@ class DraggableTriangulation:
     def element_vectors(self):
         """For each triangle, return (i, j, k, origin_point, a, b, centroid)."""
         tris = self.triangles(False)
+        diag_pair = self.compute_diagonal_indices()
         out = []
         for tri in tris:
             i, j, k = tri
             pi, pj, pk = self.points[i], self.points[j], self.points[k]
-
-            # Choose fixed vectors from reference configuration
-            ri, rj, rk = (
-                self.reference_points[i],
-                self.reference_points[j],
-                self.reference_points[k],
-            )
-            lij = float(np.sum((ri - rj) * (ri - rj)))
-            ljk = float(np.sum((rj - rk) * (rj - rk)))
-            lki = float(np.sum((rk - ri) * (rk - ri)))
-
-            edges = [
-                (lij, (i, j)),
-                (ljk, (j, k)),
-                (lki, (k, i)),
-            ]
-            edges.sort(key=lambda t: t[0])
-            (_, (u1, v1)), (_, (u2, v2)) = edges[0], edges[1]
-
-            if u1 == u2 or u1 == v2:
-                shared = u1
-                other_a = v1
-                other_b = v2 if u1 == u2 else u2
-            elif v1 == u2 or v1 == v2:
-                shared = v1
-                other_a = u1
-                other_b = v2 if v1 == u2 else u2
-            else:
-                shared = u1
-                other_a = v1
-                other_b = u2
-
-            po = self.points[shared]
-            a = self.points[other_a] - po
-            b = self.points[other_b] - po
+            # Use the same basis rule as the heatmap so the Poincare mapping
+            # depends only on the current geometry, not on the initial point set.
+            o, u, v = self.triangle_basis_indices(tri, diag_pair)
+            po = self.points[o]
+            a = self.points[u] - po
+            b = self.points[v] - po
 
             centroid = (pi + pj + pk) / 3.0
             out.append((i, j, k, po.copy(), a, b, centroid))
@@ -688,19 +659,28 @@ class DraggableTriangulation:
 
 
 def run_reconnection_demo():
-    # Square-like layout for clarity
     points = np.array(
         [
-            [0.0, 0.0],  # 0
-            [1.0, 0.0],  # 1
-            [1.0, 1.0],  # 2
-            [0.0, 1.0],  # 3
+            [2, 1.3],  # A0
+            [1, 1],  # C0
+            [1.0, 0.00],  # B0
+            [2, 0.5],  # D0
+        ]
+    )
+
+    points = np.array(
+        [
+            [-0.5, -0.5],
+            [0.5, -0.5],
+            [0.5, 0.5],
+            [-0.5, 0.5],
         ]
     )
 
     fig, (ax, ax_g) = plt.subplots(1, 2, figsize=(10, 5))
-    ax.set_xlim(-1, 2)
-    ax.set_ylim(-1, 2)
+    padding = 0.25
+    ax.set_xlim(points[:, 0].min() - padding, points[:, 0].max() + padding)
+    ax.set_ylim(points[:, 1].min() - padding, points[:, 1].max() + padding)
     ax.set_aspect("equal", adjustable="box")
     ax.set_title("Triangulation")
 

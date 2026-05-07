@@ -18,6 +18,8 @@ class SimulationConfig:
         self.cols = 3
         self.usingPBC = "true"
         self.reconnectionMethod = "none"  # "none", "edgeFlip", "delaunay"
+        self.reconnectRevert = 0 #False
+        self.reconnectEdgeLocking = 1 #True
         self.scenario = "simpleShear"
         self.nrThreads = 1  # This needs to be 1. Don't change. (see queueLocalJobs)
         self.seed = 0
@@ -31,6 +33,9 @@ class SimulationConfig:
         self.startLoad = 0.0
         self.loadIncrement = 1e-5
         self.maxLoad = 1.0
+        self.GP1 = 0.0
+        self.GP2 = 0.0
+        self.GP3 = 0.0
 
         # Minimizer settings
         self.minimizer = "LBFGS"  # FIRE / LBFGS / CG
