@@ -1736,7 +1736,7 @@ def prepPoincareFig(
             "beta": -0.25,
             "K": 4,
             "resolution": max(80, grid_size),
-            "n_angles": 60,
+            "n_angles": 50,
             "zoom": zoom,
             "transformation": transformation,
         }
