@@ -765,7 +765,7 @@ def lagrange_reduction_bases_row(
             label=rf"${label_base}_1^{i}$",
             label_pos=e1_label_pos,
             color="tab:red",
-            linewidth=2.0,
+            width=.017,
             ha="left" if i < 2 else "right",
             va="bottom",
         )
@@ -774,7 +774,7 @@ def lagrange_reduction_bases_row(
             label=rf"${label_base}_2^{i}$",
             label_pos=e2_label_pos,
             color="tab:blue",
-            linewidth=2.0,
+            width=.017,
             ha="right" if i < 2 else "left",
             va="bottom",
         )
