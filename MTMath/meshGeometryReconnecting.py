@@ -19,16 +19,47 @@ class DraggableTriangulation:
             return j, i, k
         return k, i, j
 
+    def reference_triangle_basis_indices(self, tri):
+        """Return a fixed basis chosen from the reference geometry."""
+        i, j, k = tri
+        ri = self.reference_points[i]
+        rj = self.reference_points[j]
+        rk = self.reference_points[k]
+        edges = [
+            (float(np.sum((ri - rj) * (ri - rj))), (i, j)),
+            (float(np.sum((rj - rk) * (rj - rk))), (j, k)),
+            (float(np.sum((rk - ri) * (rk - ri))), (k, i)),
+        ]
+        edges.sort(key=lambda item: item[0])
+        (_, (u1, v1)), (_, (u2, v2)) = edges[0], edges[1]
+        if u1 == u2 or u1 == v2:
+            other_b = v2 if u1 == u2 else u2
+            return u1, v1, other_b
+        if v1 == u2 or v1 == v2:
+            other_b = v2 if v1 == u2 else u2
+            return v1, u1, other_b
+        raise RuntimeError(
+            f"Expected the two shortest reference edges in triangle {tri} to share one vertex."
+        )
+
+    def basis_indices(self, tri, diag_pair):
+        """Return the currently active basis for a triangle."""
+        if self.use_reference_basis:
+            return self.reference_triangle_basis_indices(tri)
+        return self.triangle_basis_indices(tri, diag_pair)
+
     def __init__(self, ax, points, ax_g=None, poincare_transformation="triangular"):
         assert points.shape == (4, 2), "Provide exactly four 2D points"
         self.ax = ax
         self.initial_points = np.copy(points)
         self.points = points
+        self.reference_points = np.copy(points)
         self.ax_g = ax_g  # optional axes for (G11,G22) scatter
         self.poincare_transformation = poincare_transformation
         self.g_scatter = None
         self.g_colors = ["tab:green", "tab:orange"]
         self.alt_region_lines = []
+        self.use_reference_basis = False
 
         # Initial triangulation uses diagonal (0, 2): triangles (0,1,2) and (0,2,3)
         self.diagonal_02 = True
@@ -239,20 +270,26 @@ class DraggableTriangulation:
                 )
         elif event.key == "r":
             self.reconnect()
+            return
         elif event.key == "t":
             self.reset()
+            return
         elif event.key == "down":
             # Negative shear in x with respect to y
             self.apply_shear(kx=-self.shear_step)
+            return
         elif event.key == "up":
             # Positive shear in x with respect to y
             self.apply_shear(kx=+self.shear_step)
+            return
         elif event.key == "left":
             # Negative shear in y with respect to x
             self.apply_shear(ky=-self.shear_step)
+            return
         elif event.key == "right":
             # Positive shear in y with respect to x
             self.apply_shear(ky=+self.shear_step)
+            return
         elif event.key == "b":
             # Toggle heatmap visibility
             self.heatmap_visible = not self.heatmap_visible
@@ -262,6 +299,8 @@ class DraggableTriangulation:
             # No geometry change, just redraw
             self.ax.figure.canvas.draw_idle()
             return
+        elif event.key == "f":
+            self.use_reference_basis = not self.use_reference_basis
         self.update()
 
     def compute_diagonal_indices(self):
@@ -289,9 +328,7 @@ class DraggableTriangulation:
         for tri in tris:
             i, j, k = tri
             pi, pj, pk = self.points[i], self.points[j], self.points[k]
-            # Use the same basis rule as the heatmap so the Poincare mapping
-            # depends only on the current geometry, not on the initial point set.
-            o, u, v = self.triangle_basis_indices(tri, diag_pair)
+            o, u, v = self.basis_indices(tri, diag_pair)
             po = self.points[o]
             a = self.points[u] - po
             b = self.points[v] - po
@@ -314,7 +351,6 @@ class DraggableTriangulation:
         """
         M = np.array([[1.0, kx], [ky, 1.0]], dtype=float)
         self.points = self.points @ M
-        self.update_heatmap()
         self.update()
 
     def compute_poincare_points(self):
@@ -444,7 +480,7 @@ class DraggableTriangulation:
         self._grid_ys = ys
 
         def tri_violation_map(tri, diag_pair):
-            o, u, v = self.triangle_basis_indices(tri, diag_pair)
+            o, u, v = self.basis_indices(tri, diag_pair)
 
             def comp(idx):
                 if idx == self.selected_index:
@@ -650,11 +686,11 @@ class DraggableTriangulation:
         self.update_element_arrows()
         self.update_gram_labels()
         self.update_g_scatter()
+        self.update_heatmap()
         self.ax.figure.canvas.draw_idle()
 
     def reset(self):
         self.points = np.copy(self.initial_points)
-        self.update_heatmap()
         self.update()
 
 
@@ -678,7 +714,7 @@ def run_reconnection_demo():
     )
 
     fig, (ax, ax_g) = plt.subplots(1, 2, figsize=(10, 5))
-    padding = 0.25
+    padding = 4.25
     ax.set_xlim(points[:, 0].min() - padding, points[:, 0].max() + padding)
     ax.set_ylim(points[:, 1].min() - padding, points[:, 1].max() + padding)
     ax.set_aspect("equal", adjustable="box")

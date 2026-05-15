@@ -147,7 +147,7 @@ def benchmark():
 
 
 def reconnectingBenchmark():
-    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=20, reconnection="edgeFlip", logDuringMinimization=1, loadIncrement=1e-3)
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection="edgeFlip", logDuringMinimization=1, loadIncrement=1e-5, reconnectRevert=1,reconnectEdgeLocking=0)
     run_locally(configs[0], resume=False)
     """
         - Config File: /Users/eliaslundheim/work/PhD/MTS2D/build-release/simpleShear,s50x50l0.15,1e-05,1.0PBCReCONt3LBFGSEpsx1e-06s0.conf
@@ -488,7 +488,7 @@ def startJobs():
     #build_on_all_servers(onlyPrefered=False)
 
     for batch in range(1, 9):
-        configs, labels = sylvainBatches(batch, reconnection="edgeFlip")
+        configs, labels = sylvainBatches(batch, reconnection="none")
         if not configs:
             continue
 

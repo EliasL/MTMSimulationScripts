@@ -8,93 +8,121 @@ import numpy as np
 
 
 DEBUG_BLOCK = """
- libc++abi: terminating due to uncaught exception of type std::runtime_error: getElementPairNodes: shared edge nodes disagree on reference translation.
- element1:
- eIndex: 511
- m3Nr: 1 red_quadrant: 3
- thetaElastic: -0.100932 referenceTheta: 0 thetaTotal: -0.100932
+ libc++abi: terminating due to uncaught exception of type std::runtime_error: Reduction exploded in Mesh::updateElementsForces.
+ 
+ minimization:
+ nrMinItterations: 168
+ nrMinFunctionCalls: 333
+ load: 0.65275
+ loadSteps: 50276
+ 
+ element:
+ eIndex: 10
+ m3Nr: 149 red_quadrant: 4
+ thetaElastic: 1.26566 referenceTheta: -1.53514 thetaTotal: -0.269483
  F:
-  1.10325 0.100383
- 0.889598 0.991163
+   -0.301787   0.0034085
+     1.22581 -0.00759409
  F_P:
   1 -0
   1  1
  F_E:
-   1.00287  0.100383
- -0.101565  0.991163
+  0.469548 -0.890178
+   1.16227  0.176925
  C:
-  2.00855 0.992484
- 0.992484  0.99248
+    1.59368 -0.0103375
+ -0.0103375 6.9288e-05
  C_R:
-     0.99248 3.54104e-06
- 3.54104e-06     1.01607
+  6.9288e-05 1.36059e-05
+ 1.36059e-05   0.0513589
  G:
-      1.01607 -3.54104e-06
- -3.54104e-06      0.99248
+  0.82372 0.212346
+ 0.212346  1.57135
  M_e:
-  1  0
- -1  1
+   1   0
+ 149   1
  M_l:
-  0  1
-  1 -1
+  -0   1
+  -1 149
  P:
-   0.0865524  -0.0817662
- -0.00874439   0.0557919
+      268617 3.67937e+07
+      120557 2.53016e+07
  sigma:
-    0.086916 -0.00402981
- -0.00402981   0.0473209
- ghost[0]: refId=276 id=(16,13) pShift=(0,0) pos=(17.5293, 13.0118) ref=(0.5, 0.5) u=(17.0293, 12.5118)
- ghost[1]: refId=256 id=(16,12) pShift=(0,0) pos=(17.4289, 12.0206) ref=(0.5, -0.5) u=(16.9289, 12.5206)
- ghost[2]: refId=275 id=(15,13) pShift=(0,0) pos=(16.426, 12.1222) ref=(-0.5, 0.5) u=(16.926, 11.6222)
- element2:
- eIndex: 549
- m3Nr: 0 red_quadrant: 3
- thetaElastic: -0.102496 referenceTheta: 0 thetaTotal: -0.102496
+     1.43 0.421727
+ 0.421727  2.13815
+ ghost[0]: refId=55 id=(5,1) pShift=(0,0) pos=(5.99003, 1.13878) ref=(-0.5, 0.5) u=(6.49003, 0.638779)
+ ghost[1]: refId=6 id=(6,0) pShift=(0,0) pos=(5.98662, 1.14637) ref=(-0.5, -0.5) u=(6.48662, 1.64637)
+ ghost[2]: refId=105 id=(5,2) pShift=(0,0) pos=(5.68484, 2.37218) ref=(0.5, -0.5) u=(5.18484, 2.87218)
+ realNodeRefs:
+ realNodeRef[0]: refId=55 pos=(5.99003, 1.13878) ref=(5, 1) u=(0.990033, 0.138779)
+ realNodeRef[1]: refId=6 pos=(5.98662, 1.14637) ref=(6, 0) u=(-0.0133754, 1.14637)
+ realNodeRef[2]: refId=105 pos=(5.68484, 2.37218) ref=(5, 2) u=(0.684838, 0.37218)
+ 
+ lastFlipDebug:
+ element=10 with partner 111
+ minIterationsAtFlip: 168
+ minFunctionCallsAtFlip: 332
+ deltaMinIterationsSinceFlip: 0
+ deltaMinFunctionCallsSinceFlip: 1
+ applied_F_P:
+  1 -1
+ -0  1
+ thetaElasticBefore: 1.29587
+ thetaElasticAfter: 1.26566
+ thetaElasticDelta: -0.0302178
+ oldAnchor: (0, 0)
+ newAnchor: (0, 0)
+ postFlipSelfGhost:
+ postFlipSelfGhost[0]: refId=55 id=(5,1) pShift=(0,0) pos=(5.99003, 1.13878) ref=(-0.5, 0.5) u=(6.49003, 0.638779)
+ postFlipSelfGhost[1]: refId=6 id=(6,0) pShift=(0,0) pos=(5.98662, 1.14637) ref=(-0.5, -0.5) u=(6.48662, 1.64637)
+ postFlipSelfGhost[2]: refId=105 id=(5,2) pShift=(0,0) pos=(5.68484, 2.37218) ref=(0.5, -0.5) u=(5.18484, 2.87218)
+ 
+ partnerElement:
+ eIndex: 111
+ m3Nr: 1 red_quadrant: 2
+ thetaElastic: 1.21118 referenceTheta: -1.60063 thetaTotal: -0.389449
  F:
-  0.99961 0.103643
- -0.10107 0.990668
+ -0.301787  -1.67028
+   1.22581  0.330307
  F_P:
   1 -0
- -0  1
+  1  1
  F_E:
-  0.99961 0.103643
- -0.10107 0.990668
+  0.362664 -0.783295
+   1.02283   0.31637
  C:
-   1.00944 0.0034764
- 0.0034764  0.992164
+  1.59368 0.908962
+ 0.908962  2.89894
  C_R:
-  0.992164 0.0034764
- 0.0034764   1.00944
+  1.59368 0.684716
+ 0.684716  2.67469
  G:
-    1.00944 -0.0034764
- -0.0034764   0.992164
+     1.1777 -0.0395182
+ -0.0395182   0.713641
  M_e:
- 1 0
- 0 1
+  1 -1
+  0  1
  M_l:
- 0 1
- 1 0
+  1  1
+  0 -1
  P:
-  0.0288171  0.0202597
-  0.0176769 -0.0049388
+  4.01041 -14.2365
+  19.0149  -3.5635
  sigma:
-   0.0308823   0.0171451
-   0.0171451 -0.00667425
- ghost[0]: refId=275 id=(15,13) pShift=(0,0) pos=(16.426, 12.1222) ref=(-0.5, -1) u=(16.926, 13.1222)
- ghost[1]: refId=294 id=(14,14) pShift=(0,0) pos=(16.5297, 13.1128) ref=(-0.5, 0) u=(17.0297, 13.1128)
- ghost[2]: refId=276 id=(16,13) pShift=(0,0) pos=(17.5293, 13.0118) ref=(0.5, 0) u=(17.0293, 13.0118)
- sharedEdge[0]_element1: refId=275 id=(15,13) pShift=(0,0) pos=(16.426, 12.1222) ref=(-0.5, 0.5) u=(16.926, 11.6222)
- sharedEdge[0]_element2: refId=275 id=(15,13) pShift=(0,0) pos=(16.426, 12.1222) ref=(-0.5, -1) u=(16.926, 13.1222)
- sharedEdge[0]_ref_diff: (0, 1.5)
- sharedEdge[1]_element1: refId=276 id=(16,13) pShift=(0,0) pos=(17.5293, 13.0118) ref=(0.5, 0.5) u=(17.0293, 12.5118)
- sharedEdge[1]_element2: refId=276 id=(16,13) pShift=(0,0) pos=(17.5293, 13.0118) ref=(0.5, 0) u=(17.0293, 13.0118)
- sharedEdge[1]_ref_diff: (0, 0.5)
- Temporary rotation fallback also failed.
- keptElement: 511 thetaElastic=-0.100932
- rotatedElement: 549 thetaElastic=-0.102496
- expectedRotation: -90deg
- bestRotation: -90deg
- bestMismatch: 1
+  -1.93092    0.1995
+    0.1995 -0.883487
+ postFlipPartnerGhost:
+ postFlipPartnerGhost[0]: refId=56 id=(6,1) pShift=(0,0) pos=(7.35512, 2.04187) ref=(0.5, -0.5) u=(6.85512, 2.54187)
+ postFlipPartnerGhost[1]: refId=6 id=(6,0) pShift=(0,0) pos=(5.98662, 1.14637) ref=(-0.5, 0.5) u=(6.48662, 0.646373)
+ postFlipPartnerGhost[2]: refId=105 id=(5,2) pShift=(0,0) pos=(5.68484, 2.37218) ref=(0.5, 0.5) u=(5.18484, 1.87218)
+ preFlipSelfGhost:
+ preFlipSelfGhost[0]: refId=6 id=(6,0) pShift=(0,0) pos=(6.49119, 1.04006) ref=(-0.5, -0.5) u=(6.99119, 1.54006)
+ preFlipSelfGhost[1]: refId=55 id=(5,1) pShift=(0,0) pos=(5.60101, 1.21699) ref=(-0.5, 0.5) u=(6.10101, 0.71699)
+ preFlipSelfGhost[2]: refId=56 id=(6,1) pShift=(0,0) pos=(6.85385, 2.06289) ref=(0.5, -0.5) u=(6.35385, 2.56289)
+ preFlipPartnerGhost:
+ preFlipPartnerGhost[0]: refId=105 id=(5,2) pShift=(0,0) pos=(6.07056, 2.37926) ref=(0.5, 0.5) u=(5.57056, 1.87926)
+ preFlipPartnerGhost[1]: refId=55 id=(5,1) pShift=(0,0) pos=(5.60101, 1.21699) ref=(-0.5, 0.5) u=(6.10101, 0.71699)
+ preFlipPartnerGhost[2]: refId=56 id=(6,1) pShift=(0,0) pos=(6.85385, 2.06289) ref=(0.5, -0.5) u=(6.35385, 2.56289)
  """
 
 

@@ -131,10 +131,10 @@ class DataManager:
 
         # Use ThreadPoolExecutor to execute find_data_on_server in
         # parallel across all servers plus one to find the data stored locally
-        with ThreadPoolExecutor(max_workers=len(Servers.servers) + 1) as executor:
+        with ThreadPoolExecutor(max_workers=len(Servers.search_servers) + 1) as executor:
             futures_to_server = {
                 executor.submit(self.find_data_on_server, server, silent): server
-                for server in Servers.servers
+                for server in Servers.search_servers
             }
             if os.path.isdir("/Volumes/data/MTS2D_output"):
                 futures_to_server[

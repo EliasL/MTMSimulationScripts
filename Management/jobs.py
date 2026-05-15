@@ -178,7 +178,7 @@ def propperJobFIRE():
 
 
 def basicJob(
-    nrThreads, nrSeeds, size=100, group_by_variant=False, maxLoad=1.0, reconnection="none", logDuringMinimization=0,loadIncrement=1e-5
+    nrThreads, nrSeeds, size=100, group_by_variant=False, maxLoad=1.0, reconnection="none", logDuringMinimization=0,loadIncrement=1e-5, **kwargs,
 ):
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -199,6 +199,7 @@ def basicJob(
         # temp
         energyDropThreshold=1e-4,
         logDuringMinimization=logDuringMinimization,
+        **kwargs
     )
     return configs, labels
 
