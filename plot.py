@@ -873,7 +873,7 @@ if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    run_reconnection_demo()
+    #run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
     # test()
@@ -886,7 +886,7 @@ if __name__ == "__main__":
 
     # debugPlotAll()
     # energyField()
-    #showPoincareDisk()
+    showPoincareDisk()
     # showInstabilityAngle()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()

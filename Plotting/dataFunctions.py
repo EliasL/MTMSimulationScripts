@@ -68,6 +68,48 @@ class VTUData:
             arr = arr[..., 0]
         return arr
 
+    def get_matrix_component(self, matrix_name, i, j, symmetric_fallback=True):
+        """Return one matrix component stored as cell data.
+
+        Accepts both compact names like ``T11`` and underscored variants like
+        ``T_11``. For symmetric tensors, missing off-diagonal components fall
+        back to the transposed entry.
+        """
+        candidates = [
+            f"{matrix_name}{i}{j}",
+            f"{matrix_name}_{i}{j}",
+            f"{matrix_name}{i}_{j}",
+            f"{matrix_name}_{i}_{j}",
+        ]
+        for field in candidates:
+            if field in self.mesh.cell_data:
+                return self.get_cell_data(field)
+
+        if symmetric_fallback and i != j:
+            return self.get_matrix_component(
+                matrix_name,
+                j,
+                i,
+                symmetric_fallback=False,
+            )
+
+        available = sorted(
+            key for key in self.mesh.cell_data.keys() if key.startswith(matrix_name)
+        )
+        raise KeyError(
+            f"Missing matrix component for {matrix_name}[{i},{j}]. "
+            f"Tried {candidates}. Available matching fields: {available}"
+        )
+
+    def get_matrix_components(self, matrix_name):
+        """Return all four 2x2 matrix components as a dict keyed by ``(i, j)``."""
+        return {
+            (1, 1): self.get_matrix_component(matrix_name, 1, 1),
+            (1, 2): self.get_matrix_component(matrix_name, 1, 2),
+            (2, 1): self.get_matrix_component(matrix_name, 2, 1),
+            (2, 2): self.get_matrix_component(matrix_name, 2, 2),
+        }
+
     def get_nodes(self):
         """Return node coordinates as a NumPy array of shape (n_points, 3)."""
         return self.mesh.points
@@ -579,10 +621,12 @@ def _infer_constant_load_increment(nameOrPath):
 
     inferred_increment = float(diffs[0])
     if np.isclose(inferred_increment, 0.0, rtol=0.0, atol=1e-15):
-        raise ValueError(
-            f"loadIncrement not found in file name, and the inferred load increment "
-            f"from {csv_path} is zero."
-        )
+        if np.allclose(diffs, 0.0, rtol=0.0, atol=1e-15):
+            print(
+                "Warning: loadIncrement not found in file name, and the inferred "
+                f"load increment from {csv_path} is zero. Using 0.0."
+            )
+            return 0.0
 
     if not np.allclose(diffs, inferred_increment, rtol=1e-9, atol=1e-12):
         return diffs

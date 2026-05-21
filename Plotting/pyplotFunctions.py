@@ -65,6 +65,28 @@ def get_energy_range(vtu_files, cvs_file):
     return [min_energy, max_energy]
 
 
+def get_matrix_range(vtu_files, matrix_name):
+    max_abs = 0.0
+    found_finite_value = False
+
+    for vtu_file in vtu_files:
+        components = VTUData(vtu_file).get_matrix_components(matrix_name)
+        for field in components.values():
+            values = np.asarray(field, dtype=float)
+            finite = values[np.isfinite(values)]
+            if finite.size == 0:
+                continue
+            found_finite_value = True
+            max_abs = max(max_abs, float(np.max(np.abs(finite))))
+
+    if not found_finite_value:
+        raise ValueError(f"No finite values found for matrix '{matrix_name}'.")
+    if max_abs == 0.0:
+        max_abs = 1.0
+
+    return (-max_abs, max_abs)
+
+
 def _infer_ref_grid_dims(dims, n_nodes):
     nx, ny = dims
     if nx * ny == n_nodes:
@@ -511,7 +533,10 @@ def base_plot(
             previous_load = infer_strain_from_vtu(previous_frame_vtu_file)
             if previous_load is None or not np.isfinite(previous_load):
                 previous_load = get_data_from_name(previous_frame_vtu_file)["load"]
-            steps_since_last_frame = int((load - previous_load) / load_step)
+            if np.isfinite(load_step) and not np.isclose(load_step, 0.0):
+                steps_since_last_frame = int((load - previous_load) / load_step)
+            else:
+                steps_since_last_frame = 0
         else:
             steps_since_last_frame = 0
 
@@ -701,6 +726,60 @@ def pretty_mesh_property(mesh_property):
         return r"$\Delta N_p$"
 
 
+def _pretty_math_token(token):
+    greek = {
+        "alpha": r"\alpha",
+        "beta": r"\beta",
+        "gamma": r"\gamma",
+        "delta": r"\delta",
+        "epsilon": r"\epsilon",
+        "eta": r"\eta",
+        "kappa": r"\kappa",
+        "lambda": r"\lambda",
+        "mu": r"\mu",
+        "nu": r"\nu",
+        "omega": r"\omega",
+        "phi": r"\phi",
+        "pi": r"\pi",
+        "rho": r"\rho",
+        "sigma": r"\sigma",
+        "tau": r"\tau",
+        "theta": r"\theta",
+        "xi": r"\xi",
+        "zeta": r"\zeta",
+    }
+    mapped = greek.get(str(token).lower())
+    if mapped is not None:
+        return mapped
+    return rf"\mathrm{{{token}}}"
+
+
+def _pretty_matrix_symbol(matrix_name):
+    parts = str(matrix_name).split("_")
+    if not parts or not parts[0]:
+        raise ValueError(f"Invalid matrix name: {matrix_name!r}")
+
+    base = _pretty_math_token(parts[0])
+    if base.startswith(r"\mathrm{") and len(parts[0]) == 1:
+        base = parts[0]
+
+    if len(parts) == 1:
+        return base
+
+    suffix = r"\,".join(_pretty_math_token(part) for part in parts[1:] if part)
+    if not suffix:
+        return base
+    return f"{base}_{{{suffix}}}"
+
+
+def pretty_matrix_property(matrix_name):
+    return f"${_pretty_matrix_symbol(matrix_name)}_{{ij}}$"
+
+
+def pretty_matrix_component(matrix_name, i, j):
+    return f"${_pretty_matrix_symbol(matrix_name)}_{{{i}{j}}}$"
+
+
 def plot_mesh(
     vtu_file,
     e_lims=None,
@@ -784,6 +863,133 @@ def plot_mesh(
         nodes,
         data,
         show_force,
+    )
+
+    return ax, cmap, norm
+
+
+def plot_matrix_component_grid(
+    vtu_file,
+    matrix_name,
+    matrix_lims=None,
+    ax=None,
+    add_colorbar=True,
+    add_tile_labels=True,
+    **kwargs,
+):
+    data = VTUData(vtu_file)
+    nodes = data.get_nodes()
+    connectivity = data.get_connectivity()
+    x, y = nodes[:, 0], nodes[:, 1]
+
+    components = data.get_matrix_components(matrix_name)
+    element_indices = _element_subset_indices(
+        len(connectivity), kwargs.get("element_subset")
+    )
+    if element_indices is not None:
+        connectivity = connectivity[element_indices]
+        components = {
+            key: np.asarray(field)[element_indices]
+            for key, field in components.items()
+        }
+
+    if matrix_lims is None:
+        frame_max = max(
+            float(np.nanmax(np.abs(np.asarray(field, dtype=float))))
+            for field in components.values()
+        )
+        if not np.isfinite(frame_max):
+            raise ValueError(
+                f"Could not determine a finite color scale for matrix '{matrix_name}'."
+            )
+        if frame_max == 0.0:
+            frame_max = 1.0
+        matrix_lims = (-frame_max, frame_max)
+
+    matrix_abs_max = max(abs(float(matrix_lims[0])), abs(float(matrix_lims[1])))
+    norm = mcolors.Normalize(vmin=-matrix_abs_max, vmax=matrix_abs_max)
+    cmap = "coolwarm"
+    backgroundColor = plt.get_cmap(cmap)(0.5)
+
+    x_period = float(data.size[0])
+    y_period = float(data.size[1])
+    base_limits = kwargs.get("axis_limits")
+    if base_limits is None:
+        base_limits = (
+            float(np.min(x)),
+            float(np.max(x)),
+            float(np.min(y)),
+            float(np.max(y)),
+        )
+
+    tile_specs = [
+        ((1, 1), (0.0, y_period)),
+        ((1, 2), (x_period, y_period)),
+        ((2, 1), (0.0, 0.0)),
+        ((2, 2), (x_period, 0.0)),
+    ]
+    super_limits = [
+        min(base_limits[0] + dx for _, (dx, dy) in tile_specs),
+        max(base_limits[1] + dx for _, (dx, dy) in tile_specs),
+        min(base_limits[2] + dy for _, (_, dy) in tile_specs),
+        max(base_limits[3] + dy for _, (_, dy) in tile_specs),
+    ]
+
+    if ax is None:
+        plot_kwargs = dict(kwargs)
+        plot_kwargs["axis_limits"] = tuple(super_limits)
+        ax, fig = base_plot(vtu_file=vtu_file, **plot_kwargs)
+
+    mappable = None
+    for (i, j), (dx, dy) in tile_specs:
+        field = np.asarray(components[(i, j)], dtype=float).ravel()
+        mappable = _plot_mesh_elements(
+            ax,
+            x,
+            y,
+            connectivity,
+            field,
+            norm,
+            cmap,
+            data,
+            "matrix",
+            backgroundColor,
+            False,
+            None,
+            False,
+            None,
+            shifts=[(dx, dy)],
+            apply_shear_to_shift=False,
+        )
+
+        if add_tile_labels:
+            x0 = base_limits[0] + dx
+            x1 = base_limits[1] + dx
+            y0 = base_limits[2] + dy
+            y1 = base_limits[3] + dy
+            ax.text(
+                x0 + 0.03 * (x1 - x0),
+                y1 - 0.04 * (y1 - y0),
+                pretty_matrix_component(matrix_name, i, j),
+                ha="left",
+                va="top",
+                fontsize=11,
+                bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+            )
+
+    _add_additional_elements(
+        ax,
+        mappable,
+        "matrix",
+        add_colorbar,
+        None,
+        None,
+        None,
+        False,
+        nodes,
+        data,
+        False,
+        colorbar_label=pretty_matrix_property(matrix_name),
     )
 
     return ax, cmap, norm
@@ -915,18 +1121,22 @@ def _plot_mesh_elements(
     state_indices,
     show_force,
     force_contributions,
+    shifts=None,
+    apply_shear_to_shift=True,
 ):
     """Optimized version of original approach"""
     edgecolors = "none" if len(x) > 2000 else "black"
     mappable = None
 
-    shifts = calculate_shifts(ax, data)
+    if shifts is None:
+        shifts = calculate_shifts(ax, data)
 
     # Precompute connectivity if used repeatedly
     tri_args = {"triangles": connectivity} if connectivity is not None else {}
 
     for dx, dy in shifts:
-        sheared_x = x + dx + data.load * dy
+        shift_x = dx + data.load * dy if apply_shear_to_shift else dx
+        sheared_x = x + shift_x
         sheared_y = y + dy
 
         # Create triangulation once per shift
@@ -1088,10 +1298,14 @@ def _add_additional_elements(
     nodes,
     data,
     show_force,
+    colorbar_label=None,
 ):
     """Add colorbar and rhombus if needed."""
     if add_colorbar and mappable is not None:
-        cbar = plt.colorbar(mappable, ax=ax, label=pretty_mesh_property(mesh_property))
+        label = colorbar_label
+        if label is None:
+            label = pretty_mesh_property(mesh_property)
+        cbar = plt.colorbar(mappable, ax=ax, label=label)
         if boundaries is not None:
             if tick_positions is not None or tick_labels is not None:
                 if tick_positions is None:
@@ -1639,6 +1853,13 @@ def plot_and_save_mesh(**kwargs):
     )
 
 
+def plot_and_save_matrix_component_grid(**kwargs):
+    return plot_and_save(
+        plot_func=plot_matrix_component_grid,
+        **kwargs,
+    )
+
+
 def plot_and_save_mesh_with_force(**kwargs):
     systemSize = get_data_from_name(kwargs["vtu_file"])["L"]
     if systemSize > 50:
@@ -1916,6 +2137,9 @@ def make_images(vtu_files, num_processes=-2, use_tqdm=True, X="load", **kwargs):
         macro_data = {X: 0, "loadIncrement": 0, "nrM": 0}
         kwargs["macro_data"] = macro_data
     kwargs["stress_label"] = stress_label
+
+    if kwargs.get("matrix_name") is not None and "matrix_lims" not in kwargs:
+        kwargs["matrix_lims"] = get_matrix_range(vtu_files, kwargs["matrix_name"])
 
     # Some ploting functions cannot handle multithreading
     # in particular, if we want to reuse a plot many times

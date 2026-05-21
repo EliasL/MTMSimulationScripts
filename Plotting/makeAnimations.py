@@ -9,6 +9,7 @@ from .pyplotFunctions import (
     make_images,
     plot_and_save_nodes,
     plot_and_save_mesh,
+    plot_and_save_matrix_component_grid,
     plot_and_save_m_mesh,
     plot_and_save_m_diff_mesh,
     plot_and_save_plot,
@@ -183,6 +184,7 @@ def makeAnimations(
     X="load",
     element_subset=None,
     poincare_use_C_fix=False,
+    matrix_name="T",
 ):
     frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macroData is None:
@@ -229,6 +231,17 @@ def makeAnimations(
     if subset == "none":
         subset = None
 
+    if matrix_name is None:
+        matrix_names = []
+    elif isinstance(matrix_name, str):
+        name = matrix_name.strip()
+        matrix_names = [] if name == "" else [name]
+    else:
+        matrix_names = list(matrix_name)
+        if not all(isinstance(name, str) for name in matrix_names):
+            raise TypeError("matrix_name must be a string or an iterable of strings.")
+        matrix_names = [name.strip() for name in matrix_names if name.strip()]
+
     mesh_disk_names = {
         "m_diff_mesh",
         "mesh",
@@ -240,17 +253,24 @@ def makeAnimations(
     }
     poincare_names = {"disk", "erDisk", "erDisk_velocity"}
 
+    def _is_matrix_component_grid(base_name):
+        return base_name.endswith("_component_grid")
+
     def _with_suffixes(base_name):
         name = base_name
         if base_name in poincare_names:
             tag = "Cfix" if poincare_use_C_fix else "C"
             name = f"{name}_{tag}"
-        if subset in ("odd", "even") and base_name in mesh_disk_names:
+        if subset in ("odd", "even") and (
+            base_name in mesh_disk_names or _is_matrix_component_grid(base_name)
+        ):
             return f"{name}_{subset}_elements"
         return name
 
     def _subset_arg(name):
-        if subset in ("odd", "even") and name in mesh_disk_names:
+        if subset in ("odd", "even") and (
+            name in mesh_disk_names or _is_matrix_component_grid(name)
+        ):
             return subset
         return None
 
@@ -259,11 +279,16 @@ def makeAnimations(
             return poincare_use_C_fix
         return None
 
-    # Define the path and file name
-    # The name of the video is the same as the name of the folder+_video.mp4
-    for function, base_name in [
+    matrix_jobs = [
+        (plot_and_save_matrix_component_grid, f"{name}_component_grid", name)
+        for name in matrix_names
+    ]
+
+    render_jobs = [
         # (plot_and_save_nodes, "nodes"),
         #(plot_and_save_mesh_with_force, "mesh_with_forces"),
+        # Move this line to choose where the matrix videos are rendered.
+        *matrix_jobs,
         (plot_and_save_in_poincare_disk, "disk"),
         (plot_and_save_velocity_field_in_e_reduced_poincare_disk, "erDisk_velocity"),
         (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
@@ -272,9 +297,25 @@ def makeAnimations(
         (plot_and_save_plot, "e_drop_plot"),
         (plot_and_save_mesh, "mesh"),
         (plot_and_save_m_mesh, "m_mesh"),
-    ]:
+    ]
+
+    # Define the path and file name
+    # The name of the video is the same as the name of the folder+_video.mp4
+    for job in render_jobs:
+        if len(job) == 2:
+            function, base_name = job
+            matrix_name_for_job = None
+        elif len(job) == 3:
+            function, base_name, matrix_name_for_job = job
+        else:
+            raise ValueError(f"Unexpected render job entry: {job}")
+
         fileName = _with_suffixes(base_name)
         use_C_fix = _poincare_arg(base_name)
+        extra_kwargs = {}
+        subset_arg = _subset_arg(base_name)
+        if matrix_name_for_job is not None:
+            extra_kwargs["matrix_name"] = matrix_name_for_job
         images = make_images(
             vtu_files,
             macro_data=macroData,
@@ -285,7 +326,8 @@ def makeAnimations(
             X=X,
             reuse_images=reuseImages,
             fileName=fileName,
-            element_subset=_subset_arg(base_name),
+            element_subset=subset_arg,
+            **extra_kwargs,
             **({"use_C_fix": use_C_fix} if use_C_fix is not None else {}),
         )
 

@@ -192,7 +192,7 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
 
     # makeItterationsPlot(path+macroData, name+"_itterations.pdf")
     if videoes and pvdFile is not None:
-        if video_variants or True:
+        if video_variants and False:
             variant_settings = [
                 {"poincare_use_C_fix": False, "element_subset": None},
                 {"poincare_use_C_fix": True, "element_subset": None},
