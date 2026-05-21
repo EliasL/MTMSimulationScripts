@@ -175,9 +175,9 @@ def approximate_ellipticity_boundary(
     eps=1e-9,
 ):
     """
-    Approximate the ellipticity-loss boundary by contouring the stability field
-    on the Poincare disk. Returns a list of (x, y) points along the boundary
-    curve (longest contour by default).
+    Approximate the ellipticity-loss boundary by contouring the continuous
+    minimum acoustic determinant on the Poincare disk. Returns a list of
+    (x, y) points along the boundary curve (longest contour by default).
 
     If return_all=True, returns a list of curves, each a list of (x, y) points.
     """
@@ -204,6 +204,7 @@ def approximate_ellipticity_boundary(
         "loops": int(loops),
         "eulerian": bool(eulerian),
         "eps": float(eps),
+        "boundary_mode": "min_det_contour_v1",
     }
 
     cache_dir = Path(__file__).resolve().parents[1] / ".cache" / "ellipticity_boundary"
@@ -245,10 +246,10 @@ def approximate_ellipticity_boundary(
     theta = np.linspace(0, np.pi, n_angles, endpoint=False)
     n = np.stack([np.cos(theta), np.sin(theta)], axis=-1)
 
-    stable = E_func.stability(
+    _, min_det = E_func.min_det_angle(
         F, n, beta=beta, K=K, loops=loops, eulerian=eulerian
     )
-    stability_field = np.where(mask_outside, np.nan, stable.astype(float))
+    stability_field = np.where(mask_outside, np.nan, min_det)
     stability_field = np.ma.masked_invalid(stability_field)
 
     fig_tmp, ax_tmp = plt.subplots()
@@ -256,7 +257,7 @@ def approximate_ellipticity_boundary(
         "Computing ellipticity boundary (may take several minutes). "
         "Result will be cached for future runs."
     )
-    contour = ax_tmp.contour(X, Y, stability_field, levels=[0.5])
+    contour = ax_tmp.contour(X, Y, stability_field, levels=[0.0])
     paths_vertices = (
         [np.asarray(seg) for seg in contour.allsegs[0] if seg is not None]
         if contour.allsegs and contour.allsegs[0]
@@ -1709,14 +1710,15 @@ def prepPoincareFig(
     if withCircle:
         # Add a thin black circle
         circleSize = (grid_size / 2) * zoom
-        circle_center_x = grid_size / 2 - 0.5
-        circle_center_y = grid_size / 2 - 0.5
+        circle_center_x = grid_size / 2
+        circle_center_y = grid_size / 2
         circle = Circle(
             (circle_center_x, circle_center_y),
             circleSize,
             color="black",
             fill=False,
             linewidth=1,
+            zorder=100,
         )
         ax.add_patch(circle)
 
@@ -1779,11 +1781,11 @@ def prepPoincareFig(
                     label="Yield surface",
                     zorder=10,
                 )
-    center = grid_size / 2 - 0.5
+    center = grid_size / 2
     half = grid_size / 2
     tick_pos = np.linspace(center - half, center + half, 5)
     # Map tick positions back to Poincare coordinates using the same scaling as the data layer
-    tick_lab = ((tick_pos - (grid_size / 2)) / (zoom * (grid_size / 2))).round(2)
+    tick_lab = ((tick_pos - center) / (zoom * half)).round(2)
 
     if minimalTicks:
         ax.set_xticks(tick_pos, [""] * len(tick_pos))
@@ -1805,7 +1807,7 @@ def prepPoincareFig(
 def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation="none", show=False):
     # Make plot of fundamental domain
     if ax is None:
-        fig, ax = prepPoincareFig(grid_size=grid_size, withGrid=False)
+        fig, ax = prepPoincareFig(grid_size=grid_size, withGrid=False, withYieldSurface=False)
     zoom = 1
 
     drawPoincareGrid(
@@ -1825,15 +1827,15 @@ def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation=
     #     transformation=transformation,
     #     linewidth=1,
     # )
-    drawTriangularElasticDomain(
-        ax=ax,
-        grid_size=grid_size,
-        zoom=zoom,
-        c="green",
-        transformation=transformation,
-        linewidth=1.5,
-        shade=True,
-    )
+    # drawTriangularElasticDomain(
+    #     ax=ax,
+    #     grid_size=grid_size,
+    #     zoom=zoom,
+    #     c="green",
+    #     transformation=transformation,
+    #     linewidth=1.5,
+    #     shade=True,
+    # )
 
     drawFundamentalDomain(
         ax,

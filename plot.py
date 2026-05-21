@@ -242,7 +242,7 @@ def energyField():
 def showPoincareDisk():
     from MTMath.poincareEnergy import plotPoincareDisk
 
-    plotPoincareDisk(depth=7)
+    plotPoincareDisk(grid_size=50, depth=7)
 
 
 def showInstabilityAngle():
