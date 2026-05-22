@@ -143,11 +143,10 @@ def benchmark():
     # Elastic reduction (02.04.26)
     # 2% RT: 2m 10s  ETR: 1h 33m 38s Load: 0.167000
     # Optimizations (split update function)
-    # 2% RT: 1m 51s  ETR: 1h 11m 35s Load: 0.170570
-
+    # 2% RT: 1m 51s  ETR: 1h 11m 35s Load: 0.170570 
 
 def reconnectingBenchmark():
-    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection="edgeFlip", logDuringMinimization=1, loadIncrement=1e-5, reconnectRevert=1,reconnectEdgeLocking=0)
+    configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50, reconnection="edgeFlip",loadIncrement=1e-5, reconnectRevert=1,reconnectEdgeLocking=0)
     run_locally(configs[0], resume=False)
     """
         - Config File: /Users/eliaslundheim/work/PhD/MTS2D/build-release/simpleShear,s50x50l0.15,1e-05,1.0PBCReCONt3LBFGSEpsx1e-06s0.conf
@@ -201,6 +200,13 @@ def reconnectingBenchmark():
     # 2% RT: 1m 57s  ETR: 1h 17m 40s Load: 0.170270
     # Deformation history (29.04.26)
     # 2% RT: 1m 55s  ETR: 1h 22m 28s Load: 0.167000
+    # Working deformation history (22.05.26)
+    # 0% RT: 2m 3s   ETR: 4h 35m 31s Load: 0.156160 #NO FAST MATH
+    # 1% RT: 2m 12s  ETR: 2h 34m 36s Load: 0.162330 # Fast math
+    # 1% RT: 2m 10s  ETR: 2h 33m 12s Load: 0.162300 # Less redundant work
+    # 1% RT: 1m 53s  ETR: 2h 29m 31s Load: 0.160630 # Edge lookup table
+    # 1% RT: 1m 53s  ETR: 2h 29m 1s  Load: 0.160640 # fixed no wait in loop
+    # 2% RT: 1m 52s  ETR: 1h 26m 9s  Load: 0.167000 # string view instead of const string
 
 def parameterExploring():
     # pe.loadingSpeeds()
@@ -452,7 +458,7 @@ def runOnLocalMachine():
     #configs, labels = pristineCrystal()
     # configs, labels = triangular_edge_flip_job(size=50)
     #configs, labels = referenceStateTestJob()
-    configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, diagonal=["major"], reconnecton=["edgeFlip"])
+    configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, reconnecton=["edgeFlip"])
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
@@ -614,7 +620,7 @@ if __name__ == "__main__":
     # cleanData()
     #startJobs()
 
-    runOnLocalMachine()
+    #runOnLocalMachine()
 
     # plotPropperJob()
     # plotSizeScaling()
@@ -622,7 +628,7 @@ if __name__ == "__main__":
     # stopConditionJob()
     # threadTest()
     #benchmark()
-    #reconnectingBenchmark()
+    reconnectingBenchmark()
     # resumeSim(
     #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,

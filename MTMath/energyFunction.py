@@ -1071,18 +1071,6 @@ def sanityCheck_Piola(verbose=True):
 
 if __name__ == "__main__":
     pass
-    # debug_symbolic_cauchy_trace()
-    # sanityCheck_Piola()
-    # # Get symbolic expressions from ContiEnergy
-    # phi_func, div_phi, div_div_phi = ContiEnergy.symbolic_potential()
-
-    # # Choose whether to include second derivatives
-    # include_second_derivatives = False  # Set to True when needed
-
-    # # Generate the code
-    # energy_code, stress_code = compute_energy_and_derivatives(
-    #     phi_func, div_phi, div_div_phi, include_second_derivatives
-    # )
 
     # # Output results
     # print("Energy function:\n", energy_code)

@@ -562,8 +562,10 @@ def doubleDislocationTest(
     nrSeeds=1,
     seeds=None,
     L=10,
-    diagonal=["major", "minor"],
+    #diagonal=["major", "minor"],
     reconnecton=["none", "edgeFlip"],
+    GP1=[0.0, 1.0],
+    GP2=[0.0, 1.0],
 ):
     if seeds is None:
         seeds = range(nrSeeds)
@@ -581,9 +583,11 @@ def doubleDislocationTest(
         minimizer="LBFGS",
         epsR=1e-6,
         scenario=scenario,
-        meshDiagonal=diagonal,
+        #meshDiagonal=diagonal,
         reconnectionMethod=reconnecton,
         logDuringMinimization=1,
+        GP1=GP1,
+        GP2=GP2,
     )
     return configs, labels
 

@@ -488,7 +488,25 @@ def find_gamma_single_crossing(
     return low if count_final == 1 else None
 
 
-if __name__ == "__main__":
+def write_code():
+    from MTMath.sympyToCpp import compute_energy_and_derivatives
+    # debug_symbolic_cauchy_trace()
+    # sanityCheck_Piola()
+    # Get symbolic expressions from ContiEnergy
+    phi_func, div_phi, div_div_phi = ContiEnergy.symbolic_potential()
+
+    # # Choose whether to include second derivatives
+    include_second_derivatives = False  # Set to True when needed
+
+    # # Generate the code
+    energy_code, stress_code = compute_energy_and_derivatives(
+        phi_func, div_phi, div_div_phi, include_second_derivatives
+    )
+    print(energy_code)
+    print(stress_code)
+
+def stabilityTest():
+
     print(f"F={np.eye(2)}")
     A = print_tangent_elasticity_matrix(np.eye(2), eulerian=True)
     print("Voigt")
@@ -517,3 +535,7 @@ if __name__ == "__main__":
         print(f"Gamma with exactly one det(q) crossing: {gamma_single:.6g}")
         gammas = [gamma_single, 0.001]
     plot_det_q_vs_theta(gammas=gammas)
+
+
+if __name__ == "__main__":
+  write_code()
