@@ -8,122 +8,33 @@ import numpy as np
 
 
 DEBUG_BLOCK = """
- libc++abi: terminating due to uncaught exception of type std::runtime_error: Reduction exploded in Mesh::updateElementsForces.
- 
- minimization:
- nrMinItterations: 168
- nrMinFunctionCalls: 333
- load: 0.65275
- loadSteps: 50276
- 
- element:
- eIndex: 10
- m3Nr: 149 red_quadrant: 4
- thetaElastic: 1.26566 referenceTheta: -1.53514 thetaTotal: -0.269483
- F:
-   -0.301787   0.0034085
-     1.22581 -0.00759409
- F_P:
-  1 -0
-  1  1
- F_E:
-  0.469548 -0.890178
-   1.16227  0.176925
- C:
-    1.59368 -0.0103375
- -0.0103375 6.9288e-05
- C_R:
-  6.9288e-05 1.36059e-05
- 1.36059e-05   0.0513589
- G:
-  0.82372 0.212346
- 0.212346  1.57135
- M_e:
-   1   0
- 149   1
- M_l:
-  -0   1
-  -1 149
- P:
-      268617 3.67937e+07
-      120557 2.53016e+07
- sigma:
-     1.43 0.421727
- 0.421727  2.13815
- ghost[0]: refId=55 id=(5,1) pShift=(0,0) pos=(5.99003, 1.13878) ref=(-0.5, 0.5) u=(6.49003, 0.638779)
- ghost[1]: refId=6 id=(6,0) pShift=(0,0) pos=(5.98662, 1.14637) ref=(-0.5, -0.5) u=(6.48662, 1.64637)
- ghost[2]: refId=105 id=(5,2) pShift=(0,0) pos=(5.68484, 2.37218) ref=(0.5, -0.5) u=(5.18484, 2.87218)
- realNodeRefs:
- realNodeRef[0]: refId=55 pos=(5.99003, 1.13878) ref=(5, 1) u=(0.990033, 0.138779)
- realNodeRef[1]: refId=6 pos=(5.98662, 1.14637) ref=(6, 0) u=(-0.0133754, 1.14637)
- realNodeRef[2]: refId=105 pos=(5.68484, 2.37218) ref=(5, 2) u=(0.684838, 0.37218)
- 
- lastFlipDebug:
- element=10 with partner 111
- minIterationsAtFlip: 168
- minFunctionCallsAtFlip: 332
- deltaMinIterationsSinceFlip: 0
- deltaMinFunctionCallsSinceFlip: 1
- applied_F_P:
-  1 -1
- -0  1
- thetaElasticBefore: 1.29587
- thetaElasticAfter: 1.26566
- thetaElasticDelta: -0.0302178
- oldAnchor: (0, 0)
- newAnchor: (0, 0)
- postFlipSelfGhost:
- postFlipSelfGhost[0]: refId=55 id=(5,1) pShift=(0,0) pos=(5.99003, 1.13878) ref=(-0.5, 0.5) u=(6.49003, 0.638779)
- postFlipSelfGhost[1]: refId=6 id=(6,0) pShift=(0,0) pos=(5.98662, 1.14637) ref=(-0.5, -0.5) u=(6.48662, 1.64637)
- postFlipSelfGhost[2]: refId=105 id=(5,2) pShift=(0,0) pos=(5.68484, 2.37218) ref=(0.5, -0.5) u=(5.18484, 2.87218)
- 
- partnerElement:
- eIndex: 111
- m3Nr: 1 red_quadrant: 2
- thetaElastic: 1.21118 referenceTheta: -1.60063 thetaTotal: -0.389449
- F:
- -0.301787  -1.67028
-   1.22581  0.330307
- F_P:
-  1 -0
-  1  1
- F_E:
-  0.362664 -0.783295
-   1.02283   0.31637
- C:
-  1.59368 0.908962
- 0.908962  2.89894
- C_R:
-  1.59368 0.684716
- 0.684716  2.67469
- G:
-     1.1777 -0.0395182
- -0.0395182   0.713641
- M_e:
-  1 -1
-  0  1
- M_l:
-  1  1
-  0 -1
- P:
-  4.01041 -14.2365
-  19.0149  -3.5635
- sigma:
-  -1.93092    0.1995
-    0.1995 -0.883487
- postFlipPartnerGhost:
- postFlipPartnerGhost[0]: refId=56 id=(6,1) pShift=(0,0) pos=(7.35512, 2.04187) ref=(0.5, -0.5) u=(6.85512, 2.54187)
- postFlipPartnerGhost[1]: refId=6 id=(6,0) pShift=(0,0) pos=(5.98662, 1.14637) ref=(-0.5, 0.5) u=(6.48662, 0.646373)
- postFlipPartnerGhost[2]: refId=105 id=(5,2) pShift=(0,0) pos=(5.68484, 2.37218) ref=(0.5, 0.5) u=(5.18484, 1.87218)
- preFlipSelfGhost:
- preFlipSelfGhost[0]: refId=6 id=(6,0) pShift=(0,0) pos=(6.49119, 1.04006) ref=(-0.5, -0.5) u=(6.99119, 1.54006)
- preFlipSelfGhost[1]: refId=55 id=(5,1) pShift=(0,0) pos=(5.60101, 1.21699) ref=(-0.5, 0.5) u=(6.10101, 0.71699)
- preFlipSelfGhost[2]: refId=56 id=(6,1) pShift=(0,0) pos=(6.85385, 2.06289) ref=(0.5, -0.5) u=(6.35385, 2.56289)
- preFlipPartnerGhost:
- preFlipPartnerGhost[0]: refId=105 id=(5,2) pShift=(0,0) pos=(6.07056, 2.37926) ref=(0.5, 0.5) u=(5.57056, 1.87926)
- preFlipPartnerGhost[1]: refId=55 id=(5,1) pShift=(0,0) pos=(5.60101, 1.21699) ref=(-0.5, 0.5) u=(6.10101, 0.71699)
- preFlipPartnerGhost[2]: refId=56 id=(6,1) pShift=(0,0) pos=(6.85385, 2.06289) ref=(0.5, -0.5) u=(6.35385, 2.56289)
- """
+Standard exception: Reduction exploded in Mesh::updateElementsForces: eIndex=62120, m3Nr=299, load=1.4152200000007946, loadSteps=126523.
+[LBFGS] Mesh context:
+[LBFGS]   load=1.4152200000007946, loadSteps=126523, nrMinFunctionCalls=1660, nrMinItterations=982
+[LBFGS]   totalEnergy=5844.1222245966246, maxForce=1018867607.0794692, rows=200, cols=200, nrElements=80000, nrNodes=40000, usingPBC=1, updateState=Dirty
+[LBFGS] Element:
+[LBFGS]   eIndex=62120, m3Nr=299, pastM3Nr=0, pastStepM3Nr=0, redQuadrant=3, angleNode=-1, angleEdge=invalid, noise=1
+[LBFGS]   ghost[0]: referenceId=31459, id=(59, 157), periodicShift=(0, 0), pos=(265.4841234876086, 152.54303000517862), ref_pos=(-0.5, -0.5)
+[LBFGS]   ghost[1]: referenceId=31061, id=(61, 155), periodicShift=(0, 0), pos=(265.50705462034171, 152.24625652527953), ref_pos=(0.5, -0.5)
+[LBFGS]   ghost[2]: referenceId=31659, id=(59, 158), periodicShift=(0, 0), pos=(265.41517052702295, 153.4343414524017), ref_pos=(-0.5, 0.5)
+[LBFGS]   currentArea=1.2314479765563273e-05, referenceArea=0.5
+[LBFGS]   F:
+[LBFGS]  0.022931132733106097 -0.068952960585647816
+[LBFGS]  -0.29677347989908753   0.89131144722307454
+[LBFGS]   C:
+[LBFGS] 0.088600335219837442 -0.26609876935781385
+[LBFGS] -0.26609876935781385  0.79919060672441755
+[LBFGS]   C_R:
+[LBFGS] 1.0075560714084553e-06 4.7289883538248478e-07
+[LBFGS] 4.7289883538248478e-07 0.00060225857786065651
+[LBFGS]   G:
+[LBFGS]  1.1251080414268595 0.27935277794138919
+[LBFGS] 0.27935277794138919  1.3690734575873376
+[LBFGS]   M_l:
+[LBFGS]   3 889
+[LBFGS]   1 296
+
+"""
 
 
 GROUP_ORDER = (

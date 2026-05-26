@@ -458,7 +458,7 @@ def runOnLocalMachine():
     #configs, labels = pristineCrystal()
     # configs, labels = triangular_edge_flip_job(size=50)
     #configs, labels = referenceStateTestJob()
-    configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, reconnecton=["edgeFlip"])
+    #configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, reconnecton=["edgeFlip"])
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
@@ -467,7 +467,7 @@ def runOnLocalMachine():
     #configs, labels = remeshTest(diagonal="minor")
     # run_many_locally(configs, taskNames=labels, resume=False)
 
-    #configs, labels = longJob(8, 1, size=300)
+    configs, labels = longJob(5, 1, size=200)
     # configs, labels = longJobStatic(8, 1, size=300)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
@@ -484,7 +484,7 @@ def runOnLocalMachine():
     run_many_locally(
         configs,
         taskNames=labels,
-        resume=False,
+        resume=True,
     )
 
 
@@ -620,7 +620,7 @@ if __name__ == "__main__":
     # cleanData()
     #startJobs()
 
-    #runOnLocalMachine()
+    runOnLocalMachine()
 
     # plotPropperJob()
     # plotSizeScaling()
@@ -628,7 +628,7 @@ if __name__ == "__main__":
     # stopConditionJob()
     # threadTest()
     #benchmark()
-    reconnectingBenchmark()
+    #reconnectingBenchmark()
     # resumeSim(
     #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,
