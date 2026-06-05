@@ -127,7 +127,7 @@ def baseSpeed():
         nrThreads=1,
         loadIncrement=0.00001,
         maxLoad=1,
-        scenario="simpleShearFixedBoundary",
+        experiment="simpleShearFixedBoundary",
     )
     manager = SimulationManager(config)
     nrRuns = 1

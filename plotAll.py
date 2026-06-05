@@ -29,12 +29,6 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
         element_subset = None
     kwargs["element_subset"] = element_subset
 
-    # poincare: accept explicit bool, otherwise map CLI choice to bool
-    if "poincare_use_C_fix" not in kwargs:
-        poincare_choice = kwargs.pop("poincareC", None)
-        if poincare_choice is not None:
-            kwargs["poincare_use_C_fix"] = poincare_choice == "C_fix"
-
     video_variants = kwargs.pop("videoVariants", False)
     video_variants = bool(video_variants)
 
@@ -139,6 +133,7 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
             "nr_iterations",
             "nr_func_evals",
             "est_time_remaining",
+            "avg_P12",
             "avg_sigma12-avg_P12",
         ]:  # "Write_time", "Run_time", "Est_time_remaining"]:
             try:
@@ -194,13 +189,11 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
     if videoes and pvdFile is not None:
         if video_variants and False:
             variant_settings = [
-                {"poincare_use_C_fix": False, "element_subset": None},
-                {"poincare_use_C_fix": True, "element_subset": None},
-                {"poincare_use_C_fix": True, "element_subset": "even"},
+                {"element_subset": None},
+                {"element_subset": "even"},
             ]
             for variant in variant_settings:
                 variant_kwargs = kwargs.copy()
-                variant_kwargs["poincare_use_C_fix"] = variant["poincare_use_C_fix"]
                 variant_kwargs["element_subset"] = variant["element_subset"]
                 makeAnimations(path, X=X, **variant_kwargs)
         else:
@@ -264,15 +257,9 @@ def handle_args_and_plot():
         help="Only plot odd/even elements in mesh/disk videos (default: none).",
     )
     parser.add_argument(
-        "--poincareC",
-        choices=["C_fix", "C"],
-        default="C_fix",
-        help="Use C_fix or C for Poincare disk plots (default: C_fix).",
-    )
-    parser.add_argument(
         "--videoVariants",
         action="store_true",
-        help="Render videos for C, C_fix, and C_fix with even elements.",
+        help="Render videos for C",
     )
 
     args = parser.parse_args()

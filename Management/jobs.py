@@ -11,7 +11,7 @@ def LBFGSconfs(nrThreads, nrSeeds):
         loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
         maxLoad=1.0,
         LBFGSEpsg=[1e-4, 5e-5, 1e-5, 1e-6],
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     return configs, labels
 
@@ -30,7 +30,7 @@ def CGconfs(nrThreads, nrSeeds):
         # loadIncrement=[1e-5],
         # eps=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     return configs, labels
 
@@ -48,7 +48,7 @@ def bigJob(nrThreads, nrSeeds, size=200, group_by_variant=False):
         CGEpsg=1e-4,
         eps=1e-4,
         maxLoad=1.0,
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     return configs, labels
 
@@ -67,7 +67,7 @@ def allPlasticEventsJob():
         # CGEpsg=1e-5,
         # eps=1e-8,
         maxLoad=1.0,
-        scenario="simpleShear",
+        experiment="simpleShear",
         # Save all events
         # plasticityEventThreshold=1e-6,
         energyDropThreshold=1e-10,
@@ -91,26 +91,43 @@ def initalInstability():
         LBFGSEpsx=1e-6,
         # eps=1e-8,
         usingPBC="false",
-        scenario="simpleShearFixedBoundary",
+        experiment="simpleShearFixedBoundary",
     )
     return configs, labels
 
-def pristineCrystal(size=[100,200, 300], loadIncrement=[1e-4, 1e-5, 1e-6], group_by_variant=True, reconnection="none"):
+def pristineCrystal(size=[100,200, 300], loadIncrement=[1e-4, 1e-5, 1e-6], group_by_variant=True, reconnection="none", maxLoad=0.2):
     configs, labels = ConfigGenerator.generate(
         seed=0,
         group_by_variant=group_by_variant,
         L=size,
         startLoad=0.0,
-        maxLoad=0.01,
+        maxLoad=maxLoad,
         nrThreads=1,
         minimizer="LBFGS",
         loadIncrement=loadIncrement,
         LBFGSEpsx=1e-7,
-        scenario="simpleShear",
+        experiment="simpleShear",
         reconnectionMethod=reconnection,
+        initialGuessNoise = 0.00,
     )
     return configs, labels
 
+def smallPristineCrystal(size=[10,20, 30], loadIncrement=[1e-3, 1e-4, 1e-5], group_by_variant=True, reconnection="none", maxLoad=0.2):
+    configs, labels = ConfigGenerator.generate(
+        seed=0,
+        group_by_variant=group_by_variant,
+        L=size,
+        startLoad=0.0,
+        maxLoad=maxLoad,
+        nrThreads=1,
+        minimizer="LBFGS",
+        loadIncrement=loadIncrement,
+        LBFGSEpsx=1e-7,
+        experiment="simpleShear",
+        reconnectionMethod=reconnection,
+        initialGuessNoise = 0.00,
+    )
+    return configs, labels
 
 def propperJob(
     nrThreads, nrSeeds=0, size=100, group_by_variant=False, seeds=None, minimizer=None
@@ -134,7 +151,7 @@ def propperJob(
         CGEpsg=1e-5,
         eps=1e-5,
         maxLoad=1.0,
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     return configs, labels
 
@@ -193,7 +210,7 @@ def basicJob(
         # epsR=1e-6,
         LBFGSEpsx=1e-6,
         # LBFGSEpsg=1e-8,
-        scenario="simpleShear",
+        experiment="simpleShear",
         reconnectionMethod=reconnection,
         # remesh=1,
         # temp
@@ -224,7 +241,7 @@ def debugJob(
         loadIncrement=1e-3,
         epsR=1e-5,
         LBFGSEpsx=1e-6,
-        scenario="simpleShear",
+        experiment="simpleShear",
         reconnectionMethod=reconnection,
         energyDropThreshold=1e-10,
         # logDuringMinimization=1,
@@ -246,8 +263,9 @@ def longJob(nrThreads, nrSeeds, size=100, group_by_variant=False):
         LBFGSEpsx=1e-6,
         epsR=1e-5,
         LBFGSEpsg=1e-8,
-        scenario="simpleShear",
+        experiment="simpleShear",
         reconnectionMethod="edgeFlip",
+        makeDumpAt=1.4292,
     )
     return configs, labels
 
@@ -266,7 +284,7 @@ def longJobStatic(nrThreads, nrSeeds, size=100, group_by_variant=False):
         LBFGSEpsx=1e-6,
         epsR=1e-5,
         LBFGSEpsg=1e-8,
-        scenario="simpleShear",
+        experiment="simpleShear",
         reconnectionMethod="none",
     )
     return configs, labels
@@ -291,7 +309,7 @@ def largeAvalanche(nrThreads, nrSeeds=1, seeds=None, LBFGSEpsg=1e-8):
         minimizer="LBFGS",
         loadIncrement=1e-5,
         LBFGSEpsg=LBFGSEpsg,
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     return configs, labels, dump
 
@@ -315,7 +333,7 @@ def smallAvalanches(nrThreads, nrSeeds=1, seeds=None):
         "minimizer": "LBFGS",
         "loadIncrement": 1e-5,
         "LBFGSEpsg": LBFGSEpsg,
-        "scenario": "simpleShear",
+        "experiment": "simpleShear",
     }
     configs, labels = ConfigGenerator.generate(**kwargs)
     # Also add a simulation using Epsx
@@ -343,7 +361,7 @@ def avalanches(nrThreads, nrSeeds=1, seeds=None, size=100):
         "minimizer": "LBFGS",
         "loadIncrement": 1e-5,
         "LBFGSEpsg": LBFGSEpsg,
-        "scenario": "simpleShear",
+        "experiment": "simpleShear",
     }
     configs, labels = ConfigGenerator.generate(**kwargs)
     configs, labels = [configs[0]], [labels[0]]
@@ -359,7 +377,7 @@ def avalanches(nrThreads, nrSeeds=1, seeds=None, size=100):
         "minimizer": "LBFGS",
         "loadIncrement": 1e-5,
         "epsR": epsR,
-        "scenario": "simpleShear",
+        "experiment": "simpleShear",
     }
     epsRconfigs, epsRlabels = ConfigGenerator.generate(**kwargs)
     configs.extend(epsRconfigs)
@@ -387,7 +405,7 @@ def backwards(nrThreads, nrSeeds=1, seeds=None, LBFGSEpsg=1e-8):
         nrThreads=nrThreads,
         minimizer="LBFGS",
         LBFGSEpsg=LBFGSEpsg,
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     return configs, labels
 
@@ -406,7 +424,7 @@ def cyclicLoading(nrThreads, nrSeeds=1, seeds=None):
         nrThreads=nrThreads,
         minimizer="LBFGS",
         epsR=1e-6,
-        scenario="cyclicSimpleShear",
+        experiment="cyclicSimpleShear",
     )
     return configs, labels
 
@@ -506,7 +524,7 @@ def reconnectionTest(L=100):
 def fixedBoundaries(nrThreads, nrSeeds=1, seeds=None, L=40, fixed=True):
     if seeds is None:
         seeds = range(nrSeeds)
-    scenario = "simpleShearFixedBoundary" if fixed else "simpleShear"
+    experiment = "simpleShearFixedBoundary" if fixed else "simpleShear"
     usingPBC = "false" if fixed else "true"
     configs, labels = ConfigGenerator.generate(
         usingPBC=usingPBC,
@@ -521,7 +539,7 @@ def fixedBoundaries(nrThreads, nrSeeds=1, seeds=None, L=40, fixed=True):
         minimizer="LBFGS",
         epsR=1e-6,
         # LBFGSEpsx=1e-6,
-        scenario=scenario,
+        experiment=experiment,
     )
     return configs, labels
 
@@ -564,25 +582,27 @@ def doubleDislocationTest(
     L=10,
     #diagonal=["major", "minor"],
     reconnecton=["none", "edgeFlip"],
-    GP1=[0.0, 1.0],
-    GP2=[0.0, 1.0],
+    GP1=[0.0],# 1.0],
+    GP2=[0.0],# 1.0],
 ):
     if seeds is None:
         seeds = range(nrSeeds)
-    scenario = "doubleDislocationTest"
-    # scenario = "simpleShear"
+    experiment = "doubleDislocationTest"
+    # experiment = "simpleShear"
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",
         seed=seeds,
         group_by_variant=False,
-        L=L,
+        #L=L,
+        rows=10,
+        cols=[50, 75, 100],
         startLoad=0.0,
-        maxLoad=4.0,
+        maxLoad=1.0,
         loadIncrement=1e-2,
         nrThreads=nrThreads,
         minimizer="LBFGS",
-        epsR=1e-6,
-        scenario=scenario,
+        epsR=[1e-4, 1e-5, 1e-6, 1e-7],
+        experiment=experiment,
         #meshDiagonal=diagonal,
         reconnectionMethod=reconnecton,
         logDuringMinimization=1,
@@ -597,7 +617,7 @@ def singleDislocationTest(
 ):
     if seeds is None:
         seeds = range(nrSeeds)
-    scenario = "singleDislocationFixedBoundaryTest"
+    experiment = "singleDislocationFixedBoundaryTest"
     configs, labels = ConfigGenerator.generate(
         usingPBC="false",
         seed=seeds,
@@ -609,7 +629,7 @@ def singleDislocationTest(
         nrThreads=nrThreads,
         minimizer="LBFGS",
         epsR=1e-6,
-        scenario=scenario,
+        experiment=experiment,
         meshDiagonal=diagonal,
     )
     return configs, labels
@@ -638,7 +658,7 @@ def reversibilityJob(
         # epsR=1e-14,
         LBFGSEpsx=LBFGSEpsx,
         # LBFGSEpsg=1e-8,
-        scenario="reversibilityProtocolTest",
+        experiment="reversibilityProtocolTest",
         reconnectionMethod=reconnection,
         # remesh=1,
         # temp
@@ -704,7 +724,7 @@ def reconnectTest(diagonal="major", reconnectionMethod="edgeFlip"):
         maxLoad=1.0,
         loadIncrement=0.001,
         minimizer="LBFGS",
-        scenario="reconnectTest",
+        experiment="reconnectTest",
         reconnectionMethod=reconnectionMethod,
     )
     return configs, labels
@@ -719,7 +739,7 @@ def reconnectSSTest(diagonal="major", reconnectionMethod="edgeFlip",
         maxLoad=3.0,
         loadIncrement=0.01,
         minimizer="LBFGS",
-        scenario="reconnectSSTest",
+        experiment="reconnectSSTest",
         reconnectionMethod=reconnectionMethod,
         GP1=refConfig,
         GP2=disp,
@@ -739,7 +759,7 @@ def reconnectionJob(L=100):
         nrThreads=8,
         loadIncrement=1e-5,
         minimizer="LBFGS",
-        scenario="simpleShear",
+        experiment="simpleShear",
         # logDuringMinimization=1,
     )
     return configs, labels
@@ -756,7 +776,7 @@ def umutTestJob(group_by_variant=False):
         loadIncrement=1e-5,
         minimizer="LBFGS",
         LBFGSEpsg=1e-5,
-        scenario="simpleShear",
+        experiment="simpleShear",
         group_by_variant=group_by_variant,
     )
     return configs, labels
@@ -782,7 +802,7 @@ def umutJob(
         nrThreads=8,
         loadIncrement=loadIncrement,
         minimizer="LBFGS",
-        scenario="simpleShear",
+        experiment="simpleShear",
         group_by_variant=group_by_variant,
         reconnectionMethod=reconnecton,
         **stop,
@@ -840,7 +860,7 @@ def umutJobs(loadIncrement=2e-5):
             nrThreads=threads,
             minimizer="LBFGS",
             LBFGSEpsx=1e-6,
-            scenario="simpleShear",
+            experiment="simpleShear",
         )
         # Append the generated configs and labels to the main lists
         all_configs.append(configs)
@@ -873,7 +893,7 @@ def size_scaling_job():
             minimizer="LBFGS",
             LBFGSEpsx=1e-6,
             # epsR=1e-6,
-            scenario="simpleShear",
+            experiment="simpleShear",
         )
         # Append the generated configs and labels to the main lists
         all_configs.append(configs)
@@ -901,7 +921,7 @@ def triangular_edge_flip_job(
         # epsR=1e-14,
         LBFGSEpsx=1e-6,
         # LBFGSEpsg=1e-8,
-        scenario="simpleShear",
+        experiment="simpleShear",
         reconnectionMethod=reconnection,
         energyFunction="contiTriangular",
         # remesh=1,

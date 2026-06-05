@@ -14,7 +14,7 @@ class SimulationConfig:
         self.rows = 10
         self.cols = 10
         self.usingPBC = 1  # 0=False, 1=True
-        self.scenario = "simpleShear"
+        self.experiment = "simpleShear"
         self.nrThreads = 1
         self.seed = 0
         self.plasticityEventThreshold = 0.1
@@ -57,7 +57,7 @@ class SimulationConfig:
 
     def generate_name(self, withExtension=True):
         name = (
-            self.scenario + ","
+            self.experiment + ","
             f"s{self.rows}x{self.cols}"
             + f"l{self.startLoad},{self.loadIncrement},{self.maxLoad}"
             + f"{'PBC' if self.usingPBC == 1 else 'NPBC'}"
@@ -152,7 +152,7 @@ class ConfigGenerator:
         :return: A list of SimulationConfig objects with all combinations of argument values.
 
         Example:
-        configurations = ConfigGenerator.generate(nrThreads=[1, 2, 4], seed=[42, 43], scenario='simpleShear')
+        configurations = ConfigGenerator.generate(nrThreads=[1, 2, 4], seed=[42, 43], experiment='simpleShear')
         for config in configurations:
             print(config.generate_name())
         """
@@ -215,8 +215,8 @@ class ConfigGenerator:
         return [SimulationConfig(seed=seed, **kwargs) for seed in seeds]
 
 
-def get_custom_configs(scenario):
-    if scenario == "periodicBoundaryTest":
+def get_custom_configs(experiment):
+    if experiment == "periodicBoundaryTest":
         return SimulationConfig(
             rows=4,
             cols=4,
@@ -224,10 +224,10 @@ def get_custom_configs(scenario):
             nrThreads=4,
             loadIncrement=0.0001,
             maxLoad=1,
-            scenario="periodicBoundaryTest",
+            experiment="periodicBoundaryTest",
         )
 
-    if scenario == "singleDislocation":
+    if experiment == "singleDislocation":
         return SimulationConfig(
             rows=6,
             cols=6,
@@ -235,10 +235,10 @@ def get_custom_configs(scenario):
             nrThreads=6,
             loadIncrement=0.00001,
             maxLoad=0.001,
-            scenario="singleDislocation",
+            experiment="singleDislocation",
         )
 
-    if scenario == "longSim":
+    if experiment == "longSim":
         return SimulationConfig(
             rows=60,
             cols=60,
@@ -246,8 +246,8 @@ def get_custom_configs(scenario):
             nrThreads=4,
             loadIncrement=0.00001,
             maxLoad=10,
-            # scenario="simpleShearPeriodicBoundary")
-            scenario="cyclicSimpleShear",
+            # experiment="simpleShearPeriodicBoundary")
+            experiment="cyclicSimpleShear",
         )
 
 
@@ -261,11 +261,11 @@ if __name__ == "__main__":
     config.rows = 3
     config.cols = 3
     if len(sys.argv) >= 2:
-        scenario = sys.argv[1]
-        config.scenario = scenario
-        # if there is a complete custom scenario, we replace the config
-        if get_custom_configs(scenario) is not None:
-            config = get_custom_configs(scenario)
+        experiment = sys.argv[1]
+        config.experiment = experiment
+        # if there is a complete custom experiment, we replace the config
+        if get_custom_configs(experiment) is not None:
+            config = get_custom_configs(experiment)
 
     path = config.write_to_file("build/")
     # Extract the directory part from the original path

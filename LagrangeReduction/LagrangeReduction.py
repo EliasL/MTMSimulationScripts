@@ -463,7 +463,7 @@ def fast_lagrange_reduction(v1, v2):
     The idea here is that sometimes when one vector is very small, an the other
     one is very big (and/or the angle is close to 0 or 180), the lagrange reduction
     algorithm is very ineficcient. I have noticed a pattern, and i think i can
-    reproduce the result much more quickly in these scenarios. As an example,
+    reproduce the result much more quickly in these experiments. As an example,
     one common pattern is this m transformation.
     m1 m2 m3 m3 m3 ... m3 m3 m1
     ei, this is the sequence in which you would need to transform your m matrix

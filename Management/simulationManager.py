@@ -66,6 +66,10 @@ class SimulationManager:
         self.subfolderName = Path(self.conf_file).stem
         # Generate command to run simulation
         self.simulation_command = f"{self.program_path} -c {self.conf_file} -o {self.outputPath} {' -r' if overwriteData else ''}"
+        
+        if self.configObj.makeDumpAt !=-1:
+            self.simulation_command += f" --makeDumpAt {self.configObj.makeDumpAt}"
+
         if self.useProfiling and platform.system() == "Linux":
             self.simulation_command = f"LD_PRELOAD=/usr/lib/gcc/x86_64-linux-gnu/7/libasan.so valgrind --tool=memcheck --leak-check=full --show-leak-kinds=all --track-origins=yes {self.simulation_command}"
 
@@ -141,7 +145,8 @@ class SimulationManager:
 
         # Initialize the base command
         command = [self.program_path, "-d", dumpFile]
-
+        if self.configObj.makeDumpAt !=-1:
+            command += ["--makeDumpAt" ,f"{self.configObj.makeDumpAt}"]
         # Conditionally add flags and paths based on inputs
         if overwriteSettings:
             if resolved_config_path is None and autoConfig:

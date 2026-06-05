@@ -183,7 +183,6 @@ def makeAnimations(
     reuseImages=False,
     X="load",
     element_subset=None,
-    poincare_use_C_fix=False,
     matrix_name="T",
 ):
     frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
@@ -259,7 +258,7 @@ def makeAnimations(
     def _with_suffixes(base_name):
         name = base_name
         if base_name in poincare_names:
-            tag = "Cfix" if poincare_use_C_fix else "C"
+            tag = "C"
             name = f"{name}_{tag}"
         if subset in ("odd", "even") and (
             base_name in mesh_disk_names or _is_matrix_component_grid(base_name)
@@ -272,11 +271,6 @@ def makeAnimations(
             name in mesh_disk_names or _is_matrix_component_grid(name)
         ):
             return subset
-        return None
-
-    def _poincare_arg(name):
-        if name in poincare_names:
-            return poincare_use_C_fix
         return None
 
     matrix_jobs = [
@@ -311,7 +305,6 @@ def makeAnimations(
             raise ValueError(f"Unexpected render job entry: {job}")
 
         fileName = _with_suffixes(base_name)
-        use_C_fix = _poincare_arg(base_name)
         extra_kwargs = {}
         subset_arg = _subset_arg(base_name)
         if matrix_name_for_job is not None:
@@ -328,7 +321,6 @@ def makeAnimations(
             fileName=fileName,
             element_subset=subset_arg,
             **extra_kwargs,
-            **({"use_C_fix": use_C_fix} if use_C_fix is not None else {}),
         )
 
         # Path to the output video file

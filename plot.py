@@ -325,7 +325,7 @@ def plotSylvainBatches():
         grouped_configs, grouped_labels, group_labels = (
             ConfigGenerator.group_by_settings(configs, labels=labels)
         )
-        plotReversibilityEnergyDropCorrelation(grouped_configs, grouped_labels, xAxisCol="rev_energy_diff")
+        #plotReversibilityEnergyDropCorrelation(grouped_configs, grouped_labels, xAxisCol="rev_energy_diff")
 
         paths, _ = get_csv_files(
             grouped_configs,
@@ -840,7 +840,7 @@ def plotReferenceTest():
 
 
 def plotPristineCrystalPredictionError():
-    configs, labels = pristineCrystal(group_by_variant=True)
+    configs, labels = smallPristineCrystal(group_by_variant=True)
     paths, labels = get_csv_files(
         configs, labels=labels, useOldFiles=False, forceUpdate=False
     )
@@ -886,7 +886,7 @@ if __name__ == "__main__":
 
     # debugPlotAll()
     # energyField()
-    showPoincareDisk()
+    #showPoincareDisk()
     # showInstabilityAngle()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
@@ -921,7 +921,7 @@ if __name__ == "__main__":
     # investigateJobs()
     # print_remote_runtimes()
     #plotSylvainBatches()
-    #plotPristineCrystalPredictionError()
+    plotPristineCrystalPredictionError()
     # compare_center_node_forces()
     # compare_energy_three_sims()
     pass

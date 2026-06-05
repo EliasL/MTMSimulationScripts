@@ -12,6 +12,7 @@ from Management.dataManager import DataManager
 from Management.simulationManager import findOutputPath
 from Management.jobs import (
     pristineCrystal,
+    smallPristineCrystal,
     loadStepJob,
     cyclicLoading,
     fixedBoundaries,
@@ -63,7 +64,7 @@ def benchmark():
         Name: simpleShear,s50x50l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-08s0
         Rows, Cols: 50, 50
         Boundary Conditions: PBC
-        Scenario: simpleShear
+        Experiment: simpleShear
         Number of Threads: 3
         Seed: 0
         Quenched disorder standard deviation: 0
@@ -155,7 +156,7 @@ def reconnectingBenchmark():
         Rows, Cols: 50, 50
         Boundary Conditions: PBC
         Reconnection enabled: True
-        Scenario: simpleShear
+        Experiment: simpleShear
         Number of Threads: 3
         Seed: 0
         Quenched disorder standard deviation: 0
@@ -207,6 +208,10 @@ def reconnectingBenchmark():
     # 1% RT: 1m 53s  ETR: 2h 29m 31s Load: 0.160630 # Edge lookup table
     # 1% RT: 1m 53s  ETR: 2h 29m 1s  Load: 0.160640 # fixed no wait in loop
     # 2% RT: 1m 52s  ETR: 1h 26m 9s  Load: 0.167000 # string view instead of const string
+    # Better debug (29.05.26)
+    # 2% RT: 2m 4s   ETR: 1h 32m 36s Load: 0.167000
+    # Clean up (05.06.25)
+    # 2% RT: 2m 6s   ETR: 1h 33m 40s Load: 0.167000
 
 def parameterExploring():
     # pe.loadingSpeeds()
@@ -455,10 +460,10 @@ def runOnLocalMachine():
     #configs, labels = reversibilityJob()
     # configs, labels = loadStepJob(reconnection="edgeFlip")
     #configs, labels = reconnectSSTest(reconnectionMethod="none")
-    #configs, labels = pristineCrystal()
+    #configs, labels = smallPristineCrystal()
     # configs, labels = triangular_edge_flip_job(size=50)
     #configs, labels = referenceStateTestJob()
-    #configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, reconnecton=["edgeFlip"])
+    configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, reconnecton=["edgeFlip"])
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
@@ -467,7 +472,7 @@ def runOnLocalMachine():
     #configs, labels = remeshTest(diagonal="minor")
     # run_many_locally(configs, taskNames=labels, resume=False)
 
-    configs, labels = longJob(5, 1, size=200)
+    #configs, labels = longJob(5, 1, size=200)
     # configs, labels = longJobStatic(8, 1, size=300)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
@@ -484,7 +489,7 @@ def runOnLocalMachine():
     run_many_locally(
         configs,
         taskNames=labels,
-        resume=True,
+        resume=False,
     )
 
 
@@ -620,7 +625,7 @@ if __name__ == "__main__":
     # cleanData()
     #startJobs()
 
-    runOnLocalMachine()
+    #runOnLocalMachine()
 
     # plotPropperJob()
     # plotSizeScaling()
@@ -628,7 +633,7 @@ if __name__ == "__main__":
     # stopConditionJob()
     # threadTest()
     #benchmark()
-    #reconnectingBenchmark()
+    reconnectingBenchmark()
     # resumeSim(
     #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,

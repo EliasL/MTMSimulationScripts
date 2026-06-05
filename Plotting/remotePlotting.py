@@ -1706,7 +1706,7 @@ if __name__ == "__main__":
         maxLoad=1.0,
         LBFGSEpsx=1e-6,
         minimizer="LBFGS",
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     # paths = get_csv_files(configs)
     paths = get_csv_from_folder(

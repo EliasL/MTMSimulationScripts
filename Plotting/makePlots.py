@@ -1217,6 +1217,7 @@ def compute_predicted_next_energy(csv_file_path):
     if "L" in meta and meta["L"] is not None:
         L = float(meta["L"])
         volume = float(L * L)
+        nr_elements=L*L*2
     elif "dims" in meta and meta["dims"] is not None:
         n1, n2 = meta["dims"]
         volume = float(n1 * n2)
@@ -1233,6 +1234,7 @@ def compute_predicted_next_energy(csv_file_path):
             sigma_col = "avg_sigma12"
     if sigma_col is None and "avg_P12" in df.columns:
         sigma_col = "avg_P12"
+        print("WARNING USING PIOLA INSTEAD OF CAUCHY!")
     if sigma_col is None:
         raise KeyError(f"Missing stress column ('avg_sigma12' or 'avg_P12') in {csv_path}")
 
@@ -1251,7 +1253,7 @@ def compute_predicted_next_energy(csv_file_path):
         energy_total = np.asarray(df[energy_col], dtype=float)
     elif "avg_energy" in df.columns:
         energy_col = "avg_energy"
-        energy_total = np.asarray(df[energy_col], dtype=float) * volume
+        energy_total = np.asarray(df[energy_col], dtype=float) * nr_elements
         converted_avg_energy = True
     else:
         raise KeyError(
@@ -1286,7 +1288,8 @@ def compute_predicted_next_energy(csv_file_path):
     sigma_i = sigma_i[finite_pairs]
     e_i = e_i[finite_pairs]
     e_real_next = e_real_next[finite_pairs]
-    e_pred_next = e_i + volume * sigma_i * delta_gamma
+
+    e_pred_next = e_i + volume * sigma_i * delta_gamma*2
 
     prediction_error = e_real_next - e_pred_next
     abs_prediction_error = np.abs(prediction_error)
@@ -1329,7 +1332,7 @@ def plot_predicted_energy_error(
     property_keys=("L", "loadIncrement"),
     use_color_matrix_legend=True,
     y_log=True,
-    strain_lim=(0.001, 0.01),
+    strain_lim=(None, None),
     show_sigma=False,
     show=False,
     save=True,

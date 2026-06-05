@@ -907,6 +907,7 @@ def plot_matrix_component_grid(
         matrix_lims = (-frame_max, frame_max)
 
     matrix_abs_max = max(abs(float(matrix_lims[0])), abs(float(matrix_lims[1])))
+    matrix_abs_max = 5 # Manually set until fixed
     norm = mcolors.Normalize(vmin=-matrix_abs_max, vmax=matrix_abs_max)
     cmap = "coolwarm"
     backgroundColor = plt.get_cmap(cmap)(0.5)
@@ -1457,9 +1458,7 @@ def plot_in_poincare_disk(
         ax, fig = base_plot(vtu_file=vtu_file, **poincare_kwargs)
     data = VTUData(vtu_file)
 
-    use_C_fix = kwargs.get("use_C_fix", True)
-    C = data.get_C_fix() if use_C_fix else data.get_C()
-    C_raw = C.copy()
+    C =  data.get_C()
     element_indices = _element_subset_indices(len(C), kwargs.get("element_subset"))
     if element_indices is not None:
         C = C[element_indices]
@@ -1518,8 +1517,7 @@ def plot_velocity_field_in_poincare_disk(
         ax, fig = base_plot(vtu_file=vtu_file, **poincare_kwargs)
 
     data = VTUData(vtu_file)
-    use_C_fix = kwargs.get("use_C_fix", True)
-    C = data.get_C_fix() if use_C_fix else data.get_C()
+    C = data.get_C()
     element_indices = _element_subset_indices(len(C), kwargs.get("element_subset"))
     if element_indices is not None:
         C = C[element_indices]
@@ -1624,7 +1622,7 @@ def plot_velocity_field_in_poincare_disk(
         return ax
 
     ref_data = VTUData(ref_frame_vtu_file)
-    C_prev = ref_data.get_C_fix() if use_C_fix else ref_data.get_C()
+    C_prev = ref_data.get_C()
     M_prev = ref_data.get_M(elastic_M=True) if do_elastic_reduction else None
     if element_indices is not None:
         element_indices = element_indices[element_indices < len(C_prev)]

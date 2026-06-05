@@ -20,7 +20,7 @@ class SimulationConfig:
         self.reconnectionMethod = "none"  # "none", "edgeFlip", "delaunay"
         self.reconnectRevert = 0 #False
         self.reconnectEdgeLocking = 1 #True
-        self.scenario = "simpleShear"
+        self.experiment = "simpleShear"
         self.nrThreads = 1  # This needs to be 1. Don't change. (see queueLocalJobs)
         self.seed = 0
         self.QDSD = 0.00  # Quenched dissorder standard deviation
@@ -77,6 +77,7 @@ class SimulationConfig:
         self.plasticityEventThreshold = 0.05
         self.energyDropThreshold = 1e-1
         self.showProgress = 1  # 0=False, 1=True
+        self.makeDumpAt=-1.0
 
         if configPath is not None:
             self.parse(configPath)
@@ -109,7 +110,7 @@ class SimulationConfig:
 
     def generate_name(self, withExtension=True):
         name = (
-            self.scenario + ","
+            self.experiment + ","
             f"s{self.rows}x{self.cols}"
             + f"l{self.startLoad},{self.loadIncrement},{self.maxLoad}"
             + f"{'PBC' if self.usingPBC.lower() == 'true' else 'NPBC'}"
@@ -121,7 +122,7 @@ class SimulationConfig:
         for attr, value in vars(self).items():
             if attr not in [
                 "name",
-                "scenario",
+                "experiment",
                 "rows",
                 "cols",
                 "startLoad",
@@ -131,6 +132,7 @@ class SimulationConfig:
                 "nrThreads",
                 "seed",
                 "reconnectionMethod",
+                "makeDumpAt",# Special: Should not make new simulation if changed!
             ]:
                 if defaultValues.get(attr) != value:
                     name += f"{attr}{value}"
@@ -196,7 +198,7 @@ class SimulationConfig:
 
             # Write the attributes and their values
             for attr, value in self.__dict__.items():
-                if attr != "NONAME":
+                if attr not in ["NONAME", "makeDumpAt"]:
                     file.write(f"{attr} = {value}\n")
 
         return full_path
@@ -555,8 +557,8 @@ class ConfigGenerator:
         return matching_keys, non_matching_keys
 
 
-def get_custom_configs(scenario="large"):
-    if scenario == "large":
+def get_custom_configs(experiment="large"):
+    if experiment == "large":
         return SimulationConfig(
             rows=100,
             cols=100,
@@ -566,7 +568,7 @@ def get_custom_configs(scenario="large"):
             maxLoad=1.0,
         )
 
-    elif scenario == "periodicBoundaryTest":
+    elif experiment == "periodicBoundaryTest":
         return SimulationConfig(
             rows=4,
             cols=4,
@@ -574,10 +576,10 @@ def get_custom_configs(scenario="large"):
             nrThreads=4,
             loadIncrement=0.0001,
             maxLoad=1,
-            scenario="periodicBoundaryTest",
+            experiment="periodicBoundaryTest",
         )
 
-    elif scenario == "singleDislocation":
+    elif experiment == "singleDislocation":
         return SimulationConfig(
             rows=6,
             cols=6,
@@ -585,10 +587,10 @@ def get_custom_configs(scenario="large"):
             nrThreads=6,
             loadIncrement=1e-5,
             maxLoad=0.001,
-            scenario="singleDislocation",
+            experiment="singleDislocation",
         )
 
-    elif scenario == "longSim":
+    elif experiment == "longSim":
         return SimulationConfig(
             rows=60,
             cols=60,
@@ -596,11 +598,11 @@ def get_custom_configs(scenario="large"):
             nrThreads=4,
             loadIncrement=1e-5,
             maxLoad=10.0,
-            # scenario="simpleShearPeriodicBoundary")
-            scenario="cyclicSimpleShear",
+            # experiment="simpleShearPeriodicBoundary")
+            experiment="cyclicSimpleShear",
         )
     else:
-        raise RuntimeError(f"No scenario found for {scenario}")
+        raise RuntimeError(f"No experiment found for {experiment}")
 
 
 if __name__ == "__main__":
@@ -610,7 +612,7 @@ if __name__ == "__main__":
     L = 3
     config = SimulationConfig(
         usingPBC="true",
-        scenario="simpleShear",
+        experiment="simpleShear",
         rows=L,
         cols=L,
         startLoad=0.15,
@@ -621,11 +623,11 @@ if __name__ == "__main__":
     )
     # config = get_custom_configs()
     if len(sys.argv) >= 2:
-        scenario = sys.argv[1]
-        config.scenario = scenario
-        # if there is a complete custom scenario, we replace the config
-        if get_custom_configs(scenario) is not None:
-            config = get_custom_configs(scenario)
+        experiment = sys.argv[1]
+        config.experiment = experiment
+        # if there is a complete custom experiment, we replace the config
+        if get_custom_configs(experiment) is not None:
+            config = get_custom_configs(experiment)
     build_path = os.path.join(os.getcwd(), "build/")
     path = config.write_to_file(build_path)
     # Extract the directory part from the original path

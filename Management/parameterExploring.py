@@ -85,7 +85,7 @@ def plotOldStuff():
         epsx=[0],
         epsg=[0, 1e-2, 1e-3, 1e-4],
         epsf=[0, 1e-4, 1e-5, 1e-6],
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     c = assignColors(
         configs,
@@ -111,7 +111,7 @@ def plotLessOldStuff():
         alphaStart=[0.01, 0.1, 0.3],
         eps=[1e-3, 1e-4, 1e-5],
         LBFGSEpsg=[9e-4, 9e-5, 9e-6],
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     c = assignColors(
         configs,
@@ -136,7 +136,7 @@ def statStuff():
         maxLoad=1,
         LBFGSEpsx=1e-6,
         minimizer="LBFGS",
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     plotSims(
         configs,
@@ -160,7 +160,7 @@ def fastStatStuff():
         maxLoad=1,
         LBFGSEpsx=1e-5,
         minimizer="LBFGS",
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     runSims(configs)
     # plotSims(configs, "powerlaw", labels=[f"s:{i}" for i in seeds], show=True,
@@ -185,7 +185,7 @@ def loadingSpeeds():
         # loadIncrement=[1e-5],
         # LBFGSEpsg=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     extra_configs, extra_labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -196,7 +196,7 @@ def loadingSpeeds():
         loadIncrement=[1e-5],
         maxLoad=1.0,
         LBFGSEpsx=[1e-6],
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     # configs.extend([extra_configs])
     # labels.extend([["loadIncrement=1e-5, LBFGSEpsx=1e-6"]])
@@ -216,7 +216,7 @@ def smallLoadingSpeeds():
         loadIncrement=[1e-5, 4e-5, 1e-4, 2e-4],
         maxLoad=1.0,
         LBFGSEpsg=[1e-8, 1e-9],
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     extra_configs, extra_labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -227,7 +227,7 @@ def smallLoadingSpeeds():
         loadIncrement=[1e-5],
         maxLoad=1.0,
         LBFGSEpsx=[1e-6],
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     configs.extend(extra_configs)
     labels.extend(["loadIncrement=1e-5, LBFGSEpsx=1e-6"])
@@ -262,7 +262,7 @@ def FIRELoading():
         # loadIncrement=[1e-5],
         # eps=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     extra_configs, extra_labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -273,7 +273,7 @@ def FIRELoading():
         loadIncrement=[1e-5],
         maxLoad=1.0,
         LBFGSEpsx=[1e-6],
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     # configs.extend([extra_configs])
     # labels.extend([["loadIncrement=1e-5, LBFGSEpsx=1e-6"]])
@@ -301,7 +301,7 @@ def CGLoading():
         loadIncrement=[1e-5],
         CGEpsg=[1e-6, 1e-5, 1e-4],
         maxLoad=1.0,
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     extra_configs, extra_labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
@@ -312,7 +312,7 @@ def CGLoading():
         loadIncrement=[1e-5],
         maxLoad=1.0,
         LBFGSEpsx=[1e-6],
-        scenario="simpleShear",
+        experiment="simpleShear",
     )
     # configs.extend([extra_configs])
     # labels.extend([["loadIncrement=1e-5, LBFGSEpsx=1e-6"]])
