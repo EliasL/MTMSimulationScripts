@@ -1458,13 +1458,22 @@ def plot_in_poincare_disk(
         ax, fig = base_plot(vtu_file=vtu_file, **poincare_kwargs)
     data = VTUData(vtu_file)
 
-    C =  data.get_C()
-    element_indices = _element_subset_indices(len(C), kwargs.get("element_subset"))
+    poincare_matrix = str(kwargs.get("poincare_matrix", "C")).upper()
+    if poincare_matrix == "C":
+        disk_matrix = data.get_C()
+    elif poincare_matrix == "G":
+        disk_matrix = data.get_G()
+    else:
+        raise ValueError(f"Unsupported Poincare disk matrix: {poincare_matrix!r}")
+
+    element_indices = _element_subset_indices(
+        len(disk_matrix), kwargs.get("element_subset")
+    )
     if element_indices is not None:
-        C = C[element_indices]
+        disk_matrix = disk_matrix[element_indices]
     if do_elastic_reduction:
         # Do the elastic reduction
-        C, _ = elastic_reduction(C)
+        disk_matrix, _ = elastic_reduction(disk_matrix)
         zoom = 3
     else:
         zoom = 1
@@ -1488,7 +1497,25 @@ def plot_in_poincare_disk(
         yieldSurface_kwargs=kwargs.get("yieldSurface_kwargs", None),
     )
 
-    drawCScatter(ax, C, len(g), zoom=zoom, remove_max_color=False)
+    legend_label = rf"$\mathbf{{{poincare_matrix}}}$"
+    scatter = drawCScatter(
+        ax,
+        disk_matrix,
+        len(g),
+        zoom=zoom,
+        remove_max_color=False,
+        label=legend_label,
+    )
+    if scatter is not None:
+        legend_handle = ax.scatter(
+            [],
+            [],
+            s=3,
+            c="black",
+            linewidth=0,
+            label=legend_label,
+        )
+        ax.legend(handles=[legend_handle], labels=[legend_label], loc="upper left")
 
     return ax
 
@@ -1821,6 +1848,14 @@ def plot_velocity_field_in_poincare_disk(
 
 
 def plot_and_save_in_poincare_disk(**kwargs):
+    return plot_and_save(
+        plot_func=plot_in_poincare_disk,
+        **kwargs,
+    )
+
+
+def plot_and_save_g_in_poincare_disk(**kwargs):
+    kwargs["poincare_matrix"] = "G"
     return plot_and_save(
         plot_func=plot_in_poincare_disk,
         **kwargs,

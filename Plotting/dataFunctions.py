@@ -196,6 +196,14 @@ class VTUData:
         C11, C12, C22 = [self.get_cell_data(C) for C in ["C11", "C12", "C22"]]
         return CArrsToMat(C11, C12, C22)
 
+    def get_G(self):
+        """
+        Returns a 3D array where each slice (2x2 matrix) corresponds to the
+        [G11, G22, G12] components.
+        """
+        G11, G12, G22 = [self.get_cell_data(G) for G in ["G11", "G12", "G22"]]
+        return CArrsToMat(G11, G12, G22)
+
 
     def get_F(self):
         """

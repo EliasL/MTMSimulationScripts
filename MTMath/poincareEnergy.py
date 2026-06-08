@@ -961,6 +961,7 @@ def drawCScatter(
         cbar = plt.colorbar(scatter, ax=ax, label=cbar_label, pad=0.01)
         if hasattr(cbar, "solids") and cbar.solids is not None:
             cbar.solids.set_alpha(1.0)
+    return scatter
 
 
 def getCFundamental(grid_size=200, zoom_val=1, transformation=None, returnMask=False):
