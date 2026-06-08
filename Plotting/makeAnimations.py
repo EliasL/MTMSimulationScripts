@@ -282,14 +282,14 @@ def makeAnimations(
         # (plot_and_save_nodes, "nodes"),
         #(plot_and_save_mesh_with_force, "mesh_with_forces"),
         # Move this line to choose where the matrix videos are rendered.
-        *matrix_jobs,
         (plot_and_save_in_poincare_disk, "disk"),
+        (plot_and_save_mesh, "mesh"),
+        *matrix_jobs,
         (plot_and_save_velocity_field_in_e_reduced_poincare_disk, "erDisk_velocity"),
         (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
         (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_plot, "energy_plot"),
         (plot_and_save_plot, "e_drop_plot"),
-        (plot_and_save_mesh, "mesh"),
         (plot_and_save_m_mesh, "m_mesh"),
     ]
 
