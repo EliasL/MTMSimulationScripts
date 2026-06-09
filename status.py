@@ -3,6 +3,7 @@ from pathlib import Path
 from Management.clusterStatus import get_all_server_info, display_server_info
 from Management.dataManager import DataManager
 from Management.connectToCluster import Servers
+from Management.simulationStatus import print_status_table
 
 
 # from Management.configGenerator import ConfigGenerator
@@ -31,6 +32,33 @@ def disp_jobs():
     j = JobManager()
     j.findAndShowSlurmJobs()
     j.findAndShowProcesses()
+
+
+def checkStatus(configs, labels=None, force_update=False, check_running=False, search_remote="conditional"):
+    """
+    Print simulation progress from CSV files.
+
+    search_remote="conditional" checks cached/local CSVs first and only queries
+    servers for missing or unfinished runs. Use False for local-only and True
+    to query servers for every config. Set check_running=True to scan servers
+    for live processes.
+    """
+    if isinstance(labels, bool):
+        old_force_update = labels
+        labels = None
+        force_update, check_running, search_remote = (
+            old_force_update,
+            force_update,
+            check_running,
+        )
+
+    print_status_table(
+        configs,
+        force_update=force_update,
+        check_running=check_running,
+        search_remote=search_remote,
+        labels=labels,
+    )
 
 
 def run_script():
@@ -84,14 +112,26 @@ if __name__ == "__main__":
             disp_servers()
         elif task == "disp_jobs":
             disp_jobs()
+
         else:
             raise ValueError(
-                f"No such task {task}. The options are disp_<data/servers/jobs>"
+                f"No such task {task}. The options are disp_<data/servers/jobs> or sylvain_status"
             )
     else:
+        from Management.jobs import sylvainBatches
         # dm = DataManager()
         # dm.clean_projects_on_servers()
         # disp_jobs()
         # disp_servers()
+        configs = []
+        labels = []
+        for batch in [-2, -1]:
+            batch_configs, batch_labels = sylvainBatches(batch)
+            configs.extend(batch_configs)
+            labels.extend(f"batch={batch}, {label}" for label in batch_labels)
+        checkStatus(
+            configs,
+            labels=labels,
+        )
         # This is where you create a terminal with all three displayed
-        run_script()
+        #run_script()

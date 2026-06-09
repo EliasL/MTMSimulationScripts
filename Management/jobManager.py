@@ -99,6 +99,7 @@ class Process:
         self.timeEstimation = ""
         self.progress = ""
         self.progress_timestamp = None
+        self.current_load = None
         self.dataSize = 0
         self.output_path = ""
         self.configObj = None
@@ -236,6 +237,7 @@ class Process:
                         load = last_line_values[header_indices["Load"]]
                     except KeyError:
                         load = None
+                self.current_load = load
 
                 try:
                     runTime = last_line_values[header_indices["run_time"]]

@@ -2,7 +2,12 @@ import os
 import sys
 import hashlib
 import re
+import math
+import posixpath
+import shutil
+import xml.etree.ElementTree as ET
 from pathlib import Path
+from pathlib import PurePosixPath
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import random
@@ -38,6 +43,7 @@ from Plotting.plotPowerLaw import (
     strip_seed_from_label,
 )
 from Management.updateCSV import fix_csv_files, read_macrodata_csv
+from Plotting.dataFunctions import infer_strain_from_vtu
 
 # Add Management to sys.path (used to import files)
 sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
@@ -533,6 +539,304 @@ def download_file(
     return None
 
 
+def _config_name(config):
+    return getattr(config, "name", None) or config.generate_name(False)
+
+
+def _flatten_mesh_configs(configs):
+    if isinstance(configs, SimulationConfig):
+        return [configs]
+    configs = list(configs)
+    if not configs:
+        return []
+    return flattenConfigList(configs)
+
+
+def _safe_relative_parts(relative_path):
+    pure_path = PurePosixPath(relative_path)
+    if pure_path.is_absolute() or ".." in pure_path.parts:
+        raise ValueError(f"Unsafe VTU path in collection.pvd: {relative_path}")
+    return pure_path.parts
+
+
+def _local_mesh_path(folder, relative_path):
+    return Path(folder).joinpath(*_safe_relative_parts(relative_path))
+
+
+def _mesh_load(relative_path, fallback=None):
+    load = infer_strain_from_vtu(relative_path)
+    if load is not None and np.isfinite(load):
+        return float(load)
+    if fallback is None:
+        return None
+    try:
+        return float(fallback)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mesh_entries_from_pvd_text(pvd_text):
+    root = ET.fromstring(pvd_text)
+    entries = []
+    for dataset in root.iter("DataSet"):
+        relative_path = dataset.attrib.get("file")
+        if not relative_path or not relative_path.endswith(".vtu"):
+            continue
+        entries.append(
+            {
+                "file": relative_path,
+                "load": _mesh_load(relative_path, dataset.attrib.get("timestep")),
+            }
+        )
+    if not entries:
+        raise ValueError("No VTU DataSet entries found in collection.pvd.")
+    return entries
+
+
+def _mesh_entries_from_local_vtus(folder):
+    folder = Path(folder)
+    vtu_files = sorted((folder / "data").glob("*.vtu"))
+    if not vtu_files:
+        vtu_files = sorted(folder.glob("*.vtu"))
+    entries = []
+    for vtu_file in vtu_files:
+        relative_path = vtu_file.relative_to(folder).as_posix()
+        entries.append({"file": relative_path, "load": _mesh_load(str(vtu_file))})
+    return entries
+
+
+def _read_local_mesh_entries(folder):
+    folder = Path(folder)
+    pvd_path = folder / "collection.pvd"
+    if pvd_path.exists():
+        pvd_text = pvd_path.read_text()
+        return _mesh_entries_from_pvd_text(pvd_text), pvd_text
+    return _mesh_entries_from_local_vtus(folder), None
+
+
+def _remote_exists(sftp, remote_path):
+    try:
+        sftp.stat(remote_path)
+        return True
+    except OSError:
+        return False
+
+
+def _read_remote_mesh_entries(sftp, remote_folder):
+    pvd_path = posixpath.join(remote_folder, "collection.pvd")
+    if _remote_exists(sftp, pvd_path):
+        with sftp.open(pvd_path, "r") as pvd_file:
+            raw_pvd = pvd_file.read()
+            pvd_text = raw_pvd.decode() if isinstance(raw_pvd, bytes) else raw_pvd
+        return _mesh_entries_from_pvd_text(pvd_text), pvd_text
+
+    entries = []
+    for relative_dir in ("data", ""):
+        remote_dir = posixpath.join(remote_folder, relative_dir) if relative_dir else remote_folder
+        if not _remote_exists(sftp, remote_dir):
+            continue
+        for filename in sftp.listdir(remote_dir):
+            if not filename.endswith(".vtu"):
+                continue
+            relative_path = posixpath.join(relative_dir, filename) if relative_dir else filename
+            entries.append({"file": relative_path, "load": _mesh_load(relative_path)})
+        if entries:
+            break
+    return entries, None
+
+
+def _select_mesh_entry(entries, load):
+    if not entries:
+        raise ValueError("No VTU files found for requested mesh.")
+
+    entries_with_load = [entry for entry in entries if entry["load"] is not None]
+    if not entries_with_load:
+        raise ValueError("Could not infer load values for any VTU files.")
+
+    if math.isinf(float(load)):
+        return max(entries_with_load, key=lambda entry: entry["load"])
+    target_load = float(load)
+    return min(entries_with_load, key=lambda entry: abs(entry["load"] - target_load))
+
+
+def _format_mesh_load(load):
+    load = float(load)
+    if math.isinf(load):
+        return "final load"
+    return f"load {load:g}"
+
+
+def _copy_root_small_files(source_folder, dest_folder):
+    source_folder = Path(source_folder)
+    dest_folder = Path(dest_folder)
+    dest_folder.mkdir(parents=True, exist_ok=True)
+    for source_path in source_folder.iterdir():
+        if source_path.is_file() and source_path.suffix.lower() == ".csv":
+            shutil.copy2(source_path, dest_folder / source_path.name)
+
+
+def _download_root_small_files(sftp, remote_folder, dest_folder):
+    dest_folder = Path(dest_folder)
+    dest_folder.mkdir(parents=True, exist_ok=True)
+    for filename in sftp.listdir(remote_folder):
+        if Path(filename).suffix.lower() != ".csv":
+            continue
+        remote_file = posixpath.join(remote_folder, filename)
+        local_file = dest_folder / filename
+        sftp.get(remote_file, str(local_file))
+
+
+def _copy_mesh_from_local_folder(source_folder, config_name, load, *, missing_ok=False):
+    source_folder = Path(source_folder)
+    if not source_folder.is_dir():
+        return None
+
+    entries, _ = _read_local_mesh_entries(source_folder)
+    entry = _select_mesh_entry(entries, load)
+    source_vtu = _local_mesh_path(source_folder, entry["file"])
+    if not source_vtu.is_file():
+        if missing_ok:
+            return None
+        raise FileNotFoundError(f"Selected VTU is missing: {source_vtu}")
+
+    dest_folder = Path(RAW_DATA_PATH) / config_name
+    dest_vtu = _local_mesh_path(dest_folder, entry["file"])
+    if source_folder.resolve() != dest_folder.resolve():
+        _copy_root_small_files(source_folder, dest_folder)
+        dest_vtu.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_vtu, dest_vtu)
+
+    return str(dest_vtu)
+
+
+def _download_mesh_from_remote_folder(sftp, remote_folder, config_name, load):
+    entries, _ = _read_remote_mesh_entries(sftp, remote_folder)
+    entry = _select_mesh_entry(entries, load)
+    dest_folder = Path(RAW_DATA_PATH) / config_name
+    dest_vtu = _local_mesh_path(dest_folder, entry["file"])
+
+    _download_root_small_files(sftp, remote_folder, dest_folder)
+
+    dest_vtu.parent.mkdir(parents=True, exist_ok=True)
+    remote_vtu = posixpath.join(remote_folder, entry["file"])
+    try:
+        total_bytes = sftp.stat(remote_vtu).st_size
+    except OSError:
+        total_bytes = None
+
+    description = f"Downloading {PurePosixPath(entry['file']).name[:32]}"
+    if total_bytes:
+        with tqdm(
+            total=total_bytes,
+            desc=description,
+            unit="B",
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as progress:
+            transferred = [0]
+
+            def update_progress(done, total):
+                increment = done - transferred[0]
+                if increment > 0:
+                    progress.update(increment)
+                transferred[0] = done
+
+            sftp.get(remote_vtu, str(dest_vtu), callback=update_progress)
+    else:
+        tqdm.write(f"{description}...")
+        sftp.get(remote_vtu, str(dest_vtu))
+    return str(dest_vtu)
+
+
+def getMeshAt(configs, load, forceUpdate=False):
+    configs = _flatten_mesh_configs(configs)
+    found_paths = {}
+    load_label = _format_mesh_load(load)
+    print(f"Looking for {len(configs)} mesh file(s) at {load_label}.")
+
+    if not forceUpdate:
+        for config in tqdm(configs, desc="Checking mesh cache", unit="mesh"):
+            name = _config_name(config)
+            path = _copy_mesh_from_local_folder(
+                Path(RAW_DATA_PATH) / name,
+                name,
+                load,
+                missing_ok=True,
+            )
+            if path is not None:
+                found_paths[name] = path
+        if found_paths:
+            print(f"Using {len(found_paths)} cached mesh file(s).")
+    else:
+        print("Skipping mesh cache because forceUpdate=True.")
+
+    remaining_configs = [config for config in configs if _config_name(config) not in found_paths]
+    if remaining_configs:
+        print(f"Checking local data volume for {len(remaining_configs)} mesh file(s).")
+    for config in tqdm(remaining_configs, desc="Checking local data", unit="mesh"):
+        name = _config_name(config)
+        source_folder = Path(Servers.local_path_mac) / REMOTE_FOLDER_NAME / name
+        path = _copy_mesh_from_local_folder(source_folder, name, load, missing_ok=False)
+        if path is not None:
+            found_paths[name] = path
+
+    remaining_configs = [config for config in configs if _config_name(config) not in found_paths]
+    if remaining_configs:
+        print(f"Searching {len(Servers.search_servers)} server(s) for {len(remaining_configs)} mesh file(s).")
+    for server in Servers.search_servers:
+        if not remaining_configs:
+            break
+        print(f"Searching {server} ({len(remaining_configs)} remaining).")
+        ssh = connectToCluster(server, False)
+        if ssh is None:
+            continue
+        sftp = None
+        try:
+            sftp = ssh.open_sftp()
+            data_paths = _discover_remote_data_paths(ssh, server)
+            for data_path in data_paths:
+                remote_folders = set(_list_remote_output_folders(ssh, data_path))
+                for config in list(remaining_configs):
+                    name = _config_name(config)
+                    if name not in remote_folders:
+                        continue
+                    remote_folder = _normalize_remote_path(data_path, REMOTE_FOLDER_NAME, name)
+                    tqdm.write(f"Found {name} on {server}; downloading selected VTU.")
+                    found_paths[name] = _download_mesh_from_remote_folder(
+                        sftp,
+                        remote_folder,
+                        name,
+                        load,
+                    )
+                    remaining_configs = [
+                        item
+                        for item in remaining_configs
+                        if _config_name(item) not in found_paths
+                    ]
+                if not remaining_configs:
+                    break
+        finally:
+            if sftp is not None:
+                try:
+                    sftp.close()
+                except Exception:
+                    pass
+            ssh.close()
+
+    missing = [config for config in configs if _config_name(config) not in found_paths]
+    if missing:
+        preview = "\n".join(f"  {_config_name(config)}" for config in missing[:5])
+        raise FileNotFoundError(
+            f"Could not find mesh data for {len(missing)} configs. First missing configs:\n{preview}"
+        )
+
+    return [found_paths[_config_name(config)] for config in configs]
+
+
+def getFinalMesh(configs, forceUpdate=False):
+    return getMeshAt(configs, load=float("inf"), forceUpdate=forceUpdate)
+
+
 def search_for_cvs_files(
     configs,
     useOldFiles=False,
@@ -611,11 +915,13 @@ def search_for_cvs_files(
                 keys = df.keys()
                 if "est_time_remaining" in keys:
                     est_time_remaining = df["est_time_remaining"]
-                    time_remaining = (
-                        duration_to_seconds(est_time_remaining.iloc[-1])
-                        if not est_time_remaining.empty
-                        else None
-                    )
+                    if est_time_remaining.empty:
+                        time_remaining = None
+                    else:
+                        try:
+                            time_remaining = duration_to_seconds(est_time_remaining.iloc[-1])
+                        except (TypeError, ValueError):
+                            time_remaining = None
                 else:
                     time_remaining = -1
 
