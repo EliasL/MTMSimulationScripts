@@ -584,7 +584,7 @@ def doubleDislocationTest(
     reconnecton=["none", "edgeFlip"],
     GP1=[0.0],# 1.0],
     GP2=[0.0],# 1.0],
-    GP3=1.0, # Load direction change point
+    GP3=0.7, # Load direction change point
 ):
     if seeds is None:
         seeds = range(nrSeeds)
@@ -598,7 +598,7 @@ def doubleDislocationTest(
         #rows=10,
         #cols=[50, 75, 100],
         startLoad=0.0,
-        maxLoad=2.0,
+        maxLoad=3.0,
         loadIncrement=1e-2,
         nrThreads=nrThreads,
         minimizer="LBFGS",

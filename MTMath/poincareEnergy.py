@@ -1450,9 +1450,9 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
         G22 = G[..., 1, 1]
 
         # Region: 0 <= C12 <= min(C11, C22)
-        r_mask = np.logical_and(r_mask, 0 <= G12)
-        r_mask = np.logical_and(r_mask, G12 <= G11)
-        r_mask = np.logical_and(r_mask, G12 <= G22)
+        #r_mask = np.logical_and(r_mask, 0 <= G12)
+        r_mask = np.logical_and(r_mask, abs(G12) <= G11)
+        r_mask = np.logical_and(r_mask, abs(G12) <= G22)
 
         drawRegion(
             ax,
@@ -1828,15 +1828,15 @@ def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation=
     #     transformation=transformation,
     #     linewidth=1,
     # )
-    # drawTriangularElasticDomain(
-    #     ax=ax,
-    #     grid_size=grid_size,
-    #     zoom=zoom,
-    #     c="green",
-    #     transformation=transformation,
-    #     linewidth=1.5,
-    #     shade=True,
-    # )
+    drawTriangularElasticDomain(
+        ax=ax,
+        grid_size=grid_size,
+        zoom=zoom,
+        c="green",
+        transformation=transformation,
+        linewidth=1.5,
+        shade=True,
+    )
 
     drawFundamentalDomain(
         ax,

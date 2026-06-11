@@ -242,7 +242,7 @@ def energyField():
 def showPoincareDisk():
     from MTMath.poincareEnergy import plotPoincareDisk
 
-    plotPoincareDisk(grid_size=50, depth=7)
+    plotPoincareDisk(grid_size=500, depth=7, transformation="triangular")
 
 
 def showInstabilityAngle():
@@ -886,7 +886,7 @@ if __name__ == "__main__":
 
     # debugPlotAll()
     # energyField()
-    #showPoincareDisk()
+    showPoincareDisk()
     # showInstabilityAngle()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()
@@ -921,7 +921,7 @@ if __name__ == "__main__":
     # investigateJobs()
     # print_remote_runtimes()
     #plotSylvainBatches()
-    plotPristineCrystalPredictionError()
+    #plotPristineCrystalPredictionError()
     # compare_center_node_forces()
     # compare_energy_three_sims()
     pass
