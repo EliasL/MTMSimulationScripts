@@ -74,7 +74,16 @@ FIXED_G_VECTOR_CHOICES = (
     G_VECTOR_CHOICE_OPTION_3,
 )
 G_VECTOR_CHOICES = (G_VECTOR_CHOICE_SHORTEST, *FIXED_G_VECTOR_CHOICES)
+STRESS_MEASURE_NORMAL_DIFFERENCE_HALF = "normal_difference_half"
+STRESS_MEASURE_VON_MISES = "von_mises"
+STRESS_MEASURES = (
+    STRESS_MEASURE_NORMAL_DIFFERENCE_HALF,
+    STRESS_MEASURE_VON_MISES,
+)
+MATRIX_FIELD_COMPONENT = "component"
+MATRIX_FIELD_STRESS_MEASURE = "stress_measure"
 PROGRESS_GRID_SIZE_THRESHOLD = 400
+MATRIX_PANEL_FIGSIZE = (3.6, 3.5)
 
 # =============================================================================
 # User-editable plotting defaults
@@ -163,7 +172,7 @@ class HeatmapElementPairGridConfig:
 
 
 @dataclass(frozen=True)
-class ReferenceEnergyContourConfig:
+class ReferenceContourConfig:
     draw: bool = True
     shear: float = 0.5
     color: str = "black"
@@ -208,6 +217,7 @@ class MatrixFieldPlotConfig:
         (1, 0),
         (1, 1),
     )
+    fields: tuple[tuple[str, tuple[int, int] | str], ...] | None = None
     columns: int | None = None
     element_pair_grid: HeatmapElementPairGridConfig = HeatmapElementPairGridConfig()
 
@@ -217,11 +227,12 @@ class PlotConfig:
     flip_mode: FlipMode
     parameterization: ParameterizationConfig
     material: MaterialConfig
-    reference_energy_contour: ReferenceEnergyContourConfig
+    reference_contour: ReferenceContourConfig
     pair_grid: PairGridConfig
     heatmap: HeatmapConfig
     focused_heatmap: HeatmapConfig
     cauchy_stress_difference: MatrixFieldPlotConfig
+    cauchy_stress_measures: MatrixFieldPlotConfig
     first_element_G: MatrixFieldPlotConfig
     flip_modes: tuple[FlipMode, ...] = DEFAULT_FLIP_MODES
     remove_figure_titles: bool = True
@@ -237,10 +248,10 @@ CONFIG = PlotConfig(
     # predicts Delta E_flip(L, 0, v)=0 there.
     parameterization=ParameterizationConfig(),
     material=MaterialConfig(),
-    reference_energy_contour=ReferenceEnergyContourConfig(),
+    reference_contour=ReferenceContourConfig(),
     pair_grid=PairGridConfig(
         L_values=(1, REFERENCE_L, REFERENCE_L * 2),
-        parameter_values=(0.8, 0.0, -0.8),
+        parameter_values=(0.8, 0.4, 0.0),
         output_path=PLOTS_DIR / "two_element_parameterization_grid.pdf",
         flipped_output_path=PLOTS_DIR / "two_element_parameterization_flipped_grid.pdf",
     ),
@@ -248,32 +259,47 @@ CONFIG = PlotConfig(
         output_path=PLOTS_DIR / "two_element_parameterization_flip_energy_heatmap.pdf",
         resolution=500,
         L_range=(0.75, REFERENCE_L * 2),
-        parameter_range=(-0.9, 0.9),
+        parameter_range=(0.0, 0.9),
     ),
     focused_heatmap=HeatmapConfig(
         output_path=PLOTS_DIR
         / "two_element_parameterization_flip_energy_heatmap_focused.pdf",
         resolution=500,
         L_range=(REFERENCE_L, 2),
-        parameter_range=(-0.3, 0.3),
+        parameter_range=(0.0, 0.3),
     ),
     cauchy_stress_difference=MatrixFieldPlotConfig(
         output_path=PLOTS_DIR
         / "two_element_parameterization_cauchy_stress_difference.pdf",
         resolution=500,
         L_range=(0.75, REFERENCE_L * 2),
-        parameter_range=(-0.9, 0.9),
+        parameter_range=(0.0, 0.9),
         title=r"$\sigma_{flipped} - \sigma_{current}$",
         colorbar_label=r"$\Delta\sigma$",
         component_symbol=r"\Delta\sigma",
-        components=((0, 0), (0, 1), (1, 1)),
+        fields=(
+            (MATRIX_FIELD_COMPONENT, (0, 0)),
+            (MATRIX_FIELD_STRESS_MEASURE, STRESS_MEASURE_NORMAL_DIFFERENCE_HALF),
+            (MATRIX_FIELD_COMPONENT, (1, 1)),
+        ),
         columns=3,
+    ),
+    cauchy_stress_measures=MatrixFieldPlotConfig(
+        output_path=PLOTS_DIR
+        / "two_element_parameterization_cauchy_stress_measures.pdf",
+        resolution=500,
+        L_range=(0.75, REFERENCE_L * 2),
+        parameter_range=(0.0, 0.9),
+        title="Cauchy stress difference measures",
+        colorbar_label=r"$\Delta \frac{\sigma_{11}-\sigma_{22}}{2}$",
+        fields=((MATRIX_FIELD_STRESS_MEASURE, STRESS_MEASURE_NORMAL_DIFFERENCE_HALF),),
+        columns=1,
     ),
     first_element_G=MatrixFieldPlotConfig(
         output_path=PLOTS_DIR / "two_element_parameterization_first_element_G.pdf",
         resolution=500,
         L_range=(0.75, REFERENCE_L * 3),
-        parameter_range=(-0.9, 0.9),
+        parameter_range=(0.0, 0.9),
         title="First current element G",
         colorbar_label="G",
         component_symbol="G",
@@ -298,6 +324,10 @@ def validate_parameterization(parameterization: ParameterizationConfig) -> None:
             f"Unsupported parameterization mode {parameterization.mode!r}. "
             f"Use one of {PARAMETERIZATION_MODES}."
         )
+
+
+def material_kwargs(material: MaterialConfig) -> dict[str, float]:
+    return {"beta": material.beta, "K": material.K, "noise": material.noise}
 
 
 def parameter_axis_label(parameterization: ParameterizationConfig) -> str:
@@ -662,27 +692,6 @@ def reconnection_condition_masks(
     }
 
 
-def insideReconnectionZone(
-    L_values: tuple[float, ...] | list[float] | np.ndarray,
-    parameter_values: tuple[float, ...] | list[float] | np.ndarray,
-    triangles: tuple[tuple[int, int, int], ...] | None = None,
-    shared_edge: tuple[int, int] | None = None,
-    parameterization: ParameterizationConfig = CONFIG.parameterization,
-    flip_mode: FlipMode = CONFIG.flip_mode,
-    g_vector_choice: str = G_VECTOR_CHOICE_SHORTEST,
-) -> np.ndarray:
-    """Return a Boolean mask for the C++ inRegion condition on a parameter/L grid."""
-    return reconnection_condition_masks(
-        L_values,
-        parameter_values,
-        triangles=triangles,
-        shared_edge=shared_edge,
-        parameterization=parameterization,
-        flip_mode=flip_mode,
-        g_vector_choice=g_vector_choice,
-    )["inside"]
-
-
 def t23_parameterized_vertices_array(
     L: np.ndarray,
     u: np.ndarray,
@@ -863,9 +872,7 @@ def pair_energy(
     )
     energy_density = ContiEnergy.energy_from_F(
         F,
-        beta=material.beta,
-        K=material.K,
-        noise=material.noise,
+        **material_kwargs(material),
         zeroReference=True,
     )
     return float(np.sum(reference_areas * energy_density))
@@ -880,7 +887,7 @@ def horizontal_simple_shear_F(shear: float) -> np.ndarray:
 
 def reference_simple_shear_energy(
     material: MaterialConfig,
-    config: ReferenceEnergyContourConfig,
+    config: ReferenceContourConfig,
 ) -> float:
     """Return the two-half-area-element reference energy for simple shear.
 
@@ -890,37 +897,21 @@ def reference_simple_shear_energy(
     F = horizontal_simple_shear_F(config.shear)
     energy_density = ContiEnergy.energy_from_F(
         F,
-        beta=material.beta,
-        K=material.K,
-        noise=material.noise,
+        **material_kwargs(material),
         zeroReference=True,
     )
     return float(2.0 * 0.5 * energy_density)
 
 
-def current_pair_energy(
-    current_vertices: dict[int, np.ndarray],
-    material: MaterialConfig = CONFIG.material,
-    flip_mode: FlipMode = CONFIG.flip_mode,
-) -> float:
-    return pair_energy(
-        current_vertices,
-        flip_mode.current_triangles,
-        material=material,
-        flip_mode=flip_mode,
-    )
-
-
-def flipped_pair_energy(
-    current_vertices: dict[int, np.ndarray],
-    material: MaterialConfig = CONFIG.material,
-    flip_mode: FlipMode = CONFIG.flip_mode,
-) -> float:
-    return pair_energy(
-        current_vertices,
-        flip_mode.flipped_triangles,
-        material=material,
-        flip_mode=flip_mode,
+def reference_simple_shear_cauchy_stress(
+    material: MaterialConfig,
+    config: ReferenceContourConfig,
+) -> np.ndarray:
+    """Return the Cauchy stress for the same simple shear as the energy contour."""
+    F = horizontal_simple_shear_F(config.shear)
+    return ContiEnergy.cauchy_from_F(
+        F,
+        **material_kwargs(material),
     )
 
 
@@ -932,24 +923,16 @@ def pair_energy_grid(
     parameterization: ParameterizationConfig = CONFIG.parameterization,
     flip_mode: FlipMode = CONFIG.flip_mode,
 ) -> np.ndarray:
-    L_grid, parameter_grid = np.meshgrid(L_values, parameter_values, indexing="xy")
-    current_vertices = t23_parameterized_vertices_array_from_parameter(
-        L_grid,
-        parameter_grid,
+    F, reference_areas = pair_deformation_gradient_grid(
+        L_values,
+        parameter_values,
+        triangles,
         parameterization=parameterization,
         flip_mode=flip_mode,
     )
-    reference_vertices = square_reference_vertices(flip_mode=flip_mode)
-    reference_array = vertices_to_array(reference_vertices)
-    F = deformation_gradients_from_vertex_array(reference_array, current_vertices, triangles)
-    reference_areas = np.array(
-        [triangle_reference_area(reference_vertices, triangle) for triangle in triangles]
-    )
     energy_density = ContiEnergy.energy_from_F(
         F,
-        beta=material.beta,
-        K=material.K,
-        noise=material.noise,
+        **material_kwargs(material),
         zeroReference=True,
     )
     return np.sum(reference_areas * energy_density, axis=-1)
@@ -995,9 +978,7 @@ def pair_cauchy_stress_grid(
     )
     sigma = ContiEnergy.cauchy_from_F(
         F,
-        beta=material.beta,
-        K=material.K,
-        noise=material.noise,
+        **material_kwargs(material),
     )
     J = np.linalg.det(F)
     if np.any(J <= 0.0):
@@ -1452,23 +1433,11 @@ def heatmap_color_norm(
     values: np.ndarray,
     config: HeatmapConfig = CONFIG.heatmap,
 ):
-    finite_values = values[np.isfinite(values)]
-    if finite_values.size == 0:
-        raise ValueError("Cannot build heatmap color scale from only non-finite values.")
-    if config.color_scale == "linear":
-        max_abs = float(np.max(np.abs(finite_values)))
-        if max_abs <= 0.0:
-            max_abs = 1.0
-        return CenteredNorm(vcenter=0.0, halfrange=max_abs)
-    if config.color_scale == "power":
-        if config.power_gamma <= 0.0:
-            raise ValueError(f"power_gamma must be positive, got {config.power_gamma}.")
-        max_abs = float(np.max(np.abs(finite_values)))
-        if max_abs <= 0.0:
-            max_abs = 1.0
-        return PowerNorm(gamma=config.power_gamma, vmin=-max_abs, vmax=max_abs)
-    raise ValueError(
-        f"Unsupported color_scale {config.color_scale!r}. Use 'linear' or 'power'."
+    return field_color_norm(
+        values,
+        color_scale=config.color_scale,
+        power_gamma=config.power_gamma,
+        centered_colorbar=True,
     )
 
 
@@ -1522,30 +1491,35 @@ def add_hatched_region_overlay(
     hatched_region.set_facecolor("none")
 
 
-def reference_energy_contour_label(config: ReferenceEnergyContourConfig) -> str:
+def reference_energy_label(config: ReferenceContourConfig) -> str:
     if config.label is not None:
         return config.label
     return rf"$|\Delta E| = E_{{\gamma={config.shear:g}}}$"
 
 
-def add_reference_energy_contour(
+def add_reference_contour(
     ax: plt.Axes,
     L_values: np.ndarray,
     parameter_values: np.ndarray,
-    delta_energy: np.ndarray,
-    reference_energy: float,
-    config: ReferenceEnergyContourConfig,
+    values: np.ndarray,
+    level: float,
+    config: ReferenceContourConfig,
+    *,
+    require_nonnegative_level: bool = False,
 ) -> bool:
     if not config.draw:
         return False
-    if reference_energy < 0.0:
-        raise ValueError(f"Reference energy must be non-negative, got {reference_energy}.")
-
-    values = np.abs(delta_energy) if config.use_absolute_delta_energy else delta_energy
+    if values.shape != (len(parameter_values), len(L_values)):
+        raise ValueError(
+            "values grid shape does not match L/parameter axes: "
+            f"{values.shape} vs {(len(parameter_values), len(L_values))}."
+        )
+    if require_nonnegative_level and level < 0.0:
+        raise ValueError(f"Reference level must be non-negative, got {level}.")
     finite_values = values[np.isfinite(values)]
     if finite_values.size == 0:
         return False
-    if reference_energy < float(np.nanmin(finite_values)) or reference_energy > float(
+    if level < float(np.nanmin(finite_values)) or level > float(
         np.nanmax(finite_values)
     ):
         return False
@@ -1554,7 +1528,7 @@ def add_reference_energy_contour(
         L_values,
         parameter_values,
         values,
-        levels=[reference_energy],
+        levels=[level],
         colors=config.color,
         linestyles=config.linestyle,
         linewidths=config.linewidth,
@@ -1563,16 +1537,14 @@ def add_reference_energy_contour(
     return True
 
 
-def reference_energy_contour_handle(
-    config: ReferenceEnergyContourConfig,
-) -> Line2D:
+def reference_contour_handle(config: ReferenceContourConfig, label: str) -> Line2D:
     return Line2D(
         [0, 1],
         [0, 0],
         color=config.color,
         linestyle=config.linestyle,
         linewidth=config.linewidth,
-        label=reference_energy_contour_label(config),
+        label=label,
     )
 
 
@@ -1623,35 +1595,38 @@ def sampled_parameter_values(
     )
 
 
-def matrix_field_color_norm(
+def field_color_norm(
     values: np.ndarray,
-    config: MatrixFieldPlotConfig,
+    *,
+    color_scale: str,
+    power_gamma: float,
+    centered_colorbar: bool,
 ):
     finite_values = values[np.isfinite(values)]
     if finite_values.size == 0:
-        raise ValueError("Cannot build matrix color scale from only non-finite values.")
-    if config.color_scale == "linear":
-        if config.centered_colorbar:
+        raise ValueError("Cannot build color scale from only non-finite values.")
+    if color_scale == "linear":
+        if centered_colorbar:
             max_abs = float(np.max(np.abs(finite_values)))
             if max_abs <= 0.0:
                 max_abs = 1.0
             return CenteredNorm(vcenter=0.0, halfrange=max_abs)
         return Normalize(vmin=float(np.min(finite_values)), vmax=float(np.max(finite_values)))
-    if config.color_scale == "power":
-        if config.power_gamma <= 0.0:
-            raise ValueError(f"power_gamma must be positive, got {config.power_gamma}.")
-        if config.centered_colorbar:
+    if color_scale == "power":
+        if power_gamma <= 0.0:
+            raise ValueError(f"power_gamma must be positive, got {power_gamma}.")
+        if centered_colorbar:
             max_abs = float(np.max(np.abs(finite_values)))
             if max_abs <= 0.0:
                 max_abs = 1.0
-            return PowerNorm(gamma=config.power_gamma, vmin=-max_abs, vmax=max_abs)
+            return PowerNorm(gamma=power_gamma, vmin=-max_abs, vmax=max_abs)
         vmin = float(np.min(finite_values))
         vmax = float(np.max(finite_values))
         if np.isclose(vmin, vmax):
             vmax = vmin + 1.0
-        return PowerNorm(gamma=config.power_gamma, vmin=vmin, vmax=vmax)
+        return PowerNorm(gamma=power_gamma, vmin=vmin, vmax=vmax)
     raise ValueError(
-        f"Unsupported color_scale {config.color_scale!r}. Use 'linear' or 'power'."
+        f"Unsupported color_scale {color_scale!r}. Use 'linear' or 'power'."
     )
 
 
@@ -1663,12 +1638,132 @@ def validate_matrix_components(components: tuple[tuple[int, int], ...]) -> None:
             raise ValueError(f"Unsupported matrix component {component}.")
 
 
+def validate_stress_measures(measures: tuple[str, ...]) -> None:
+    if len(measures) == 0:
+        raise ValueError("Stress measure list must not be empty.")
+    invalid_measures = [measure for measure in measures if measure not in STRESS_MEASURES]
+    if invalid_measures:
+        raise ValueError(
+            f"Unsupported stress measures {invalid_measures}. Use {STRESS_MEASURES}."
+        )
+
+
+def matrix_component_label(
+    config: MatrixFieldPlotConfig,
+    component: tuple[int, int],
+) -> str:
+    i, j = component
+    if config.component_symbol:
+        return rf"${config.component_symbol}_{{{i + 1}{j + 1}}}$"
+    return f"[{i}, {j}]"
+
+
+def stress_measure_label(measure: str) -> str:
+    validate_stress_measures((measure,))
+    if measure == STRESS_MEASURE_NORMAL_DIFFERENCE_HALF:
+        return r"$\Delta \frac{\sigma_{11}-\sigma_{22}}{2}$"
+    if measure == STRESS_MEASURE_VON_MISES:
+        return r"$\Delta\sigma_{\mathrm{vM}}$"
+    raise RuntimeError(f"Unhandled stress measure {measure!r}.")
+
+
+def matrix_plot_fields(
+    config: MatrixFieldPlotConfig,
+) -> tuple[tuple[str, tuple[int, int] | str], ...]:
+    if config.fields is None:
+        validate_matrix_components(config.components)
+        return tuple((MATRIX_FIELD_COMPONENT, component) for component in config.components)
+    validate_matrix_plot_fields(config.fields)
+    return config.fields
+
+
+def validate_matrix_plot_fields(
+    fields: tuple[tuple[str, tuple[int, int] | str], ...],
+) -> None:
+    if len(fields) == 0:
+        raise ValueError("MatrixFieldPlotConfig.fields must not be empty.")
+    for field_kind, field_value in fields:
+        if field_kind == MATRIX_FIELD_COMPONENT:
+            if (
+                not isinstance(field_value, tuple)
+                or len(field_value) != 2
+                or any(index not in (0, 1) for index in field_value)
+            ):
+                raise ValueError(f"Unsupported matrix component field {field_value}.")
+        elif field_kind == MATRIX_FIELD_STRESS_MEASURE:
+            if not isinstance(field_value, str):
+                raise ValueError(f"Stress-measure field must be a string, got {field_value}.")
+            validate_stress_measures((field_value,))
+        else:
+            raise ValueError(
+                f"Unsupported matrix plot field kind {field_kind!r}. "
+                f"Use {MATRIX_FIELD_COMPONENT!r} or {MATRIX_FIELD_STRESS_MEASURE!r}."
+            )
+
+
+def matrix_plot_field_label(
+    config: MatrixFieldPlotConfig,
+    field: tuple[str, tuple[int, int] | str],
+) -> str:
+    field_kind, field_value = field
+    if field_kind == MATRIX_FIELD_COMPONENT:
+        if not isinstance(field_value, tuple):
+            raise RuntimeError(f"Expected component tuple, got {field_value}.")
+        return matrix_component_label(config, field_value)
+    if field_kind == MATRIX_FIELD_STRESS_MEASURE:
+        if not isinstance(field_value, str):
+            raise RuntimeError(f"Expected stress-measure string, got {field_value}.")
+        return stress_measure_label(field_value)
+    raise RuntimeError(f"Unhandled matrix plot field kind {field_kind!r}.")
+
+
+def matrix_plot_field_values(
+    matrix_values: np.ndarray,
+    field: tuple[str, tuple[int, int] | str],
+) -> np.ndarray:
+    field_kind, field_value = field
+    if field_kind == MATRIX_FIELD_COMPONENT:
+        if not isinstance(field_value, tuple):
+            raise RuntimeError(f"Expected component tuple, got {field_value}.")
+        i, j = field_value
+        return matrix_values[..., i, j]
+    if field_kind == MATRIX_FIELD_STRESS_MEASURE:
+        if not isinstance(field_value, str):
+            raise RuntimeError(f"Expected stress-measure string, got {field_value}.")
+        return stress_measure_values(matrix_values, field_value)
+    raise RuntimeError(f"Unhandled matrix plot field kind {field_kind!r}.")
+
+
+def matrix_plot_field_values_stack(
+    matrix_values: np.ndarray,
+    fields: tuple[tuple[str, tuple[int, int] | str], ...],
+) -> np.ndarray:
+    return np.stack(
+        [matrix_plot_field_values(matrix_values, field) for field in fields],
+        axis=-1,
+    )
+
+
+def stress_measure_values(stress_values: np.ndarray, measure: str) -> np.ndarray:
+    validate_stress_measures((measure,))
+    sigma11 = stress_values[..., 0, 0]
+    sigma22 = stress_values[..., 1, 1]
+    sigma12 = 0.5 * (stress_values[..., 0, 1] + stress_values[..., 1, 0])
+    if measure == STRESS_MEASURE_NORMAL_DIFFERENCE_HALF:
+        return 0.5 * (sigma11 - sigma22)
+    if measure == STRESS_MEASURE_VON_MISES:
+        vm_squared = sigma11**2 - sigma11 * sigma22 + sigma22**2 + 3.0 * sigma12**2
+        return np.sqrt(np.maximum(vm_squared, 0.0))
+    raise RuntimeError(f"Unhandled stress measure {measure!r}.")
+
+
 def matrix_plot_columns(config: MatrixFieldPlotConfig) -> int:
     if config.columns is not None:
         if config.columns < 1:
             raise ValueError(f"columns must be positive, got {config.columns}.")
         return config.columns
-    return 2 if len(config.components) == 4 else len(config.components)
+    field_count = len(matrix_plot_fields(config))
+    return 2 if field_count == 4 else field_count
 
 
 def build_matrix_field_heatmaps(
@@ -1678,43 +1773,50 @@ def build_matrix_field_heatmaps(
     config: MatrixFieldPlotConfig,
     current_no_flip_mask: np.ndarray | None = None,
     reconnection_contours: ReconnectionContourConfig = CONFIG.heatmap.reconnection_contours,
-    delta_energy: np.ndarray | None = None,
-    reference_energy: float | None = None,
-    reference_energy_contour: ReferenceEnergyContourConfig | None = None,
+    reference_matrix: np.ndarray | None = None,
+    reference_contour: ReferenceContourConfig | None = None,
     parameterization: ParameterizationConfig = CONFIG.parameterization,
     flip_mode: FlipMode = CONFIG.flip_mode,
     remove_figure_title: bool = CONFIG.remove_figure_titles,
 ) -> plt.Figure:
     validate_parameterization(parameterization)
-    validate_matrix_components(config.components)
+    plot_fields = matrix_plot_fields(config)
     if matrix_values.shape != (len(parameter_values), len(L_values), 2, 2):
         raise ValueError(
             "matrix_values must have shape "
             f"({len(parameter_values)}, {len(L_values)}, 2, 2), "
             f"got {matrix_values.shape}."
         )
+    full_matrix_values = matrix_values
     if current_no_flip_mask is not None:
         matrix_values = mask_matrix_field_to_region(matrix_values, current_no_flip_mask)
-    norm = matrix_field_color_norm(matrix_values, config)
+    shared_norm = field_color_norm(
+        matrix_plot_field_values_stack(matrix_values, plot_fields),
+        color_scale=config.color_scale,
+        power_gamma=config.power_gamma,
+        centered_colorbar=config.centered_colorbar,
+    )
     columns = matrix_plot_columns(config)
-    rows = int(np.ceil(len(config.components) / columns))
+    rows = int(np.ceil(len(plot_fields) / columns))
     fig, axes = plt.subplots(
         rows,
         columns,
-        figsize=(3.6 * columns, 3.5 * rows),
+        figsize=(MATRIX_PANEL_FIGSIZE[0] * columns, MATRIX_PANEL_FIGSIZE[1] * rows),
         sharex=True,
         sharey=True,
         constrained_layout=True,
         squeeze=False,
     )
-    image = None
+    shared_image = None
+    shared_axes = []
     reference_contour_drawn = False
-    for component_index, (i, j) in enumerate(config.components):
-        row = component_index // columns
-        col = component_index % columns
+    for field_index, field in enumerate(plot_fields):
+        row = field_index // columns
+        col = field_index % columns
         ax = axes[row, col]
+        values = matrix_plot_field_values(matrix_values, field)
         image = ax.imshow(
-            matrix_values[..., i, j],
+            values,
             origin="lower",
             extent=(
                 L_values[0],
@@ -1724,9 +1826,12 @@ def build_matrix_field_heatmaps(
             ),
             aspect="auto",
             cmap=config.cmap,
-            norm=norm,
+            norm=shared_norm,
             interpolation="nearest",
         )
+        if shared_image is None:
+            shared_image = image
+        shared_axes.append(ax)
         ax.axvline(REFERENCE_L, color="0.2", linestyle="--", linewidth=1.0, alpha=0.7)
         ax.axhline(
             REFERENCE_PARAMETER,
@@ -1749,18 +1854,18 @@ def build_matrix_field_heatmaps(
                 zorder=14,
             )
         if (
-            delta_energy is not None
-            and reference_energy is not None
-            and reference_energy_contour is not None
+            reference_matrix is not None
+            and reference_contour is not None
         ):
+            reference_value = float(matrix_plot_field_values(reference_matrix, field))
             reference_contour_drawn = (
-                add_reference_energy_contour(
+                add_reference_contour(
                     ax,
                     L_values,
                     parameter_values,
-                    delta_energy,
-                    reference_energy,
-                    reference_energy_contour,
+                    matrix_plot_field_values(full_matrix_values, field),
+                    reference_value,
+                    reference_contour,
                 )
                 or reference_contour_drawn
             )
@@ -1775,25 +1880,20 @@ def build_matrix_field_heatmaps(
                 parameterization=parameterization,
                 flip_mode=flip_mode,
             )
-        title = (
-            rf"${config.component_symbol}_{{{i + 1}{j + 1}}}$"
-            if config.component_symbol
-            else f"[{i}, {j}]"
-        )
-        ax.set_title(title)
+        ax.set_title(matrix_plot_field_label(config, field))
         if row == rows - 1:
             ax.set_xlabel(r"$L$")
         if col == 0:
             ax.set_ylabel(parameter_axis_label(parameterization))
 
-    for empty_index in range(len(config.components), rows * columns):
+    for empty_index in range(len(plot_fields), rows * columns):
         row = empty_index // columns
         col = empty_index % columns
         axes[row, col].set_visible(False)
 
-    if image is None:
+    if shared_image is None:
         raise RuntimeError("Expected at least one matrix component to plot.")
-    colorbar = fig.colorbar(image, ax=axes.ravel().tolist())
+    colorbar = fig.colorbar(shared_image, ax=shared_axes)
     colorbar.set_label(config.colorbar_label)
     if current_no_flip_mask is not None or reference_contour_drawn:
         legend_handles = []
@@ -1807,8 +1907,13 @@ def build_matrix_field_heatmaps(
                     label="current no-flip region",
                 )
             )
-        if reference_contour_drawn and reference_energy_contour is not None:
-            legend_handles.append(reference_energy_contour_handle(reference_energy_contour))
+        if reference_contour_drawn and reference_contour is not None:
+            legend_handles.append(
+                reference_contour_handle(
+                    reference_contour,
+                    rf"simple-shear stress at $\gamma={reference_contour.shear:g}$",
+                )
+            )
         if legend_handles:
             legend = axes[0, 0].legend(
                 handles=legend_handles,
@@ -1824,10 +1929,104 @@ def build_matrix_field_heatmaps(
     return fig
 
 
+def stress_data_grid_matches_config(
+    stress_data: dict[str, np.ndarray],
+    config: MatrixFieldPlotConfig,
+) -> bool:
+    L_values = stress_data["L_values"]
+    parameter_values = stress_data["parameter_values"]
+    return (
+        len(L_values) == config.resolution
+        and len(parameter_values) == config.resolution
+        and np.allclose((L_values[0], L_values[-1]), config.L_range)
+        and np.allclose((parameter_values[0], parameter_values[-1]), config.parameter_range)
+    )
+
+
+def build_cauchy_stress_measure_heatmaps(
+    config: MatrixFieldPlotConfig = CONFIG.cauchy_stress_measures,
+    material: MaterialConfig = CONFIG.material,
+    reference_contour: ReferenceContourConfig = CONFIG.reference_contour,
+    parameterization: ParameterizationConfig = CONFIG.parameterization,
+    flip_mode: FlipMode = CONFIG.flip_mode,
+    remove_figure_title: bool = CONFIG.remove_figure_titles,
+    stress_data: dict[str, np.ndarray] | None = None,
+) -> tuple[plt.Figure, dict[str, np.ndarray]]:
+    if stress_data is not None and stress_data_grid_matches_config(stress_data, config):
+        L_values = stress_data["L_values"]
+        parameter_values = stress_data["parameter_values"]
+        matrix_values = stress_data["matrix_values"]
+        current_no_flip_mask = stress_data["inside_current_reconnection_zone"]
+        reference_cauchy_stress = stress_data["reference_cauchy_stress"]
+    else:
+        L_values, parameter_values = sampled_parameter_values(
+            config.resolution,
+            config.L_range,
+            config.parameter_range,
+            parameterization=parameterization,
+        )
+        matrix_values = cauchy_stress_difference_grid(
+            L_values,
+            parameter_values,
+            material=material,
+            parameterization=parameterization,
+            flip_mode=flip_mode,
+        )
+        current_reconnection_masks = reconnection_condition_masks(
+            L_values,
+            parameter_values,
+            triangles=flip_mode.current_triangles,
+            shared_edge=flip_mode.current_diagonal,
+            parameterization=parameterization,
+            flip_mode=flip_mode,
+        )
+        current_no_flip_mask = current_reconnection_masks["inside"]
+        reference_cauchy_stress = reference_simple_shear_cauchy_stress(
+            material,
+            reference_contour,
+        )
+
+    fig = build_matrix_field_heatmaps(
+        matrix_values,
+        L_values,
+        parameter_values,
+        config,
+        current_no_flip_mask=current_no_flip_mask,
+        reconnection_contours=CONFIG.heatmap.reconnection_contours,
+        reference_matrix=reference_cauchy_stress,
+        reference_contour=reference_contour,
+        parameterization=parameterization,
+        flip_mode=flip_mode,
+        remove_figure_title=remove_figure_title,
+    )
+    data = {
+        "L_values": L_values,
+        "parameter_values": parameter_values,
+        "matrix_values": matrix_values,
+        "inside_current_reconnection_zone": current_no_flip_mask,
+        "reference_cauchy_stress": reference_cauchy_stress,
+    }
+    for field_kind, field_value in matrix_plot_fields(config):
+        if field_kind != MATRIX_FIELD_STRESS_MEASURE:
+            continue
+        if not isinstance(field_value, str):
+            raise RuntimeError(f"Expected stress-measure string, got {field_value}.")
+        values = stress_measure_values(matrix_values, field_value)
+        data[field_value] = values
+        data[f"visible_{field_value}"] = mask_scalar_field_to_region(
+            values,
+            current_no_flip_mask,
+        )
+        data[f"reference_{field_value}"] = np.asarray(
+            stress_measure_values(reference_cauchy_stress, field_value)
+        )
+    return fig, data
+
+
 def build_cauchy_stress_difference_heatmaps(
     config: MatrixFieldPlotConfig = CONFIG.cauchy_stress_difference,
     material: MaterialConfig = CONFIG.material,
-    reference_energy_contour: ReferenceEnergyContourConfig = CONFIG.reference_energy_contour,
+    reference_contour: ReferenceContourConfig = CONFIG.reference_contour,
     parameterization: ParameterizationConfig = CONFIG.parameterization,
     flip_mode: FlipMode = CONFIG.flip_mode,
     remove_figure_title: bool = CONFIG.remove_figure_titles,
@@ -1845,13 +2044,6 @@ def build_cauchy_stress_difference_heatmaps(
         parameterization=parameterization,
         flip_mode=flip_mode,
     )
-    delta_energy, _, _ = edge_flip_energy_difference_grid(
-        L_values,
-        parameter_values,
-        material=material,
-        parameterization=parameterization,
-        flip_mode=flip_mode,
-    )
     current_reconnection_masks = reconnection_condition_masks(
         L_values,
         parameter_values,
@@ -1861,9 +2053,9 @@ def build_cauchy_stress_difference_heatmaps(
         flip_mode=flip_mode,
     )
     current_no_flip_mask = current_reconnection_masks["inside"]
-    reference_energy = reference_simple_shear_energy(
+    reference_cauchy_stress = reference_simple_shear_cauchy_stress(
         material,
-        reference_energy_contour,
+        reference_contour,
     )
     fig = build_matrix_field_heatmaps(
         matrix_values,
@@ -1872,9 +2064,8 @@ def build_cauchy_stress_difference_heatmaps(
         config,
         current_no_flip_mask=current_no_flip_mask,
         reconnection_contours=CONFIG.heatmap.reconnection_contours,
-        delta_energy=delta_energy,
-        reference_energy=reference_energy,
-        reference_energy_contour=reference_energy_contour,
+        reference_matrix=reference_cauchy_stress,
+        reference_contour=reference_contour,
         parameterization=parameterization,
         flip_mode=flip_mode,
         remove_figure_title=remove_figure_title,
@@ -1883,16 +2074,13 @@ def build_cauchy_stress_difference_heatmaps(
         "L_values": L_values,
         "parameter_values": parameter_values,
         "matrix_values": matrix_values,
-        "delta_energy": delta_energy,
         "inside_current_reconnection_zone": current_no_flip_mask,
-        "reference_energy": reference_energy,
+        "reference_cauchy_stress": reference_cauchy_stress,
     }
 
 
 def build_first_element_G_heatmaps(
     config: MatrixFieldPlotConfig = CONFIG.first_element_G,
-    material: MaterialConfig = CONFIG.material,
-    reference_energy_contour: ReferenceEnergyContourConfig = CONFIG.reference_energy_contour,
     parameterization: ParameterizationConfig = CONFIG.parameterization,
     flip_mode: FlipMode = CONFIG.flip_mode,
     remove_figure_title: bool = CONFIG.remove_figure_titles,
@@ -1909,13 +2097,6 @@ def build_first_element_G_heatmaps(
         parameterization=parameterization,
         flip_mode=flip_mode,
     )
-    delta_energy, _, _ = edge_flip_energy_difference_grid(
-        L_values,
-        parameter_values,
-        material=material,
-        parameterization=parameterization,
-        flip_mode=flip_mode,
-    )
     current_reconnection_masks = reconnection_condition_masks(
         L_values,
         parameter_values,
@@ -1925,10 +2106,6 @@ def build_first_element_G_heatmaps(
         flip_mode=flip_mode,
     )
     current_no_flip_mask = current_reconnection_masks["inside"]
-    reference_energy = reference_simple_shear_energy(
-        material,
-        reference_energy_contour,
-    )
     fig = build_matrix_field_heatmaps(
         matrix_values,
         L_values,
@@ -1936,9 +2113,6 @@ def build_first_element_G_heatmaps(
         config,
         current_no_flip_mask=current_no_flip_mask,
         reconnection_contours=CONFIG.heatmap.reconnection_contours,
-        delta_energy=delta_energy,
-        reference_energy=reference_energy,
-        reference_energy_contour=reference_energy_contour,
         parameterization=parameterization,
         flip_mode=flip_mode,
         remove_figure_title=remove_figure_title,
@@ -1947,16 +2121,14 @@ def build_first_element_G_heatmaps(
         "L_values": L_values,
         "parameter_values": parameter_values,
         "matrix_values": matrix_values,
-        "delta_energy": delta_energy,
         "inside_current_reconnection_zone": current_no_flip_mask,
-        "reference_energy": reference_energy,
     }
 
 
 def build_flip_energy_heatmap(
     config: HeatmapConfig = CONFIG.heatmap,
     material: MaterialConfig = CONFIG.material,
-    reference_energy_contour: ReferenceEnergyContourConfig = CONFIG.reference_energy_contour,
+    reference_contour: ReferenceContourConfig = CONFIG.reference_contour,
     parameterization: ParameterizationConfig = CONFIG.parameterization,
     flip_mode: FlipMode = CONFIG.flip_mode,
     content: str = HEATMAP_COMBINED,
@@ -1982,7 +2154,7 @@ def build_flip_energy_heatmap(
     abs_delta_energy = np.abs(delta_energy)
     reference_energy = reference_simple_shear_energy(
         material,
-        reference_energy_contour,
+        reference_contour,
     )
     show_energy = content in (HEATMAP_COMBINED, HEATMAP_ENERGY_ONLY)
     show_regions = content in (HEATMAP_COMBINED, HEATMAP_REGIONS_ONLY)
@@ -1995,14 +2167,14 @@ def build_flip_energy_heatmap(
         flip_mode=flip_mode,
         g_vector_choice=g_vector_choice,
     )
-    current_reconnection_zone_mask = current_reconnection_masks["inside"]
+    current_no_flip_mask = current_reconnection_masks["inside"]
     visible_delta_energy = (
-        mask_scalar_field_to_region(delta_energy, current_reconnection_zone_mask)
+        mask_scalar_field_to_region(delta_energy, current_no_flip_mask)
         if show_energy
         else delta_energy
     )
     norm = heatmap_color_norm(visible_delta_energy, config=config) if show_energy else None
-    flipped_reconnection_zone_mask = insideReconnectionZone(
+    flipped_no_flip_mask = reconnection_condition_masks(
         L_values,
         parameter_values,
         triangles=flip_mode.flipped_triangles,
@@ -2010,17 +2182,17 @@ def build_flip_energy_heatmap(
         parameterization=parameterization,
         flip_mode=flip_mode,
         g_vector_choice=g_vector_choice,
-    )
+    )["inside"]
 
-    fig, ax = plt.subplots(figsize=(7.2, 5.6), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=MATRIX_PANEL_FIGSIZE, constrained_layout=True)
     contours = config.reconnection_contours
     overlay = config.element_pair_grid
     image = None
 
     if contours.debug_only:
-        debug_mask = np.zeros_like(current_reconnection_zone_mask, dtype=float)
-        debug_mask[current_reconnection_zone_mask] += 1.0
-        debug_mask[flipped_reconnection_zone_mask] += 2.0
+        debug_mask = np.zeros_like(current_no_flip_mask, dtype=float)
+        debug_mask[current_no_flip_mask] += 1.0
+        debug_mask[flipped_no_flip_mask] += 2.0
         image = ax.imshow(
             debug_mask,
             origin="lower",
@@ -2060,12 +2232,12 @@ def build_flip_energy_heatmap(
         if (
             not show_energy
             and contours.draw_current
-            and np.any(current_reconnection_zone_mask)
+            and np.any(current_no_flip_mask)
         ):
             ax.contourf(
                 L_values,
                 parameter_values,
-                current_reconnection_zone_mask.astype(float),
+                current_no_flip_mask.astype(float),
                 levels=[contours.level, 1.5],
                 colors=[contours.current_color],
                 alpha=contours.fill_alpha,
@@ -2101,11 +2273,11 @@ def build_flip_energy_heatmap(
                         alpha=contours.failure_fill_alpha,
                         zorder=zorder,
                     )
-        if contours.draw_flipped and np.any(flipped_reconnection_zone_mask):
+        if contours.draw_flipped and np.any(flipped_no_flip_mask):
             ax.contourf(
                 L_values,
                 parameter_values,
-                flipped_reconnection_zone_mask.astype(float),
+                flipped_no_flip_mask.astype(float),
                 levels=[contours.level, 1.5],
                 colors=[contours.flipped_color],
                 alpha=contours.fill_alpha,
@@ -2140,29 +2312,40 @@ def build_flip_energy_heatmap(
         )
 
     legend_handles = []
-    reference_contour_drawn = add_reference_energy_contour(
+    reference_contour_values = (
+        np.abs(delta_energy)
+        if reference_contour.use_absolute_delta_energy
+        else delta_energy
+    )
+    reference_contour_drawn = add_reference_contour(
         ax,
         L_values,
         parameter_values,
-        delta_energy,
+        reference_contour_values,
         reference_energy,
-        reference_energy_contour,
+        reference_contour,
+        require_nonnegative_level=True,
     )
     if reference_contour_drawn:
-        legend_handles.append(reference_energy_contour_handle(reference_energy_contour))
+        legend_handles.append(
+            reference_contour_handle(
+                reference_contour,
+                reference_energy_label(reference_contour),
+            )
+        )
 
-    has_current_reconnection_boundary = has_region_boundary(
-        current_reconnection_zone_mask
+    has_current_no_flip_boundary = has_region_boundary(
+        current_no_flip_mask
     )
     if (
         (show_regions or show_energy)
         and contours.draw_current
-        and has_current_reconnection_boundary
+        and has_current_no_flip_boundary
     ):
         ax.contour(
             L_values,
             parameter_values,
-            current_reconnection_zone_mask.astype(float),
+            current_no_flip_mask.astype(float),
             levels=[contours.level],
             colors=contours.current_color,
             linewidths=contours.linewidth,
@@ -2250,14 +2433,14 @@ def build_flip_energy_heatmap(
                     )
                 )
 
-    has_flipped_reconnection_boundary = has_region_boundary(
-        flipped_reconnection_zone_mask
+    has_flipped_no_flip_boundary = has_region_boundary(
+        flipped_no_flip_mask
     )
-    if show_regions and contours.draw_flipped and has_flipped_reconnection_boundary:
+    if show_regions and contours.draw_flipped and has_flipped_no_flip_boundary:
         ax.contour(
             L_values,
             parameter_values,
-            flipped_reconnection_zone_mask.astype(float),
+            flipped_no_flip_mask.astype(float),
             levels=[contours.level],
             colors=contours.flipped_color,
             linewidths=contours.linewidth,
@@ -2320,9 +2503,9 @@ def build_flip_energy_heatmap(
         "abs_delta_energy": abs_delta_energy,
         "current_energy": current_energy,
         "flipped_energy": flipped_energy,
-        "inside_current_reconnection_zone": current_reconnection_zone_mask,
-        "inside_flipped_reconnection_zone": flipped_reconnection_zone_mask,
-        "inside_reconnection_zone": current_reconnection_zone_mask,
+        "inside_current_reconnection_zone": current_no_flip_mask,
+        "inside_flipped_reconnection_zone": flipped_no_flip_mask,
+        "inside_reconnection_zone": current_no_flip_mask,
         "current_g12_negative": current_reconnection_masks["g12_negative"],
         "current_g12_too_large": current_reconnection_masks["g12_too_large"],
         "current_shared_edge_not_longest": current_reconnection_masks[
@@ -2354,7 +2537,7 @@ def heatmap_content_output_path(path: Path, output_tag: str) -> Path:
 def build_heatmap_variants(
     config: HeatmapConfig,
     material: MaterialConfig,
-    reference_energy_contour: ReferenceEnergyContourConfig,
+    reference_contour: ReferenceContourConfig,
     parameterization: ParameterizationConfig,
     flip_mode: FlipMode,
     remove_figure_title: bool = CONFIG.remove_figure_titles,
@@ -2364,29 +2547,27 @@ def build_heatmap_variants(
 
     figures = []
     data_by_content = {}
-    for content in config.contents:
+    variants = [
+        (content, content, G_VECTOR_CHOICE_SHORTEST)
+        for content in config.contents
+    ]
+    variants.extend(
+        (
+            f"{HEATMAP_REGIONS_ONLY}_{g_vector_choice}",
+            HEATMAP_REGIONS_ONLY,
+            g_vector_choice,
+        )
+        for g_vector_choice in config.extra_region_g_vector_choices
+    )
+    for output_tag, content, g_vector_choice in variants:
+        validate_g_vector_choice(g_vector_choice)
         fig, data = build_flip_energy_heatmap(
             config=config,
             material=material,
-            reference_energy_contour=reference_energy_contour,
+            reference_contour=reference_contour,
             parameterization=parameterization,
             flip_mode=flip_mode,
             content=content,
-            remove_figure_title=remove_figure_title,
-        )
-        figures.append((content, fig))
-        data_by_content[content] = data
-
-    for g_vector_choice in config.extra_region_g_vector_choices:
-        validate_g_vector_choice(g_vector_choice)
-        output_tag = f"{HEATMAP_REGIONS_ONLY}_{g_vector_choice}"
-        fig, data = build_flip_energy_heatmap(
-            config=config,
-            material=material,
-            reference_energy_contour=reference_energy_contour,
-            parameterization=parameterization,
-            flip_mode=flip_mode,
-            content=HEATMAP_REGIONS_ONLY,
             g_vector_choice=g_vector_choice,
             remove_figure_title=remove_figure_title,
         )
@@ -2428,7 +2609,7 @@ def build_and_save_for_flip_mode(
     heatmap_figures, heatmap_data_by_content = build_heatmap_variants(
         config=config.heatmap,
         material=config.material,
-        reference_energy_contour=config.reference_energy_contour,
+        reference_contour=config.reference_contour,
         parameterization=config.parameterization,
         flip_mode=flip_mode,
         remove_figure_title=config.remove_figure_titles,
@@ -2437,7 +2618,7 @@ def build_and_save_for_flip_mode(
         focused_heatmap_figures, focused_heatmap_data_by_content = build_heatmap_variants(
             config=config.focused_heatmap,
             material=config.material,
-            reference_energy_contour=config.reference_energy_contour,
+            reference_contour=config.reference_contour,
             parameterization=config.parameterization,
             flip_mode=flip_mode,
             remove_figure_title=config.remove_figure_titles,
@@ -2448,16 +2629,23 @@ def build_and_save_for_flip_mode(
     cauchy_fig, cauchy_data = build_cauchy_stress_difference_heatmaps(
         config=config.cauchy_stress_difference,
         material=config.material,
-        reference_energy_contour=config.reference_energy_contour,
+        reference_contour=config.reference_contour,
         parameterization=config.parameterization,
         flip_mode=flip_mode,
         remove_figure_title=config.remove_figure_titles,
     )
+    stress_measure_fig, stress_measure_data = build_cauchy_stress_measure_heatmaps(
+        config=config.cauchy_stress_measures,
+        material=config.material,
+        reference_contour=config.reference_contour,
+        parameterization=config.parameterization,
+        flip_mode=flip_mode,
+        remove_figure_title=config.remove_figure_titles,
+        stress_data=cauchy_data,
+    )
     if config.plot_first_element_G:
         first_element_G_fig, first_element_G_data = build_first_element_G_heatmaps(
             config=config.first_element_G,
-            material=config.material,
-            reference_energy_contour=config.reference_energy_contour,
             parameterization=config.parameterization,
             flip_mode=flip_mode,
             remove_figure_title=config.remove_figure_titles,
@@ -2495,6 +2683,10 @@ def build_and_save_for_flip_mode(
         cauchy_fig,
         flip_mode_output_path(config.cauchy_stress_difference.output_path, flip_mode),
     )
+    save_figure(
+        stress_measure_fig,
+        flip_mode_output_path(config.cauchy_stress_measures.output_path, flip_mode),
+    )
     if first_element_G_fig is not None:
         save_figure(
             first_element_G_fig,
@@ -2524,13 +2716,29 @@ def build_and_save_for_flip_mode(
     print(
         "Reference simple-shear energy: "
         f"{reference_energy:.6e} "
-        f"(gamma={config.reference_energy_contour.shear:g})"
+        f"(gamma={config.reference_contour.shear:g})"
     )
     print(
         "Visible Cauchy stress difference range: "
         f"{float(np.nanmin(visible_cauchy_values)):.6e} "
         f"to {float(np.nanmax(visible_cauchy_values)):.6e}"
     )
+    stress_measure_names = [
+        field_value
+        for field_kind, field_value in matrix_plot_fields(config.cauchy_stress_measures)
+        if field_kind == MATRIX_FIELD_STRESS_MEASURE
+    ]
+    if stress_measure_names:
+        print(
+            "Visible Cauchy stress measure ranges: "
+            + ", ".join(
+                f"{measure}="
+                f"{float(np.nanmin(stress_measure_data[f'visible_{measure}'])):.6e}"
+                f" to "
+                f"{float(np.nanmax(stress_measure_data[f'visible_{measure}'])):.6e}"
+                for measure in stress_measure_names
+            )
+        )
     if first_element_G_data is not None:
         first_element_G_values = first_element_G_data["matrix_values"]
         print(
@@ -2538,34 +2746,34 @@ def build_and_save_for_flip_mode(
             f"{float(np.nanmin(first_element_G_values)):.6e} "
             f"to {float(np.nanmax(first_element_G_values)):.6e}"
         )
-    current_reconnection_zone_mask = heatmap_data["inside_current_reconnection_zone"]
-    flipped_reconnection_zone_mask = heatmap_data["inside_flipped_reconnection_zone"]
+    current_no_flip_mask = heatmap_data["inside_current_reconnection_zone"]
+    flipped_no_flip_mask = heatmap_data["inside_flipped_reconnection_zone"]
     print(
-        "Current reconnection-zone occupancy: "
-        f"{int(np.count_nonzero(current_reconnection_zone_mask))} / "
-        f"{current_reconnection_zone_mask.size}"
+        "Current no-flip occupancy: "
+        f"{int(np.count_nonzero(current_no_flip_mask))} / "
+        f"{current_no_flip_mask.size}"
     )
     print(
-        "Flipped reconnection-zone occupancy: "
-        f"{int(np.count_nonzero(flipped_reconnection_zone_mask))} / "
-        f"{flipped_reconnection_zone_mask.size}"
+        "Flipped no-flip occupancy: "
+        f"{int(np.count_nonzero(flipped_no_flip_mask))} / "
+        f"{flipped_no_flip_mask.size}"
     )
     if config.plot_focused_heatmap:
-        focused_current_reconnection_zone_mask = focused_heatmap_data[
+        focused_current_no_flip_mask = focused_heatmap_data[
             "inside_current_reconnection_zone"
         ]
-        focused_flipped_reconnection_zone_mask = focused_heatmap_data[
+        focused_flipped_no_flip_mask = focused_heatmap_data[
             "inside_flipped_reconnection_zone"
         ]
         print(
-            "Focused current reconnection-zone occupancy: "
-            f"{int(np.count_nonzero(focused_current_reconnection_zone_mask))} / "
-            f"{focused_current_reconnection_zone_mask.size}"
+            "Focused current no-flip occupancy: "
+            f"{int(np.count_nonzero(focused_current_no_flip_mask))} / "
+            f"{focused_current_no_flip_mask.size}"
         )
         print(
-            "Focused flipped reconnection-zone occupancy: "
-            f"{int(np.count_nonzero(focused_flipped_reconnection_zone_mask))} / "
-            f"{focused_flipped_reconnection_zone_mask.size}"
+            "Focused flipped no-flip occupancy: "
+            f"{int(np.count_nonzero(focused_flipped_no_flip_mask))} / "
+            f"{focused_flipped_no_flip_mask.size}"
         )
 
     figures = [
@@ -2577,6 +2785,7 @@ def build_and_save_for_flip_mode(
             for _, focused_heatmap_fig in focused_heatmap_figures
         ],
         cauchy_fig,
+        stress_measure_fig,
     ]
     if first_element_G_fig is not None:
         figures.append(first_element_G_fig)
