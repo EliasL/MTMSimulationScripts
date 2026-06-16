@@ -1450,9 +1450,9 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
         G22 = G[..., 1, 1]
 
         # Region: 0 <= C12 <= min(C11, C22)
-        #r_mask = np.logical_and(r_mask, 0 <= G12)
-        r_mask = np.logical_and(r_mask, abs(G12) <= G11)
-        r_mask = np.logical_and(r_mask, abs(G12) <= G22)
+        r_mask = np.logical_and(r_mask, 0 <= G12)
+        r_mask = np.logical_and(r_mask, G12 <= G11/2)
+        r_mask = np.logical_and(r_mask, G12 <= G22/2)
 
         drawRegion(
             ax,

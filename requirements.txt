@@ -22,3 +22,4 @@ PyQt5
 pyqtgraph
 joblib
 PyMuPDF
+pypdf

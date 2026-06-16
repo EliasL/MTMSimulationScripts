@@ -182,6 +182,85 @@ def plot_stress_tensor_components(strain=None, beta=-1 / 4, K=4, noise=1):
     return fig, ax
 
 
+def _simple_shear_F(gamma):
+    gamma = np.asarray(gamma, dtype=float)
+    F = np.tile(np.eye(2), (*gamma.shape, 1, 1)).astype(float)
+    F[..., 0, 1] = gamma
+    return F
+
+
+def _pure_shear_F(gamma):
+    gamma = np.asarray(gamma, dtype=float)
+    diagonal = np.sqrt(1.0 + 0.25 * gamma**2)
+    F = np.tile(np.eye(2), (*gamma.shape, 1, 1)).astype(float)
+    F[..., 0, 0] = diagonal
+    F[..., 0, 1] = 0.5 * gamma
+    F[..., 1, 0] = 0.5 * gamma
+    F[..., 1, 1] = diagonal
+    return F
+
+
+def plot_cauchy_stress_components_simple_and_pure_shear(
+    gamma=None,
+    beta=-1 / 4,
+    K=4,
+    noise=1,
+    save_path=os.path.join(
+        "Plots", "cauchy_stress_components_simple_and_pure_shear.pdf"
+    ),
+):
+    """
+    Plot the independent 2D Cauchy stress components for determinant-one
+    simple shear and symmetric pure shear over gamma in [0, 1].
+    """
+    if gamma is None:
+        gamma = np.linspace(0.0, 1.0, 1000)
+    gamma = np.asarray(gamma, dtype=float)
+    if gamma.ndim != 1:
+        raise ValueError("gamma must be a 1D array.")
+
+    plt.rcParams.update({"text.usetex": False, "font.family": "DejaVu Sans"})
+
+    paths = (
+        ("Simple shear", _simple_shear_F(gamma)),
+        ("Pure shear", _pure_shear_F(gamma)),
+    )
+    components = (
+        ((0, 0), r"$\sigma_{11}$", "-"),
+        ((0, 1), r"$\sigma_{12}$", "--"),
+        ((1, 1), r"$\sigma_{22}$", ":"),
+    )
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), sharex=True)
+    for ax, (title, F) in zip(axes, paths):
+        sigma = ContiEnergy.cauchy_from_F(F, beta=beta, K=K, noise=noise)
+        for (i, j), label, linestyle in components:
+            ax.plot(
+                gamma,
+                sigma[:, i, j],
+                linestyle=linestyle,
+                linewidth=1.8,
+                label=label,
+            )
+        ax.set_title(title)
+        ax.set_xlabel(r"$\gamma$")
+        ax.set_ylabel("Cauchy stress")
+        ax.grid(True, alpha=0.25)
+
+    axes[1].legend()
+    fig.suptitle("Square Conti Energy: Cauchy Stress Components")
+    fig.tight_layout()
+
+    if save_path is not None:
+        output_dir = os.path.dirname(save_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        fig.savefig(save_path, bbox_inches="tight")
+        print(f"Saved figure to: {save_path}")
+
+    return fig, axes
+
+
 # ---------- animation with auto writer + optional multiprocessing ----------
 def animate_nodes_and_forces(
     coords_ref=None,
@@ -350,10 +429,11 @@ if __name__ == "__main__":
     #plot_energy()
     #plot_eulerian_forces()
     #plot_Lagrangian_forces()
-    plot_stress_tensor_components()
+    plot_cauchy_stress_components_simple_and_pure_shear()
     # animate_nodes_and_forces(
     #     save_path="simple_shear_nodes_forces.mp4",
     #     interval=30,
     #     n_procs=1,  # try >1 if ContiEnergy calls are expensive
     # )
-    plt.show()
+    if plt.get_backend().lower() != "agg":
+        plt.show()
