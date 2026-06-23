@@ -134,8 +134,7 @@ def _remote_csv_sources(configs: list[SimulationConfig]) -> dict[str, CsvSource]
     sources = {}
     server_names = ", ".join(_short_source_name(server) for server in Servers.search_servers)
     print(
-        f"Checking {len(Servers.search_servers)} status server(s) "
-        f"for {len(configs)} config(s): {server_names}",
+        f"Checking {len(Servers.search_servers)} server(s) for {len(configs)} config(s): {server_names}",
         flush=True,
     )
     with ThreadPoolExecutor(max_workers=len(Servers.search_servers)) as executor:
@@ -143,7 +142,7 @@ def _remote_csv_sources(configs: list[SimulationConfig]) -> dict[str, CsvSource]
             executor.submit(_remote_csv_sources_from_server, server, configs): server
             for server in Servers.search_servers
         }
-        with tqdm(total=len(future_to_server), desc="Checking status servers", unit="server") as progress:
+        with tqdm(total=len(future_to_server), desc="Checking servers", unit="server") as progress:
             for future in as_completed(future_to_server):
                 server = future_to_server[future]
                 server_name = _short_source_name(server)
@@ -151,11 +150,11 @@ def _remote_csv_sources(configs: list[SimulationConfig]) -> dict[str, CsvSource]
                 try:
                     server_sources = future.result()
                 except Exception as exc:
-                    tqdm.write(f"{server_name} status CSV search failed: {exc}")
+                    tqdm.write(f"{server_name} CSV search failed: {exc}")
                     progress.update(1)
                     continue
                 if server_sources:
-                    tqdm.write(f"{server_name}: found {len(server_sources)} status CSV file(s).")
+                    tqdm.write(f"{server_name}: found {len(server_sources)} CSV file(s).")
                 for name, source in server_sources.items():
                     sources.setdefault(name, source)
                 progress.update(1)
@@ -213,12 +212,12 @@ def _csv_sources(
     search_remote: bool | str,
 ) -> dict[str, CsvSource]:
     if force_update:
-        print("Skipping local/cache status CSV check because force_update=True.", flush=True)
+        print("Skipping local/cache CSV check because force_update=True.", flush=True)
         sources = {}
     else:
-        print(f"Checking local/cache status CSV files for {len(configs)} config(s)...", flush=True)
+        print(f"Checking local/cache CSV files for {len(configs)} config(s)...", flush=True)
         sources = _local_csv_sources(configs)
-        print(f"Found {len(sources)} local/cache status CSV file(s).", flush=True)
+        print(f"Found {len(sources)} local/cache CSV file(s).", flush=True)
 
     if search_remote is False:
         print("Server status check disabled.", flush=True)
@@ -255,44 +254,48 @@ def _csv_sources(
     return sources
 
 
-def _last_complete_csv_row(path: str | os.PathLike) -> dict[str, str]:
-    with open(path, "rb") as file:
-        headers = file.readline().decode("utf-8").strip().split(",")
-        if not headers or headers == [""]:
+def _headers_from_line(line: str, path: str | os.PathLike) -> list[str]:
+    stripped = line.strip()
+    if stripped.startswith("#HEADER:"):
+        stripped = stripped.split(":", 1)[1].strip()
+    headers = stripped.split(",")
+    if not headers or headers == [""]:
+        raise RuntimeError(f"{path} has no CSV header.")
+    return headers
+
+
+def _last_complete_csv_row(path: str | os.PathLike) -> dict[str, str] | None:
+    with open(path, encoding="utf-8", errors="replace") as file:
+        header_line = file.readline()
+        if not header_line:
             raise RuntimeError(f"{path} has no CSV header.")
+        headers = _headers_from_line(header_line, path)
+        row = None
+        saw_data = False
 
-        file.seek(0, os.SEEK_END)
-        file_size = file.tell()
-        chunk_size = 8192
-        data = b""
-        pos = file_size
-        while pos > 0 and data.count(b"\n") < 2:
-            read_size = min(chunk_size, pos)
-            pos -= read_size
-            file.seek(pos)
-            data = file.read(read_size) + data
+        for line in file:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith("#HEADER:"):
+                headers = _headers_from_line(stripped, path)
+                continue
+            if stripped.startswith("#"):
+                continue
+            values = stripped.split(",")
+            if values == headers:
+                continue
+            saw_data = True
+            if len(values) == len(headers):
+                row = dict(zip(headers, values))
+            elif len(values) == len(headers) - 1:
+                row = dict(zip(headers[1:], values))
 
-    lines = data.decode("utf-8", errors="replace").splitlines()
-    header_override = None
-    for line in reversed(lines):
-        stripped = line.strip()
-        if stripped.startswith("#HEADER:"):
-            header_override = stripped.split(":", 1)[1].strip().split(",")
-            break
-    if header_override:
-        headers = header_override
-
-    for line in reversed(lines):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        values = stripped.split(",")
-        if len(values) == len(headers):
-            return dict(zip(headers, values))
-        if len(values) == len(headers) - 1:
-            return dict(zip(headers[1:], values))
-
-    raise RuntimeError(f"{path} has no complete data row.")
+    if row is not None:
+        return row
+    if not saw_data:
+        return None
+    raise RuntimeError(f"{path} has data rows, but none match the active CSV header.")
 
 
 def _float_value(row: dict[str, str], *keys: str) -> float | None:
@@ -315,6 +318,9 @@ def _csv_status(config: SimulationConfig, csv_path: str | None) -> tuple[float |
         return None, None, "Missing CSV", ""
 
     row = _last_complete_csv_row(csv_path)
+    if row is None:
+        return 0.0, None, "No data", str(csv_path)
+
     current_load = _float_value(row, "load", "Load")
     progress = _progress_from_load(current_load, float(config.maxLoad))
     if progress is None:
@@ -374,7 +380,8 @@ def collect_status(
         running = process is not None and state != "Done"
         if not check_running and state != "Done":
             running = None
-            state = "Not checked"
+            if state == "Not running":
+                state = "Unfinished"
         server = _short_source_name(getattr(process, "server", "")) if running else source_name
         if running:
             state = "Running"

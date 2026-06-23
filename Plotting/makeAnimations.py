@@ -185,6 +185,9 @@ def makeAnimations(
     X="load",
     element_subset=None,
     matrix_name="T",
+    videoNames=None,
+    xlim=None,
+    num_processes=-2,
 ):
     frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
     if macroData is None:
@@ -202,6 +205,22 @@ def makeAnimations(
 
     vtu_source = pvdFile if os.path.exists(pvdFile) else path
     vtu_files = resolve_vtu_files(vtu_source)
+    if xlim is not None:
+        xmin, xmax = xlim
+        filtered_vtu_files = []
+        for vtu_file in vtu_files:
+            data = get_data_from_name(vtu_file)
+            if X not in data:
+                raise ValueError(f"{X} not found in VTU metadata for {vtu_file}")
+            x = float(data[X])
+            if xmin is not None and x < xmin:
+                continue
+            if xmax is not None and x > xmax:
+                continue
+            filtered_vtu_files.append(vtu_file)
+        vtu_files = filtered_vtu_files
+        if not vtu_files:
+            raise ValueError(f"No VTU files found inside {xlim=}")
 
     # we don't want every frame to be created, so in order to find out what
     # frames should be drawn, we first check how much load change there is
@@ -295,6 +314,15 @@ def makeAnimations(
         (plot_and_save_plot, "e_drop_plot"),
         (plot_and_save_m_mesh, "m_mesh"),
     ]
+    if videoNames is not None:
+        wanted = {videoNames} if isinstance(videoNames, str) else set(videoNames)
+        render_jobs = [
+            job
+            for job in render_jobs
+            if job[1] in wanted or _with_suffixes(job[1]) in wanted
+        ]
+        if not render_jobs:
+            raise ValueError(f"No render jobs matched {videoNames=}")
 
     # Define the path and file name
     # The name of the video is the same as the name of the folder+_video.mp4
@@ -314,6 +342,7 @@ def makeAnimations(
             extra_kwargs["matrix_name"] = matrix_name_for_job
         images = make_images(
             vtu_files,
+            num_processes=num_processes,
             macro_data=macroData,
             frameFunction=function,
             frame_path=frame_path,

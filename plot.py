@@ -73,11 +73,16 @@ from Plotting.remotePlotting import (
     get_csv_from_server,
 )
 from matplotlib.backends.backend_pdf import PdfPages
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 from Management.configGenerator import SimulationConfig
 from Management.connectToCluster import Servers
 from pathlib import Path
+from Plotting.doubleDislocationComparison import (
+    doubleDislocationComparison,
+    doubleDislocationEnergy,
+    doubleDislocationMeshMovies,
+)
+
 
 def plotPropperJob():
     nrThreads = 3
@@ -213,6 +218,7 @@ def compare_energy_three_sims():
     plt.show()
 
 
+
 # MDPI Article plot
 def energyField():
     from matplotlib import pyplot as plt
@@ -240,9 +246,11 @@ def energyField():
 
 
 def showPoincareDisk():
-    from MTMath.poincareEnergy import plotPoincareDisk
+    from MTMath.poincareEnergy import plotPoincareDisk, plotPoincareLines
 
-    plotPoincareDisk(grid_size=500, depth=7, transformation="triangular")
+    #plotPoincareDisk(grid_size=500, depth=7, transformation="triangular")
+    plotPoincareLines(grid_size=500)
+    plt.show()
 
 
 def showInstabilityAngle():
@@ -873,7 +881,7 @@ if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    #run_reconnection_demo()
+    run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
     # test()
@@ -886,7 +894,7 @@ if __name__ == "__main__":
 
     # debugPlotAll()
     # energyField()
-    showPoincareDisk()
+    #showPoincareDisk()
     # showInstabilityAngle()
     # plotThreadTest()
     # configs, labels = allPlasticEventsJob()

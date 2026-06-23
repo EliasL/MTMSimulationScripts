@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from .configGenerator import ConfigGenerator, SimulationConfig
 
 
@@ -219,6 +221,23 @@ def basicJob(
         **kwargs
     )
     return configs, labels
+
+
+def restartWithLogDuringMinimization(config, dump):
+    config_path = Path(config)
+    dump_path = Path(dump)
+    if not config_path.is_file():
+        raise FileNotFoundError(f"No config file found at {config_path}")
+    if not dump_path.is_file():
+        raise FileNotFoundError(f"No dump file found at {dump_path}")
+
+    conf = SimulationConfig(config_path)
+    conf.logDuringMinimization = 1
+    conf.name = conf.generate_name(withExtension=False)
+
+    from .runSimulation import run_locally
+
+    run_locally(conf, dump=str(dump_path), newOutput=True)
 
 
 def debugJob(
@@ -583,8 +602,8 @@ def doubleDislocationTest(
     diagonal=["minor"],
     reconnecton=["none", "edgeFlip"],
     GP1=[0.0],# 1.0],
-    GP2=[0.0],# 1.0],
-    GP3=0.7, # Load direction change point
+    GP2=[2.0],# 1.0],
+    GP3=1.0, # Load direction change point
 ):
     if seeds is None:
         seeds = range(nrSeeds)
@@ -598,8 +617,8 @@ def doubleDislocationTest(
         #rows=10,
         #cols=[50, 75, 100],
         startLoad=0.0,
-        maxLoad=3.0,
-        loadIncrement=1e-2,
+        maxLoad=4.0,
+        loadIncrement=1e-3,
         nrThreads=nrThreads,
         minimizer="LBFGS",
         epsR=1e-6,

@@ -118,20 +118,23 @@ if __name__ == "__main__":
                 f"No such task {task}. The options are disp_<data/servers/jobs> or sylvain_status"
             )
     else:
-        from Management.jobs import sylvainBatches
+        from Management.jobs import sylvainBatches, size_scaling_job
         # dm = DataManager()
         # dm.clean_projects_on_servers()
         # disp_jobs()
         # disp_servers()
-        configs = []
-        labels = []
-        for batch in [-2, -1]:
-            batch_configs, batch_labels = sylvainBatches(batch)
-            configs.extend(batch_configs)
-            labels.extend(f"batch={batch}, {label}" for label in batch_labels)
+        # configs = []
+        # labels = []
+        # for batch in [-2, -1]:
+        #     batch_configs, batch_labels = sylvainBatches(batch)
+        #     configs.extend(batch_configs)
+        #     labels.extend(f"batch={batch}, {label}" for label in batch_labels)
+        configs, labels = size_scaling_job()
         checkStatus(
             configs,
             labels=labels,
         )
+
+
         # This is where you create a terminal with all three displayed
         #run_script()

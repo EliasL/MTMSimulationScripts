@@ -1605,6 +1605,69 @@ def drawUnitCircle(ax, grid_size, zoom=1):
     )
     ax.add_patch(circle)
 
+def plotPoincareLines(
+    ax=None,
+    save=True,
+    grid_size=200,
+    depth=5,
+    transformation="none",
+    show=False,
+):
+    # Make plot of fundamental domain
+    if ax is None:
+        fig, ax = prepPoincareFig(
+            grid_size=grid_size,
+            withGrid=True,
+            withYieldSurface=False,
+        )
+
+    nr = 1000
+    zero = np.zeros(nr)
+
+    # Base parameter range
+    t = np.sinh(
+        np.linspace(
+            np.arcsinh(0.0000001),
+            np.arcsinh(2 / np.sqrt(3)),
+            nr,
+        )
+    )
+
+    # This is T(C0), where C0 = diag(t, 1/t)
+    C = np.array(
+        [
+            [t, t],
+            [t, t + 1 / t],
+        ]
+    ).transpose(2, 0, 1)
+    drawC(ax, C, grid_size, c="red")
+
+    # This is S(T(C0))
+    C = np.array(
+        [
+            [t + 1 / t, t],
+            [t, t],
+        ]
+    ).transpose(2, 0, 1)
+    drawC(ax, C, grid_size, c="blue")
+
+
+    t = np.sinh(
+        np.linspace(
+            np.arcsinh(0.0000001),
+            np.arcsinh(1),
+            nr,
+        )
+    )
+
+    C = np.array([[t, zero], [zero, 1 / t]]).transpose(2, 0, 1)
+    drawC(ax, C, grid_size, c="green")
+    C = np.array([[1 / t, zero], [zero, t]]).transpose(2, 0, 1)
+    drawC(ax, C, grid_size, c="yellow")
+
+
+
+    return ax
 
 def plotEnergyField(
     energy_grid,

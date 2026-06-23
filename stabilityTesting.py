@@ -33,7 +33,9 @@ def plot_moduli_simple_shear(
     F[:, 0, 1] = gamma
     F[:, 1, 1] = 1.0
 
-    mu, lam = ContiEnergy.moduli_at_F(F, loops=loops, eulerian=True)
+    moduli = ContiEnergy.moduli_at_F(F, loops=loops, eulerian=True)
+    mu = moduli.mu
+    lam = moduli.lam
 
     # Compute Eulerian acoustic tensor determinant for a single direction
     # elasticity_tensor already returns Eulerian a when eulerian=True
@@ -82,9 +84,9 @@ def plot_moduli_simple_shear(
         )
 
     # Values at gamma = 0
-    mu0, lam0 = ContiEnergy.moduli_at_F(np.eye(2), loops=loops, eulerian=True)
-    mu0 = float(mu0)
-    lam0 = float(lam0)
+    moduli0 = ContiEnergy.moduli_at_F(np.eye(2), loops=loops, eulerian=True)
+    mu0 = float(moduli0.mu)
+    lam0 = float(moduli0.lam)
     A0 = ContiEnergy.elasticity_tensor(np.eye(2), loops=loops, eulerian=False)
     A0_voigt = ContiEnergy._voigt_from_A(A0)
     print("Voigt matrix at gamma=0:\n", A0_voigt)

@@ -323,7 +323,7 @@ def _get_volume_from_meta(meta):
 
 
 def get_elastic_mu(report=False):
-    mu, _ = ContiEnergy.moduli_at_F(np.eye(2))
+    mu = ContiEnergy.moduli_at_F(np.eye(2)).mu
     mu = float(np.asarray(mu, dtype=float).reshape(-1)[0])
     if report:
         print(f"Using mu: {mu:.2f}")

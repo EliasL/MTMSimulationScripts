@@ -11,14 +11,36 @@ from sympy import (
     S,
     Mul,
 )
+from dataclasses import dataclass
 import math
 import numpy as np
+from pathlib import Path
+import sys
 from typing import TypeAlias
 from numpy.typing import ArrayLike
-from .reduction import lagrange_reduction, lagrange_reduction_components
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from MTMath.reduction import lagrange_reduction, lagrange_reduction_components
+else:
+    from .reduction import lagrange_reduction, lagrange_reduction_components
 
 Array: TypeAlias = ArrayLike | int | float
 Array_Str: TypeAlias = Array | str
+
+
+@dataclass(frozen=True)
+class ElasticModuli:
+    """Projected 2D isotropic elastic constants.
+
+    K is the calculated bulk modulus, not the energy-density parameter.
+    """
+
+    mu: Array
+    lam: Array
+    K: Array
+    E: Array
+    nu: Array
 
 
 # The following class is a bit messy, with all the static methods and class methods.
@@ -88,18 +110,17 @@ class EnergyFunction:
         return cls._PHI, cls._DIV_PHI, cls._DIV_DIV_PHI
 
     @classmethod
-    def ground_state_energy(cls, beta=-1 / 4, K=4, noise=1):
-        """Caches and returns the ground state energy."""
-        cls._initialize_phi()
-        assert cls._PHI is not None
-        return cls._PHI(1, 1, 0, beta, K, noise)
-
-    @classmethod
     def energy_from_simple_shear(cls, shear, beta=-1 / 4, K=4, noise=1):
         """Caches and returns the ground state energy."""
         cls._initialize_phi()
         assert cls._PHI is not None
         return cls._PHI(1, 1 + shear**2, shear, beta, K, noise)
+    
+    @classmethod
+    def ground_state_energy(cls, beta=-1 / 4, K=4, noise=1):
+        """Caches and returns the ground state energy."""
+        return cls.energy_from_simple_shear(0, beta, K, noise)
+        
 
     @classmethod
     def energy_from_reduced_C_components(
@@ -416,7 +437,14 @@ class EnergyFunction:
         # Our Hessian H is just ∂²φ/∂C∂C, so multiply by 2 here.
         C4_red *= 2.0
 
-        # Transform reduced C-tensor back to the original basis (ignore dM/dC)
+        # Transform reduced C-tensor back to the original basis.
+        # dM/dC derivatives can be ignored inside a local,
+        # fundamental-domain-shaped reduction region because M is constant
+        # there and changes only at region borders. At borders M jumps and the
+        # branch derivative needs more care; for a symmetry-compatible,
+        # twice-differentiable potential such as ContiEnergy, the branches are
+        # expected to glue smoothly. This should be checked more carefully
+        # before relying on boundary tangents for other potentials.
         C4 = np.einsum(
             "...ir,...js,...kt,...lu,...rstu->...ijkl", M_R, M_R, M_R, M_R, C4_red
         )
@@ -434,8 +462,11 @@ class EnergyFunction:
         A = term1 + term2
 
         if eulerian:
-            # Push-forward A to a
+            # Push-forward A to the spatial Cauchy tangent. The two F factors
+            # push forward to the Kirchhoff-stress tangent, so divide by J.
             a = np.einsum("...jR,...lS,...iRkS->...ijkl", F, F, A)
+            _, J = _assert_physical_det(F, "elasticity_tensor")
+            a /= J[..., None, None, None, None]
             return a
         else:
             return A
@@ -642,19 +673,31 @@ class EnergyFunction:
     @classmethod
     def moduli_at_F(cls, F, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True):
         """
-        Return mu from the tangent tensor using Voigt component (12,12).
+        Return projected 2D isotropic elastic constants from the tangent tensor.
         If eulerian=True, use the pushed-forward tensor a; otherwise use A.
-        Note: matches linearized isotropic definition when evaluated at the
-        reference configuration.
+        The constants match the linearized isotropic definitions at the
+        reference configuration and are effective scalar projections otherwise.
         """
         A = cls.elasticity_tensor(
             F, beta=beta, K=K, noise=noise, loops=loops, eulerian=eulerian
         )
         t_voigt = cls._voigt_from_A(A)
         # https://en.wikipedia.org/wiki/Lam%C3%A9_parameters
-        mu = t_voigt[..., 2, 2]  # Shear modulus
-        Lambda = t_voigt[..., 1, 0]  # First Lame parameter
-        return mu, Lambda
+        mu = t_voigt[..., 2, 2]
+        bulk = 0.25 * (
+            t_voigt[..., 0, 0]
+            + t_voigt[..., 1, 1]
+            + t_voigt[..., 0, 1]
+            + t_voigt[..., 1, 0]
+        )
+        denominator = bulk + mu
+        if np.any(~np.isfinite(denominator)) or np.any(np.isclose(denominator, 0.0)):
+            raise ValueError("Cannot compute 2D E and nu because K + mu is zero.")
+
+        lam = bulk - mu
+        young = 4.0 * bulk * mu / denominator
+        poisson = lam / denominator
+        return ElasticModuli(mu=mu, lam=lam, K=bulk, E=young, nu=poisson)
 
     @classmethod
     def moduli_at_C(cls, C, beta=-1 / 4, K=4, noise=1, loops=1000, eulerian=True):
@@ -665,6 +708,11 @@ class EnergyFunction:
 
 
 class ContiEnergy(EnergyFunction):
+    # Simple-shear gamma where min_n det(q(n)) first reaches zero for
+    # F = [[1, gamma], [0, 1]]. (loss of strong ellipticity)
+    # Calculated using stabilityTesting.py.
+    simpleShearStabilityLimit: float = 0.13222139
+
     @staticmethod
     def I1(C11, C22, C12):
         return (1.0 / 3.0) * (C11 + C22 - C12)
@@ -1070,11 +1118,7 @@ def sanityCheck_Piola(verbose=True):
 
 
 if __name__ == "__main__":
-    pass
-
-    # # Output results
-    # print("Energy function:\n", energy_code)
-    # print("\n")
-
-    # print("Stress function:\n", stress_code)
-    # print(ContiEnergy.ground_state_energy())
+    
+    #print(ContiEnergy.ground_state_energy())
+    phi_sym, phi_div_sym, phi_div_div_sym = ContiEnergy.symbolic_potential() 
+    print(simplify(phi_sym))

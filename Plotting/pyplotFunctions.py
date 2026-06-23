@@ -2215,7 +2215,7 @@ def make_images(vtu_files, num_processes=-2, use_tqdm=True, X="load", **kwargs):
 
     if "disk" in kwargs["fileName"]:
         reset_energy_grid_cache()
-    if multithread:
+    if multithread and num_processes != 1:
         if num_processes < 0:
             import multiprocessing
 

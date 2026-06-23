@@ -67,11 +67,13 @@ REFERENCE_V = 0.0
 REFERENCE_PARAMETER = 0.0
 ROOT_DIR = Path(__file__).resolve().parents[1]
 PLOTS_DIR = ROOT_DIR / "Plots"
+ELEMENT_PAIR_PARAMETERIZATION_PLOTS_DIR = PLOTS_DIR / "elementPairParameterization"
+INDIVIDUAL_PLOT_DIR_NAME = "individual"
+BEFORE_AFTER_PLOT_DIR_NAME = "before-after"
 HEATMAP_COMBINED = "combined"
 HEATMAP_ENERGY_ONLY = "energy_only"
 HEATMAP_REGIONS_ONLY = "regions_only"
 HEATMAP_CONTENTS = (HEATMAP_COMBINED, HEATMAP_ENERGY_ONLY, HEATMAP_REGIONS_ONLY)
-DEFAULT_HEATMAP_CONTENTS = (HEATMAP_COMBINED, HEATMAP_ENERGY_ONLY)
 PARAMETERIZATION_SYMMETRIC = "symmetric"
 PARAMETERIZATION_ANTISYMMETRIC = "antisymmetric"
 PARAMETERIZATION_MODES = (
@@ -106,6 +108,14 @@ STRESS_SELECTIONS = (
     STRESS_SELECTION_ELEMENT_1,
     STRESS_SELECTION_ELEMENT_2,
 )
+FIELD_VALUE_MODE_DIFFERENCE = "difference"
+FIELD_VALUE_MODE_CURRENT = "current"
+FIELD_VALUE_MODE_FLIPPED = "flipped"
+FIELD_VALUE_MODES = (
+    FIELD_VALUE_MODE_DIFFERENCE,
+    FIELD_VALUE_MODE_CURRENT,
+    FIELD_VALUE_MODE_FLIPPED,
+)
 ELEMENT_STRESS_MEASURE_SHEAR = "shear"
 ELEMENT_STRESS_MEASURE_VON_MISES_AVERAGE = "von_mises_average"
 ELEMENT_STRESS_MEASURES = (
@@ -114,6 +124,14 @@ ELEMENT_STRESS_MEASURES = (
 )
 MATRIX_FIELD_COMPONENT = "component"
 MATRIX_FIELD_STRESS_MEASURE = "stress_measure"
+MESH_STRESS_MEASURE_SIGMA_12 = "sigma_12"
+MESH_STRESS_MEASURE_VON_MISES = STRESS_MEASURE_VON_MISES
+MESH_STRESS_MEASURE_ENERGY = "energy"
+MESH_STRESS_MEASURES = (
+    MESH_STRESS_MEASURE_SIGMA_12,
+    MESH_STRESS_MEASURE_VON_MISES,
+    MESH_STRESS_MEASURE_ENERGY,
+)
 PROGRESS_GRID_SIZE_THRESHOLD = 400
 MATRIX_PANEL_FIGSIZE = (3.6, 3.5)
 STANDALONE_FIGSIZE = (MATRIX_PANEL_FIGSIZE[0] + 1.0, MATRIX_PANEL_FIGSIZE[1])
@@ -130,16 +148,84 @@ ELEMENT_PAIR_GRID_ZORDER = 8
 # Edit these values directly when running the script from an IDE or with:
 #     python MTMath/elementPairParameterization.py
 
-RESOLUTION=100
+RESOLUTION=400
+
+# Plot-family switches.
+PLOT_PARAMETERIZATION_GRIDS = False
+PLOT_ENERGY_HEATMAPS = False
+PLOT_FOCUSED_ENERGY_HEATMAPS = False
+PLOT_CAUCHY_STRESS_COMPONENTS = False
+PLOT_CAUCHY_STRESS_MEASURES = False
+PLOT_ELEMENT_SHEAR_STRESS = False
+PLOT_ELEMENT_VON_MISES_STRESS = False
+PLOT_FIRST_ELEMENT_G = False
+PLOT_MESH_PARAMETERIZATION_STRESS = True
+
+# Topology switches.
+PLOT_FIRST_FLIP = True
+PLOT_SECOND_FLIP = False
+
+# Parameterization switches.
+PLOT_SYMMETRIC_PARAMETERIZATION = True
+PLOT_ANTISYMMETRIC_PARAMETERIZATION = False
+
+# Heatmap-content switches.
+PLOT_COMBINED_ENERGY_AND_REGIONS_HEATMAP = False
+PLOT_ENERGY_ONLY_HEATMAP = True
+PLOT_REGIONS_ONLY_HEATMAP = False
+PLOT_FIXED_VECTOR_REGION_HEATMAPS = False
+
+# Value-selection switches. These control both stress plots and per-element
+# energy heatmaps.
+PLOT_AVERAGED_VALUES = True
+PLOT_ELEMENT_1_VALUES = True
+PLOT_ELEMENT_2_VALUES = True
+COMBINE_ELEMENT_PDFS = True
+
+# Field-value modes. Plots are exported under one subfolder per mode.
+PLOT_DIFFERENCE_VALUE_MODE = True
+PLOT_CURRENT_VALUE_MODE = True
+PLOT_FLIPPED_VALUE_MODE = True
+
 # Main heatmap window. w=L-sqrt(2) directly controls the shared-edge length;
 # w=(-0.60, 0.60) corresponds to L=(0.814..., 2.014...).
 # The parameter axis is u for symmetric mode and v for antisymmetric mode.
 MAIN_VIEW_w_RANGE = (-0.60, 0.60)
 MAIN_VIEW_PARAMETER_RANGE = (0.0, 0.5)
+GAMMA_C = ContiEnergy.simpleShearStabilityLimit
+MESH_PARAMETERIZATION_ENERGY_REFERENCE_GAMMA = 0.5
+MESH_PARAMETERIZATION_SOURCE_FOLDER = Path(
+    "/Volumes/data/MTS2D_output/"
+    "simpleShear,s200x200l0.15,1e-05,5.0PBCedgeFlipt5epsR1e-05"
+    "LBFGSEpsg1e-08LBFGSEpsx1e-06s0"
+)
+MESH_PARAMETERIZATION_STRESS_MEASURES = (
+    MESH_STRESS_MEASURE_VON_MISES,
+    MESH_STRESS_MEASURE_ENERGY,
+    MESH_STRESS_MEASURE_SIGMA_12,
+)
+MESH_PARAMETERIZATION_STRESS_SELECTIONS = (
+    STRESS_SELECTION_AVERAGE,
+    STRESS_SELECTION_ELEMENT_1,
+    STRESS_SELECTION_ELEMENT_2,
+)
 
 # Keep False to color the full parameterization domain. Set True to only color
-# values inside the current no-flip region while keeping the region outline.
+# values inside the no-flip region while keeping the region outline.
 MASK_COLOR_OUTSIDE_NO_FLIP_REGION = False
+
+DEFAULT_HEATMAP_CONTENTS = tuple(
+    content
+    for enabled, content in (
+        (PLOT_COMBINED_ENERGY_AND_REGIONS_HEATMAP, HEATMAP_COMBINED),
+        (PLOT_ENERGY_ONLY_HEATMAP, HEATMAP_ENERGY_ONLY),
+        (PLOT_REGIONS_ONLY_HEATMAP, HEATMAP_REGIONS_ONLY),
+    )
+    if enabled
+)
+DEFAULT_EXTRA_REGION_G_VECTOR_CHOICES = (
+    FIXED_G_VECTOR_CHOICES if PLOT_FIXED_VECTOR_REGION_HEATMAPS else ()
+)
 
 
 @dataclass(frozen=True)
@@ -178,15 +264,39 @@ SECOND_FLIP_T14_TO_T23 = FlipMode(
     flipped_diagonal=DIAGONAL_23,
 )
 DEFAULT_FLIP_MODES = (FIRST_FLIP_T23_TO_T14, SECOND_FLIP_T14_TO_T23)
-DEFAULT_PLOTTED_FLIP_MODES = (FIRST_FLIP_T23_TO_T14,)
-DEFAULT_STRESS_SELECTIONS = (
-    STRESS_SELECTION_AVERAGE,
-    STRESS_SELECTION_ELEMENT_1,
-    STRESS_SELECTION_ELEMENT_2,
+DEFAULT_PLOTTED_FLIP_MODES = tuple(
+    flip_mode
+    for enabled, flip_mode in (
+        (PLOT_FIRST_FLIP, FIRST_FLIP_T23_TO_T14),
+        (PLOT_SECOND_FLIP, SECOND_FLIP_T14_TO_T23),
+    )
+    if enabled
 )
-DEFAULT_PARAMETERIZATIONS = (
-    ParameterizationConfig(PARAMETERIZATION_SYMMETRIC),
-    ParameterizationConfig(PARAMETERIZATION_ANTISYMMETRIC),
+DEFAULT_STRESS_SELECTIONS = tuple(
+    stress_selection
+    for enabled, stress_selection in (
+        (PLOT_AVERAGED_VALUES, STRESS_SELECTION_AVERAGE),
+        (PLOT_ELEMENT_1_VALUES, STRESS_SELECTION_ELEMENT_1),
+        (PLOT_ELEMENT_2_VALUES, STRESS_SELECTION_ELEMENT_2),
+    )
+    if enabled
+)
+DEFAULT_FIELD_VALUE_MODES = tuple(
+    value_mode
+    for enabled, value_mode in (
+        (PLOT_DIFFERENCE_VALUE_MODE, FIELD_VALUE_MODE_DIFFERENCE),
+        (PLOT_CURRENT_VALUE_MODE, FIELD_VALUE_MODE_CURRENT),
+        (PLOT_FLIPPED_VALUE_MODE, FIELD_VALUE_MODE_FLIPPED),
+    )
+    if enabled
+)
+DEFAULT_PARAMETERIZATIONS = tuple(
+    ParameterizationConfig(mode)
+    for enabled, mode in (
+        (PLOT_SYMMETRIC_PARAMETERIZATION, PARAMETERIZATION_SYMMETRIC),
+        (PLOT_ANTISYMMETRIC_PARAMETERIZATION, PARAMETERIZATION_ANTISYMMETRIC),
+    )
+    if enabled
 )
 
 
@@ -238,7 +348,7 @@ class HeatmapElementPairGridConfig:
 @dataclass(frozen=True)
 class ReferenceContourConfig:
     draw: bool = True
-    shear: float = 0.5
+    gamma_c: float = GAMMA_C
     color: str = "black"
     linestyle: str = "--"
     linewidth: float = 1.4
@@ -261,7 +371,7 @@ class HeatmapConfig:
     reconnection_contours: ReconnectionContourConfig = ReconnectionContourConfig()
     element_pair_grid: HeatmapElementPairGridConfig = HeatmapElementPairGridConfig()
     contents: tuple[str, ...] = DEFAULT_HEATMAP_CONTENTS
-    extra_region_g_vector_choices: tuple[str, ...] = ()
+    extra_region_g_vector_choices: tuple[str, ...] = DEFAULT_EXTRA_REGION_G_VECTOR_CHOICES
     mask_color_outside_no_flip_region: bool = MASK_COLOR_OUTSIDE_NO_FLIP_REGION
 
 
@@ -309,6 +419,49 @@ class ScalarFieldPlotConfig:
 
 
 @dataclass(frozen=True)
+class MeshParameterizationPlotConfig:
+    source_folder: Path
+    output_path: Path
+    resolution: int
+    w_range: tuple[float, float]
+    parameter_range: tuple[float, float]
+    stress_measures: tuple[str, ...] = MESH_PARAMETERIZATION_STRESS_MEASURES
+    stress_selections: tuple[str, ...] = MESH_PARAMETERIZATION_STRESS_SELECTIONS
+    cmap: str = "coolwarm"
+    color_scale: str = "linear"  # "linear" or "power"
+    power_gamma: float = 0.5
+    centered_colorbar: bool = False
+    color_limits_from_delaunay_switch_region: bool = True
+    reconnection_contours: ReconnectionContourConfig = ReconnectionContourConfig()
+    element_pair_grid: HeatmapElementPairGridConfig = HeatmapElementPairGridConfig(
+        draw=False
+    )
+    valid_pair_color: str = "black"
+    invalid_pair_color: str = "red"
+    hide_invalid_pair_points: bool = True
+    energy_reference_gamma: float = MESH_PARAMETERIZATION_ENERGY_REFERENCE_GAMMA
+    point_alpha: float = 0.22
+    point_size: float = 5.0
+    fit_padding_fraction: float = 0.05
+    max_background_parameter: float = 1.0 - 1e-6
+
+
+@dataclass(frozen=True)
+class MeshParameterizationSamples:
+    source_folder: Path
+    vtu_file: Path
+    w_values: np.ndarray
+    parameter_values: np.ndarray
+    v_values: np.ndarray
+    valid_pair_mask: np.ndarray
+    total_shared_edge_pairs: int
+    skipped_boundary_edges: int
+    skipped_nonmanifold_edges: int
+    skipped_same_side_pairs: int
+    periodic_twin_pairs_ignored: int
+
+
+@dataclass(frozen=True)
 class PlotConfig:
     flip_mode: FlipMode
     parameterization: ParameterizationConfig
@@ -322,14 +475,23 @@ class PlotConfig:
     element_shear_stress: ScalarFieldPlotConfig
     element_von_mises_stress: ScalarFieldPlotConfig
     first_element_G: MatrixFieldPlotConfig
+    mesh_parameterization_stress: MeshParameterizationPlotConfig
     flip_modes: tuple[FlipMode, ...] = DEFAULT_PLOTTED_FLIP_MODES
     parameterizations: tuple[ParameterizationConfig, ...] = DEFAULT_PARAMETERIZATIONS
     stress_selections: tuple[str, ...] = DEFAULT_STRESS_SELECTIONS
+    value_modes: tuple[str, ...] = DEFAULT_FIELD_VALUE_MODES
     assert_element_stress_component_signs: bool = False
     combine_element_pdfs: bool = True
     remove_figure_titles: bool = True
-    plot_focused_heatmap: bool = False
-    plot_first_element_G: bool = False
+    plot_parameterization_grids: bool = PLOT_PARAMETERIZATION_GRIDS
+    plot_energy_heatmaps: bool = PLOT_ENERGY_HEATMAPS
+    plot_focused_heatmap: bool = PLOT_FOCUSED_ENERGY_HEATMAPS
+    plot_cauchy_stress_difference: bool = PLOT_CAUCHY_STRESS_COMPONENTS
+    plot_cauchy_stress_measures: bool = PLOT_CAUCHY_STRESS_MEASURES
+    plot_element_shear_stress: bool = PLOT_ELEMENT_SHEAR_STRESS
+    plot_element_von_mises_stress: bool = PLOT_ELEMENT_VON_MISES_STRESS
+    plot_first_element_G: bool = PLOT_FIRST_ELEMENT_G
+    plot_mesh_parameterization_stress: bool = PLOT_MESH_PARAMETERIZATION_STRESS
     show: bool = False
 
 
@@ -408,8 +570,8 @@ CONFIG = PlotConfig(
         resolution=RESOLUTION,
         w_range=MAIN_VIEW_w_RANGE,
         parameter_range=MAIN_VIEW_PARAMETER_RANGE,
-        title=r"Element-averaged von Mises stress difference",
-        colorbar_label=r"$\Delta \left\langle \sigma_{\mathrm{vM}} \right\rangle$",
+        title=r"Element-averaged von Mises stress-change magnitude",
+        colorbar_label=r"$(\Delta \left\langle \sigma \right\rangle)_{\mathrm{vM}}$",
     ),
     first_element_G=MatrixFieldPlotConfig(
         output_path=PLOTS_DIR / "two_element_parameterization_first_element_G.pdf",
@@ -422,15 +584,31 @@ CONFIG = PlotConfig(
         cmap="viridis",
         centered_colorbar=False,
     ),
+    mesh_parameterization_stress=MeshParameterizationPlotConfig(
+        source_folder=MESH_PARAMETERIZATION_SOURCE_FOLDER,
+        output_path=PLOTS_DIR / "two_element_parameterization_mesh_stress.pdf",
+        resolution=RESOLUTION,
+        w_range=MAIN_VIEW_w_RANGE,
+        parameter_range=MAIN_VIEW_PARAMETER_RANGE,
+    ),
     flip_modes=DEFAULT_PLOTTED_FLIP_MODES,
     # Default to both the symmetric slice v=0 from PDF Section 6.1 and the
     # antisymmetric affine slice u=0 from PDF Section 5.
     parameterizations=DEFAULT_PARAMETERIZATIONS,
     stress_selections=DEFAULT_STRESS_SELECTIONS,
+    value_modes=DEFAULT_FIELD_VALUE_MODES,
     assert_element_stress_component_signs=False,
-    combine_element_pdfs=True,
+    combine_element_pdfs=COMBINE_ELEMENT_PDFS,
     remove_figure_titles=True,
-    plot_first_element_G=False,
+    plot_parameterization_grids=PLOT_PARAMETERIZATION_GRIDS,
+    plot_energy_heatmaps=PLOT_ENERGY_HEATMAPS,
+    plot_focused_heatmap=PLOT_FOCUSED_ENERGY_HEATMAPS,
+    plot_cauchy_stress_difference=PLOT_CAUCHY_STRESS_COMPONENTS,
+    plot_cauchy_stress_measures=PLOT_CAUCHY_STRESS_MEASURES,
+    plot_element_shear_stress=PLOT_ELEMENT_SHEAR_STRESS,
+    plot_element_von_mises_stress=PLOT_ELEMENT_VON_MISES_STRESS,
+    plot_first_element_G=PLOT_FIRST_ELEMENT_G,
+    plot_mesh_parameterization_stress=PLOT_MESH_PARAMETERIZATION_STRESS,
     show=False,
 )
 
@@ -1155,7 +1333,7 @@ def reference_simple_shear_energy(
     energy. Element-specific plots use one half-area element instead.
     """
     validate_stress_selection(element_selection)
-    F = horizontal_simple_shear_F(config.shear)
+    F = horizontal_simple_shear_F(config.gamma_c)
     energy_density = ContiEnergy.energy_from_F(
         F,
         **material_kwargs(material),
@@ -1170,7 +1348,7 @@ def reference_simple_shear_cauchy_stress(
     config: ReferenceContourConfig,
 ) -> np.ndarray:
     """Return the Cauchy stress for the same simple shear as the energy contour."""
-    F = horizontal_simple_shear_F(config.shear)
+    F = horizontal_simple_shear_F(config.gamma_c)
     return ContiEnergy.cauchy_from_F(
         F,
         **material_kwargs(material),
@@ -1233,6 +1411,25 @@ def select_energy_values(
         )
     if element_selection == STRESS_SELECTION_AVERAGE:
         return np.sum(element_energy, axis=-1)
+    return select_two_element_values(
+        element_energy,
+        element_selection,
+        element_axis=-1,
+    )
+
+
+def select_mesh_energy_values(
+    element_energy: np.ndarray,
+    element_selection: str,
+) -> np.ndarray:
+    validate_stress_selection(element_selection)
+    if element_energy.shape[-1] != 2:
+        raise ValueError(
+            "element_energy must have exactly two values on the last axis, "
+            f"got shape {element_energy.shape}."
+        )
+    if element_selection == STRESS_SELECTION_AVERAGE:
+        return np.mean(element_energy, axis=-1)
     return select_two_element_values(
         element_energy,
         element_selection,
@@ -1376,7 +1573,7 @@ def pair_cauchy_stress_grid(
     )
 
 
-def cauchy_stress_difference_grid(
+def cauchy_stress_value_grids(
     w_values: np.ndarray,
     parameter_values: np.ndarray,
     material: MaterialConfig = CONFIG.material,
@@ -1413,11 +1610,38 @@ def cauchy_stress_difference_grid(
             flipped_stress,
             f"{flip_mode.name} flipped",
         )
-    return select_two_element_values(
-        flipped_stress - current_stress,
+    current_values = select_two_element_values(
+        current_stress,
         stress_selection,
         element_axis=-3,
     )
+    flipped_values = select_two_element_values(
+        flipped_stress,
+        stress_selection,
+        element_axis=-3,
+    )
+    return flipped_values - current_values, current_values, flipped_values
+
+
+def cauchy_stress_difference_grid(
+    w_values: np.ndarray,
+    parameter_values: np.ndarray,
+    material: MaterialConfig = CONFIG.material,
+    parameterization: ParameterizationConfig = CONFIG.parameterization,
+    flip_mode: FlipMode = CONFIG.flip_mode,
+    assert_component_signs: bool = False,
+    stress_selection: str = STRESS_SELECTION_AVERAGE,
+) -> np.ndarray:
+    values, _, _ = cauchy_stress_value_grids(
+        w_values,
+        parameter_values,
+        material=material,
+        parameterization=parameterization,
+        flip_mode=flip_mode,
+        assert_component_signs=assert_component_signs,
+        stress_selection=stress_selection,
+    )
+    return values
 
 
 def stress_measure_difference_grid(
@@ -1429,7 +1653,12 @@ def stress_measure_difference_grid(
     flip_mode: FlipMode = CONFIG.flip_mode,
     stress_selection: str = STRESS_SELECTION_AVERAGE,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return Delta measure = measure(flipped) - measure(current)."""
+    """Return selected stress-measure change.
+
+    For linear measures this is measure(flipped) - measure(current). For von
+    Mises this is instead measure(flipped - current), so the plot shows the
+    magnitude of the tensorial stress change.
+    """
     validate_stress_measures((measure,))
     validate_stress_selection(stress_selection)
     current_stress = element_cauchy_stress_grid(
@@ -1460,17 +1689,26 @@ def stress_measure_difference_grid(
             flipped_stress,
             f"{flip_mode.name} flipped",
         )
-    current_values = select_two_element_values(
-        stress_measure_values(current_stress, measure),
+    current_selected_stress = select_two_element_values(
+        current_stress,
         stress_selection,
-        element_axis=-1,
+        element_axis=-3,
     )
-    flipped_values = select_two_element_values(
-        stress_measure_values(flipped_stress, measure),
+    flipped_selected_stress = select_two_element_values(
+        flipped_stress,
         stress_selection,
-        element_axis=-1,
+        element_axis=-3,
     )
-    return flipped_values - current_values, current_values, flipped_values
+    current_values = stress_measure_values(current_selected_stress, measure)
+    flipped_values = stress_measure_values(flipped_selected_stress, measure)
+    if measure == STRESS_MEASURE_VON_MISES:
+        values = stress_measure_values(
+            flipped_selected_stress - current_selected_stress,
+            measure,
+        )
+    else:
+        values = flipped_values - current_values
+    return values, current_values, flipped_values
 
 
 def element_stress_measure_difference_grid(
@@ -1510,7 +1748,24 @@ def element_stress_measure_difference_grid(
         measure,
         stress_selection=stress_selection,
     )
-    return flipped_values - current_values, current_values, flipped_values
+    if measure == ELEMENT_STRESS_MEASURE_VON_MISES_AVERAGE:
+        current_selected_stress = select_two_element_values(
+            current_stress,
+            stress_selection,
+            element_axis=-3,
+        )
+        flipped_selected_stress = select_two_element_values(
+            flipped_stress,
+            stress_selection,
+            element_axis=-3,
+        )
+        values = stress_measure_values(
+            flipped_selected_stress - current_selected_stress,
+            STRESS_MEASURE_VON_MISES,
+        )
+    else:
+        values = flipped_values - current_values
+    return values, current_values, flipped_values
 
 
 def first_element_G_grid(
@@ -1570,6 +1825,42 @@ def edge_flip_energy_difference_grid(
     )
     current_energy = select_energy_values(current_element_energy, element_selection)
     flipped_energy = select_energy_values(flipped_element_energy, element_selection)
+    return flipped_energy - current_energy, current_energy, flipped_energy
+
+
+def mesh_energy_difference_grid(
+    w_values: np.ndarray,
+    parameter_values: np.ndarray,
+    material: MaterialConfig = CONFIG.material,
+    parameterization: ParameterizationConfig = CONFIG.parameterization,
+    flip_mode: FlipMode = CONFIG.flip_mode,
+    element_selection: str = STRESS_SELECTION_AVERAGE,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    validate_stress_selection(element_selection)
+    current_element_energy = element_energy_grid(
+        w_values,
+        parameter_values,
+        flip_mode.current_triangles,
+        material=material,
+        parameterization=parameterization,
+        flip_mode=flip_mode,
+    )
+    flipped_element_energy = element_energy_grid(
+        w_values,
+        parameter_values,
+        flip_mode.flipped_triangles,
+        material=material,
+        parameterization=parameterization,
+        flip_mode=flip_mode,
+    )
+    current_energy = select_mesh_energy_values(
+        current_element_energy,
+        element_selection,
+    )
+    flipped_energy = select_mesh_energy_values(
+        flipped_element_energy,
+        element_selection,
+    )
     return flipped_energy - current_energy, current_energy, flipped_energy
 
 
@@ -2097,8 +2388,10 @@ def add_hatched_region_overlay(
 def reference_energy_label(
     config: ReferenceContourConfig,
     element_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> str:
     validate_stress_selection(element_selection)
+    validate_field_value_mode(value_mode)
     if config.label is not None:
         return config.label
     element_suffix = (
@@ -2106,9 +2399,67 @@ def reference_energy_label(
         if element_selection == STRESS_SELECTION_AVERAGE
         else rf"^{{({element_selection_index(element_selection)})}}"
     )
+    gamma_label = (
+        r"\gamma_c"
+        if np.isclose(config.gamma_c, GAMMA_C)
+        else rf"\gamma={config.gamma_c:g}"
+    )
+    if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+        mode = (
+            r"\mathrm{current}"
+            if value_mode == FIELD_VALUE_MODE_CURRENT
+            else r"\mathrm{flipped}"
+        )
+        return rf"$E_{{{mode}}}{element_suffix} = E_{{{gamma_label}}}{element_suffix}$"
     return (
         rf"$|\Delta E{element_suffix}| = "
-        rf"E_{{\gamma={config.shear:g}}}{element_suffix}$"
+        rf"E_{{{gamma_label}}}{element_suffix}$"
+    )
+
+
+def energy_plot_label(
+    element_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
+) -> str:
+    validate_stress_selection(element_selection)
+    validate_field_value_mode(value_mode)
+    if value_mode == FIELD_VALUE_MODE_DIFFERENCE:
+        if element_selection == STRESS_SELECTION_AVERAGE:
+            return r"$\Delta E = E_{\mathrm{flipped}} - E_{\mathrm{current}}$"
+        element_index = element_selection_index(element_selection)
+        return (
+            rf"$\Delta E^{{({element_index})}}"
+            rf" = E_{{\mathrm{{flipped}}}}^{{({element_index})}}"
+            rf" - E_{{\mathrm{{current}}}}^{{({element_index})}}$"
+        )
+
+    mode = (
+        r"\mathrm{current}"
+        if value_mode == FIELD_VALUE_MODE_CURRENT
+        else r"\mathrm{flipped}"
+    )
+    if element_selection == STRESS_SELECTION_AVERAGE:
+        return rf"$E_{{{mode}}}$"
+    element_index = element_selection_index(element_selection)
+    return rf"$E_{{{mode}}}^{{({element_index})}}$"
+
+
+def mesh_reference_energy_label(
+    config: ReferenceContourConfig,
+    element_selection: str = STRESS_SELECTION_AVERAGE,
+) -> str:
+    validate_stress_selection(element_selection)
+    gamma_label = (
+        r"\gamma_c"
+        if np.isclose(config.gamma_c, GAMMA_C)
+        else rf"\gamma={config.gamma_c:g}"
+    )
+    if element_selection == STRESS_SELECTION_AVERAGE:
+        return rf"$|\Delta \left\langle E \right\rangle| = E_{{{gamma_label}}}$"
+    element_index = element_selection_index(element_selection)
+    return (
+        rf"$|\Delta E^{{({element_index})}}| = "
+        rf"E_{{{gamma_label}}}^{{({element_index})}}$"
     )
 
 
@@ -2428,6 +2779,7 @@ def add_field_overlay_legend(
     reconnection_contours: ReconnectionContourConfig,
     reference_contour: ReferenceContourConfig | None,
     reference_label: str | None = None,
+    extra_handles: tuple[Line2D, ...] = (),
 ) -> None:
     legend_handles = []
     if current_contour_drawn:
@@ -2437,19 +2789,20 @@ def add_field_overlay_legend(
                 [0, 0],
                 color=reconnection_contours.current_color,
                 linewidth=reconnection_contours.linewidth,
-                label="current no-flip region",
+                label="no-flip region",
             )
         )
+    if delaunay_contour_drawn:
+        legend_handles.append(delaunay_contour_handle(reconnection_contours))
     if reference_contour_drawn and reference_contour is not None:
         legend_handles.append(
             reference_contour_handle(
                 reference_contour,
                 reference_label
-                or rf"simple-shear stress at $\gamma={reference_contour.shear:g}$",
+                or r"simple-shear stress at $\gamma_c$",
             )
         )
-    if delaunay_contour_drawn:
-        legend_handles.append(delaunay_contour_handle(reconnection_contours))
+    legend_handles.extend(extra_handles)
     if legend_handles:
         legend = ax.legend(
             handles=legend_handles,
@@ -2521,6 +2874,267 @@ def sampled_parameter_values(
         np.linspace(w_range[0], w_range[1], resolution),
         np.linspace(parameter_range[0], parameter_range[1], resolution),
     )
+
+
+def validate_mesh_stress_measure(measure: str) -> None:
+    if measure not in MESH_STRESS_MEASURES:
+        raise ValueError(
+            f"Unsupported mesh stress measure {measure!r}. "
+            f"Use one of {MESH_STRESS_MEASURES}."
+        )
+
+
+def validate_mesh_parameterization_plot_config(
+    config: MeshParameterizationPlotConfig,
+) -> None:
+    if len(config.stress_measures) == 0:
+        raise ValueError("Mesh stress measures must not be empty.")
+    for measure in config.stress_measures:
+        validate_mesh_stress_measure(measure)
+    validate_stress_selections(config.stress_selections)
+    if not isinstance(config.hide_invalid_pair_points, bool):
+        raise ValueError(
+            "hide_invalid_pair_points must be a bool, "
+            f"got {config.hide_invalid_pair_points!r}."
+        )
+    if not np.isfinite(config.energy_reference_gamma):
+        raise ValueError(
+            "energy_reference_gamma must be finite, "
+            f"got {config.energy_reference_gamma}."
+        )
+    if not 0.0 <= config.point_alpha <= 1.0:
+        raise ValueError(f"point_alpha must be in [0, 1], got {config.point_alpha}.")
+    if config.point_size <= 0.0:
+        raise ValueError(f"point_size must be positive, got {config.point_size}.")
+    if config.fit_padding_fraction < 0.0:
+        raise ValueError(
+            "fit_padding_fraction must be non-negative, "
+            f"got {config.fit_padding_fraction}."
+        )
+    if config.max_background_parameter <= 0.0:
+        raise ValueError(
+            "max_background_parameter must be positive, "
+            f"got {config.max_background_parameter}."
+        )
+
+
+def _cell_edges(triangle: np.ndarray) -> tuple[tuple[int, int], ...]:
+    a, b, c = [int(node) for node in triangle]
+    return (
+        tuple(sorted((a, b))),
+        tuple(sorted((b, c))),
+        tuple(sorted((a, c))),
+    )
+
+
+def shared_edge_cell_pairs(
+    connectivity: np.ndarray,
+) -> tuple[list[tuple[int, int]], int, int]:
+    if connectivity.ndim != 2 or connectivity.shape[1] != 3:
+        raise ValueError(f"Expected triangle connectivity with shape (n, 3), got {connectivity.shape}.")
+
+    edge_to_cells: dict[tuple[int, int], list[int]] = {}
+    for cell_index, triangle in enumerate(connectivity):
+        for edge in _cell_edges(triangle):
+            edge_to_cells.setdefault(edge, []).append(cell_index)
+
+    pairs = []
+    skipped_boundary_edges = 0
+    skipped_nonmanifold_edges = 0
+    for cells in edge_to_cells.values():
+        if len(cells) == 2:
+            pairs.append((int(cells[0]), int(cells[1])))
+        elif len(cells) == 1:
+            skipped_boundary_edges += 1
+        else:
+            skipped_nonmanifold_edges += 1
+    return pairs, skipped_boundary_edges, skipped_nonmanifold_edges
+
+
+def reciprocal_twin_mask(twin_ids: np.ndarray, pairs: list[tuple[int, int]]) -> np.ndarray:
+    twin_ids = np.asarray(twin_ids, dtype=float)
+    if twin_ids.ndim != 1:
+        raise ValueError(f"twinID must be a 1D cell field, got shape {twin_ids.shape}.")
+    rounded = np.rint(twin_ids)
+    finite_twins = np.isfinite(twin_ids)
+    if np.any(finite_twins & ~np.isclose(twin_ids, rounded)):
+        bad_index = int(np.flatnonzero(finite_twins & ~np.isclose(twin_ids, rounded))[0])
+        raise ValueError(
+            f"Expected integer-valued twinID entries, got {twin_ids[bad_index]} "
+            f"at cell {bad_index}."
+        )
+    twin_int = np.where(finite_twins, rounded, -1).astype(int)
+
+    valid = np.zeros(len(pairs), dtype=bool)
+    for pair_index, (cell_a, cell_b) in enumerate(pairs):
+        valid[pair_index] = (
+            0 <= twin_int[cell_a] < len(twin_int)
+            and 0 <= twin_int[cell_b] < len(twin_int)
+            and twin_int[cell_a] == cell_b
+            and twin_int[cell_b] == cell_a
+        )
+    return valid
+
+
+def ignored_periodic_twin_pair_count(
+    twin_ids: np.ndarray,
+    connectivity: np.ndarray,
+) -> int:
+    twin_values = np.asarray(twin_ids, dtype=float)
+    finite_twins = np.isfinite(twin_values)
+    twin_int = np.where(finite_twins, np.rint(twin_values), -1).astype(int)
+    count = 0
+    for cell_a, cell_b in enumerate(twin_int):
+        if cell_b < 0 or cell_a >= cell_b or cell_b >= len(twin_int):
+            continue
+        if twin_int[cell_b] != cell_a:
+            continue
+        shared_nodes = set(connectivity[cell_a]) & set(connectivity[cell_b])
+        if len(shared_nodes) != 2:
+            count += 1
+    return count
+
+
+def map_shared_edge_pair_to_wuv(
+    points: np.ndarray,
+    connectivity: np.ndarray,
+    cell_a: int,
+    cell_b: int,
+) -> tuple[float, float, float] | None:
+    triangle_a = set(int(node) for node in connectivity[cell_a])
+    triangle_b = set(int(node) for node in connectivity[cell_b])
+    shared_nodes = list(triangle_a & triangle_b)
+    if len(shared_nodes) != 2:
+        return None
+    outer_a_nodes = list(triangle_a - set(shared_nodes))
+    outer_b_nodes = list(triangle_b - set(shared_nodes))
+    if len(outer_a_nodes) != 1 or len(outer_b_nodes) != 1:
+        raise RuntimeError(
+            f"Expected one outer node for cells {cell_a}, {cell_b}; "
+            f"got {outer_a_nodes}, {outer_b_nodes}."
+        )
+
+    x2 = points[shared_nodes[0]]
+    x3 = points[shared_nodes[1]]
+    lower_or_upper_a = points[outer_a_nodes[0]]
+    lower_or_upper_b = points[outer_b_nodes[0]]
+
+    edge_vector = x3 - x2
+    L = float(np.linalg.norm(edge_vector))
+    if L <= 1e-12:
+        raise RuntimeError(f"Cells {cell_a}, {cell_b} share a near-zero-length edge.")
+    edge_unit = edge_vector / L
+    normal_unit = np.array([-edge_unit[1], edge_unit[0]])
+    signed_height_a = float((lower_or_upper_a - x2) @ normal_unit)
+    signed_height_b = float((lower_or_upper_b - x2) @ normal_unit)
+    if signed_height_a * signed_height_b >= 0.0:
+        return None
+    lower_node, upper_node = (
+        (lower_or_upper_a, lower_or_upper_b)
+        if signed_height_a < 0.0
+        else (lower_or_upper_b, lower_or_upper_a)
+    )
+
+    s = float((lower_node - x2) @ edge_unit / L)
+    t = float((upper_node - x2) @ edge_unit / L)
+    u = s + t - 1.0
+    v = s - t
+    if u < 0.0:
+        u = -u
+        v = -v
+    return float(w_from_L(L)), float(u), float(v)
+
+
+def load_mesh_parameterization_samples(
+    source_folder: Path,
+) -> MeshParameterizationSamples:
+    from Plotting.dataFunctions import VTUData, resolve_vtu_files
+
+    source_folder = Path(source_folder)
+    if not source_folder.exists():
+        raise FileNotFoundError(f"Mesh source folder does not exist: {source_folder}")
+
+    vtu_file = Path(resolve_vtu_files(source_folder)[-1])
+    data = VTUData(vtu_file)
+    points = np.asarray(data.get_nodes(), dtype=float)
+    if points.ndim != 2 or points.shape[1] < 2:
+        raise RuntimeError(f"Expected node coordinates with shape (n, >=2), got {points.shape}.")
+    points = points[:, :2]
+    connectivity = np.asarray(data.get_connectivity(), dtype=int)
+    twin_ids = data.get_cell_data("twinID")
+    if len(twin_ids) != len(connectivity):
+        raise RuntimeError(
+            f"Expected one twinID per cell, got {len(twin_ids)} twin IDs and "
+            f"{len(connectivity)} cells."
+        )
+
+    pairs, skipped_boundary_edges, skipped_nonmanifold_edges = shared_edge_cell_pairs(
+        connectivity
+    )
+    valid_pair_mask = reciprocal_twin_mask(twin_ids, pairs)
+    periodic_twin_pairs_ignored = ignored_periodic_twin_pair_count(
+        twin_ids,
+        connectivity,
+    )
+
+    w_values = []
+    parameter_values = []
+    v_values = []
+    kept_valid_pair_mask = []
+    skipped_same_side_pairs = 0
+    for pair_index, (cell_a, cell_b) in enumerate(pairs):
+        mapped = map_shared_edge_pair_to_wuv(points, connectivity, cell_a, cell_b)
+        if mapped is None:
+            skipped_same_side_pairs += 1
+            continue
+        w, u, v = mapped
+        w_values.append(w)
+        parameter_values.append(u)
+        v_values.append(v)
+        kept_valid_pair_mask.append(valid_pair_mask[pair_index])
+
+    if not w_values:
+        raise RuntimeError(f"No shared-edge mesh pairs could be mapped from {vtu_file}.")
+
+    return MeshParameterizationSamples(
+        source_folder=source_folder,
+        vtu_file=vtu_file,
+        w_values=np.asarray(w_values, dtype=float),
+        parameter_values=np.asarray(parameter_values, dtype=float),
+        v_values=np.asarray(v_values, dtype=float),
+        valid_pair_mask=np.asarray(kept_valid_pair_mask, dtype=bool),
+        total_shared_edge_pairs=len(pairs),
+        skipped_boundary_edges=skipped_boundary_edges,
+        skipped_nonmanifold_edges=skipped_nonmanifold_edges,
+        skipped_same_side_pairs=skipped_same_side_pairs,
+        periodic_twin_pairs_ignored=periodic_twin_pairs_ignored,
+    )
+
+
+def padded_finite_range(
+    values: np.ndarray,
+    padding_fraction: float,
+    *,
+    lower_bound: float | None = None,
+    upper_bound: float | None = None,
+) -> tuple[float, float]:
+    finite_values = np.asarray(values, dtype=float)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    if finite_values.size == 0:
+        raise ValueError("Cannot fit range from no finite values.")
+    vmin = float(np.min(finite_values))
+    vmax = float(np.max(finite_values))
+    span = vmax - vmin
+    padding = padding_fraction * (span if span > 0.0 else max(abs(vmin), 1.0))
+    vmin -= padding
+    vmax += padding
+    if lower_bound is not None:
+        vmin = max(vmin, lower_bound)
+    if upper_bound is not None:
+        vmax = min(vmax, upper_bound)
+    if vmin >= vmax:
+        raise ValueError(f"Could not build increasing fitted range from {values}.")
+    return vmin, vmax
 
 
 def field_color_norm(
@@ -2661,6 +3275,48 @@ def validate_stress_selections(stress_selections: tuple[str, ...]) -> None:
         validate_stress_selection(stress_selection)
 
 
+def validate_field_value_mode(value_mode: str) -> None:
+    if value_mode not in FIELD_VALUE_MODES:
+        raise ValueError(
+            f"Unsupported field value mode {value_mode!r}. "
+            f"Use one of {FIELD_VALUE_MODES}."
+        )
+
+
+def validate_field_value_modes(value_modes: tuple[str, ...]) -> None:
+    if len(value_modes) == 0:
+        raise ValueError("value_modes must contain at least one value.")
+    for value_mode in value_modes:
+        validate_field_value_mode(value_mode)
+
+
+def select_field_value_mode(
+    difference_values: np.ndarray,
+    current_values: np.ndarray,
+    flipped_values: np.ndarray,
+    value_mode: str,
+) -> np.ndarray:
+    validate_field_value_mode(value_mode)
+    if value_mode == FIELD_VALUE_MODE_DIFFERENCE:
+        return difference_values
+    if value_mode == FIELD_VALUE_MODE_CURRENT:
+        return current_values
+    if value_mode == FIELD_VALUE_MODE_FLIPPED:
+        return flipped_values
+    raise RuntimeError(f"Unhandled field value mode {value_mode!r}.")
+
+
+def field_value_mode_label(value_mode: str) -> str:
+    validate_field_value_mode(value_mode)
+    if value_mode == FIELD_VALUE_MODE_DIFFERENCE:
+        return "difference"
+    if value_mode == FIELD_VALUE_MODE_CURRENT:
+        return "current"
+    if value_mode == FIELD_VALUE_MODE_FLIPPED:
+        return "flipped"
+    raise RuntimeError(f"Unhandled field value mode {value_mode!r}.")
+
+
 def select_two_element_values(
     values: np.ndarray,
     stress_selection: str,
@@ -2722,26 +3378,62 @@ def scalar_measure_plot_config_for_selection(
     config: ScalarFieldPlotConfig,
     measure: str,
     stress_selection: str,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> ScalarFieldPlotConfig:
     validate_element_stress_measures((measure,))
     validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
+    mode = (
+        r"\mathrm{current}"
+        if value_mode == FIELD_VALUE_MODE_CURRENT
+        else r"\mathrm{flipped}"
+    )
     if stress_selection == STRESS_SELECTION_AVERAGE:
+        if value_mode == FIELD_VALUE_MODE_DIFFERENCE:
+            return config
+        if measure == ELEMENT_STRESS_MEASURE_SHEAR:
+            return replace(
+                config,
+                title=f"Element-averaged shear stress {field_value_mode_label(value_mode)}",
+                colorbar_label=rf"$\left\langle \sigma_{{12,{mode}}} \right\rangle$",
+            )
+        if measure == ELEMENT_STRESS_MEASURE_VON_MISES_AVERAGE:
+            return replace(
+                config,
+                title=(
+                    "Element-averaged von Mises stress "
+                    f"{field_value_mode_label(value_mode)}"
+                ),
+                colorbar_label=rf"$(\left\langle \sigma_{{{mode}}} \right\rangle)_{{\mathrm{{vM}}}}$",
+            )
         return config
 
     element_index = element_selection_index(stress_selection)
     element_label = stress_selection_label(stress_selection).capitalize()
     if measure == ELEMENT_STRESS_MEASURE_SHEAR:
+        if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+            return replace(
+                config,
+                title=f"{element_label} shear stress {field_value_mode_label(value_mode)}",
+                colorbar_label=rf"$\sigma_{{12,{mode}}}^{{({element_index})}}$",
+            )
         return replace(
             config,
             title=f"{element_label} shear stress difference",
             colorbar_label=rf"$\Delta \sigma_{{12}}^{{({element_index})}}$",
         )
     if measure == ELEMENT_STRESS_MEASURE_VON_MISES_AVERAGE:
+        if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+            return replace(
+                config,
+                title=f"{element_label} von Mises stress {field_value_mode_label(value_mode)}",
+                colorbar_label=rf"$(\sigma_{{{mode}}}^{{({element_index})}})_{{\mathrm{{vM}}}}$",
+            )
         return replace(
             config,
-            title=f"{element_label} von Mises stress difference",
+            title=f"{element_label} von Mises stress-change magnitude",
             colorbar_label=(
-                rf"$\Delta \sigma_{{\mathrm{{vM}}}}^{{({element_index})}}$"
+                rf"$(\Delta \sigma^{{({element_index})}})_{{\mathrm{{vM}}}}$"
             ),
         )
     raise RuntimeError(f"Unhandled element stress measure {measure!r}.")
@@ -2764,10 +3456,18 @@ def matrix_component_label(
     config: MatrixFieldPlotConfig,
     component: tuple[int, int],
     stress_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> str:
     validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
     i, j = component
     if config.component_symbol == r"\Delta\sigma":
+        if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+            mode = r"\mathrm{current}" if value_mode == FIELD_VALUE_MODE_CURRENT else r"\mathrm{flipped}"
+            if stress_selection != STRESS_SELECTION_AVERAGE:
+                element_index = element_selection_index(stress_selection)
+                return rf"$\sigma_{{{i + 1}{j + 1},{mode}}}^{{({element_index})}}$"
+            return rf"$\left\langle \sigma_{{{i + 1}{j + 1},{mode}}} \right\rangle$"
         if stress_selection != STRESS_SELECTION_AVERAGE:
             element_index = element_selection_index(stress_selection)
             return rf"$\Delta \sigma_{{{i + 1}{j + 1}}}^{{({element_index})}}$"
@@ -2780,10 +3480,26 @@ def matrix_component_label(
 def stress_measure_label(
     measure: str,
     stress_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> str:
     validate_stress_measures((measure,))
     validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
     if measure == STRESS_MEASURE_NORMAL_DIFFERENCE_HALF:
+        if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+            mode = r"\mathrm{current}" if value_mode == FIELD_VALUE_MODE_CURRENT else r"\mathrm{flipped}"
+            if stress_selection != STRESS_SELECTION_AVERAGE:
+                element_index = element_selection_index(stress_selection)
+                return (
+                    r"$\left("
+                    r"\frac{\sigma_{11}-\sigma_{22}}{2} \right)"
+                    rf"_{{{mode}}}^{{({element_index})}}$"
+                )
+            return (
+                r"$\left\langle "
+                r"\frac{\sigma_{11}-\sigma_{22}}{2} "
+                rf"\right\rangle_{{{mode}}}$"
+            )
         if stress_selection != STRESS_SELECTION_AVERAGE:
             element_index = element_selection_index(stress_selection)
             return (
@@ -2796,50 +3512,107 @@ def stress_measure_label(
             r"\frac{\sigma_{11}-\sigma_{22}}{2} \right\rangle$"
         )
     if measure == STRESS_MEASURE_VON_MISES:
+        if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+            mode = r"\mathrm{current}" if value_mode == FIELD_VALUE_MODE_CURRENT else r"\mathrm{flipped}"
+            if stress_selection != STRESS_SELECTION_AVERAGE:
+                element_index = element_selection_index(stress_selection)
+                return rf"$(\sigma_{{{mode}}}^{{({element_index})}})_{{\mathrm{{vM}}}}$"
+            return rf"$(\left\langle \sigma_{{{mode}}} \right\rangle)_{{\mathrm{{vM}}}}$"
         if stress_selection != STRESS_SELECTION_AVERAGE:
             element_index = element_selection_index(stress_selection)
-            return rf"$\Delta\sigma_{{\mathrm{{vM}}}}^{{({element_index})}}$"
-        return r"$\Delta\sigma_{\mathrm{vM}}$"
+            return rf"$(\Delta\sigma^{{({element_index})}})_{{\mathrm{{vM}}}}$"
+        return r"$(\Delta\left\langle \sigma \right\rangle)_{\mathrm{vM}}$"
     raise RuntimeError(f"Unhandled stress measure {measure!r}.")
 
 
 def stress_reference_component_label(
     component: tuple[int, int] | None = None,
+    reference_contour: ReferenceContourConfig | None = None,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> str:
+    reference_contour = reference_contour or CONFIG.reference_contour
+    validate_field_value_mode(value_mode)
+    if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+        mode = (
+            r"\mathrm{current}"
+            if value_mode == FIELD_VALUE_MODE_CURRENT
+            else r"\mathrm{flipped}"
+        )
+        if component is None:
+            return rf"$\sigma_{{ij,{mode}}} = \sigma^{{\gamma_c}}_{{ij}}$"
+        i, j = component
+        return (
+            rf"$\sigma_{{{i + 1}{j + 1},{mode}}} = "
+            rf"\sigma^{{\gamma_c}}_{{{i + 1}{j + 1}}}$"
+        )
     if component is None:
         return (
             r"$|\Delta\sigma_{ij}| = "
-            r"|\sigma^{\gamma=0.5}_{ij}|$"
+            r"|\sigma^{\gamma_c}_{ij}|$"
         )
     i, j = component
     return (
         rf"$|\Delta\sigma_{{{i + 1}{j + 1}}}| = "
-        rf"|\sigma^{{\gamma=0.5}}_{{{i + 1}{j + 1}}}|$"
+        rf"|\sigma^{{\gamma_c}}_{{{i + 1}{j + 1}}}|$"
     )
 
 
-def stress_reference_measure_label(measure: str | None = None) -> str:
+def stress_reference_measure_label(
+    measure: str | None = None,
+    reference_contour: ReferenceContourConfig | None = None,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
+) -> str:
+    reference_contour = reference_contour or CONFIG.reference_contour
+    validate_field_value_mode(value_mode)
+    if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+        mode = (
+            r"\mathrm{current}"
+            if value_mode == FIELD_VALUE_MODE_CURRENT
+            else r"\mathrm{flipped}"
+        )
+        if measure is None:
+            return rf"$\sigma_{{\bullet,{mode}}} = \sigma^{{\gamma_c}}_\bullet$"
+        validate_stress_measures((measure,))
+        if measure == STRESS_MEASURE_NORMAL_DIFFERENCE_HALF:
+            return (
+                r"$\left(\frac{\sigma_{11}-\sigma_{22}}{2}\right)"
+                rf"_{{{mode}}} = "
+                r"\left(\frac{\sigma^{\gamma_c}_{11}-\sigma^{\gamma_c}_{22}}{2}\right)$"
+            )
+        if measure == STRESS_MEASURE_VON_MISES:
+            return (
+                rf"$(\sigma_{{{mode}}})_{{\mathrm{{vM}}}} = "
+                r"(\sigma^{\gamma_c})_{\mathrm{vM}}$"
+            )
+        raise RuntimeError(f"Unhandled stress measure {measure!r}.")
     if measure is None:
         return (
             r"$|\Delta\sigma_\bullet| = "
-            r"|\sigma^{\gamma=0.5}_\bullet|$"
+            r"|\sigma^{\gamma_c}_\bullet|$"
         )
     validate_stress_measures((measure,))
     if measure == STRESS_MEASURE_NORMAL_DIFFERENCE_HALF:
         subscript = r"{(11-22)/2}"
     elif measure == STRESS_MEASURE_VON_MISES:
-        subscript = r"{\mathrm{vM}}"
+        return (
+            r"$(\Delta\sigma)_{\mathrm{vM}} = "
+            r"(\sigma^{\gamma_c})_{\mathrm{vM}}$"
+        )
     else:
         raise RuntimeError(f"Unhandled stress measure {measure!r}.")
     return (
         rf"$|\Delta\sigma_{subscript}| = "
-        rf"|\sigma^{{\gamma=0.5}}_{subscript}|$"
+        rf"|\sigma^{{\gamma_c}}_{subscript}|$"
     )
 
 
 def matrix_reference_stress_label(
     fields: tuple[tuple[str, tuple[int, int] | str], ...],
+    reference_contour: ReferenceContourConfig | None = None,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> str:
+    reference_contour = reference_contour or CONFIG.reference_contour
+    validate_field_value_mode(value_mode)
     component_fields = [
         field_value
         for field_kind, field_value in fields
@@ -2852,15 +3625,36 @@ def matrix_reference_stress_label(
     ]
     if component_fields and not measure_fields:
         if len(component_fields) == 1 and isinstance(component_fields[0], tuple):
-            return stress_reference_component_label(component_fields[0])
-        return stress_reference_component_label()
+            return stress_reference_component_label(
+                component_fields[0],
+                reference_contour,
+                value_mode,
+            )
+        return stress_reference_component_label(
+            reference_contour=reference_contour,
+            value_mode=value_mode,
+        )
     if measure_fields and not component_fields:
         if len(measure_fields) == 1 and isinstance(measure_fields[0], str):
-            return stress_reference_measure_label(measure_fields[0])
-        return stress_reference_measure_label()
+            return stress_reference_measure_label(
+                measure_fields[0],
+                reference_contour,
+                value_mode,
+            )
+        return stress_reference_measure_label(
+            reference_contour=reference_contour,
+            value_mode=value_mode,
+        )
+    if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+        mode = (
+            r"\mathrm{current}"
+            if value_mode == FIELD_VALUE_MODE_CURRENT
+            else r"\mathrm{flipped}"
+        )
+        return rf"$\sigma_{{\bullet,{mode}}} = \sigma^{{\gamma_c}}_\bullet$"
     return (
         r"$|\Delta\sigma_\bullet| = "
-        r"|\sigma^{\gamma=0.5}_\bullet|$"
+        r"|\sigma^{\gamma_c}_\bullet|$"
     )
 
 
@@ -2878,12 +3672,25 @@ def draw_matrix_reference_contour(
     return True
 
 
-def element_stress_reference_label(measure: str) -> str:
+def element_stress_reference_label(
+    measure: str,
+    reference_contour: ReferenceContourConfig | None = None,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
+) -> str:
     validate_element_stress_measures((measure,))
+    validate_field_value_mode(value_mode)
     if measure == ELEMENT_STRESS_MEASURE_SHEAR:
-        return stress_reference_component_label((0, 1))
+        return stress_reference_component_label(
+            (0, 1),
+            reference_contour,
+            value_mode,
+        )
     if measure == ELEMENT_STRESS_MEASURE_VON_MISES_AVERAGE:
-        return stress_reference_measure_label(STRESS_MEASURE_VON_MISES)
+        return stress_reference_measure_label(
+            STRESS_MEASURE_VON_MISES,
+            reference_contour,
+            value_mode,
+        )
     raise RuntimeError(f"Unhandled element stress measure {measure!r}.")
 
 
@@ -2925,16 +3732,17 @@ def matrix_plot_field_label(
     config: MatrixFieldPlotConfig,
     field: tuple[str, tuple[int, int] | str],
     stress_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> str:
     field_kind, field_value = field
     if field_kind == MATRIX_FIELD_COMPONENT:
         if not isinstance(field_value, tuple):
             raise RuntimeError(f"Expected component tuple, got {field_value}.")
-        return matrix_component_label(config, field_value, stress_selection)
+        return matrix_component_label(config, field_value, stress_selection, value_mode)
     if field_kind == MATRIX_FIELD_STRESS_MEASURE:
         if not isinstance(field_value, str):
             raise RuntimeError(f"Expected stress-measure string, got {field_value}.")
-        return stress_measure_label(field_value, stress_selection)
+        return stress_measure_label(field_value, stress_selection, value_mode)
     raise RuntimeError(f"Unhandled matrix plot field kind {field_kind!r}.")
 
 
@@ -2983,21 +3791,21 @@ def element_stress_measure_values(
             "element_stress_values must end with shape (2 elements, 2, 2), "
             f"got {element_stress_values.shape}."
         )
+    selected_stress_values = select_two_element_values(
+        element_stress_values,
+        stress_selection,
+        element_axis=-3,
+    )
     if measure == ELEMENT_STRESS_MEASURE_SHEAR:
         sigma12 = 0.5 * (
-            element_stress_values[..., 0, 1]
-            + element_stress_values[..., 1, 0]
+            selected_stress_values[..., 0, 1]
+            + selected_stress_values[..., 1, 0]
         )
-        return select_two_element_values(
-            sigma12,
-            stress_selection,
-            element_axis=-1,
-        )
+        return sigma12
     if measure == ELEMENT_STRESS_MEASURE_VON_MISES_AVERAGE:
-        return select_two_element_values(
-            stress_measure_values(element_stress_values, STRESS_MEASURE_VON_MISES),
-            stress_selection,
-            element_axis=-1,
+        return stress_measure_values(
+            selected_stress_values,
+            STRESS_MEASURE_VON_MISES,
         )
     raise RuntimeError(f"Unhandled element stress measure {measure!r}.")
 
@@ -3024,9 +3832,11 @@ def build_matrix_field_heatmaps(
     flip_mode: FlipMode = CONFIG.flip_mode,
     remove_figure_title: bool = CONFIG.remove_figure_titles,
     stress_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> plt.Figure:
     validate_parameterization(parameterization)
     validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
     plot_fields = matrix_plot_fields(config)
     if matrix_values.shape != (len(parameter_values), len(w_values), 2, 2):
         raise ValueError(
@@ -3108,7 +3918,12 @@ def build_matrix_field_heatmaps(
             parameter_values,
             cmap=cmap,
             norm=norm,
-            title=matrix_plot_field_label(config, field, stress_selection),
+            title=matrix_plot_field_label(
+                config,
+                field,
+                stress_selection,
+                value_mode,
+            ),
             show_xlabel=row == rows - 1,
             show_ylabel=col == 0,
             current_no_flip_mask=current_no_flip_mask,
@@ -3124,7 +3939,12 @@ def build_matrix_field_heatmaps(
         )
         colorbar = fig.colorbar(image, ax=ax)
         colorbar.set_label(
-            label_with_stress_selection(config.colorbar_label, stress_selection)
+            matrix_plot_field_label(
+                config,
+                field,
+                stress_selection,
+                value_mode,
+            )
         )
         current_contour_drawn = (
             panel_current_contour_drawn or current_contour_drawn
@@ -3145,7 +3965,11 @@ def build_matrix_field_heatmaps(
         delaunay_contour_drawn=delaunay_contour_drawn,
         reconnection_contours=reconnection_contours,
         reference_contour=reference_contour,
-        reference_label=matrix_reference_stress_label(tuple(reference_label_fields)),
+        reference_label=matrix_reference_stress_label(
+            tuple(reference_label_fields),
+            reference_contour,
+            value_mode,
+        ),
     )
     if not remove_figure_title:
         fig.suptitle(
@@ -3368,9 +4192,7 @@ def build_scalar_field_panel_heatmaps(
             selected_element_index=selected_element_index,
         )
         colorbar = fig.colorbar(image, ax=ax)
-        colorbar.set_label(
-            label_with_stress_selection(config.colorbar_label, stress_selection)
-        )
+        colorbar.set_label(label)
         current_contour_drawn = (
             panel_current_contour_drawn or current_contour_drawn
         )
@@ -3428,8 +4250,10 @@ def build_cauchy_stress_measure_heatmaps(
     stress_data: dict[str, np.ndarray] | None = None,
     assert_component_signs: bool = CONFIG.assert_element_stress_component_signs,
     stress_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> tuple[plt.Figure, dict[str, np.ndarray]]:
     validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
     fields = matrix_plot_fields(config)
     for field_kind, field_value in fields:
         if field_kind != MATRIX_FIELD_STRESS_MEASURE or not isinstance(
@@ -3495,18 +4319,26 @@ def build_cauchy_stress_measure_heatmaps(
             flip_mode=flip_mode,
             stress_selection=stress_selection,
         )
+        selected_values = select_field_value_mode(
+            values,
+            current_values,
+            flipped_values,
+            value_mode,
+        )
         reference_level = float(stress_measure_values(reference_cauchy_stress, measure))
-        field_values.append(values)
-        field_labels.append(stress_measure_label(measure, stress_selection))
+        field_values.append(selected_values)
+        field_labels.append(stress_measure_label(measure, stress_selection, value_mode))
         reference_levels.append(reference_level)
-        data[measure] = values
+        data[measure] = selected_values
+        data[f"difference_{measure}"] = values
         data[f"current_{measure}"] = current_values
         data[f"flipped_{measure}"] = flipped_values
         data[f"visible_{measure}"] = mask_scalar_field_to_region(
-            values,
+            selected_values,
             current_no_flip_mask,
         )
         data[f"reference_{measure}"] = np.asarray(reference_level)
+        data["value_mode"] = value_mode
 
     fig = build_scalar_field_panel_heatmaps(
         tuple(field_values),
@@ -3518,7 +4350,11 @@ def build_cauchy_stress_measure_heatmaps(
         current_no_flip_mask=current_no_flip_mask,
         reconnection_contours=CONFIG.heatmap.reconnection_contours,
         reference_contour=reference_contour,
-        reference_label=matrix_reference_stress_label(fields),
+        reference_label=matrix_reference_stress_label(
+            fields,
+            reference_contour,
+            value_mode,
+        ),
         parameterization=parameterization,
         flip_mode=flip_mode,
         remove_figure_title=remove_figure_title,
@@ -3536,15 +4372,17 @@ def build_cauchy_stress_difference_heatmaps(
     remove_figure_title: bool = CONFIG.remove_figure_titles,
     assert_component_signs: bool = CONFIG.assert_element_stress_component_signs,
     stress_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> tuple[plt.Figure, dict[str, np.ndarray]]:
     validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
     w_values, parameter_values = sampled_parameter_values(
         config.resolution,
         config.w_range,
         config.parameter_range,
         parameterization=parameterization,
     )
-    matrix_values = cauchy_stress_difference_grid(
+    difference_values, current_values, flipped_values = cauchy_stress_value_grids(
         w_values,
         parameter_values,
         material=material,
@@ -3552,6 +4390,12 @@ def build_cauchy_stress_difference_heatmaps(
         flip_mode=flip_mode,
         assert_component_signs=assert_component_signs,
         stress_selection=stress_selection,
+    )
+    matrix_values = select_field_value_mode(
+        difference_values,
+        current_values,
+        flipped_values,
+        value_mode,
     )
     current_reconnection_masks = reconnection_condition_masks(
         w_values,
@@ -3579,15 +4423,20 @@ def build_cauchy_stress_difference_heatmaps(
         flip_mode=flip_mode,
         remove_figure_title=remove_figure_title,
         stress_selection=stress_selection,
+        value_mode=value_mode,
     )
     return fig, {
         "w_values": w_values,
         "physical_L_values": L_from_w(w_values),
         "parameter_values": parameter_values,
         "matrix_values": matrix_values,
+        "difference_matrix_values": difference_values,
+        "current_matrix_values": current_values,
+        "flipped_matrix_values": flipped_values,
         "inside_current_reconnection_zone": current_no_flip_mask,
         "reference_cauchy_stress": reference_cauchy_stress,
         "stress_selection": stress_selection,
+        "value_mode": value_mode,
     }
 
 
@@ -3615,6 +4464,466 @@ def reference_element_stress_measure_value(
     return 0.0 if np.isclose(value, 0.0, atol=1e-12) else value
 
 
+def mesh_stress_label(
+    measure: str,
+    stress_selection: str,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
+) -> str:
+    validate_mesh_stress_measure(measure)
+    validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
+    mode = (
+        r"\mathrm{current}"
+        if value_mode == FIELD_VALUE_MODE_CURRENT
+        else r"\mathrm{flipped}"
+    )
+    if measure == MESH_STRESS_MEASURE_ENERGY:
+        if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+            if stress_selection != STRESS_SELECTION_AVERAGE:
+                element_index = element_selection_index(stress_selection)
+                return rf"$E_{{{mode}}}^{{({element_index})}}$"
+            return rf"$\left\langle E_{{{mode}}} \right\rangle$"
+        if stress_selection != STRESS_SELECTION_AVERAGE:
+            element_index = element_selection_index(stress_selection)
+            return rf"$\Delta E^{{({element_index})}}$"
+        return r"$\Delta\left\langle E \right\rangle$"
+    if measure == MESH_STRESS_MEASURE_SIGMA_12:
+        if value_mode != FIELD_VALUE_MODE_DIFFERENCE:
+            if stress_selection != STRESS_SELECTION_AVERAGE:
+                element_index = element_selection_index(stress_selection)
+                return rf"$\sigma_{{12,{mode}}}^{{({element_index})}}$"
+            return rf"$\left\langle \sigma_{{12,{mode}}} \right\rangle$"
+        if stress_selection != STRESS_SELECTION_AVERAGE:
+            element_index = element_selection_index(stress_selection)
+            return rf"$\Delta\sigma_{{12}}^{{({element_index})}}$"
+        return r"$\Delta\left\langle \sigma_{12} \right\rangle$"
+    if measure == MESH_STRESS_MEASURE_VON_MISES:
+        return stress_measure_label(
+            STRESS_MEASURE_VON_MISES,
+            stress_selection,
+            value_mode,
+        )
+    raise RuntimeError(f"Unhandled mesh stress measure {measure!r}.")
+
+
+def mesh_stress_value_grids(
+    w_values: np.ndarray,
+    parameter_values: np.ndarray,
+    measure: str,
+    stress_selection: str,
+    material: MaterialConfig,
+    parameterization: ParameterizationConfig,
+    flip_mode: FlipMode,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    validate_mesh_stress_measure(measure)
+    validate_stress_selection(stress_selection)
+    if measure == MESH_STRESS_MEASURE_ENERGY:
+        return mesh_energy_difference_grid(
+            w_values,
+            parameter_values,
+            material=material,
+            parameterization=parameterization,
+            flip_mode=flip_mode,
+            element_selection=stress_selection,
+        )
+    if measure == MESH_STRESS_MEASURE_SIGMA_12:
+        matrix_values, current_values, flipped_values = cauchy_stress_value_grids(
+            w_values,
+            parameter_values,
+            material=material,
+            parameterization=parameterization,
+            flip_mode=flip_mode,
+            stress_selection=stress_selection,
+        )
+        return tuple(
+            0.5 * (values[..., 0, 1] + values[..., 1, 0])
+            for values in (matrix_values, current_values, flipped_values)
+        )
+    if measure == MESH_STRESS_MEASURE_VON_MISES:
+        return stress_measure_difference_grid(
+            w_values,
+            parameter_values,
+            STRESS_MEASURE_VON_MISES,
+            material=material,
+            parameterization=parameterization,
+            flip_mode=flip_mode,
+            stress_selection=stress_selection,
+        )
+    raise RuntimeError(f"Unhandled mesh stress measure {measure!r}.")
+
+
+def mesh_stress_difference_grid(
+    w_values: np.ndarray,
+    parameter_values: np.ndarray,
+    measure: str,
+    stress_selection: str,
+    material: MaterialConfig,
+    parameterization: ParameterizationConfig,
+    flip_mode: FlipMode,
+) -> np.ndarray:
+    values, _, _ = mesh_stress_value_grids(
+        w_values,
+        parameter_values,
+        measure,
+        stress_selection,
+        material,
+        parameterization,
+        flip_mode,
+    )
+    return values
+
+
+def mesh_reference_stress_level(
+    material: MaterialConfig,
+    reference_contour: ReferenceContourConfig,
+    measure: str,
+    stress_selection: str,
+) -> float:
+    validate_mesh_stress_measure(measure)
+    validate_stress_selection(stress_selection)
+    if measure == MESH_STRESS_MEASURE_ENERGY:
+        value = reference_simple_shear_energy(
+            material,
+            reference_contour,
+            element_selection=stress_selection,
+        )
+        return 0.5 * value if stress_selection == STRESS_SELECTION_AVERAGE else value
+    reference_stress = reference_simple_shear_cauchy_stress(
+        material,
+        reference_contour,
+    )
+    if measure == MESH_STRESS_MEASURE_SIGMA_12:
+        return float(0.5 * (reference_stress[0, 1] + reference_stress[1, 0]))
+    if measure == MESH_STRESS_MEASURE_VON_MISES:
+        return float(stress_measure_values(reference_stress, STRESS_MEASURE_VON_MISES))
+    raise RuntimeError(f"Unhandled mesh stress measure {measure!r}.")
+
+
+def mesh_reference_contour_config(
+    config: MeshParameterizationPlotConfig,
+    reference_contour: ReferenceContourConfig,
+    measure: str,
+) -> ReferenceContourConfig:
+    validate_mesh_stress_measure(measure)
+    if measure == MESH_STRESS_MEASURE_ENERGY:
+        return replace(reference_contour, gamma_c=config.energy_reference_gamma)
+    return reference_contour
+
+
+def mesh_reference_stress_label(
+    measure: str,
+    reference_contour: ReferenceContourConfig,
+    stress_selection: str = STRESS_SELECTION_AVERAGE,
+) -> str:
+    validate_mesh_stress_measure(measure)
+    validate_stress_selection(stress_selection)
+    if measure == MESH_STRESS_MEASURE_ENERGY:
+        return mesh_reference_energy_label(reference_contour, stress_selection)
+    if measure == MESH_STRESS_MEASURE_SIGMA_12:
+        return stress_reference_component_label((0, 1), reference_contour)
+    if measure == MESH_STRESS_MEASURE_VON_MISES:
+        return stress_reference_measure_label(STRESS_MEASURE_VON_MISES, reference_contour)
+    raise RuntimeError(f"Unhandled mesh stress measure {measure!r}.")
+
+
+def mesh_reference_values_grid(
+    values: np.ndarray,
+    measure: str,
+    reference_contour: ReferenceContourConfig,
+) -> np.ndarray:
+    validate_mesh_stress_measure(measure)
+    if (
+        measure == MESH_STRESS_MEASURE_ENERGY
+        and reference_contour.use_absolute_delta_energy
+    ):
+        return np.abs(values)
+    return values
+
+
+def mesh_parameterization_sample_ranges(
+    samples: MeshParameterizationSamples,
+    config: MeshParameterizationPlotConfig,
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    w_range = padded_finite_range(
+        samples.w_values,
+        config.fit_padding_fraction,
+        lower_bound=-REFERENCE_L + 1e-9,
+    )
+    parameter_range = padded_finite_range(
+        samples.parameter_values,
+        config.fit_padding_fraction,
+        lower_bound=0.0,
+    )
+    return w_range, parameter_range
+
+
+def mesh_parameterization_output_path(
+    path: Path,
+    measure: str,
+    stress_selection: str,
+) -> Path:
+    validate_mesh_stress_measure(measure)
+    validate_stress_selection(stress_selection)
+    if (
+        measure == MESH_STRESS_MEASURE_ENERGY
+        and path.stem.endswith("_mesh_stress")
+    ):
+        output_stem = path.stem.removesuffix("_mesh_stress") + "_mesh_energy"
+        suffix = ""
+    else:
+        output_stem = path.stem
+        suffix = f"_{measure}"
+    if stress_selection != STRESS_SELECTION_AVERAGE:
+        suffix += f"_{stress_selection}"
+    return path.with_name(f"{output_stem}{suffix}{path.suffix}")
+
+
+def add_mesh_parameterization_samples(
+    ax: plt.Axes,
+    samples: MeshParameterizationSamples,
+    config: MeshParameterizationPlotConfig,
+) -> tuple[Line2D, ...]:
+    invalid_mask = ~samples.valid_pair_mask
+    if np.any(invalid_mask) and not config.hide_invalid_pair_points:
+        ax.scatter(
+            samples.w_values[invalid_mask],
+            samples.parameter_values[invalid_mask],
+            s=config.point_size,
+            c=config.invalid_pair_color,
+            alpha=config.point_alpha,
+            edgecolors="none",
+            rasterized=True,
+            zorder=80,
+        )
+    if np.any(samples.valid_pair_mask):
+        ax.scatter(
+            samples.w_values[samples.valid_pair_mask],
+            samples.parameter_values[samples.valid_pair_mask],
+            s=config.point_size,
+            c=config.valid_pair_color,
+            alpha=config.point_alpha,
+            edgecolors="none",
+            rasterized=True,
+            zorder=81,
+        )
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            marker="o",
+            linestyle="",
+            markerfacecolor=to_rgba(config.valid_pair_color, config.point_alpha),
+            markeredgecolor="none",
+            label="share longest edge",
+            markersize=5,
+        )
+    ]
+    if not config.hide_invalid_pair_points:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                linestyle="",
+                markerfacecolor=to_rgba(config.invalid_pair_color, config.point_alpha),
+                markeredgecolor="none",
+                label="not share longest edge",
+                markersize=5,
+            )
+        )
+    return tuple(handles)
+
+
+def build_mesh_parameterization_stress_plot(
+    config: MeshParameterizationPlotConfig,
+    samples: MeshParameterizationSamples,
+    stress_measure: str,
+    stress_selection: str,
+    material: MaterialConfig = CONFIG.material,
+    reference_contour: ReferenceContourConfig = CONFIG.reference_contour,
+    parameterization: ParameterizationConfig = CONFIG.parameterization,
+    flip_mode: FlipMode = CONFIG.flip_mode,
+    remove_figure_title: bool = CONFIG.remove_figure_titles,
+    fitted: bool = False,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
+) -> tuple[plt.Figure, dict[str, np.ndarray]]:
+    validate_mesh_parameterization_plot_config(config)
+    validate_mesh_stress_measure(stress_measure)
+    validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
+    validate_parameterization(parameterization)
+    if parameterization.mode != PARAMETERIZATION_SYMMETRIC:
+        raise ValueError(
+            "Mesh parameterization overlay currently uses the projected u-w map "
+            f"and requires the symmetric parameterization, got {parameterization.mode!r}."
+        )
+    if flip_mode != FIRST_FLIP_T23_TO_T14:
+        raise ValueError(
+            "Mesh parameterization overlay is currently defined for the first "
+            f"T23-to-T14 flip only, got {flip_mode.name!r}."
+        )
+    display_w_range = config.w_range
+    display_parameter_range = config.parameter_range
+    if fitted:
+        display_w_range, display_parameter_range = mesh_parameterization_sample_ranges(
+            samples,
+            config,
+        )
+
+    background_parameter_range = (
+        display_parameter_range[0],
+        min(display_parameter_range[1], config.max_background_parameter),
+    )
+    if background_parameter_range[0] >= background_parameter_range[1]:
+        raise ValueError(
+            "No valid parameterization background remains after clipping to "
+            f"u < {config.max_background_parameter:g}: "
+            f"{display_parameter_range}."
+        )
+
+    w_values, parameter_values = sampled_parameter_values(
+        config.resolution,
+        display_w_range,
+        background_parameter_range,
+        parameterization=parameterization,
+    )
+    difference_values, current_values, flipped_values = mesh_stress_value_grids(
+        w_values,
+        parameter_values,
+        stress_measure,
+        stress_selection,
+        material,
+        parameterization,
+        flip_mode,
+    )
+    values = select_field_value_mode(
+        difference_values,
+        current_values,
+        flipped_values,
+        value_mode,
+    )
+    reference_contour_for_measure = mesh_reference_contour_config(
+        config,
+        reference_contour,
+        stress_measure,
+    )
+    reference_values = mesh_reference_values_grid(
+        values,
+        stress_measure,
+        reference_contour_for_measure,
+    )
+    current_reconnection_masks = reconnection_condition_masks(
+        w_values,
+        parameter_values,
+        triangles=flip_mode.current_triangles,
+        shared_edge=flip_mode.current_diagonal,
+        parameterization=parameterization,
+        flip_mode=flip_mode,
+    )
+    current_no_flip_mask = current_reconnection_masks["inside"]
+    delaunay_current_mask, color_limit_mask = delaunay_mask_and_color_limit(
+        w_values,
+        parameter_values,
+        config.reconnection_contours,
+        config.color_limits_from_delaunay_switch_region,
+        parameterization,
+        flip_mode,
+    )
+    norm = field_color_norm(
+        values,
+        color_scale=config.color_scale,
+        power_gamma=config.power_gamma,
+        centered_colorbar=config.centered_colorbar,
+        color_limit_mask=color_limit_mask,
+    )
+    cmap = field_cmap_for_range(
+        values,
+        config.cmap,
+        color_limit_mask=color_limit_mask,
+    )
+    reference_level = mesh_reference_stress_level(
+        material,
+        reference_contour_for_measure,
+        stress_measure,
+        stress_selection,
+    )
+
+    fig, ax = plt.subplots(figsize=STANDALONE_FIGSIZE, constrained_layout=True)
+    (
+        image,
+        current_contour_drawn,
+        reference_contour_drawn,
+        delaunay_contour_drawn,
+    ) = draw_field_heatmap_panel(
+        ax,
+        values,
+        reference_values,
+        w_values,
+        parameter_values,
+        cmap=cmap,
+        norm=norm,
+        title=mesh_stress_label(stress_measure, stress_selection, value_mode),
+        show_xlabel=True,
+        show_ylabel=True,
+        current_no_flip_mask=current_no_flip_mask,
+        reconnection_contours=config.reconnection_contours,
+        delaunay_current_mask=delaunay_current_mask,
+        reference_level=reference_level,
+        reference_contour=reference_contour_for_measure,
+        reference_contour_symmetric=True,
+        element_pair_grid=config.element_pair_grid,
+        parameterization=parameterization,
+        flip_mode=flip_mode,
+        selected_element_index=selected_element_index_for_plot(stress_selection),
+    )
+    colorbar = fig.colorbar(image, ax=ax)
+    colorbar.set_label(mesh_stress_label(stress_measure, stress_selection, value_mode))
+    sample_handles = add_mesh_parameterization_samples(ax, samples, config)
+    ax.set_xlim(display_w_range)
+    ax.set_ylim(display_parameter_range)
+    add_field_overlay_legend(
+        ax,
+        current_contour_drawn=current_contour_drawn,
+        reference_contour_drawn=reference_contour_drawn,
+        delaunay_contour_drawn=delaunay_contour_drawn,
+        reconnection_contours=config.reconnection_contours,
+        reference_contour=reference_contour_for_measure,
+        reference_label=mesh_reference_stress_label(
+            stress_measure,
+            reference_contour_for_measure,
+            stress_selection,
+        ),
+        extra_handles=sample_handles,
+    )
+    if not remove_figure_title:
+        suffix = "auto-fit" if fitted else "standard range"
+        fig.suptitle(
+            f"Final mesh pairs on parameterization map ({suffix}, "
+            f"{config.resolution}x{config.resolution})"
+        )
+    return fig, {
+        "w_values": w_values,
+        "parameter_values": parameter_values,
+        "values": values,
+        "difference_values": difference_values,
+        "current_values": current_values,
+        "flipped_values": flipped_values,
+        "inside_current_reconnection_zone": current_no_flip_mask,
+        "delaunay_keeps_current_diagonal": delaunay_current_mask,
+        "sample_w_values": samples.w_values,
+        "sample_parameter_values": samples.parameter_values,
+        "sample_v_values": samples.v_values,
+        "sample_valid_pair_mask": samples.valid_pair_mask,
+        "display_w_range": np.asarray(display_w_range),
+        "display_parameter_range": np.asarray(display_parameter_range),
+        "background_parameter_range": np.asarray(background_parameter_range),
+        "stress_measure": np.asarray(stress_measure),
+        "stress_selection": np.asarray(stress_selection),
+        "value_mode": np.asarray(value_mode),
+    }
+
+
 def build_element_stress_measure_heatmap(
     config: ScalarFieldPlotConfig,
     measure: str,
@@ -3624,9 +4933,11 @@ def build_element_stress_measure_heatmap(
     flip_mode: FlipMode = CONFIG.flip_mode,
     remove_figure_title: bool = CONFIG.remove_figure_titles,
     stress_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> tuple[plt.Figure, dict[str, np.ndarray]]:
     validate_element_stress_measures((measure,))
     validate_stress_selection(stress_selection)
+    validate_field_value_mode(value_mode)
     w_values, parameter_values = sampled_parameter_values(
         config.resolution,
         config.w_range,
@@ -3641,6 +4952,12 @@ def build_element_stress_measure_heatmap(
         parameterization=parameterization,
         flip_mode=flip_mode,
         stress_selection=stress_selection,
+    )
+    selected_values = select_field_value_mode(
+        values,
+        current_values,
+        flipped_values,
+        value_mode,
     )
     current_reconnection_masks = reconnection_condition_masks(
         w_values,
@@ -3661,9 +4978,10 @@ def build_element_stress_measure_heatmap(
         config,
         measure,
         stress_selection,
+        value_mode,
     )
     fig = build_scalar_field_heatmap(
-        values,
+        selected_values,
         w_values,
         parameter_values,
         plot_config,
@@ -3671,7 +4989,11 @@ def build_element_stress_measure_heatmap(
         reconnection_contours=CONFIG.heatmap.reconnection_contours,
         reference_level=reference_value,
         reference_contour=reference_contour,
-        reference_label=element_stress_reference_label(measure),
+        reference_label=element_stress_reference_label(
+            measure,
+            reference_contour,
+            value_mode,
+        ),
         parameterization=parameterization,
         flip_mode=flip_mode,
         remove_figure_title=remove_figure_title,
@@ -3681,14 +5003,19 @@ def build_element_stress_measure_heatmap(
         "w_values": w_values,
         "physical_L_values": L_from_w(w_values),
         "parameter_values": parameter_values,
-        "values": values,
+        "values": selected_values,
+        "difference_values": values,
         "current_values": current_values,
         "flipped_values": flipped_values,
-        "visible_values": mask_scalar_field_to_region(values, current_no_flip_mask),
+        "visible_values": mask_scalar_field_to_region(
+            selected_values,
+            current_no_flip_mask,
+        ),
         "inside_current_reconnection_zone": current_no_flip_mask,
         "reference_value": np.asarray(reference_value),
         "measure": np.asarray(measure),
         "stress_selection": stress_selection,
+        "value_mode": value_mode,
     }
 
 
@@ -3749,11 +5076,13 @@ def build_flip_energy_heatmap(
     g_vector_choice: str = G_VECTOR_CHOICE_SHORTEST,
     remove_figure_title: bool = CONFIG.remove_figure_titles,
     element_selection: str = STRESS_SELECTION_AVERAGE,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> tuple[plt.Figure, dict[str, np.ndarray]]:
     validate_heatmap_content(content)
     validate_parameterization(parameterization)
     validate_g_vector_choice(g_vector_choice)
     validate_stress_selection(element_selection)
+    validate_field_value_mode(value_mode)
     w_values, parameter_values = sampled_parameter_values(
         config.resolution,
         config.w_range,
@@ -3767,6 +5096,12 @@ def build_flip_energy_heatmap(
         parameterization=parameterization,
         flip_mode=flip_mode,
         element_selection=element_selection,
+    )
+    plotted_energy = select_field_value_mode(
+        delta_energy,
+        current_energy,
+        flipped_energy,
+        value_mode,
     )
     abs_delta_energy = np.abs(delta_energy)
     reference_energy = reference_simple_shear_energy(
@@ -3787,10 +5122,10 @@ def build_flip_energy_heatmap(
         g_vector_choice=g_vector_choice,
     )
     current_no_flip_mask = current_reconnection_masks["inside"]
-    visible_delta_energy = (
-        mask_scalar_field_to_region(delta_energy, current_no_flip_mask)
+    visible_energy = (
+        mask_scalar_field_to_region(plotted_energy, current_no_flip_mask)
         if show_energy and config.mask_color_outside_no_flip_region
-        else delta_energy
+        else plotted_energy
     )
     delaunay_current_mask, color_limit_mask = delaunay_mask_and_color_limit(
         w_values,
@@ -3802,7 +5137,7 @@ def build_flip_energy_heatmap(
     )
     norm = (
         heatmap_color_norm(
-            visible_delta_energy,
+            visible_energy,
             config=config,
             color_limit_mask=color_limit_mask,
         )
@@ -3839,7 +5174,7 @@ def build_flip_energy_heatmap(
         )
     elif show_energy:
         image = ax.imshow(
-            visible_delta_energy,
+            visible_energy,
             origin="lower",
             extent=heatmap_extent(w_values, parameter_values),
             aspect="auto",
@@ -3937,8 +5272,9 @@ def build_flip_energy_heatmap(
     legend_handles = []
     reference_contour_values = (
         np.abs(delta_energy)
-        if reference_contour.use_absolute_delta_energy
-        else delta_energy
+        if value_mode == FIELD_VALUE_MODE_DIFFERENCE
+        and reference_contour.use_absolute_delta_energy
+        else plotted_energy
     )
     reference_contour_drawn = add_reference_contour(
         ax,
@@ -3953,7 +5289,11 @@ def build_flip_energy_heatmap(
         legend_handles.append(
             reference_contour_handle(
                 reference_contour,
-                reference_energy_label(reference_contour, element_selection),
+                reference_energy_label(
+                    reference_contour,
+                    element_selection,
+                    value_mode,
+                ),
             )
         )
 
@@ -3996,7 +5336,7 @@ def build_flip_energy_heatmap(
                     [0, 0],
                     color=contours.current_color,
                     linewidth=contours.linewidth,
-                    label="current no-flip region",
+                    label="no-flip region",
                 )
             )
         else:
@@ -4004,7 +5344,7 @@ def build_flip_energy_heatmap(
                 region_legend_patch(
                     contours.current_color,
                     contours.fill_alpha,
-                    "current no-flip region: both triangles inside",
+                    "no-flip region: both triangles inside",
                 )
             )
 
@@ -4118,33 +5458,30 @@ def build_flip_energy_heatmap(
                 else rf", {stress_selection_label(element_selection)}"
             )
             ax.set_title(
-                rf"$E_{{\mathrm{{flipped}}}} - E_{{\mathrm{{current}}}}$ "
+                f"{energy_plot_label(element_selection, value_mode)} "
                 rf"({config.resolution}x{config.resolution}, {config.color_scale}, "
                 rf"{parameterization.mode}{element_title_suffix})"
             )
     if image is not None:
         colorbar = fig.colorbar(image, ax=ax)
-        energy_label = (
-            r"$\Delta E = E_{\mathrm{flipped}} - E_{\mathrm{current}}$"
-            if element_selection == STRESS_SELECTION_AVERAGE
-            else (
-                rf"$\Delta E^{{({element_selection_index(element_selection)})}}"
-                rf" = E_{{\mathrm{{flipped}}}}^{{({element_selection_index(element_selection)})}}"
-                rf" - E_{{\mathrm{{current}}}}^{{({element_selection_index(element_selection)})}}$"
-            )
-        )
         colorbar.set_label(
             "reconnection zone: 1=current, 2=flipped, 3=both"
             if contours.debug_only
-            else energy_label
+            else energy_plot_label(element_selection, value_mode)
         )
 
     data = {
         "w_values": w_values,
         "physical_L_values": L_from_w(w_values),
         "parameter_values": parameter_values,
+        "values": plotted_energy,
+        "visible_values": visible_energy,
         "delta_energy": delta_energy,
-        "visible_delta_energy": visible_delta_energy,
+        "visible_delta_energy": (
+            mask_scalar_field_to_region(delta_energy, current_no_flip_mask)
+            if show_energy and config.mask_color_outside_no_flip_region
+            else delta_energy
+        ),
         "abs_delta_energy": abs_delta_energy,
         "current_energy": current_energy,
         "flipped_energy": flipped_energy,
@@ -4161,6 +5498,7 @@ def build_flip_energy_heatmap(
         "parameterization_mode": parameterization.mode,
         "reference_energy": reference_energy,
         "element_selection": element_selection,
+        "value_mode": value_mode,
     }
     return fig, data
 
@@ -4209,6 +5547,19 @@ def stress_selection_output_path(path: Path, stress_selection: str) -> Path:
     if stress_selection == STRESS_SELECTION_AVERAGE:
         return path
     return path.with_name(f"{path.stem}_{stress_selection}{path.suffix}")
+
+
+def field_value_mode_output_path(
+    path: Path,
+    value_mode: str,
+    *,
+    individual: bool = False,
+) -> Path:
+    validate_field_value_mode(value_mode)
+    output_dir = ELEMENT_PAIR_PARAMETERIZATION_PLOTS_DIR / value_mode
+    if individual:
+        output_dir = output_dir / INDIVIDUAL_PLOT_DIR_NAME
+    return output_dir / path.name
 
 
 def combined_elements_output_path(path: Path) -> Path:
@@ -4306,20 +5657,115 @@ def combine_two_element_pdfs(
     print(f"Saved {output_path}")
 
 
+def combine_before_after_pdfs(
+    current_pdf: Path,
+    flipped_pdf: Path,
+    output_path: Path,
+) -> None:
+    """Create a side-by-side PDF comparing current and flipped value plots."""
+    if not current_pdf.exists():
+        raise FileNotFoundError(current_pdf)
+    if not flipped_pdf.exists():
+        raise FileNotFoundError(flipped_pdf)
+
+    current_page = PdfReader(str(current_pdf)).pages[0]
+    flipped_page = PdfReader(str(flipped_pdf)).pages[0]
+
+    current_width = float(current_page.cropbox.width)
+    current_height = float(current_page.cropbox.height)
+    flipped_width = float(flipped_page.cropbox.width)
+    flipped_height = float(flipped_page.cropbox.height)
+
+    output_width = current_width + flipped_width
+    output_height = max(current_height, flipped_height)
+
+    combined_page = PageObject.create_blank_page(
+        width=output_width,
+        height=output_height,
+    )
+
+    current_y_offset = 0.5 * (output_height - current_height)
+    flipped_y_offset = 0.5 * (output_height - flipped_height)
+
+    combined_page.merge_transformed_page(
+        current_page,
+        Transformation().translate(
+            tx=-float(current_page.cropbox.left),
+            ty=current_y_offset - float(current_page.cropbox.bottom),
+        ),
+    )
+    combined_page.merge_transformed_page(
+        flipped_page,
+        Transformation().translate(
+            tx=current_width - float(flipped_page.cropbox.left),
+            ty=flipped_y_offset - float(flipped_page.cropbox.bottom),
+        ),
+    )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = PdfWriter()
+    writer.add_page(combined_page)
+    with output_path.open("wb") as file:
+        writer.write(file)
+
+    print(f"Saved {output_path}")
+
+
+def combine_current_flipped_exports(
+    output_root: Path = ELEMENT_PAIR_PARAMETERIZATION_PLOTS_DIR,
+) -> int:
+    current_dir = output_root / FIELD_VALUE_MODE_CURRENT
+    flipped_dir = output_root / FIELD_VALUE_MODE_FLIPPED
+    if not current_dir.exists() or not flipped_dir.exists():
+        return 0
+
+    exported_count = 0
+    for current_pdf in sorted(current_dir.rglob("*.pdf")):
+        relative_path = current_pdf.relative_to(current_dir)
+        flipped_pdf = flipped_dir / relative_path
+        if not flipped_pdf.exists():
+            continue
+        combine_before_after_pdfs(
+            current_pdf,
+            flipped_pdf,
+            output_root / BEFORE_AFTER_PLOT_DIR_NAME / relative_path,
+        )
+        exported_count += 1
+
+    if exported_count == 0:
+        print("No matching current/flipped PDFs found for before-after exports.")
+    else:
+        print(f"Saved {exported_count} before-after comparison PDFs.")
+    return exported_count
+
+
 def combine_element_specific_stress_pdfs(
     base_output_path: Path,
     flip_mode: FlipMode,
     parameterization: ParameterizationConfig,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> None:
+    validate_field_value_mode(value_mode)
     flipped_base_path = flip_mode_output_path(
         base_output_path,
         flip_mode,
         parameterization,
     )
     combine_two_element_pdfs(
-        stress_selection_output_path(flipped_base_path, STRESS_SELECTION_ELEMENT_1),
-        stress_selection_output_path(flipped_base_path, STRESS_SELECTION_ELEMENT_2),
-        combined_elements_output_path(flipped_base_path),
+        field_value_mode_output_path(
+            stress_selection_output_path(flipped_base_path, STRESS_SELECTION_ELEMENT_1),
+            value_mode,
+            individual=True,
+        ),
+        field_value_mode_output_path(
+            stress_selection_output_path(flipped_base_path, STRESS_SELECTION_ELEMENT_2),
+            value_mode,
+            individual=True,
+        ),
+        field_value_mode_output_path(
+            combined_elements_output_path(flipped_base_path),
+            value_mode,
+        ),
     )
 
 
@@ -4330,16 +5776,20 @@ def build_heatmap_variants(
     parameterization: ParameterizationConfig,
     flip_mode: FlipMode,
     remove_figure_title: bool = CONFIG.remove_figure_titles,
+    element_selections: tuple[str, ...] = DEFAULT_STRESS_SELECTIONS,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> tuple[list[tuple[str, plt.Figure]], dict[str, dict[str, np.ndarray]]]:
     if len(config.contents) == 0:
         raise ValueError("HeatmapConfig.contents must contain at least one variant.")
+    validate_stress_selections(element_selections)
+    validate_field_value_mode(value_mode)
 
     figures = []
     data_by_content = {}
     variants = []
     for content in config.contents:
-        element_selections = (
-            STRESS_SELECTIONS
+        content_element_selections = (
+            element_selections
             if content in (HEATMAP_COMBINED, HEATMAP_ENERGY_ONLY)
             else (STRESS_SELECTION_AVERAGE,)
         )
@@ -4350,7 +5800,7 @@ def build_heatmap_variants(
                 G_VECTOR_CHOICE_SHORTEST,
                 element_selection,
             )
-            for element_selection in element_selections
+            for element_selection in content_element_selections
         )
     variants.extend(
         (
@@ -4373,6 +5823,7 @@ def build_heatmap_variants(
             g_vector_choice=g_vector_choice,
             remove_figure_title=remove_figure_title,
             element_selection=element_selection,
+            value_mode=value_mode,
         )
         figures.append((output_tag, fig))
         data_by_content[output_tag] = data
@@ -4389,66 +5840,135 @@ def representative_heatmap_data(
     return next(iter(data_by_content.values()))
 
 
+def representative_value_mode_data(
+    data_by_mode_key: dict[tuple[str, object], dict],
+    value_modes: tuple[str, ...],
+) -> dict[object, dict]:
+    if not data_by_mode_key:
+        return {}
+    validate_field_value_modes(value_modes)
+    summary_mode = (
+        FIELD_VALUE_MODE_DIFFERENCE
+        if any(mode == FIELD_VALUE_MODE_DIFFERENCE for mode, _ in data_by_mode_key)
+        else next(
+            mode
+            for mode in value_modes
+            if any(data_mode == mode for data_mode, _ in data_by_mode_key)
+        )
+    )
+    return {
+        key: data
+        for (mode, key), data in data_by_mode_key.items()
+        if mode == summary_mode
+    }
+
+
 def build_stress_plot_set(
     config: PlotConfig,
     flip_mode: FlipMode,
     stress_selection: str,
+    value_mode: str = FIELD_VALUE_MODE_DIFFERENCE,
 ) -> tuple[list[tuple[Path, plt.Figure]], dict[str, dict[str, np.ndarray]]]:
     validate_stress_selection(stress_selection)
-    cauchy_fig, cauchy_data = build_cauchy_stress_difference_heatmaps(
-        config=config.cauchy_stress_difference,
-        material=config.material,
-        reference_contour=config.reference_contour,
-        parameterization=config.parameterization,
-        flip_mode=flip_mode,
-        remove_figure_title=config.remove_figure_titles,
-        assert_component_signs=config.assert_element_stress_component_signs,
-        stress_selection=stress_selection,
-    )
-    stress_measure_fig, stress_measure_data = build_cauchy_stress_measure_heatmaps(
-        config=config.cauchy_stress_measures,
-        material=config.material,
-        reference_contour=config.reference_contour,
-        parameterization=config.parameterization,
-        flip_mode=flip_mode,
-        remove_figure_title=config.remove_figure_titles,
-        stress_data=cauchy_data,
-        assert_component_signs=config.assert_element_stress_component_signs,
-        stress_selection=stress_selection,
-    )
-    shear_fig, shear_data = build_element_stress_measure_heatmap(
-        config=config.element_shear_stress,
-        measure=ELEMENT_STRESS_MEASURE_SHEAR,
-        material=config.material,
-        reference_contour=config.reference_contour,
-        parameterization=config.parameterization,
-        flip_mode=flip_mode,
-        remove_figure_title=config.remove_figure_titles,
-        stress_selection=stress_selection,
-    )
-    element_vm_fig, element_vm_data = build_element_stress_measure_heatmap(
-        config=config.element_von_mises_stress,
-        measure=ELEMENT_STRESS_MEASURE_VON_MISES_AVERAGE,
-        material=config.material,
-        reference_contour=config.reference_contour,
-        parameterization=config.parameterization,
-        flip_mode=flip_mode,
-        remove_figure_title=config.remove_figure_titles,
-        stress_selection=stress_selection,
-    )
-    figures = [
-        (config.cauchy_stress_difference.output_path, cauchy_fig),
-        (config.cauchy_stress_measures.output_path, stress_measure_fig),
-        (config.element_shear_stress.output_path, shear_fig),
-        (config.element_von_mises_stress.output_path, element_vm_fig),
-    ]
-    data = {
-        "cauchy": cauchy_data,
-        "stress_measure": stress_measure_data,
-        "shear": shear_data,
-        "element_vm": element_vm_data,
-    }
+    validate_field_value_mode(value_mode)
+    figures = []
+    data = {}
+    cauchy_data = None
+    if config.plot_cauchy_stress_difference:
+        cauchy_fig, cauchy_data = build_cauchy_stress_difference_heatmaps(
+            config=config.cauchy_stress_difference,
+            material=config.material,
+            reference_contour=config.reference_contour,
+            parameterization=config.parameterization,
+            flip_mode=flip_mode,
+            remove_figure_title=config.remove_figure_titles,
+            assert_component_signs=config.assert_element_stress_component_signs,
+            stress_selection=stress_selection,
+            value_mode=value_mode,
+        )
+        figures.append((config.cauchy_stress_difference.output_path, cauchy_fig))
+        data["cauchy"] = cauchy_data
+    if config.plot_cauchy_stress_measures:
+        stress_measure_fig, stress_measure_data = build_cauchy_stress_measure_heatmaps(
+            config=config.cauchy_stress_measures,
+            material=config.material,
+            reference_contour=config.reference_contour,
+            parameterization=config.parameterization,
+            flip_mode=flip_mode,
+            remove_figure_title=config.remove_figure_titles,
+            stress_data=cauchy_data,
+            assert_component_signs=config.assert_element_stress_component_signs,
+            stress_selection=stress_selection,
+            value_mode=value_mode,
+        )
+        figures.append((config.cauchy_stress_measures.output_path, stress_measure_fig))
+        data["stress_measure"] = stress_measure_data
+    if config.plot_element_shear_stress:
+        shear_fig, shear_data = build_element_stress_measure_heatmap(
+            config=config.element_shear_stress,
+            measure=ELEMENT_STRESS_MEASURE_SHEAR,
+            material=config.material,
+            reference_contour=config.reference_contour,
+            parameterization=config.parameterization,
+            flip_mode=flip_mode,
+            remove_figure_title=config.remove_figure_titles,
+            stress_selection=stress_selection,
+            value_mode=value_mode,
+        )
+        figures.append((config.element_shear_stress.output_path, shear_fig))
+        data["shear"] = shear_data
+    if config.plot_element_von_mises_stress:
+        element_vm_fig, element_vm_data = build_element_stress_measure_heatmap(
+            config=config.element_von_mises_stress,
+            measure=ELEMENT_STRESS_MEASURE_VON_MISES_AVERAGE,
+            material=config.material,
+            reference_contour=config.reference_contour,
+            parameterization=config.parameterization,
+            flip_mode=flip_mode,
+            remove_figure_title=config.remove_figure_titles,
+            stress_selection=stress_selection,
+            value_mode=value_mode,
+        )
+        figures.append((config.element_von_mises_stress.output_path, element_vm_fig))
+        data["element_vm"] = element_vm_data
     return figures, data
+
+
+def any_stress_plots_enabled(config: PlotConfig) -> bool:
+    return any(
+        (
+            config.plot_cauchy_stress_difference,
+            config.plot_cauchy_stress_measures,
+            config.plot_element_shear_stress,
+            config.plot_element_von_mises_stress,
+        )
+    )
+
+
+def enabled_element_combination_paths(config: PlotConfig) -> tuple[Path, ...]:
+    paths = []
+    if config.plot_cauchy_stress_difference:
+        paths.append(config.cauchy_stress_difference.output_path)
+    if config.plot_cauchy_stress_measures:
+        paths.append(config.cauchy_stress_measures.output_path)
+    if config.plot_element_shear_stress:
+        paths.append(config.element_shear_stress.output_path)
+    if config.plot_element_von_mises_stress:
+        paths.append(config.element_von_mises_stress.output_path)
+    return tuple(paths)
+
+
+def use_individual_stress_output_folder(
+    config: PlotConfig,
+    stress_selection: str,
+) -> bool:
+    validate_stress_selection(stress_selection)
+    return (
+        config.combine_element_pdfs
+        and stress_selection in (STRESS_SELECTION_ELEMENT_1, STRESS_SELECTION_ELEMENT_2)
+        and STRESS_SELECTION_ELEMENT_1 in config.stress_selections
+        and STRESS_SELECTION_ELEMENT_2 in config.stress_selections
+    )
 
 
 def build_and_save_for_flip_mode(
@@ -4456,56 +5976,107 @@ def build_and_save_for_flip_mode(
     flip_mode: FlipMode,
 ) -> list[plt.Figure]:
     validate_stress_selections(config.stress_selections)
+    validate_field_value_modes(config.value_modes)
     print(f"\nFlip mode: {flip_mode.name}")
     print(f"Parameterization: {config.parameterization.mode}")
-    fig = build_parameterization_grid(
-        config=config.pair_grid,
-        material=config.material,
-        parameterization=config.parameterization,
-        flip_mode=flip_mode,
-        remove_figure_title=config.remove_figure_titles,
-    )
-    flipped_fig = build_flipped_parameterization_grid(
-        config=config.pair_grid,
-        material=config.material,
-        parameterization=config.parameterization,
-        flip_mode=flip_mode,
-        remove_figure_title=config.remove_figure_titles,
-    )
-    heatmap_figures, heatmap_data_by_content = build_heatmap_variants(
-        config=config.heatmap,
-        material=config.material,
-        reference_contour=config.reference_contour,
-        parameterization=config.parameterization,
-        flip_mode=flip_mode,
-        remove_figure_title=config.remove_figure_titles,
-    )
-    if config.plot_focused_heatmap:
-        focused_heatmap_figures, focused_heatmap_data_by_content = build_heatmap_variants(
-            config=config.focused_heatmap,
+    if config.plot_parameterization_grids:
+        fig = build_parameterization_grid(
+            config=config.pair_grid,
             material=config.material,
-            reference_contour=config.reference_contour,
+            parameterization=config.parameterization,
+            flip_mode=flip_mode,
+            remove_figure_title=config.remove_figure_titles,
+        )
+        flipped_fig = build_flipped_parameterization_grid(
+            config=config.pair_grid,
+            material=config.material,
             parameterization=config.parameterization,
             flip_mode=flip_mode,
             remove_figure_title=config.remove_figure_titles,
         )
     else:
-        focused_heatmap_figures = []
-        focused_heatmap_data_by_content = {}
+        fig = None
+        flipped_fig = None
+    heatmap_figures = []
+    heatmap_data_by_mode_content = {}
+    if config.plot_energy_heatmaps:
+        for value_mode in config.value_modes:
+            mode_figures, mode_data_by_content = build_heatmap_variants(
+                config=config.heatmap,
+                material=config.material,
+                reference_contour=config.reference_contour,
+                parameterization=config.parameterization,
+                flip_mode=flip_mode,
+                remove_figure_title=config.remove_figure_titles,
+                element_selections=config.stress_selections,
+                value_mode=value_mode,
+            )
+            heatmap_figures.extend(
+                (value_mode, content, heatmap_fig)
+                for content, heatmap_fig in mode_figures
+            )
+            heatmap_data_by_mode_content.update(
+                ((value_mode, content), data)
+                for content, data in mode_data_by_content.items()
+            )
+    heatmap_data_by_content = representative_value_mode_data(
+        heatmap_data_by_mode_content,
+        config.value_modes,
+    )
+
+    focused_heatmap_figures = []
+    focused_heatmap_data_by_mode_content = {}
+    if config.plot_energy_heatmaps and config.plot_focused_heatmap:
+        for value_mode in config.value_modes:
+            mode_figures, mode_data_by_content = build_heatmap_variants(
+                config=config.focused_heatmap,
+                material=config.material,
+                reference_contour=config.reference_contour,
+                parameterization=config.parameterization,
+                flip_mode=flip_mode,
+                remove_figure_title=config.remove_figure_titles,
+                element_selections=config.stress_selections,
+                value_mode=value_mode,
+            )
+            focused_heatmap_figures.extend(
+                (value_mode, content, focused_heatmap_fig)
+                for content, focused_heatmap_fig in mode_figures
+            )
+            focused_heatmap_data_by_mode_content.update(
+                ((value_mode, content), data)
+                for content, data in mode_data_by_content.items()
+            )
+    focused_heatmap_data_by_content = representative_value_mode_data(
+        focused_heatmap_data_by_mode_content,
+        config.value_modes,
+    )
     stress_figures = []
-    stress_data_by_selection = {}
-    for stress_selection in config.stress_selections:
-        print(f"Stress plots: {stress_selection_label(stress_selection)}")
-        plot_specs, stress_data = build_stress_plot_set(
-            config,
-            flip_mode,
-            stress_selection,
-        )
-        stress_figures.extend(
-            (stress_selection, base_path, stress_fig)
-            for base_path, stress_fig in plot_specs
-        )
-        stress_data_by_selection[stress_selection] = stress_data
+    stress_data_by_mode_selection = {}
+    if any_stress_plots_enabled(config):
+        for value_mode in config.value_modes:
+            for stress_selection in config.stress_selections:
+                print(
+                    "Stress plots: "
+                    f"{stress_selection_label(stress_selection)}, "
+                    f"{field_value_mode_label(value_mode)}"
+                )
+                plot_specs, stress_data = build_stress_plot_set(
+                    config,
+                    flip_mode,
+                    stress_selection,
+                    value_mode=value_mode,
+                )
+                stress_figures.extend(
+                    (value_mode, stress_selection, base_path, stress_fig)
+                    for base_path, stress_fig in plot_specs
+                )
+                stress_data_by_mode_selection[(value_mode, stress_selection)] = (
+                    stress_data
+                )
+    stress_data_by_selection = representative_value_mode_data(
+        stress_data_by_mode_selection,
+        config.value_modes,
+    )
     if config.plot_first_element_G:
         first_element_G_fig, first_element_G_data = build_first_element_G_heatmaps(
             config=config.first_element_G,
@@ -4516,55 +6087,126 @@ def build_and_save_for_flip_mode(
     else:
         first_element_G_fig = None
         first_element_G_data = None
+    if config.plot_mesh_parameterization_stress:
+        print("Mesh parameterization stress plot: loading final mesh pairs")
+        mesh_samples = load_mesh_parameterization_samples(
+            config.mesh_parameterization_stress.source_folder
+        )
+        mesh_parameterization_figures = []
+        mesh_parameterization_data = {}
+        for value_mode in config.value_modes:
+            for mesh_stress_measure in (
+                config.mesh_parameterization_stress.stress_measures
+            ):
+                for mesh_stress_selection in (
+                    config.mesh_parameterization_stress.stress_selections
+                ):
+                    print(
+                        "Mesh parameterization stress plot: "
+                        f"{mesh_stress_measure}, "
+                        f"{stress_selection_label(mesh_stress_selection)}, "
+                        f"{field_value_mode_label(value_mode)}"
+                    )
+                    mesh_parameterization_fig, mesh_data = (
+                        build_mesh_parameterization_stress_plot(
+                            config=config.mesh_parameterization_stress,
+                            samples=mesh_samples,
+                            stress_measure=mesh_stress_measure,
+                            stress_selection=mesh_stress_selection,
+                            material=config.material,
+                            reference_contour=config.reference_contour,
+                            parameterization=config.parameterization,
+                            flip_mode=flip_mode,
+                            remove_figure_title=config.remove_figure_titles,
+                            fitted=False,
+                            value_mode=value_mode,
+                        )
+                    )
+                    mesh_parameterization_figures.append(
+                        (
+                            value_mode,
+                            mesh_stress_measure,
+                            mesh_stress_selection,
+                            mesh_parameterization_fig,
+                        )
+                    )
+                    mesh_parameterization_data[
+                        (value_mode, mesh_stress_measure, mesh_stress_selection)
+                    ] = mesh_data
+    else:
+        mesh_samples = None
+        mesh_parameterization_figures = []
+        mesh_parameterization_data = {}
 
-    save_figure(
-        fig,
-        flip_mode_output_path(
-            config.pair_grid.output_path,
-            flip_mode,
-            config.parameterization,
-        ),
-    )
-    save_figure(
-        flipped_fig,
-        flip_mode_output_path(
-            config.pair_grid.flipped_output_path,
-            flip_mode,
-            config.parameterization,
-        ),
-    )
-    for content, heatmap_fig in heatmap_figures:
+    if fig is not None:
+        save_figure(
+            fig,
+            field_value_mode_output_path(
+                flip_mode_output_path(
+                    config.pair_grid.output_path,
+                    flip_mode,
+                    config.parameterization,
+                ),
+                FIELD_VALUE_MODE_CURRENT,
+            ),
+        )
+    if flipped_fig is not None:
+        save_figure(
+            flipped_fig,
+            field_value_mode_output_path(
+                flip_mode_output_path(
+                    config.pair_grid.flipped_output_path,
+                    flip_mode,
+                    config.parameterization,
+                ),
+                FIELD_VALUE_MODE_FLIPPED,
+            ),
+        )
+    for value_mode, content, heatmap_fig in heatmap_figures:
         save_figure(
             heatmap_fig,
-            flip_mode_output_path(
-                heatmap_content_output_path(config.heatmap.output_path, content),
-                flip_mode,
-                config.parameterization,
+            field_value_mode_output_path(
+                flip_mode_output_path(
+                    heatmap_content_output_path(config.heatmap.output_path, content),
+                    flip_mode,
+                    config.parameterization,
+                ),
+                value_mode,
             ),
         )
     if config.plot_focused_heatmap:
-        for content, focused_heatmap_fig in focused_heatmap_figures:
+        for value_mode, content, focused_heatmap_fig in focused_heatmap_figures:
             save_figure(
                 focused_heatmap_fig,
-                flip_mode_output_path(
-                    heatmap_content_output_path(
-                        config.focused_heatmap.output_path,
-                        content,
+                field_value_mode_output_path(
+                    flip_mode_output_path(
+                        heatmap_content_output_path(
+                            config.focused_heatmap.output_path,
+                            content,
+                        ),
+                        flip_mode,
+                        config.parameterization,
                     ),
-                    flip_mode,
-                    config.parameterization,
+                    value_mode,
                 ),
             )
-    for stress_selection, base_path, stress_fig in stress_figures:
+    for value_mode, stress_selection, base_path, stress_fig in stress_figures:
         save_figure(
             stress_fig,
-            stress_selection_output_path(
-                flip_mode_output_path(
-                    base_path,
-                    flip_mode,
-                    config.parameterization,
+            field_value_mode_output_path(
+                stress_selection_output_path(
+                    flip_mode_output_path(
+                        base_path,
+                        flip_mode,
+                        config.parameterization,
+                    ),
+                    stress_selection,
                 ),
-                stress_selection,
+                value_mode,
+                individual=use_individual_stress_output_folder(
+                    config,
+                    stress_selection,
+                ),
             ),
         )
     if (
@@ -4572,34 +6214,66 @@ def build_and_save_for_flip_mode(
         and STRESS_SELECTION_ELEMENT_1 in config.stress_selections
         and STRESS_SELECTION_ELEMENT_2 in config.stress_selections
     ):
-        for base_path in (
-            config.cauchy_stress_difference.output_path,
-            config.cauchy_stress_measures.output_path,
-            config.element_shear_stress.output_path,
-            config.element_von_mises_stress.output_path,
-        ):
-            combine_element_specific_stress_pdfs(
-                base_path,
-                flip_mode,
-                config.parameterization,
-            )
+        for value_mode in config.value_modes:
+            for base_path in enabled_element_combination_paths(config):
+                combine_element_specific_stress_pdfs(
+                    base_path,
+                    flip_mode,
+                    config.parameterization,
+                    value_mode,
+                )
     if first_element_G_fig is not None:
         save_figure(
             first_element_G_fig,
-            flip_mode_output_path(
-                config.first_element_G.output_path,
-                flip_mode,
-                config.parameterization,
+            field_value_mode_output_path(
+                flip_mode_output_path(
+                    config.first_element_G.output_path,
+                    flip_mode,
+                    config.parameterization,
+                ),
+                FIELD_VALUE_MODE_CURRENT,
+            ),
+        )
+    for (
+        value_mode,
+        mesh_stress_measure,
+        mesh_stress_selection,
+        mesh_parameterization_fig,
+    ) in mesh_parameterization_figures:
+        mesh_output_path = mesh_parameterization_output_path(
+            config.mesh_parameterization_stress.output_path,
+            mesh_stress_measure,
+            mesh_stress_selection,
+        )
+        save_figure(
+            mesh_parameterization_fig,
+            field_value_mode_output_path(
+                flip_mode_output_path(
+                    mesh_output_path,
+                    flip_mode,
+                    config.parameterization,
+                ),
+                value_mode,
             ),
         )
 
-    heatmap_data = representative_heatmap_data(heatmap_data_by_content)
-    delta_energy = heatmap_data["delta_energy"]
-    print(
-        "Delta E range: "
-        f"{float(np.nanmin(delta_energy)):.6e} to {float(np.nanmax(delta_energy)):.6e}"
-    )
-    if config.plot_focused_heatmap:
+    heatmap_data = None
+    focused_heatmap_data = None
+    if heatmap_data_by_content:
+        heatmap_data = representative_heatmap_data(heatmap_data_by_content)
+        delta_energy = heatmap_data["delta_energy"]
+        print(
+            "Delta E range: "
+            f"{float(np.nanmin(delta_energy)):.6e} "
+            f"to {float(np.nanmax(delta_energy)):.6e}"
+        )
+        reference_energy = heatmap_data["reference_energy"]
+        print(
+            "Reference simple-shear energy: "
+            f"{reference_energy:.6e} "
+            f"(gamma_c={config.reference_contour.gamma_c:g})"
+        )
+    if focused_heatmap_data_by_content:
         focused_heatmap_data = representative_heatmap_data(
             focused_heatmap_data_by_content
         )
@@ -4609,59 +6283,70 @@ def build_and_save_for_flip_mode(
             f"{float(np.nanmin(focused_delta_energy)):.6e} "
             f"to {float(np.nanmax(focused_delta_energy)):.6e}"
         )
-    summary_stress_selection = (
-        STRESS_SELECTION_AVERAGE
-        if STRESS_SELECTION_AVERAGE in stress_data_by_selection
-        else next(iter(stress_data_by_selection))
-    )
-    summary_stress_data = stress_data_by_selection[summary_stress_selection]
-    cauchy_data = summary_stress_data["cauchy"]
-    stress_measure_data = summary_stress_data["stress_measure"]
-    shear_data = summary_stress_data["shear"]
-    element_vm_data = summary_stress_data["element_vm"]
-    print(
-        "Stress summary selection: "
-        f"{stress_selection_label(summary_stress_selection)}"
-    )
-    cauchy_values = cauchy_data["matrix_values"]
-    cauchy_mask = cauchy_data["inside_current_reconnection_zone"]
-    visible_cauchy_values = mask_matrix_field_to_region(cauchy_values, cauchy_mask)
-    reference_energy = heatmap_data["reference_energy"]
-    print(
-        "Reference simple-shear energy: "
-        f"{reference_energy:.6e} "
-        f"(gamma={config.reference_contour.shear:g})"
-    )
-    print(
-        "Visible Cauchy stress difference range: "
-        f"{float(np.nanmin(visible_cauchy_values)):.6e} "
-        f"to {float(np.nanmax(visible_cauchy_values)):.6e}"
-    )
-    stress_measure_names = [
-        field_value
-        for field_kind, field_value in matrix_plot_fields(config.cauchy_stress_measures)
-        if field_kind == MATRIX_FIELD_STRESS_MEASURE
-    ]
-    if stress_measure_names:
-        print(
-            "Visible Cauchy stress measure ranges: "
-            + ", ".join(
-                f"{measure}="
-                f"{float(np.nanmin(stress_measure_data[f'visible_{measure}'])):.6e}"
-                f" to "
-                f"{float(np.nanmax(stress_measure_data[f'visible_{measure}'])):.6e}"
-                for measure in stress_measure_names
-            )
+    if stress_data_by_selection:
+        summary_stress_selection = (
+            STRESS_SELECTION_AVERAGE
+            if STRESS_SELECTION_AVERAGE in stress_data_by_selection
+            else next(iter(stress_data_by_selection))
         )
-    print(
-        "Visible element stress measure ranges: "
-        f"shear="
-        f"{float(np.nanmin(shear_data['visible_values'])):.6e} to "
-        f"{float(np.nanmax(shear_data['visible_values'])):.6e}, "
-        f"von_mises_average="
-        f"{float(np.nanmin(element_vm_data['visible_values'])):.6e} to "
-        f"{float(np.nanmax(element_vm_data['visible_values'])):.6e}"
-    )
+        summary_stress_data = stress_data_by_selection[summary_stress_selection]
+        print(
+            "Stress summary selection: "
+            f"{stress_selection_label(summary_stress_selection)}"
+        )
+        cauchy_data = summary_stress_data.get("cauchy")
+        if cauchy_data is not None:
+            cauchy_values = cauchy_data["matrix_values"]
+            cauchy_mask = cauchy_data["inside_current_reconnection_zone"]
+            visible_cauchy_values = mask_matrix_field_to_region(
+                cauchy_values,
+                cauchy_mask,
+            )
+            print(
+                "Visible Cauchy stress difference range: "
+                f"{float(np.nanmin(visible_cauchy_values)):.6e} "
+                f"to {float(np.nanmax(visible_cauchy_values)):.6e}"
+            )
+        stress_measure_data = summary_stress_data.get("stress_measure")
+        if stress_measure_data is not None:
+            stress_measure_names = [
+                field_value
+                for field_kind, field_value in matrix_plot_fields(
+                    config.cauchy_stress_measures
+                )
+                if field_kind == MATRIX_FIELD_STRESS_MEASURE
+            ]
+            if stress_measure_names:
+                print(
+                    "Visible Cauchy stress measure ranges: "
+                    + ", ".join(
+                        f"{measure}="
+                        f"{float(np.nanmin(stress_measure_data[f'visible_{measure}'])):.6e}"
+                        f" to "
+                        f"{float(np.nanmax(stress_measure_data[f'visible_{measure}'])):.6e}"
+                        for measure in stress_measure_names
+                    )
+                )
+        element_range_summaries = []
+        shear_data = summary_stress_data.get("shear")
+        if shear_data is not None:
+            element_range_summaries.append(
+                "shear="
+                f"{float(np.nanmin(shear_data['visible_values'])):.6e} to "
+                f"{float(np.nanmax(shear_data['visible_values'])):.6e}"
+            )
+        element_vm_data = summary_stress_data.get("element_vm")
+        if element_vm_data is not None:
+            element_range_summaries.append(
+                "von_mises_average="
+                f"{float(np.nanmin(element_vm_data['visible_values'])):.6e} to "
+                f"{float(np.nanmax(element_vm_data['visible_values'])):.6e}"
+            )
+        if element_range_summaries:
+            print(
+                "Visible element stress measure ranges: "
+                + ", ".join(element_range_summaries)
+            )
     if first_element_G_data is not None:
         first_element_G_values = first_element_G_data["matrix_values"]
         print(
@@ -4669,19 +6354,38 @@ def build_and_save_for_flip_mode(
             f"{float(np.nanmin(first_element_G_values)):.6e} "
             f"to {float(np.nanmax(first_element_G_values)):.6e}"
         )
-    current_no_flip_mask = heatmap_data["inside_current_reconnection_zone"]
-    flipped_no_flip_mask = heatmap_data["inside_flipped_reconnection_zone"]
-    print(
-        "Current no-flip occupancy: "
-        f"{int(np.count_nonzero(current_no_flip_mask))} / "
-        f"{current_no_flip_mask.size}"
-    )
-    print(
-        "Flipped no-flip occupancy: "
-        f"{int(np.count_nonzero(flipped_no_flip_mask))} / "
-        f"{flipped_no_flip_mask.size}"
-    )
-    if config.plot_focused_heatmap:
+    if mesh_samples is not None:
+        valid_count = int(np.count_nonzero(mesh_samples.valid_pair_mask))
+        invalid_count = int(mesh_samples.valid_pair_mask.size - valid_count)
+        print(
+            "Mesh parameterization pairs: "
+            f"{mesh_samples.valid_pair_mask.size} plotted "
+            f"({valid_count} reciprocal twinID, {invalid_count} non-twin), "
+            f"{mesh_samples.periodic_twin_pairs_ignored} periodic twin pairs ignored"
+        )
+        print(
+            "Mesh parameterization sample ranges: "
+            f"w={float(np.nanmin(mesh_samples.w_values)):.6e} to "
+            f"{float(np.nanmax(mesh_samples.w_values)):.6e}, "
+            f"u={float(np.nanmin(mesh_samples.parameter_values)):.6e} to "
+            f"{float(np.nanmax(mesh_samples.parameter_values)):.6e}, "
+            f"v={float(np.nanmin(mesh_samples.v_values)):.6e} to "
+            f"{float(np.nanmax(mesh_samples.v_values)):.6e}"
+        )
+    if heatmap_data is not None:
+        current_no_flip_mask = heatmap_data["inside_current_reconnection_zone"]
+        flipped_no_flip_mask = heatmap_data["inside_flipped_reconnection_zone"]
+        print(
+            "Current no-flip occupancy: "
+            f"{int(np.count_nonzero(current_no_flip_mask))} / "
+            f"{current_no_flip_mask.size}"
+        )
+        print(
+            "Flipped no-flip occupancy: "
+            f"{int(np.count_nonzero(flipped_no_flip_mask))} / "
+            f"{flipped_no_flip_mask.size}"
+        )
+    if focused_heatmap_data is not None:
         focused_current_no_flip_mask = focused_heatmap_data[
             "inside_current_reconnection_zone"
         ]
@@ -4689,7 +6393,7 @@ def build_and_save_for_flip_mode(
             "inside_flipped_reconnection_zone"
         ]
         print(
-            "Focused current no-flip occupancy: "
+            "Focused no-flip occupancy: "
             f"{int(np.count_nonzero(focused_current_no_flip_mask))} / "
             f"{focused_current_no_flip_mask.size}"
         )
@@ -4700,17 +6404,20 @@ def build_and_save_for_flip_mode(
         )
 
     figures = [
-        fig,
-        flipped_fig,
-        *[heatmap_fig for _, heatmap_fig in heatmap_figures],
+        *[figure for figure in (fig, flipped_fig) if figure is not None],
+        *[heatmap_fig for _, _, heatmap_fig in heatmap_figures],
         *[
             focused_heatmap_fig
-            for _, focused_heatmap_fig in focused_heatmap_figures
+            for _, _, focused_heatmap_fig in focused_heatmap_figures
         ],
-        *[stress_fig for _, _, stress_fig in stress_figures],
+        *[stress_fig for _, _, _, stress_fig in stress_figures],
     ]
     if first_element_G_fig is not None:
         figures.append(first_element_G_fig)
+    figures.extend(
+        mesh_parameterization_fig
+        for _, _, _, mesh_parameterization_fig in mesh_parameterization_figures
+    )
     if not config.show:
         for figure in figures:
             plt.close(figure)
@@ -4724,6 +6431,7 @@ def main(config: PlotConfig = CONFIG) -> None:
     validate_parameterization(config.parameterization)
     validate_parameterizations(config.parameterizations)
     validate_stress_selections(config.stress_selections)
+    validate_field_value_modes(config.value_modes)
 
     figures = []
     for parameterization in config.parameterizations:
@@ -4732,6 +6440,12 @@ def main(config: PlotConfig = CONFIG) -> None:
             figures.extend(
                 build_and_save_for_flip_mode(parameterization_config, flip_mode)
             )
+
+    if (
+        FIELD_VALUE_MODE_CURRENT in config.value_modes
+        and FIELD_VALUE_MODE_FLIPPED in config.value_modes
+    ):
+        combine_current_flipped_exports()
 
     if config.show:
         plt.show()

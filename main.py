@@ -50,6 +50,7 @@ from Management.jobs import (
     initalInstability,
     reconnectionTest,
     reversibilityJob,
+    restartWithLogDuringMinimization,
     sylvainBatches,
 )
 
@@ -247,13 +248,10 @@ def plotBigJob():
     )
 
 
-def resumeWithLogDuringMin(configPath, dump, newOutput=True):
-    conf = SimulationConfig()
-    conf.parse(configPath)
-    conf.logDuringMinimization = 1
-    if newOutput:
-        conf.name = conf.generate_name(False)
-    run_locally(conf, dump=dump, newOutput=newOutput)
+def restartLongShearWithMinimizationLog():
+    config = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,5.0PBCedgeFlipt5epsR1e-05LBFGSEpsg1e-08LBFGSEpsx1e-06s0/config.conf"
+    dump = "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,5.0PBCedgeFlipt5epsR1e-05LBFGSEpsg1e-08LBFGSEpsx1e-06s0/dumps/dump_l1.0.xml.gz"
+    restartWithLogDuringMinimization(config, dump)
 
 
 def resumeSim(dumpPath, configPath=None, newOutput=False, **kwargs):
@@ -285,7 +283,7 @@ def resumeSim(dumpPath, configPath=None, newOutput=False, **kwargs):
 def sylvainSmallDrop():
     confPath = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.138,4e-05,1.0PBCt8initialGuessNoise0.04LBFGSEpsx1e-05s0/config.conf"
     dump = "/Volumes/data/MTS2D_output/simpleShear,s150x150l0.138,4e-05,1.0PBCt8initialGuessNoise0.04LBFGSEpsx1e-05s0/dumps/dump_l0.66.xml.gz"
-    resumeWithLogDuringMin(configPath=confPath, dump=dump)
+    restartWithLogDuringMinimization(confPath, dump)
 
 
 def plotPropperJob():
@@ -463,7 +461,7 @@ def runOnLocalMachine():
     #configs, labels = smallPristineCrystal()
     # configs, labels = triangular_edge_flip_job(size=50)
     #configs, labels = referenceStateTestJob()
-    configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, reconnecton=["edgeFlip"])
+    configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, diagonal=["minor", "major"],reconnecton=["none", "edgeFlip"])
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
@@ -625,7 +623,9 @@ if __name__ == "__main__":
     # cleanData()
     #startJobs()
 
+
     runOnLocalMachine()
+    #restartLongShearWithMinimizationLog()
 
     # plotPropperJob()
     # plotSizeScaling()
