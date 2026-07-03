@@ -11,6 +11,11 @@ from powerlaw import Distribution
 from Management.updateCSV import update_df_header, read_macrodata_csv
 from .makePlots import safePath, maybe_avg, energy_drop_label
 from .dataFunctions import get_metadata
+from .energyDropCalculations import (
+    calculate_energy_step_data,
+    infer_stress_column,
+    is_piola_stress_column,
+)
 import os
 import glob
 import tempfile
@@ -277,49 +282,23 @@ def _resolve_drop_label(info=None, *, energy_type=None, stress_corrected=False, 
     )
 
 
-def _infer_energy_column(df, averageEnergy=False):
-    if averageEnergy is True:
-        candidates = ["avg_energy"]
-    elif averageEnergy is False:
-        candidates = ["total_energy", "energy"]
-    elif averageEnergy is None:
-        candidates = ["total_energy", "avg_energy", "energy"]
-    for col in candidates:
-        if col in df:
-            return col
-    raise KeyError("No energy column found")
-
-
-def _infer_sigma_column(df):
-    sigma_col="avg_sigma12"
-    P_col="avg_P12"
-    if sigma_col in df:
-        if not np.all(df[sigma_col]==0):
-            return sigma_col
-    if P_col in df:
-        print("Warning: Using Piola-Kirchhoff stress instead of Cauchy stress!")
-        return P_col
-    raise KeyError("No stress column found")
-
-
-def _is_piola_sigma_column(sigma_col):
-    return str(sigma_col).endswith("P12")
-
-
 def _stress_corrected_drop_label(use_piola=False, use_avg=None):
     symbol = "E_{SP}" if use_piola else "E_S"
     return maybe_avg(symbol, use_avg)
 
 
-def _get_volume_from_meta(meta):
-    if "L" in meta and meta["L"]:
-        L = int(meta["L"])
-        return float(L * L)
-    dims = meta.get("dims") or meta.get("N")
-    if dims:
-        n1, n2 = dims
-        return float(n1 * n2)
-    return None
+def _stress_corrected_drop_column(correction_order=2, tangent="current"):
+    if correction_order == 1:
+        return "stress_corrected_drop_first_order"
+    if correction_order == 2:
+        if tangent in {"current", "gamma", "gamma_i"}:
+            return "stress_corrected_drop_second_order"
+        if tangent in {"gamma0", "zero", "gamma_zero"}:
+            return "stress_corrected_drop_second_order_gamma0"
+    raise ValueError(
+        "Expected correction_order=1 or correction_order=2 with "
+        "tangent in {'current', 'gamma0'}."
+    )
 
 
 def get_elastic_mu(report=False):
@@ -330,7 +309,7 @@ def get_elastic_mu(report=False):
     return mu
 
 def get_mu(df):
-    sigma_col = _infer_sigma_column(df)
+    sigma_col = infer_stress_column(df)
     sigma = df[sigma_col]
     delta_gamma = np.diff(df["load"])
     mu = np.diff(sigma)/delta_gamma
@@ -363,11 +342,15 @@ def get_energy_drops(
     energy_type="e_change_from_init",
     averageEnergy=False,
     stress_corrected=True,
+    stress_correction_order=2,
+    stress_tangent="current",
 ):
     """
     Strain energy drop data from CSV, filter by strain limits, and return drops.
     When onlyStrainedEnergyDrops is true, we still use e_change_from_init, but only
-    when energy_chage is negative (there is a drop between relaxed states).
+    when energy_change is negative (there is a drop between relaxed states).
+    Stress-corrected drops use the shared Taylor expansion helper; by default
+    this is second order with A1212 evaluated at the current strain gamma_i.
     If debug=True, plot intermediate energy and drop traces.
     """
     if isinstance(csvPaths, str):
@@ -412,45 +395,37 @@ def get_energy_drops(
         energy_col = None
         signed_step_change = None
         if stress_corrected:
-            meta = get_metadata(singlePath)
-            V = _get_volume_from_meta(meta)
-            if V is None:
-                raise ValueError(f"Could not infer system size from {singlePath}")
-            delta_gamma = np.diff(df_local["load"])
-            sigma_col = _infer_sigma_column(df_local)
-            used_piola_stress = used_piola_stress or _is_piola_sigma_column(sigma_col)
-            energy_col = _infer_energy_column(df_local, averageEnergy)
-            energy = df_local[energy_col]
-            sigma = df_local[sigma_col]
-            use_average = averageEnergy
-            if use_average is None:
-                use_average = energy_col.startswith("avg_")
+            step_df, step_info = calculate_energy_step_data(
+                singlePath,
+                df=df_local,
+                metadata=get_metadata(singlePath),
+                average_energy=averageEnergy,
+            )
+            used_piola_stress = (
+                used_piola_stress or step_info["used_piola_stress"]
+            )
+            energy_col = step_info["energy_col"]
+            use_average = step_info["converted_avg_energy_to_total"]
             if use_average_label is None:
                 use_average_label = use_average
-            energy_total = energy * 2*V if use_average else energy # Nr elements=2xLxL
-            energy_total_arr = np.asarray(energy_total, dtype=float)
-            sigma_arr = np.asarray(sigma, dtype=float)
-            step_drop = energy_total_arr[:-1] - energy_total_arr[1:]+ V * sigma_arr[:-1] * delta_gamma
-            #plt.plot(V * sigma_arr[:-1] * delta_gamma, label="stress correction")
-            #plt.plot( sigma_arr[:-1], label="raw stress correction")
-            #plt.plot(energy_total_arr[:-1] - energy_total_arr[1:], label="energy drop")
-            # Run simulation of perfect crystal and check stress correction prediction
-            print(df_local.columns)
-            plt.plot(-df_local["total_e_change_from_init"], label=r"$E_R$")
-            plt.plot(step_drop, label="corrected energy drop")
-            #plt.yscale("log")
-            plt.legend()
-            plt.show()
-            if use_average:
-                step_drop = step_drop / (2*V)
-            signed_step_change = np.zeros(len(energy_total_arr), dtype=float)
+            drop_col = _stress_corrected_drop_column(
+                correction_order=stress_correction_order,
+                tangent=stress_tangent,
+            )
+            step_drop = np.asarray(step_df[drop_col], dtype=float)
+            signed_step_change = np.zeros(len(df_local), dtype=float)
             # Convention: drops are negative in signed_step_change.
             signed_step_change[1:] = -step_drop
             signed_step_change[0] = 0.0
+            correction_name = (
+                "first_order"
+                if stress_correction_order == 1
+                else f"second_order_{stress_tangent}"
+            )
             energy_key = (
-                "avg_stress_corrected_energy_drop"
+                f"avg_stress_corrected_energy_drop_{correction_name}"
                 if use_average
-                else "total_stress_corrected_energy_drop"
+                else f"total_stress_corrected_energy_drop_{correction_name}"
             )
         else:
             signed_step_change = np.asarray(df_local[energy_key], dtype=float)
@@ -661,7 +636,7 @@ def get_stress_drops(
                 strainLim, df=df_local, postRegime=postRegime
             )
 
-        sigma_col = _infer_sigma_column(df_local)
+        sigma_col = infer_stress_column(df_local)
         sigma_arr = np.asarray(df_local[sigma_col], dtype=float)
         load_arr = np.asarray(df_local["load"], dtype=float)
         delta_gamma_arr = np.diff(load_arr)
@@ -1901,7 +1876,7 @@ def plot_plastic_counts(
     if not np.any(valid):
         if ax is None:
             fig, ax = plt.subplots()
-            ax.set_title("Energy-drop PDF and plasticity vs drop size")
+            ax.set_title(r"$E$-drop PDF and plasticity vs drop size")
             ax.set_xlabel(rf"$-\Delta {drop_label}$")
             ax.set_ylabel("Density (normalized)")
         return ax
@@ -1933,7 +1908,7 @@ def plot_plastic_counts(
 
     # 1) Energy-drop PDF (normalized) on ax1
     plot_data_pdf(ax, drops, drop_label=drop_label)
-    ax.set_title("Energy-drop PDF and plasticity vs drop size")
+    ax.set_title(r"$E$-drop PDF and plasticity vs drop size")
     ax.set_xlabel(rf"$-\Delta {drop_label}$")
     ax.set_ylabel("Density (normalized)", color=c_drop_pdf)
     ax.tick_params(axis="y", colors=c_drop_pdf)
@@ -1941,7 +1916,7 @@ def plot_plastic_counts(
     ax.set_xscale("log")
 
     # Plastic-event PDF vs drop size (normalized over plastic events) on ax1
-    plastic_pdf = bin_density  # W_i / (sum W) / Δx_i
+    plastic_pdf = bin_density  # bin_weight_i / (sum weights) / bin_width_i
     ax.plot(
         bin_centers,
         plastic_pdf,

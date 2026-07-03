@@ -459,7 +459,7 @@ def findOutputPath(
         "/data2/elundheim/",
         "/data/elundheim/",
         "/lustre/fswork/projects/rech/bph/uog82gz/",  # JeanZay
-        "/Users/elias/Work/PhD/Code/localData/",
+        os.path.expanduser("~/Work/PhD/Code/localData/"),
         "/tmp/",
     ]
 

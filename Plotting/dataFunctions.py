@@ -826,7 +826,7 @@ def get_previous_data(vtu_file):
 
 if __name__ == "__main__":
     vtu_file = (
-        "/Users/eliaslundheim/work/PhD/MTS2D/build/defaultName/data/remeshTest.0.vtu"
+        os.path.expanduser("~/work/PhD/MTS2D/build/defaultName/data/remeshTest.0.vtu")
     )
     # get and print force components in a clear manner
     vtu = VTUData(vtu_file)

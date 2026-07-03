@@ -14,6 +14,8 @@ Requires:
 
 import sys
 import argparse
+from pathlib import Path
+
 import numpy as np
 
 
@@ -114,7 +116,7 @@ def main():
     #     help="Print all triangles (inside/outside). Default prints only those outside D.",
     # )
     # args = ap.parse_args()
-    path = "/Users/eliaslundheim/Downloads/configuration_86934.vtk"
+    path = Path("~/Downloads/configuration_86934.vtk").expanduser()
     tol = 0.2
     pts, tris = load_mesh_points_and_tris(path)
     n_tri = len(tris)

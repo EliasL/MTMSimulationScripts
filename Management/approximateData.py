@@ -107,7 +107,7 @@ def find_data():
         "/data2/elundheim",
         "/data/elundheim",
         "/Volumes/data/",
-        "/Users/elias/Work/PhD/Code/localData",
+        os.path.expanduser("~/Work/PhD/Code/localData"),
         "/lustre/fswork/projects/rech/bph/uog82gz/",
     ]
 

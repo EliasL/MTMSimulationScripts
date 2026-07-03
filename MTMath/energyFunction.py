@@ -1120,5 +1120,25 @@ def sanityCheck_Piola(verbose=True):
 if __name__ == "__main__":
     
     #print(ContiEnergy.ground_state_energy())
-    phi_sym, phi_div_sym, phi_div_div_sym = ContiEnergy.symbolic_potential() 
-    print(simplify(phi_sym))
+    gamma = (4/3)**0.25
+    H = gamma * np.array([
+        [1.0, 0.5],
+        [0.0, np.sqrt(3)/2],
+    ])
+
+    C = H.T @ H
+
+    M = np.array([
+        [1.0, 1.0],
+        [0.0, -1.0],
+    ])
+
+    e1 = ContiEnergy.energy_from_C_in_place(C, beta=4)
+    print(e1)
+
+    C2 = M.T @ C @ M
+
+    e2 = ContiEnergy.energy_from_C_in_place(C2, beta=4)
+    print(e2)
+    # phi_sym, phi_div_sym, phi_div_div_sym = ContiEnergy.symbolic_potential() 
+    # print(simplify(phi_sym))

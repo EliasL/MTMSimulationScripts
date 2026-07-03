@@ -22,7 +22,7 @@ def energy_density(F):
 F_base = np.array([[1.2, 0.5], [30.1, 0.3]])  # Base deformation gradient
 
 # Compute the Piola stress tensor (simplified derivative of energy function)
-P = np.dot(F_base, np.eye(2))  # Assuming dW/dF = F for a simple material model
+P = np.dot(F_base, np.eye(2))  # Assuming dE/dF = F for a simple material model
 
 # Compute nodal forces
 nodal_forces = np.array([element_area * np.dot(grad.T, P) for grad in grad_N])

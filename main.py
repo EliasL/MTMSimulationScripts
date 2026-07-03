@@ -458,10 +458,10 @@ def runOnLocalMachine():
     #configs, labels = reversibilityJob()
     # configs, labels = loadStepJob(reconnection="edgeFlip")
     #configs, labels = reconnectSSTest(reconnectionMethod="none")
-    #configs, labels = smallPristineCrystal()
+    configs, labels = smallPristineCrystal()
     # configs, labels = triangular_edge_flip_job(size=50)
     #configs, labels = referenceStateTestJob()
-    configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, diagonal=["minor", "major"],reconnecton=["none", "edgeFlip"])
+    # configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, diagonal=["minor", "major"],reconnecton=["none", "edgeFlip"])
 
     # configs, labels = remeshTest(diagonal="major")
     # run_many_locally(configs, taskNames=labels, resume=False)
