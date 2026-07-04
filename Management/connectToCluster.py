@@ -24,7 +24,7 @@ class Servers:
 
     jeanZay = "jean-zay.idris.fr"
 
-    local_path_mac = "/Volumes/data/"
+    local_path_mac = os.path.expanduser("~/Work/PhD/Code/localData")
 
     # List of server variables for iteration or list-like access
     search_servers = [

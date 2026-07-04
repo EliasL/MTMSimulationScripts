@@ -223,6 +223,6 @@ def combine_pdf_cdf_plots(
 
 
 if __name__ == "__main__":
-    folder_path = "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw"
+    folder_path = os.path.expanduser("~/Work/PhD/Code/SimulationScripts/Plots/powerLaw")
     nr_saved = combine_pdf_cdf_plots(folder_path, prefer_ccdf=True)
     print(f"Saved {nr_saved} combined plots to combinedPlots")

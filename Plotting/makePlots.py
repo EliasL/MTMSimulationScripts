@@ -20,6 +20,7 @@ from .dataFunctions import (
     extract_true_force_contribution_magnitude_series,
     resolve_vtu_files,
 )
+from .energyDropCalculations import calculate_energy_step_data
 from Management.updateCSV import update_df_header, read_macrodata_csv
 from collections import defaultdict
 
@@ -557,7 +558,7 @@ def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True, use_av
             "RSS": rf"Stress ${maybe_avg(p12, use_avg)}$",
             "P12": rf"Stress ${maybe_avg(p12, use_avg)}$",
             "sigma12": rf"Stress ${maybe_avg(sigma12, use_avg)}$",
-            "energy": rf"Energy ${maybe_avg('W', use_avg)}$",
+            "energy": rf"Energy ${maybe_avg('E', use_avg)}$",
             "est_time_remaining": "Estimated time remaining (s)",
         }
         y_name = y_labels_map.get(Y_, Y)
@@ -1196,130 +1197,19 @@ def plot_force_contribution_magnitudes(
 
 def compute_predicted_next_energy(csv_file_path):
     """
-    Compute predicted next-step total energy using
-        E_{i+1}^{pred} = E_i + V * sigma_i * delta_gamma_i
-    and compare to measured E_{i+1}.
+    Compute predicted next-step total energy using first- and second-order
+    simple-shear Taylor approximations:
+
+        E_{i+1}^{pred,1} = E_i + V * P_{12,i} * delta_gamma_i
+        E_{i+1}^{pred,2} = E_{i+1}^{pred,1}
+            + 0.5 * V * a_{1212,i} * delta_gamma_i^2
+        E_{i+1}^{pred,2}(a_{1212}(0)) = E_{i+1}^{pred,1}
+            + 0.5 * V * a_{1212}(0) * delta_gamma_i^2
+
+    where A is dP/dF evaluated along F = [[1, gamma], [0, 1]], and compare
+    to measured E_{i+1}.
     """
-    csv_path = Path(csv_file_path)
-    if not csv_path.exists():
-        raise FileNotFoundError(f"CSV file not found: {csv_path}")
-
-    df = read_macrodata_csv(csv_path)
-    if "load" not in df.columns:
-        raise KeyError(f"Missing 'load' column in {csv_path}")
-
-    load = np.asarray(df["load"], dtype=float)
-    if load.ndim != 1 or load.size < 2:
-        raise ValueError(f"'load' in {csv_path} must be 1D with at least 2 points.")
-
-    meta = get_data_from_name(str(csv_path))
-    volume = None
-    if "L" in meta and meta["L"] is not None:
-        L = float(meta["L"])
-        volume = float(L * L)
-        nr_elements=L*L*2
-    elif "dims" in meta and meta["dims"] is not None:
-        n1, n2 = meta["dims"]
-        volume = float(n1 * n2)
-    elif "N" in meta and meta["N"] is not None:
-        n1, n2 = meta["N"]
-        volume = float(n1 * n2)
-    if volume is None:
-        raise ValueError(f"Could not infer system volume from metadata for {csv_path}")
-
-    sigma_col = None
-    if "avg_sigma12" in df.columns:
-        sigma_candidate = np.asarray(df["avg_sigma12"], dtype=float)
-        if not np.all(sigma_candidate == 0):
-            sigma_col = "avg_sigma12"
-    if sigma_col is None and "avg_P12" in df.columns:
-        sigma_col = "avg_P12"
-        print("WARNING USING PIOLA INSTEAD OF CAUCHY!")
-    if sigma_col is None:
-        raise KeyError(f"Missing stress column ('avg_sigma12' or 'avg_P12') in {csv_path}")
-
-    sigma = np.asarray(df[sigma_col], dtype=float)
-    if sigma.shape != load.shape:
-        raise ValueError(
-            f"Stress shape mismatch in {csv_path}: {sigma.shape} vs load {load.shape}"
-        )
-
-    converted_avg_energy = False
-    if "total_energy" in df.columns:
-        energy_col = "total_energy"
-        energy_total = np.asarray(df[energy_col], dtype=float)
-    elif "energy" in df.columns:
-        energy_col = "energy"
-        energy_total = np.asarray(df[energy_col], dtype=float)
-    elif "avg_energy" in df.columns:
-        energy_col = "avg_energy"
-        energy_total = np.asarray(df[energy_col], dtype=float) * nr_elements
-        converted_avg_energy = True
-    else:
-        raise KeyError(
-            f"Missing energy column ('total_energy', 'energy', or 'avg_energy') in {csv_path}"
-        )
-
-    if energy_total.shape != load.shape:
-        raise ValueError(
-            f"Energy shape mismatch in {csv_path}: {energy_total.shape} vs load {load.shape}"
-        )
-
-    load_i = load[:-1]
-    load_ip1 = load[1:]
-    delta_gamma = np.diff(load)
-    sigma_i = sigma[:-1]
-    e_i = energy_total[:-1]
-    e_real_next = energy_total[1:]
-    finite_pairs = (
-        np.isfinite(load_i)
-        & np.isfinite(load_ip1)
-        & np.isfinite(delta_gamma)
-        & np.isfinite(sigma_i)
-        & np.isfinite(e_i)
-        & np.isfinite(e_real_next)
-    )
-    if not np.any(finite_pairs):
-        raise ValueError(f"No finite prediction pairs found in {csv_path}")
-
-    load_i = load_i[finite_pairs]
-    load_ip1 = load_ip1[finite_pairs]
-    delta_gamma = delta_gamma[finite_pairs]
-    sigma_i = sigma_i[finite_pairs]
-    e_i = e_i[finite_pairs]
-    e_real_next = e_real_next[finite_pairs]
-
-    e_pred_next = e_i + volume * sigma_i * delta_gamma*2
-
-    prediction_error = e_real_next - e_pred_next
-    abs_prediction_error = np.abs(prediction_error)
-    relative_prediction_error = np.full_like(abs_prediction_error, np.nan)
-    denom = np.abs(e_real_next)
-    nonzero = denom > 0
-    relative_prediction_error[nonzero] = abs_prediction_error[nonzero] / denom[nonzero]
-
-    result_df = pd.DataFrame(
-        {
-            "load_i": load_i,
-            "load_ip1": load_ip1,
-            "delta_gamma": delta_gamma,
-            "sigma_i": sigma_i,
-            "E_i": e_i,
-            "E_ip1_pred": e_pred_next,
-            "E_ip1_real": e_real_next,
-            "prediction_error": prediction_error,
-            "abs_prediction_error": abs_prediction_error,
-            "relative_prediction_error": relative_prediction_error,
-        }
-    )
-    info = {
-        "csv_path": str(csv_path),
-        "volume": volume,
-        "sigma_col": sigma_col,
-        "energy_col": energy_col,
-        "converted_avg_energy_to_total": converted_avg_energy,
-    }
-    return result_df, info
+    return calculate_energy_step_data(csv_file_path, average_energy=None)
 
 
 def plot_predicted_energy_error(
@@ -1334,6 +1224,12 @@ def plot_predicted_energy_error(
     y_log=True,
     strain_lim=(None, None),
     show_sigma=False,
+    show_first_order_reference=False,
+    first_order_alpha=0.2,
+    reference_prediction=None,
+    reference_alpha=None,
+    show_reference_line=False,
+    x_column="load_ip1",
     show=False,
     save=True,
 ):
@@ -1355,11 +1251,47 @@ def plot_predicted_energy_error(
         "prediction_error",
         "abs_prediction_error",
         "relative_prediction_error",
+        "second_order_prediction_error",
+        "abs_second_order_prediction_error",
+        "relative_second_order_prediction_error",
+        "second_order_gamma0_prediction_error",
+        "abs_second_order_gamma0_prediction_error",
+        "relative_second_order_gamma0_prediction_error",
     }
     if error_metric not in allowed_metrics:
         raise ValueError(
             f"Unknown error_metric '{error_metric}'. Expected one of {sorted(allowed_metrics)}."
         )
+
+    reference_aliases = {
+        "none": None,
+        "off": None,
+        "false": None,
+        "first": "first_order",
+        "first_order": "first_order",
+        "gamma0": "second_order_gamma0",
+        "second_order_gamma0": "second_order_gamma0",
+        "second_order_at_gamma0": "second_order_gamma0",
+    }
+    if reference_prediction is not None:
+        reference_key = str(reference_prediction).lower()
+        if reference_key not in reference_aliases:
+            raise ValueError(
+                "reference_prediction must be one of "
+                f"{sorted(key for key in reference_aliases if key not in {'false', 'off'})}."
+            )
+        reference_prediction = reference_aliases[reference_key]
+    if show_first_order_reference and reference_prediction is None:
+        reference_prediction = "first_order"
+    if reference_alpha is None:
+        reference_alpha = first_order_alpha
+
+    x_label_map = {
+        "load_i": r"Strain $\gamma_i$",
+        "load_ip1": r"Strain $\gamma_{i+1}$",
+    }
+    if x_column not in x_label_map:
+        raise ValueError(f"x_column must be one of {sorted(x_label_map)}.")
 
     if strain_lim is not None:
         if len(strain_lim) != 2:
@@ -1373,10 +1305,47 @@ def plot_predicted_energy_error(
     sigma_ax = ax.twinx() if show_sigma else None
 
     metric_label_map = {
-        "prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred}}$",
-        "abs_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred}}|$",
-        "relative_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred}}| / |E_{i+1}^{\mathrm{real}}|$",
+        "prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},1}$",
+        "abs_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},1}|$",
+        "relative_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},1}| / |E_{i+1}^{\mathrm{real}}|$",
+        "second_order_prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}$",
+        "abs_second_order_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}|$",
+        "relative_second_order_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}| / |E_{i+1}^{\mathrm{real}}|$",
+        "second_order_gamma0_prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(a_{1212}(0))$",
+        "abs_second_order_gamma0_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(a_{1212}(0))|$",
+        "relative_second_order_gamma0_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(a_{1212}(0))| / |E_{i+1}^{\mathrm{real}}|$",
     }
+
+    reference_metric_maps = {
+        "first_order": {
+            "second_order_prediction_error": "prediction_error",
+            "abs_second_order_prediction_error": "abs_prediction_error",
+            "relative_second_order_prediction_error": "relative_prediction_error",
+            "second_order_gamma0_prediction_error": "prediction_error",
+            "abs_second_order_gamma0_prediction_error": "abs_prediction_error",
+            "relative_second_order_gamma0_prediction_error": "relative_prediction_error",
+        },
+        "second_order_gamma0": {
+            "second_order_prediction_error": "second_order_gamma0_prediction_error",
+            "abs_second_order_prediction_error": "abs_second_order_gamma0_prediction_error",
+            "relative_second_order_prediction_error": "relative_second_order_gamma0_prediction_error",
+        },
+    }
+    reference_text_map = {
+        "first_order": "Transparent markers: first-order approximation",
+        "second_order_gamma0": r"Transparent markers: second order with $a_{1212}(0)$",
+    }
+    signed_error_metrics = {
+        "prediction_error",
+        "second_order_prediction_error",
+        "second_order_gamma0_prediction_error",
+    }
+
+    def _plot_values(prediction_df, metric):
+        y_raw = np.asarray(prediction_df[metric], dtype=float)
+        if y_log and metric in signed_error_metrics:
+            return np.abs(y_raw)
+        return y_raw
 
     def _sample_points(mask, delta_gamma):
         indices = np.flatnonzero(mask)
@@ -1434,16 +1403,12 @@ def plot_predicted_energy_error(
             markers[i] = cell_markers[cell]
             marker_matrix[row, col] = markers[i]
 
+    plot_data = []
     for i, (csv_path, label) in enumerate(zip(csv_paths, labels)):
         prediction_df, _ = compute_predicted_next_energy(csv_path)
-        x = np.asarray(prediction_df["load_ip1"], dtype=float)
-        y_raw = np.asarray(prediction_df[error_metric], dtype=float)
+        x = np.asarray(prediction_df[x_column], dtype=float)
+        y = _plot_values(prediction_df, error_metric)
         sigma = np.asarray(prediction_df["sigma_i"], dtype=float)
-
-        if y_log and error_metric == "prediction_error":
-            y = np.abs(y_raw)
-        else:
-            y = y_raw
 
         finite = np.isfinite(x) & np.isfinite(y)
         if strain_min is not None:
@@ -1458,6 +1423,28 @@ def plot_predicted_energy_error(
                 f"(after strain_lim={strain_lim} and y_log={y_log} filtering). Skipping."
             )
             continue
+
+        reference_metric = None
+        if reference_prediction is not None:
+            reference_metric = reference_metric_maps[reference_prediction].get(
+                error_metric
+            )
+        reference_y = None
+        reference_indices = None
+        if reference_metric is not None:
+            reference_y = _plot_values(prediction_df, reference_metric)
+            reference_finite = np.isfinite(x) & np.isfinite(reference_y)
+            if strain_min is not None:
+                reference_finite &= x >= strain_min
+            if strain_max is not None:
+                reference_finite &= x <= strain_max
+            if y_log:
+                reference_finite &= reference_y > 0
+            if np.any(reference_finite):
+                reference_indices = _sample_points(
+                    reference_finite,
+                    np.asarray(prediction_df["delta_gamma"], dtype=float),
+                )
 
         if show_sigma:
             sigma_finite = np.isfinite(x) & np.isfinite(sigma)
@@ -1481,23 +1468,66 @@ def plot_predicted_energy_error(
         )
         color = colors[i] if colors[i] is not None else f"C{i % 10}"
         legend_label = getPrettyLabel(label) if label else Path(csv_path).parent.name
-        ax.scatter(
-            x[plot_indices],
-            y[plot_indices],
-            label=legend_label,
-            marker=markers[i],
-            s=22,
-            facecolors="none",
-            edgecolors=color,
-            linewidths=0.9,
+        plot_data.append(
+            {
+                "x": x,
+                "y": y,
+                "plot_indices": plot_indices,
+                "reference_y": reference_y,
+                "reference_indices": reference_indices,
+                "color": color,
+                "marker": markers[i],
+                "legend_label": legend_label,
+            }
         )
 
-    if error_metric == "prediction_error" and not y_log:
+    for item in plot_data:
+        if item["reference_y"] is None or item["reference_indices"] is None:
+            continue
+        if show_reference_line:
+            ax.plot(
+                item["x"][item["reference_indices"]],
+                item["reference_y"][item["reference_indices"]],
+                color=item["color"],
+                linestyle="--",
+                linewidth=0.8,
+                alpha=reference_alpha,
+                zorder=1,
+                label="_nolegend_",
+            )
+        ax.scatter(
+            item["x"][item["reference_indices"]],
+            item["reference_y"][item["reference_indices"]],
+            label="_nolegend_",
+            marker=item["marker"],
+            s=22,
+            facecolors="none",
+            edgecolors=item["color"],
+            linewidths=0.9,
+            alpha=reference_alpha,
+            zorder=1,
+        )
+
+    for item in plot_data:
+        ax.scatter(
+            item["x"][item["plot_indices"]],
+            item["y"][item["plot_indices"]],
+            label=item["legend_label"],
+            marker=item["marker"],
+            s=22,
+            facecolors="none",
+            edgecolors=item["color"],
+            linewidths=0.9,
+            zorder=2,
+        )
+
+    if error_metric in signed_error_metrics and not y_log:
         ax.axhline(0.0, color="black", linestyle="--", linewidth=0.8, alpha=0.6)
 
-    ax.set_xlabel(r"Strain $\gamma_{i+1}$")
-    if y_log and error_metric == "prediction_error":
-        ax.set_ylabel(metric_label_map["abs_prediction_error"])
+    ax.set_xlabel(x_label_map[x_column])
+    if y_log and error_metric in signed_error_metrics:
+        label_key = f"abs_{error_metric}"
+        ax.set_ylabel(metric_label_map[label_key])
     else:
         ax.set_ylabel(metric_label_map[error_metric])
     if y_log:
@@ -1506,7 +1536,33 @@ def plot_predicted_energy_error(
     if show_sigma:
         sigma_ax.set_ylabel(r"$\sigma_{12}$", color="0.35")
         sigma_ax.tick_params(axis="y", colors="0.35")
-    ax.set_title(r"Energy Prediction Error: $E_{i+1}^{pred} = E_i + V \sigma_i \delta\gamma_i$")
+    if "second_order_gamma0" in error_metric:
+        title_formula = (
+            r"$E_{i+1}^{\mathrm{pred},2}(a_{1212}(0))="
+            r"E_i+V P_{12,i}\Delta\gamma_i"
+            r"+\frac{1}{2}V a_{1212}(0)(\Delta\gamma_i)^2$"
+        )
+    elif "second_order" in error_metric:
+        title_formula = (
+            r"$E_{i+1}^{\mathrm{pred},2}=E_i+V P_{12,i}\Delta\gamma_i"
+            r"+\frac{1}{2}V a_{1212,i}(\Delta\gamma_i)^2$"
+        )
+    else:
+        title_formula = (
+            r"$E_{i+1}^{\mathrm{pred},1}=E_i+V P_{12,i}\Delta\gamma_i$"
+        )
+    ax.set_title("Energy Prediction Error\n" + title_formula)
+    if reference_prediction is not None:
+        ax.text(
+            0.98,
+            0.98,
+            reference_text_map[reference_prediction],
+            transform=ax.transAxes,
+            ha="right",
+            va="top",
+            fontsize="small",
+            color="0.35",
+        )
 
     if use_color_matrix_legend:
         plot_color_matrix(
@@ -1633,7 +1689,7 @@ def addImagesToPlot(
         if mesh_property == "stress":
             label = r"Stress $\sigma$"
         elif mesh_property == "energy":
-            label = r"Energy $W$"
+            label = r"Energy $E$"
         elif mesh_property == "m":
             label = r"Dislocations $\textbf{m}_3$"
         # Add the color bar to the figure

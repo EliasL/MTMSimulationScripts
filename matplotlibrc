@@ -1,0 +1,7 @@
+text.usetex: True
+font.family: serif
+font.serif: Computer Modern Roman, Latin Modern Roman, cmr10
+mathtext.fontset: cm
+axes.formatter.use_mathtext: True
+axes.unicode_minus: False
+text.latex.preamble: \usepackage{amsmath}

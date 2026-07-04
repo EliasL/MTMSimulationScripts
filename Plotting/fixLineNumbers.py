@@ -126,12 +126,15 @@ def fix_csv_files_in_data_folder(folder_path, max_workers=10):
 
 if __name__ == "__main__":
     # Example usage
-    folder_path = "/Users/elias/Work/PhD/Code/remoteData/"
-    folder_path = "/Users/eliaslundheim/work/PhD/remoteData/"
+    folder_path = os.path.expanduser("~/Work/PhD/Code/remoteData/")
 
     fix_missing_column(
         [
-            "/Users/eliaslundheim/work/PhD/remoteData/macro/simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s18.csv"
+            os.path.join(
+                folder_path,
+                "macro",
+                "simpleShear,s100x100l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s18.csv",
+            )
         ]
     )
     # fix_csv_files_in_folder(folder_path)

@@ -221,7 +221,7 @@ def _plot_energy_axis(energy_ax, runs, colors, *, t_lim, x_col, energy_col):
             linewidth=1.5,
         )
     energy_ax.set_xlabel(r"$t$")
-    energy_ax.set_ylabel(r"$W$")
+    energy_ax.set_ylabel(r"$E$")
     if t_lim is not None:
         energy_ax.set_xlim(t_lim)
     energy_ax.grid(True, which="both", alpha=0.25, linewidth=0.5)
@@ -260,7 +260,7 @@ def _plot_difference_axis(
     )
     difference_ax.set_yscale("log")
     difference_ax.set_xlabel(r"$t$")
-    difference_ax.set_ylabel(r"$|\Delta W|$")
+    difference_ax.set_ylabel(r"$|\Delta E|$")
     if t_lim is not None:
         difference_ax.set_xlim(t_lim)
     difference_ax.grid(True, which="both", alpha=0.25, linewidth=0.5)

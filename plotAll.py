@@ -291,7 +291,9 @@ if __name__ == "__main__":
         handle_args_and_plot()
     else:
         p = "/Volumes/data/MTS2D_output/doubleDislocationTest,s30x30l0.0,0.001,4.0NPBCt3meshDiagonalminorepsR1e-06logDuringMinimization1s0/macroData.csv"
-        p="/Users/elias/Work/PhD/Code/localData/MTS2D_output/doubleDislocationTest,s20x20l0.0,0.01,2.0NPBCt1meshDiagonalminorGP31.0epsR1e-06logDuringMinimization1s0/macroData.csv"
+        p = os.path.expanduser(
+            "~/Work/PhD/Code/localData/MTS2D_output/doubleDislocationTest,s20x20l0.0,0.01,2.0NPBCt1meshDiagonalminorGP31.0epsR1e-06logDuringMinimization1s0/macroData.csv"
+        )
         plotAll(
             # "/Volumes/data/MTS2D_output/doubleDislocationTest,s100x100l0.0,0.001,4.0NPBCt3epsR1e-06s0/macroData.csv",
             p,

@@ -207,7 +207,7 @@ def compare_energy_three_sims():
 
     ax.set_yscale("log")
     ax.set_xlabel(r"$\gamma$")
-    ax.set_ylabel("Energy")
+    ax.set_ylabel(r"Energy $E$")
     ax.legend(loc="best")
     fig.tight_layout()
     os.makedirs("Plots", exist_ok=True)
@@ -362,38 +362,38 @@ def plotSylvainBatches():
             for i in range(len(aligned_group_labels), len(paths)):
                 aligned_group_labels.append(f"group_{i}")
 
-        makeAverageComparisonPlot(
-            paths,
-            Y="avg_energy",
-            name=f"sylvain_batch_{batch}_avg_energy",
-            group_labels=aligned_group_labels,
-            use_title=True,
-        )
+        # makeAverageComparisonPlot(
+        #     paths,
+        #     Y="avg_energy",
+        #     name=f"sylvain_batch_{batch}_avg_energy",
+        #     group_labels=aligned_group_labels,
+        #     use_title=True,
+        # )
 
-        flat_paths = []
-        flat_labels = []
-        for group_paths, group_label in zip(paths, aligned_group_labels):
-            if not group_paths:
-                continue
-            flat_paths.extend(group_paths)
-            flat_labels.extend([group_label] * len(group_paths))
+        # flat_paths = []
+        # flat_labels = []
+        # for group_paths, group_label in zip(paths, aligned_group_labels):
+        #     if not group_paths:
+        #         continue
+        #     flat_paths.extend(group_paths)
+        #     flat_labels.extend([group_label] * len(group_paths))
 
-        for postRegime, suffix in [(True, "post"), (False, "pre")]:
-            plot_reversibility_histograms(
-                paths,
-                postRegime=postRegime,
-                show=False,
-                save_path=f"Plots/sylvain_batch_{batch}_reversibility_{suffix}.pdf",
-                group_labels=aligned_group_labels,
-            )
+        # for postRegime, suffix in [(True, "post"), (False, "pre")]:
+        #     plot_reversibility_histograms(
+        #         paths,
+        #         postRegime=postRegime,
+        #         show=False,
+        #         save_path=f"Plots/sylvain_batch_{batch}_reversibility_{suffix}.pdf",
+        #         group_labels=aligned_group_labels,
+        #     )
 
-            plot_plastic_energy_scatter(
-                flat_paths,
-                labels=flat_labels,
-                postRegime=postRegime,
-                name=f"sylvain_batch_{batch}_plastic_energy_{suffix}",
-                color_by_label=True,
-            )
+        #     plot_plastic_energy_scatter(
+        #         flat_paths,
+        #         labels=flat_labels,
+        #         postRegime=postRegime,
+        #         name=f"sylvain_batch_{batch}_plastic_energy_{suffix}",
+        #         color_by_label=True,
+        #     )
 
         for group_idx, (group_paths, group_label) in enumerate(
             zip(paths, aligned_group_labels)
@@ -754,13 +754,14 @@ def syntheticDataPlotting():
 def testRealData():
     import numpy as np
 
+    umut_data = Path("~/work/PhD/UmutCode/UmutData").expanduser()
     paths = [
         "/Volumes/data/MTS2D_output/simpleShear,s500x500l0.138,2e-05,1.0PBCt8initialGuessNoise0.04LBFGSEpsx1e-05s0/macroData.csv",
         "/Volumes/data/MTS2D_output/simpleShear,s500x500l0.138,2e-05,1.0PBCt8initialGuessNoise0.04epsR1e-05s0/macroData.csv",
-        "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop1.csv",
-        "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop2.csv",
-        "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop3.csv",
-        "/Users/eliaslundheim/work/PhD/UmutCode/UmutData/s400x400_alpha_energy_drop4.csv",
+        str(umut_data / "s400x400_alpha_energy_drop1.csv"),
+        str(umut_data / "s400x400_alpha_energy_drop2.csv"),
+        str(umut_data / "s400x400_alpha_energy_drop3.csv"),
+        str(umut_data / "s400x400_alpha_energy_drop4.csv"),
     ]
     for path in paths:
         try:
@@ -864,15 +865,30 @@ def plotPristineCrystalPredictionError():
         print("No valid CSV paths found for pristineCrystal.")
         return
 
-    output_path = Path.cwd() / "Plots" / "pristine_crystal_energy_prediction_error.pdf"
+    # Switch to "first_order" for the first-order transparent reference.
+    #reference_prediction = "second_order_gamma0"
+    reference_prediction = "first_order"
+    output_suffix = (
+        "_gamma0_reference" if reference_prediction == "second_order_gamma0" else ""
+    )
+    output_path = (
+        Path.cwd()
+        / "Plots"
+        / f"pristine_crystal_energy_prediction_error{output_suffix}.pdf"
+    )
     plot_predicted_energy_error(
         flat_paths,
         labels=flat_labels,
         name=str(output_path),
         show=False,
-        error_metric="abs_prediction_error",
+        error_metric="abs_second_order_prediction_error",
         property_keys=("L", "loadIncrement"),
         use_color_matrix_legend=True,
+        reference_prediction=reference_prediction,
+        reference_alpha=0.2,
+        show_reference_line=True,
+        strain_lim=(0,0.14), #Loss of strong elipticity
+        x_column="load_i",
         y_log=True,
     )
 
@@ -881,7 +897,7 @@ if __name__ == "__main__":
     # calculateSimpleFiniteDifferenceDerivatives()
     # plotShearFiniteDifferenceDerivatives()
     # calculateShearFiniteDifferenceDerivatives()
-    run_reconnection_demo()
+    #run_reconnection_demo()
     # from MTMath.triangleError import test, test_Kappa
 
     # test()
@@ -928,8 +944,8 @@ if __name__ == "__main__":
     # testRealData()
     # investigateJobs()
     # print_remote_runtimes()
-    #plotSylvainBatches()
-    #plotPristineCrystalPredictionError()
+    plotSylvainBatches()
+    # plotPristineCrystalPredictionError()
     # compare_center_node_forces()
     # compare_energy_three_sims()
     pass

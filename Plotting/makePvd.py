@@ -69,4 +69,4 @@ def create_collection(
 
 
 if __name__ == "__main__":
-    create_collection("/Users/eliaslundheim/Downloads/data")
+    create_collection(os.path.expanduser("~/Downloads/data"))

@@ -554,7 +554,7 @@ def base_plot(
         else:
             data_row = [
                 rf"$\gamma$: {load:.5f}",
-                rf"$W$: {totalEnergy:.0f}",
+                rf"$E$: {totalEnergy:.0f}",
                 rf"$\langle {stress_label} \rangle$: {avgRSS:.3f}",
             ]
 
@@ -715,7 +715,7 @@ def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kw
 
 def pretty_mesh_property(mesh_property):
     if mesh_property == "energy":
-        return r"$W_i$"
+        return r"$E_i$"
     elif mesh_property == "stress":
         return r"$\sigma$"
     elif mesh_property == "m":
