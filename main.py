@@ -213,6 +213,10 @@ def reconnectingBenchmark():
     # 2% RT: 2m 4s   ETR: 1h 32m 36s Load: 0.167000
     # Clean up (05.06.25)
     # 2% RT: 2m 6s   ETR: 1h 33m 40s Load: 0.167000
+    # Better initial guess prediction (24.06.26)
+    #  2% RT: 2m 1s   ETR: 1h 52m 46s Load: 0.167000 (Turns out it's not better)
+    # Old initial guess prediction (24.06.26)
+    # 2% RT: 2m 6s   ETR: 1h 35m 6s  Load: 0.167000
 
 def parameterExploring():
     # pe.loadingSpeeds()
@@ -624,7 +628,7 @@ if __name__ == "__main__":
     #startJobs()
 
 
-    runOnLocalMachine()
+    #runOnLocalMachine()
     #restartLongShearWithMinimizationLog()
 
     # plotPropperJob()
@@ -633,7 +637,7 @@ if __name__ == "__main__":
     # stopConditionJob()
     # threadTest()
     #benchmark()
-    #reconnectingBenchmark()
+    reconnectingBenchmark()
     # resumeSim(
     #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,
