@@ -1,4 +1,4 @@
-integer_shear,reconnection,local_load,absolute_load,kappa_shape,kappa_const,kappa_tan
+integer_shear,reconnection,local_load,absolute_load,kappa_geo,kappa_mat,kappa_tan
 0,edge flip,0.1,0.1,2.45715931505401,1164.8901933429468,1531.2772475333418
 0,edge flip,0.2,0.2,2.018786171763159,1229.0593260505743,1449.9950118755605
 0,edge flip,0.3,0.3,1.6751839740415186,2786.716182296077,2937.958215969409

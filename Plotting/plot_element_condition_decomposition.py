@@ -16,6 +16,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 from MTMath.energyFunction import ContiEnergy
 from MTMath.meshUtils import triangle_shape_grads_and_area
@@ -58,7 +59,7 @@ def triangle_connectivity(data: VTUData) -> np.ndarray:
     return connectivity
 
 
-def shape_condition(data: VTUData) -> np.ndarray:
+def geometric_condition(data: VTUData) -> np.ndarray:
     points = np.asarray(data.mesh.points[:, :2], dtype=float)
     connectivity = triangle_connectivity(data)
     if np.any(connectivity < 0) or np.any(connectivity >= len(points)):
@@ -78,12 +79,12 @@ def shape_condition(data: VTUData) -> np.ndarray:
     return eigenvalues[:, 2] / eigenvalues[:, 1]
 
 
-def constitutive_condition(F: np.ndarray, *, loops: int) -> np.ndarray:
+def material_condition(F: np.ndarray, *, loops: int) -> np.ndarray:
     tangent = ContiEnergy.elasticity_tensor(F, eulerian=False, loops=loops)
     tangent_matrix = tangent.reshape(len(F), 4, 4)
     singular_values = np.linalg.svd(tangent_matrix, compute_uv=False)
     if np.any(singular_values[:, -1] <= 0.0):
-        raise ValueError("Constitutive tangent has a zero singular value.")
+        raise ValueError("Material tangent has a zero singular value.")
     return singular_values[:, 0] / singular_values[:, -1]
 
 
@@ -95,16 +96,16 @@ def tangent_condition(vtu_file: Path, *, loops: int) -> np.ndarray:
 
 def summarize(vtu_file: Path, *, loops: int) -> dict[str, float]:
     data = VTUData(str(vtu_file))
-    kappa_shape = shape_condition(data)
-    kappa_const = constitutive_condition(data.get_F(), loops=loops)
+    kappa_geo = geometric_condition(data)
+    kappa_mat = material_condition(data.get_F(), loops=loops)
     kappa_tan = tangent_condition(vtu_file, loops=loops)
 
-    assert_uniform_element_values(kappa_shape, name="kappa_shape", vtu_file=vtu_file)
-    assert_uniform_element_values(kappa_const, name="kappa_const", vtu_file=vtu_file)
+    assert_uniform_element_values(kappa_geo, name="kappa_geo", vtu_file=vtu_file)
+    assert_uniform_element_values(kappa_mat, name="kappa_mat", vtu_file=vtu_file)
     assert_uniform_element_values(kappa_tan, name="kappa_tan", vtu_file=vtu_file)
     return {
-        "kappa_shape": float(kappa_shape[0]),
-        "kappa_const": float(kappa_const[0]),
+        "kappa_geo": float(kappa_geo[0]),
+        "kappa_mat": float(kappa_mat[0]),
         "kappa_tan": float(kappa_tan[0]),
     }
 
@@ -155,15 +156,15 @@ def plot_records(records: list[dict], out_path: Path) -> None:
 
     quantities = [
         (
-            "kappa_shape",
-            r"$\kappa_{\mathrm{shape}}$",
-            "current triangle stiffness",
+            "kappa_geo",
+            r"$\kappa_{\mathrm{geo}}$",
+            "current element geometry",
             (1e0, 1e5),
         ),
         (
-            "kappa_const",
-            r"$\kappa_{\mathrm{const}}$",
-            "constitutive tangent",
+            "kappa_mat",
+            r"$\kappa_{\mathrm{mat}}$",
+            "material tangent",
             (1e3, 1e8),
         ),
         ("kappa_tan", r"$\kappa_{\mathrm{tan}}$", "element tangent", (1e3, 1e8)),
@@ -174,7 +175,7 @@ def plot_records(records: list[dict], out_path: Path) -> None:
     linestyles = {"edge flip": "-", "no reconnection": "--"}
     zorders = {"edge flip": 4, "no reconnection": 3}
 
-    fig, axes = plt.subplots(3, 1, figsize=(10.2, 7.0), sharex=True, constrained_layout=True)
+    fig, axes = plt.subplots(3, 1, figsize=(5.2, 6.8), sharex=True, constrained_layout=True)
     for ax, (field, ylabel, title, ylim) in zip(axes, quantities):
         for shear in shears:
             for reconnection in reconnections:
@@ -197,7 +198,6 @@ def plot_records(records: list[dict], out_path: Path) -> None:
                     linewidth=1.7,
                     marker="o",
                     markersize=2.8,
-                    label=f"n={shear}, {reconnection}",
                     zorder=zorders[reconnection],
                 )
         ax.set_yscale("log")
@@ -206,8 +206,48 @@ def plot_records(records: list[dict], out_path: Path) -> None:
         ax.set_title(title)
 
     axes[-1].set_xlabel(r"$\gamma-n$")
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="outside lower center", ncol=4, frameon=False)
+    shear_handles = [
+        Line2D(
+            [0],
+            [0],
+            color=colors.get(shear, "C0"),
+            linestyle="-",
+            marker="o",
+            markersize=2.8,
+            linewidth=1.7,
+            label=str(shear),
+        )
+        for shear in shears
+    ]
+    connectivity_handles = [
+        Line2D([0], [0], color="0.2", linestyle="-", linewidth=1.7, label="edge flip"),
+        Line2D([0], [0], color="0.2", linestyle="--", linewidth=1.7, label="fixed conn."),
+    ]
+    shear_legend = axes[0].legend(
+        handles=shear_handles,
+        title=r"$n$",
+        loc="upper left",
+        ncol=2,
+        fontsize=7.5,
+        title_fontsize=8,
+        frameon=True,
+        framealpha=0.9,
+        borderpad=0.3,
+        handlelength=1.5,
+        columnspacing=0.8,
+    )
+    axes[0].add_artist(shear_legend)
+    axes[0].legend(
+        handles=connectivity_handles,
+        title="connectivity",
+        loc="upper right",
+        fontsize=7.5,
+        title_fontsize=8,
+        frameon=True,
+        framealpha=0.9,
+        borderpad=0.3,
+        handlelength=1.7,
+    )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path)
@@ -217,8 +257,8 @@ def plot_records(records: list[dict], out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Decompose element conditioning into current triangle shape, "
-            "constitutive tangent, and full element tangent diagnostics."
+            "Decompose element conditioning into current element geometry, "
+            "material tangent, and full element tangent diagnostics."
         )
     )
     parser.add_argument(
