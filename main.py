@@ -30,6 +30,8 @@ from Management.jobs import (
     debugJob,
     allPlasticEventsJob,
     triangular_edge_flip_job,
+    stiffnessMatrixComparisonJob,
+    currentDistortionComparisonJob,
     propperJob,
     propperJob1,
     propperJob2,
@@ -464,6 +466,8 @@ def runOnLocalMachine():
     #configs, labels = reconnectSSTest(reconnectionMethod="none")
     configs, labels = smallPristineCrystal()
     # configs, labels = triangular_edge_flip_job(size=50)
+    # configs, labels = stiffnessMatrixComparisonJob(size=50, referenceShear=0.5)
+    # configs, labels = currentDistortionComparisonJob(size=50, startLoads=[0, 2, 5, 10])
     #configs, labels = referenceStateTestJob()
     # configs, labels = doubleDislocationTest(nrThreads=1, nrSeeds=1, L=20, diagonal=["minor", "major"],reconnecton=["none", "edgeFlip"])
 

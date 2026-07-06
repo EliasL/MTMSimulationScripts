@@ -3,3 +3,4 @@ media
 .*
 bootstrapData
 .DS_Store
+_*

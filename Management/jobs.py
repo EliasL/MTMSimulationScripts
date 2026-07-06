@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from pathlib import Path
 
 from .configGenerator import ConfigGenerator, SimulationConfig
@@ -951,4 +952,192 @@ def triangular_edge_flip_job(
         # logDuringMinimization=1,
     )
     return configs, labels
- 
+
+
+def stiffnessMatrixComparisonJob(
+    size=50,
+    nrSeeds=1,
+    seeds=None,
+    nrThreads=4,
+    maxLoad=1.0,
+    loadIncrement=1e-5,
+    referenceShear=0.5,
+    referenceReconnection="none",
+    nrVTUFrames=400,
+    energyDropThreshold=1e-10,
+    plasticityEventThreshold=0.0,
+    writeDumps=0,
+    showProgress=1,
+    group_by_variant=False,
+    startLoad=0.0,
+):
+    if startLoad != 0.0:
+        raise ValueError(
+            "Use startLoad=0.0 for this comparison. simpleShearReferenceTest "
+            "initializes the reference state differently from simpleShear."
+        )
+
+    if seeds is None:
+        seeds = range(nrSeeds)
+
+    if isinstance(referenceShear, str) or not isinstance(referenceShear, Iterable):
+        reference_shears = [float(referenceShear)]
+    else:
+        reference_shears = [float(shear) for shear in referenceShear]
+    if len(reference_shears) == 0:
+        raise ValueError("referenceShear must contain at least one value.")
+
+    if isinstance(referenceReconnection, str):
+        reference_reconnections = [referenceReconnection]
+    else:
+        reference_reconnections = list(referenceReconnection)
+    if len(reference_reconnections) == 0:
+        raise ValueError("referenceReconnection must contain at least one value.")
+
+    common = dict(
+        seed=seeds,
+        rows=size,
+        cols=size,
+        startLoad=startLoad,
+        maxLoad=maxLoad,
+        loadIncrement=loadIncrement,
+        nrThreads=nrThreads,
+        initialGuessNoise=0.0,
+        minimizer="LBFGS",
+        LBFGSEpsx=1e-6,
+        energyDropThreshold=energyDropThreshold,
+        plasticityEventThreshold=plasticityEventThreshold,
+        nrVTUFrames=nrVTUFrames,
+        writeDumps=writeDumps,
+        showProgress=showProgress,
+    )
+    variants = [
+        (
+            "simple shear, no reconnection",
+            dict(experiment="simpleShear", reconnectionMethod="none", GP1=0.0),
+        ),
+        (
+            "simple shear, edge flip",
+            dict(experiment="simpleShear", reconnectionMethod="edgeFlip", GP1=0.0),
+        ),
+    ]
+    for shear in reference_shears:
+        for reconnection_method in reference_reconnections:
+            reconnection_label = (
+                "no reconnection"
+                if reconnection_method == "none"
+                else reconnection_method
+            )
+            variants.append(
+                (
+                    f"reference shear {shear:g}, {reconnection_label}",
+                    dict(
+                        experiment="simpleShearReferenceTest",
+                        reconnectionMethod=reconnection_method,
+                        GP1=shear,
+                    ),
+                )
+            )
+
+    all_configs = []
+    all_labels = []
+    for label, variant in variants:
+        configs, labels = ConfigGenerator.generate(**common, **variant)
+        labels = [
+            label if seed_label == "" else f"{label}, {seed_label}"
+            for seed_label in labels
+        ]
+        if group_by_variant:
+            all_configs.append(configs)
+            all_labels.append(labels)
+        else:
+            all_configs.extend(configs)
+            all_labels.extend(labels)
+
+    return all_configs, all_labels
+
+
+def currentDistortionComparisonJob(
+    size=50,
+    nrSeeds=1,
+    seeds=None,
+    nrThreads=4,
+    startLoads=(0.0, 2.0, 5.0, 10.0),
+    window=1.0,
+    reconnection=("none", "edgeFlip"),
+    loadIncrement=1e-5,
+    nrVTUFrames=400,
+    energyDropThreshold=1e-10,
+    plasticityEventThreshold=0.0,
+    writeDumps=0,
+    showProgress=1,
+    group_by_variant=False,
+):
+    if seeds is None:
+        seeds = range(nrSeeds)
+
+    if isinstance(startLoads, str) or not isinstance(startLoads, Iterable):
+        start_loads = [float(startLoads)]
+    else:
+        start_loads = [float(start_load) for start_load in startLoads]
+    if len(start_loads) == 0:
+        raise ValueError("startLoads must contain at least one value.")
+    if window <= 0.0:
+        raise ValueError("window must be positive.")
+
+    if isinstance(reconnection, str):
+        reconnections = [reconnection]
+    else:
+        reconnections = list(reconnection)
+    if len(reconnections) == 0:
+        raise ValueError("reconnection must contain at least one value.")
+
+    common = dict(
+        seed=seeds,
+        rows=size,
+        cols=size,
+        loadIncrement=loadIncrement,
+        nrThreads=nrThreads,
+        initialGuessNoise=0.0,
+        minimizer="LBFGS",
+        LBFGSEpsx=1e-6,
+        experiment="simpleShear",
+        energyDropThreshold=energyDropThreshold,
+        plasticityEventThreshold=plasticityEventThreshold,
+        nrVTUFrames=nrVTUFrames,
+        writeDumps=writeDumps,
+        showProgress=showProgress,
+    )
+
+    all_configs = []
+    all_labels = []
+    for start_load in start_loads:
+        max_load = start_load + window
+        for reconnection_method in reconnections:
+            reconnection_label = (
+                "no reconnection"
+                if reconnection_method == "none"
+                else reconnection_method
+            )
+            label = (
+                f"current shear {start_load:g} to {max_load:g}, "
+                f"{reconnection_label}"
+            )
+            configs, labels = ConfigGenerator.generate(
+                **common,
+                startLoad=start_load,
+                maxLoad=max_load,
+                reconnectionMethod=reconnection_method,
+            )
+            labels = [
+                label if seed_label == "" else f"{label}, {seed_label}"
+                for seed_label in labels
+            ]
+            if group_by_variant:
+                all_configs.append(configs)
+                all_labels.append(labels)
+            else:
+                all_configs.extend(configs)
+                all_labels.extend(labels)
+
+    return all_configs, all_labels

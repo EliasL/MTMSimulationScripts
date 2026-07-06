@@ -215,6 +215,37 @@ class VTUData:
         ]
         return arrsToMat(F11, F12, F21, F22)
 
+    def get_dN_dX(self):
+        """Return exported element shape gradients with shape (n_cells, 3, 2)."""
+        fields = [
+            "dN_dX00",
+            "dN_dX01",
+            "dN_dX10",
+            "dN_dX11",
+            "dN_dX20",
+            "dN_dX21",
+        ]
+        values = [self.get_cell_data(field) for field in fields]
+        if not all(value.shape == values[0].shape for value in values):
+            shapes = {field: value.shape for field, value in zip(fields, values)}
+            raise ValueError(f"dN_dX component shapes do not match: {shapes}")
+
+        dN_dX = np.empty((values[0].shape[0], 3, 2), dtype=float)
+        dN_dX[:, 0, 0] = values[0]
+        dN_dX[:, 0, 1] = values[1]
+        dN_dX[:, 1, 0] = values[2]
+        dN_dX[:, 1, 1] = values[3]
+        dN_dX[:, 2, 0] = values[4]
+        dN_dX[:, 2, 1] = values[5]
+        return dN_dX
+
+    def get_init_area(self):
+        """Return exported reference element areas as a cell field."""
+        init_area = np.asarray(self.get_cell_data("initArea"), dtype=float)
+        if np.any(init_area <= 0.0):
+            raise ValueError("All exported initArea values must be positive.")
+        return init_area
+
 
     def get_P(self):
         """
