@@ -204,6 +204,7 @@ def plot_records(records: list[dict], out_path: Path) -> None:
         ax.set_ylim(*ylim)
         ax.set_ylabel(ylabel)
         ax.set_title(title)
+        ax.grid(True, which="both", alpha=0.25)
 
     axes[-1].set_xlabel(r"$\gamma-n$")
     shear_handles = [
