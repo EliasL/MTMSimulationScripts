@@ -89,14 +89,14 @@ def plot_records(records: list[dict], out_path: Path) -> None:
                 )
 
         axes[0, col].set_title(scenario)
-        axes[1, col].set_xlabel("local simple shear load")
+        axes[1, col].set_xlabel(r"$\gamma-n$")
         axes[1, col].set_yscale("log")
 
     for ax in axes.ravel():
         ax.grid(True, which="both", alpha=0.25)
 
-    axes[0, 0].set_ylabel("element energy")
-    axes[1, 0].set_ylabel("tangent condition")
+    axes[0, 0].set_ylabel(r"$E$")
+    axes[1, 0].set_ylabel(r"$\kappa_{\mathrm{tan}}$")
     handles, labels = axes[0, 0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="outside lower center", ncol=4, frameon=False)
 
