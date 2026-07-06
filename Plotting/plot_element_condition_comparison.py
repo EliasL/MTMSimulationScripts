@@ -55,7 +55,7 @@ def plot_records(records: list[dict], out_path: Path) -> None:
     zorders = {"edge flip": 4, "no reconnection": 3}
 
     fig, axes = plt.subplots(
-        2, 2, figsize=(10.2, 6.0), sharex=True, constrained_layout=True
+        2, 2, figsize=(10.2, 6.0), sharex=True, sharey="row", constrained_layout=True
     )
     for col, scenario in enumerate(scenarios):
         for shear in shears:
