@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import argparse
 import os
 from pathlib import Path
+
+import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib-cache"))
@@ -10,152 +13,239 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
+from matplotlib.lines import Line2D
+from matplotlib.patches import Polygon
+
+
+def shear_matrix(gamma: float) -> np.ndarray:
+    return np.array([[1.0, gamma], [0.0, 1.0]], dtype=float)
 
 
 def shear(points: np.ndarray, gamma: float) -> np.ndarray:
-    transform = np.array([[1.0, gamma], [0.0, 1.0]])
-    return points @ transform.T
+    return points @ shear_matrix(gamma).T
 
 
-def closed(points: np.ndarray) -> np.ndarray:
-    return np.vstack([points, points[0]])
-
-
-def center(points: np.ndarray) -> np.ndarray:
+def centered_unit_triangle() -> np.ndarray:
+    points = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=float)
     return points - points.mean(axis=0)
 
 
-def draw_triangle(ax, points, *, color, label, linestyle="-", linewidth=2.2, alpha=1.0):
-    pts = closed(points)
-    ax.plot(
-        pts[:, 0],
-        pts[:, 1],
-        color=color,
+def draw_element(ax, points: np.ndarray, *, color: str, label: str, linestyle: str) -> None:
+    patch = Polygon(
+        points,
+        closed=True,
+        facecolor=color,
+        edgecolor=color,
+        linewidth=2.0,
         linestyle=linestyle,
-        linewidth=linewidth,
-        alpha=alpha,
+        alpha=0.14,
         label=label,
     )
-
-
-def draw_patch(ax, points, diagonal, *, color, label, linestyle="-", alpha=1.0):
-    square = np.array([points[0], points[1], points[3], points[2], points[0]])
-    ax.plot(square[:, 0], square[:, 1], color=color, linewidth=2.0, alpha=alpha)
-    a, b = diagonal
+    ax.add_patch(patch)
+    closed = np.vstack([points, points[0]])
     ax.plot(
-        [points[a, 0], points[b, 0]],
-        [points[a, 1], points[b, 1]],
+        closed[:, 0],
+        closed[:, 1],
         color=color,
+        linewidth=2.0,
         linestyle=linestyle,
-        linewidth=2.3,
-        alpha=alpha,
-        label=label,
     )
+    ax.scatter(points[:, 0], points[:, 1], s=18, color=color, zorder=4)
 
 
-def set_equal_panel(ax, title, *, xlim=(-0.85, 1.05), ylim=(-0.82, 0.82)):
-    ax.set_title(title, fontsize=11)
+def configure_axis(ax, *, title: str, xlim: tuple[float, float]) -> None:
+    ax.set_title(title, fontsize=10)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(*xlim)
-    ax.set_ylim(*ylim)
+    ax.set_ylim(-1.08, 0.88)
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
 
 
-def main():
-    out_path = ROOT / "Plots" / "stiffness_reference_current_geometry.png"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+def add_panel_text(ax, lines: list[str], *, xy: tuple[float, float]) -> None:
+    ax.text(
+        xy[0],
+        xy[1],
+        "\n".join(lines),
+        fontsize=8.2,
+        ha="left",
+        va="bottom",
+        bbox=dict(boxstyle="round,pad=0.22", facecolor="white", edgecolor="0.85", alpha=0.92),
+    )
+
+
+def schematic_title(integer_shear: int, local_shear: float) -> str:
+    return (
+        rf"$n={integer_shear}$, $s={local_shear:g}$, "
+        rf"$F_{{12}}=\gamma_{{\mathrm{{cur}}}}-\gamma_{{\mathrm{{ref}}}}="
+        rf"{integer_shear + local_shear:g}$"
+    )
+
+
+def schematic_handles(reference_color: str, current_color: str) -> list[Line2D]:
+    return [
+        Line2D(
+            [0],
+            [0],
+            color=reference_color,
+            linestyle="--",
+            linewidth=2.0,
+            label=r"reference $X$",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=current_color,
+            linestyle="-",
+            linewidth=2.0,
+            label=r"current $x$",
+        ),
+    ]
+
+
+def add_center_annotation(
+    axes, *, integer_shear: int, local_shear: float, reference_color: str, current_color: str
+) -> None:
+    positions = [ax.get_position() for ax in axes]
+    left = min(position.x0 for position in positions)
+    right = max(position.x1 for position in positions)
+    bottom = min(position.y0 for position in positions)
+    top = max(position.y1 for position in positions)
+    center_x = 0.5 * (left + right)
+    height = top - bottom
+    fig = axes[0].figure
+
+    fig.text(
+        center_x,
+        bottom + 0.31 * height,
+        schematic_title(integer_shear, local_shear),
+        ha="center",
+        va="center",
+        fontsize=8.8,
+    )
+    fig.legend(
+        handles=schematic_handles(reference_color, current_color),
+        loc="center",
+        bbox_to_anchor=(center_x, bottom + 0.16 * height),
+        bbox_transform=fig.transFigure,
+        fontsize=7.8,
+        frameon=True,
+        framealpha=0.92,
+        borderpad=0.25,
+        handlelength=1.8,
+    )
+
+
+def plot_schematic(axes, *, integer_shear: int, local_shear: float) -> None:
+    axes = np.asarray(axes).ravel()
+    if len(axes) != 2:
+        raise ValueError(f"Expected two schematic axes, got {len(axes)}.")
 
     reference_color = "#1f77b4"
     current_color = "#d95f02"
-    old_color = "#777777"
 
-    tri = center(np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]))
-    square = center(
-        np.array(
-            [
-                [0.0, 0.0],
-                [1.0, 0.0],
-                [0.0, 1.0],
-                [1.0, 1.0],
-            ]
-        )
-    )
+    base = centered_unit_triangle()
+    current_distorted_reference = base
+    current_distorted_current = shear(base, integer_shear + local_shear)
 
-    fig, axes = plt.subplots(1, 3, figsize=(10.8, 4.1), constrained_layout=True)
+    reference_distorted_reference = shear(base, -integer_shear)
+    reference_distorted_current = shear(base, local_shear)
 
     ax = axes[0]
-    draw_triangle(
+    draw_element(
         ax,
-        tri,
+        current_distorted_reference,
         color=reference_color,
-        label="reference X",
+        label=r"reference $X$",
         linestyle="--",
     )
-    draw_triangle(
+    draw_element(
         ax,
-        shear(tri, 0.9),
+        current_distorted_current,
         color=current_color,
-        label="current x",
-    )
-    ax.text(-0.78, -0.74, "fixed reference\ncurrent sheared", fontsize=9)
-    ax.legend(frameon=False, loc="upper left", fontsize=8)
-    set_equal_panel(ax, "Distorted Current")
-
-    ax = axes[1]
-    draw_triangle(
-        ax,
-        shear(tri, 1.0),
-        color=reference_color,
-        label="reference X",
-        linestyle="--",
-    )
-    draw_triangle(
-        ax,
-        shear(tri, 0.35),
-        color=current_color,
-        label="current x",
-    )
-    ax.text(-0.78, -0.74, "reference sheared by k\ncurrent loaded by g", fontsize=9)
-    ax.legend(frameon=False, loc="upper left", fontsize=8)
-    set_equal_panel(ax, "Distorted Reference")
-
-    ax = axes[2]
-    draw_patch(
-        ax,
-        square,
-        (0, 3),
-        color=old_color,
-        label="old shared edge",
-        linestyle=":",
-        alpha=0.65,
-    )
-    draw_patch(
-        ax,
-        square,
-        (1, 2),
-        color=reference_color,
-        label="new reference edge",
-        linestyle="--",
-    )
-    draw_patch(
-        ax,
-        shear(square, 0.75) + np.array([0.15, 0.0]),
-        (1, 2),
-        color=current_color,
-        label="new current edge",
+        label=r"current $x$",
         linestyle="-",
     )
-    ax.text(-0.68, -0.74, "edge flip changes topology\nnew X and x use new element", fontsize=9)
-    ax.legend(frameon=False, loc="upper left", fontsize=8)
-    set_equal_panel(ax, "After Edge Flip", xlim=(-0.75, 1.25), ylim=(-0.82, 0.82))
+    add_panel_text(
+        ax,
+        [
+            r"$\gamma_{\mathrm{ref}}=0$",
+            rf"$\gamma_{{\mathrm{{cur}}}}={integer_shear + local_shear:g}$",
+        ],
+        xy=(-1.18, -1.0),
+    )
+    configure_axis(ax, title="distorted current geometry", xlim=(-1.35, 2.45))
+    ax = axes[1]
+    draw_element(
+        ax,
+        reference_distorted_reference,
+        color=reference_color,
+        label=r"reference $X$",
+        linestyle="--",
+    )
+    draw_element(
+        ax,
+        reference_distorted_current,
+        color=current_color,
+        label=r"current $x$",
+        linestyle="-",
+    )
+    add_panel_text(
+        ax,
+        [
+            rf"$\gamma_{{\mathrm{{ref}}}}=-{integer_shear}$",
+            rf"$\gamma_{{\mathrm{{cur}}}}={local_shear:g}$",
+        ],
+        xy=(0.38, -1.0),
+    )
+    configure_axis(ax, title="distorted reference geometry", xlim=(-2.25, 1.45))
+    add_center_annotation(
+        axes,
+        integer_shear=integer_shear,
+        local_shear=local_shear,
+        reference_color=reference_color,
+        current_color=current_color,
+    )
 
-    fig.savefig(out_path, dpi=220)
+
+def make_figure(*, integer_shear: int, local_shear: float, out_pdf: Path, out_png: Path) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(5.7, 3.1))
+    fig.subplots_adjust(left=0.035, right=0.985, top=0.92, bottom=0.08, wspace=-0.18)
+    plot_schematic(axes, integer_shear=integer_shear, local_shear=local_shear)
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_pdf)
+    fig.savefig(out_png, dpi=220)
     plt.close(fig)
-    print(out_path)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Draw the current/reference element geometry for the two shear tests."
+    )
+    parser.add_argument("--integer-shear", type=int, default=2)
+    parser.add_argument("--local-shear", type=float, default=0.5)
+    parser.add_argument(
+        "--out-pdf",
+        type=Path,
+        default=Path("Plots/current_vs_reference_distortion_element_schematic.pdf"),
+    )
+    parser.add_argument(
+        "--out-png",
+        type=Path,
+        default=Path("Plots/current_vs_reference_distortion_element_schematic.png"),
+    )
+    args = parser.parse_args()
+
+    make_figure(
+        integer_shear=args.integer_shear,
+        local_shear=args.local_shear,
+        out_pdf=args.out_pdf,
+        out_png=args.out_png,
+    )
+    print(args.out_pdf)
+    print(args.out_png)
 
 
 if __name__ == "__main__":

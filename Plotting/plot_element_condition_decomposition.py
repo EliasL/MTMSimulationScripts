@@ -206,7 +206,47 @@ def write_csv(records: list[dict], out_path: Path) -> None:
         writer.writerows(records)
 
 
-def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
+def read_csv_records(csv_path: Path) -> list[dict]:
+    required_columns = {
+        "integer_shear",
+        "reference_shear",
+        "local_load",
+        "absolute_load",
+        "kappa_geo",
+        "kappa_mat",
+        "kappa_tan",
+    }
+    with csv_path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None:
+            raise ValueError(f"{csv_path} has no header.")
+        missing = required_columns - set(reader.fieldnames)
+        if missing:
+            raise ValueError(f"{csv_path} is missing columns: {sorted(missing)}")
+        records = []
+        for row in reader:
+            row["integer_shear"] = int(float(row["integer_shear"]))
+            row["reference_shear"] = float(row["reference_shear"])
+            row["local_load"] = float(row["local_load"])
+            row["absolute_load"] = float(row["absolute_load"])
+            row["kappa_geo"] = float(row["kappa_geo"])
+            row["kappa_mat"] = float(row["kappa_mat"])
+            row["kappa_tan"] = float(row["kappa_tan"])
+            records.append(row)
+    if not records:
+        raise ValueError(f"{csv_path} contains no records.")
+    return records
+
+
+def plot_records_on_axes(
+    records: list[dict],
+    axes,
+    *,
+    mode: str,
+    column_title: str | None = None,
+    row_titles: bool = True,
+    add_legends: bool = True,
+) -> None:
     if not records:
         raise ValueError("No records to plot.")
 
@@ -231,8 +271,11 @@ def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
     linestyles = {"edge flip": "-", "no reconnection": "--"}
     zorders = {"edge flip": 4, "no reconnection": 3}
 
-    fig, axes = plt.subplots(3, 1, figsize=(5.2, 6.8), sharex=True, constrained_layout=True)
-    for ax, (field, ylabel, title, ylim) in zip(axes, quantities):
+    axes = np.asarray(axes).ravel()
+    if len(axes) != len(quantities):
+        raise ValueError(f"Expected {len(quantities)} axes, got {len(axes)}.")
+
+    for index, (ax, (field, ylabel, title, ylim)) in enumerate(zip(axes, quantities)):
         for shear in shears:
             for reconnection in reconnections:
                 rows = sorted(
@@ -259,10 +302,16 @@ def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
         ax.set_yscale("log")
         ax.set_ylim(*ylim)
         ax.set_ylabel(ylabel)
-        ax.set_title(title)
+        if row_titles:
+            ax.set_title(title)
+        elif index == 0 and column_title is not None:
+            ax.set_title(column_title)
         ax.grid(True, which="both", alpha=0.25)
 
     axes[-1].set_xlabel(r"$\gamma-n$" if mode == "current" else r"$\gamma$")
+    if not add_legends:
+        return
+
     shear_handles = [
         Line2D(
             [0],
@@ -306,6 +355,10 @@ def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
         handlelength=1.7,
     )
 
+
+def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
+    fig, axes = plt.subplots(3, 1, figsize=(5.2, 6.8), sharex=True, constrained_layout=True)
+    plot_records_on_axes(records, axes, mode=mode)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path)
     plt.close(fig)
