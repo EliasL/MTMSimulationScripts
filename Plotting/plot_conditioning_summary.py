@@ -15,6 +15,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from Plotting.plot_element_condition_decomposition import (
+    condition_quantities,
     plot_records_on_axes,
     read_csv_records,
 )
@@ -32,12 +33,13 @@ def make_figure(
 ) -> None:
     current_records = read_csv_records(current_csv)
     reference_records = read_csv_records(reference_csv)
+    n_condition_rows = len(condition_quantities("current"))
 
-    fig = plt.figure(figsize=(8.6, 9.4))
+    fig = plt.figure(figsize=(8.6, 12.2))
     outer = fig.add_gridspec(
         2,
         1,
-        height_ratios=[1.05, 3.0],
+        height_ratios=[1.05, 4.6],
         left=0.075,
         right=0.985,
         top=0.935,
@@ -45,13 +47,13 @@ def make_figure(
         hspace=0.22,
     )
     top_grid = outer[0].subgridspec(1, 2, wspace=-0.18)
-    bottom_grid = outer[1].subgridspec(3, 2, hspace=0.28, wspace=0.27)
+    bottom_grid = outer[1].subgridspec(n_condition_rows, 2, hspace=0.28, wspace=0.27)
 
     schematic_axes = [fig.add_subplot(top_grid[0, i]) for i in range(2)]
     plot_schematic(schematic_axes, integer_shear=integer_shear, local_shear=local_shear)
 
-    current_axes = [fig.add_subplot(bottom_grid[i, 0]) for i in range(3)]
-    reference_axes = [fig.add_subplot(bottom_grid[i, 1]) for i in range(3)]
+    current_axes = [fig.add_subplot(bottom_grid[i, 0]) for i in range(n_condition_rows)]
+    reference_axes = [fig.add_subplot(bottom_grid[i, 1]) for i in range(n_condition_rows)]
     plot_records_on_axes(
         current_records,
         current_axes,

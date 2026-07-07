@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
 from MTMath.energyFunction import ContiEnergy
-from MTMath.meshUtils import triangle_shape_grads_and_area
+from MTMath.reduction import lagrange_reduction
 from Plotting.dataFunctions import VTUData
 from Plotting.element_stiffness_spectrum import (
     assert_uniform_element_values,
@@ -55,52 +55,107 @@ def reference_shear_from_name(sim_dir: Path) -> float | None:
     return None
 
 
-def triangle_connectivity(data: VTUData) -> np.ndarray:
-    cell_blocks = data.mesh.cells
-    if len(cell_blocks) != 1:
-        raise ValueError(
-            f"Expected a single VTU cell block in {data.vtu_file_path}, got {len(cell_blocks)}."
-        )
-    cell_block = cell_blocks[0]
-    if cell_block.type != "triangle":
-        raise ValueError(
-            f"Expected triangle cells in {data.vtu_file_path}, got {cell_block.type!r}."
-        )
-    connectivity = np.asarray(cell_block.data, dtype=int)
-    if connectivity.ndim != 2 or connectivity.shape[1] != 3:
-        raise ValueError(
-            f"Expected triangle connectivity with shape (elements, 3), got {connectivity.shape}."
-        )
-    return connectivity
-
-
-def geometric_condition(data: VTUData) -> np.ndarray:
-    points = np.asarray(data.mesh.points[:, :2], dtype=float)
-    connectivity = triangle_connectivity(data)
-    if np.any(connectivity < 0) or np.any(connectivity >= len(points)):
-        raise ValueError(f"Triangle connectivity is out of bounds in {data.vtu_file_path}.")
-
-    coords = points[connectivity]
-    dN_dx, area = triangle_shape_grads_and_area(coords)
-    if np.any(area <= 0.0):
-        raise ValueError(f"All current triangle areas must be positive in {data.vtu_file_path}.")
-
-    scalar_stiffness = area[:, None, None] * np.einsum("eai,ebi->eab", dN_dx, dN_dx)
-    eigenvalues = np.linalg.eigvalsh(scalar_stiffness)
-    if np.any(np.abs(eigenvalues[:, 0]) > 1e-10 * np.maximum(1.0, eigenvalues[:, -1])):
-        raise ValueError(f"Scalar triangle stiffness should have one zero mode in {data.vtu_file_path}.")
-    if np.any(eigenvalues[:, 1] <= 0.0):
-        raise ValueError(f"Scalar triangle stiffness has non-positive shape mode in {data.vtu_file_path}.")
-    return eigenvalues[:, 2] / eigenvalues[:, 1]
-
-
-def material_condition(F: np.ndarray, *, loops: int) -> np.ndarray:
-    tangent = ContiEnergy.elasticity_tensor(F, eulerian=False, loops=loops)
-    tangent_matrix = tangent.reshape(len(F), 4, 4)
-    singular_values = np.linalg.svd(tangent_matrix, compute_uv=False)
+def condition_number_2(matrices: np.ndarray) -> np.ndarray:
+    singular_values = np.linalg.svd(matrices, compute_uv=False)
     if np.any(singular_values[:, -1] <= 0.0):
-        raise ValueError("Material tangent has a zero singular value.")
+        raise ValueError("Cannot compute a condition number with a zero singular value.")
     return singular_values[:, 0] / singular_values[:, -1]
+
+
+def reference_edge_matrices(data: VTUData) -> np.ndarray:
+    dN_dX = data.get_dN_dX()
+    if not np.allclose(dN_dX.sum(axis=1), 0.0, atol=1e-10, rtol=1e-10):
+        raise ValueError(f"Shape-function gradients do not sum to zero in {data.vtu_file_path}.")
+
+    grad_columns = np.stack([dN_dX[:, 1, :], dN_dX[:, 2, :]], axis=-1)
+    DX = np.linalg.inv(grad_columns).swapaxes(-1, -2)
+    det_DX = np.linalg.det(DX)
+    if np.any(det_DX <= 0.0):
+        raise ValueError(f"Reference element orientation must be positive in {data.vtu_file_path}.")
+
+    expected_det = 2.0 * data.get_init_area()
+    if not np.allclose(det_DX, expected_det, rtol=1e-8, atol=1e-10):
+        max_error = float(np.max(np.abs(det_DX - expected_det)))
+        raise ValueError(
+            f"dN_dX and initArea disagree in {data.vtu_file_path}; max determinant error {max_error:g}."
+        )
+    return DX
+
+
+def kinematic_conditions(data: VTUData) -> dict[str, np.ndarray]:
+    F = data.get_F()
+    DX = reference_edge_matrices(data)
+    Dx = np.einsum("...ij,...jk->...ik", F, DX)
+    C = data.get_C()
+    C_from_F = np.einsum("...ji,...jk->...ik", F, F)
+    if not np.allclose(C, C_from_F, rtol=1e-9, atol=1e-10):
+        max_error = float(np.max(np.abs(C - C_from_F)))
+        raise ValueError(f"C and F.T @ F disagree in {data.vtu_file_path}; max error {max_error:g}.")
+
+    kappa_F = condition_number_2(F)
+    kappa_C = condition_number_2(C)
+    if not np.allclose(kappa_C, kappa_F**2, rtol=1e-8, atol=1e-8):
+        max_error = float(np.max(np.abs(kappa_C - kappa_F**2)))
+        raise ValueError(f"kappa_C != kappa_F^2 in {data.vtu_file_path}; max error {max_error:g}.")
+
+    return {
+        "kappa_X": condition_number_2(DX),
+        "kappa_x": condition_number_2(Dx),
+        "kappa_F": kappa_F,
+        "kappa_C": kappa_C,
+    }
+
+
+def constitutive_tangent_matrix(F: np.ndarray, *, loops: int) -> np.ndarray:
+    ContiEnergy._initialize_div_div_phi()
+    if ContiEnergy._DIV_DIV_PHI is None:
+        raise RuntimeError("ContiEnergy Hessian was not initialized.")
+
+    C = np.einsum("...ji,...jk->...ik", F, F)
+    C_R, M_R = lagrange_reduction(C, loops=loops)
+    C_11, C_22, C_12 = C_R[..., 0, 0], C_R[..., 1, 1], C_R[..., 0, 1]
+    H_raw = ContiEnergy._DIV_DIV_PHI(C_11, C_22, C_12, -1 / 4, 4, 1)
+    H = np.asarray(H_raw, dtype=float)
+    H = np.moveaxis(H, (0, 1), (-2, -1))
+    if H.shape[-2:] != (3, 3):
+        raise ValueError(f"Constitutive Hessian has unexpected shape {H.shape}.")
+
+    component_basis = np.zeros((2, 2, 3), dtype=float)
+    component_basis[0, 0, 0] = 1.0
+    component_basis[1, 1, 1] = 1.0
+    component_basis[0, 1, 2] = 0.5
+    component_basis[1, 0, 2] = 0.5
+    hessian_reduced = np.einsum("ija,...ab,klb->...ijkl", component_basis, H, component_basis)
+    hessian = np.einsum(
+        "...ir,...js,...kt,...lu,...rstu->...ijkl",
+        M_R,
+        M_R,
+        M_R,
+        M_R,
+        hessian_reduced,
+    )
+
+    orthonormal_basis = np.zeros((3, 2, 2), dtype=float)
+    orthonormal_basis[0, 0, 0] = 1.0
+    orthonormal_basis[1, 1, 1] = 1.0
+    orthonormal_basis[2, 0, 1] = 1.0 / np.sqrt(2.0)
+    orthonormal_basis[2, 1, 0] = 1.0 / np.sqrt(2.0)
+    c_e = 4.0 * np.einsum(
+        "aij,...ijkl,bkl->...ab",
+        orthonormal_basis,
+        hessian,
+        orthonormal_basis,
+    )
+    return 0.5 * (c_e + np.swapaxes(c_e, -1, -2))
+
+
+def constitutive_condition(F: np.ndarray, *, loops: int) -> tuple[np.ndarray, np.ndarray]:
+    c_e = constitutive_tangent_matrix(F, loops=loops)
+    singular_values = np.linalg.svd(c_e, compute_uv=False)
+    if np.any(singular_values[:, -1] <= 0.0):
+        raise ValueError("Constitutive tangent has a zero singular value.")
+    eigenvalues = np.linalg.eigvalsh(c_e)
+    return singular_values[:, 0] / singular_values[:, -1], eigenvalues[:, 0]
 
 
 def tangent_condition(vtu_file: Path, *, loops: int) -> np.ndarray:
@@ -111,16 +166,22 @@ def tangent_condition(vtu_file: Path, *, loops: int) -> np.ndarray:
 
 def summarize(vtu_file: Path, *, loops: int) -> dict[str, float]:
     data = VTUData(str(vtu_file))
-    kappa_geo = geometric_condition(data)
-    kappa_mat = material_condition(data.get_F(), loops=loops)
+    conditions = kinematic_conditions(data)
+    kappa_con, lambda_min_con = constitutive_condition(data.get_F(), loops=loops)
     kappa_tan = tangent_condition(vtu_file, loops=loops)
 
-    assert_uniform_element_values(kappa_geo, name="kappa_geo", vtu_file=vtu_file)
-    assert_uniform_element_values(kappa_mat, name="kappa_mat", vtu_file=vtu_file)
+    for name, values in conditions.items():
+        assert_uniform_element_values(values, name=name, vtu_file=vtu_file)
+    assert_uniform_element_values(kappa_con, name="kappa_con", vtu_file=vtu_file)
+    assert_uniform_element_values(lambda_min_con, name="lambda_min_con", vtu_file=vtu_file)
     assert_uniform_element_values(kappa_tan, name="kappa_tan", vtu_file=vtu_file)
     return {
-        "kappa_geo": float(kappa_geo[0]),
-        "kappa_mat": float(kappa_mat[0]),
+        "kappa_X": float(conditions["kappa_X"][0]),
+        "kappa_x": float(conditions["kappa_x"][0]),
+        "kappa_F": float(conditions["kappa_F"][0]),
+        "kappa_C": float(conditions["kappa_C"][0]),
+        "kappa_con": float(kappa_con[0]),
+        "lambda_min_con": float(lambda_min_con[0]),
         "kappa_tan": float(kappa_tan[0]),
     }
 
@@ -212,8 +273,12 @@ def read_csv_records(csv_path: Path) -> list[dict]:
         "reference_shear",
         "local_load",
         "absolute_load",
-        "kappa_geo",
-        "kappa_mat",
+        "kappa_X",
+        "kappa_x",
+        "kappa_F",
+        "kappa_C",
+        "kappa_con",
+        "lambda_min_con",
         "kappa_tan",
     }
     with csv_path.open(newline="") as f:
@@ -229,13 +294,48 @@ def read_csv_records(csv_path: Path) -> list[dict]:
             row["reference_shear"] = float(row["reference_shear"])
             row["local_load"] = float(row["local_load"])
             row["absolute_load"] = float(row["absolute_load"])
-            row["kappa_geo"] = float(row["kappa_geo"])
-            row["kappa_mat"] = float(row["kappa_mat"])
+            row["kappa_X"] = float(row["kappa_X"])
+            row["kappa_x"] = float(row["kappa_x"])
+            row["kappa_F"] = float(row["kappa_F"])
+            row["kappa_C"] = float(row["kappa_C"])
+            row["kappa_con"] = float(row["kappa_con"])
+            row["lambda_min_con"] = float(row["lambda_min_con"])
             row["kappa_tan"] = float(row["kappa_tan"])
             records.append(row)
     if not records:
         raise ValueError(f"{csv_path} contains no records.")
     return records
+
+
+def condition_quantities(mode: str) -> list[tuple[str, str, str, tuple[float, float]]]:
+    if mode == "current":
+        geometry = ("kappa_x", r"$\kappa_x$", "current geometry", (1e0, 2e2))
+    elif mode == "reference":
+        geometry = ("kappa_X", r"$\kappa_X$", "reference geometry", (1e0, 2e2))
+    else:
+        raise ValueError(f"Unknown mode {mode!r}.")
+    return [
+        geometry,
+        (
+            "kappa_F",
+            r"$\kappa_F$",
+            "deformation gradient",
+            (1e0, 2e2),
+        ),
+        (
+            "kappa_C",
+            r"$\kappa_C$",
+            "right Cauchy-Green tensor",
+            (1e0, 5e4),
+        ),
+        (
+            "kappa_con",
+            r"$\kappa_{\mathrm{con}}$",
+            "constitutive tangent",
+            (1e1, 1e10),
+        ),
+        ("kappa_tan", r"$\kappa_{\mathrm{tan}}$", "element tangent", (1e3, 1e8)),
+    ]
 
 
 def plot_records_on_axes(
@@ -250,21 +350,7 @@ def plot_records_on_axes(
     if not records:
         raise ValueError("No records to plot.")
 
-    quantities = [
-        (
-            "kappa_geo",
-            r"$\kappa_{\mathrm{geo}}$",
-            "current element geometry",
-            (1e0, 1e5),
-        ),
-        (
-            "kappa_mat",
-            r"$\kappa_{\mathrm{mat}}$",
-            "material tangent",
-            (1e3, 1e8),
-        ),
-        ("kappa_tan", r"$\kappa_{\mathrm{tan}}$", "element tangent", (1e3, 1e8)),
-    ]
+    quantities = condition_quantities(mode)
     shears = sorted({int(row["integer_shear"]) for row in records})
     reconnections = ["no reconnection", "edge flip"]
     colors = {0: "C0", 2: "C2", 5: "C3", 10: "C4"}
@@ -357,7 +443,13 @@ def plot_records_on_axes(
 
 
 def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
-    fig, axes = plt.subplots(3, 1, figsize=(5.2, 6.8), sharex=True, constrained_layout=True)
+    fig, axes = plt.subplots(
+        len(condition_quantities(mode)),
+        1,
+        figsize=(5.2, 9.0),
+        sharex=True,
+        constrained_layout=True,
+    )
     plot_records_on_axes(records, axes, mode=mode)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path)
@@ -367,8 +459,8 @@ def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Decompose element conditioning into current element geometry, "
-            "material tangent, and full element tangent diagnostics."
+            "Plot T3 element condition numbers for geometry, kinematics, "
+            "constitutive response, and the full element tangent."
         )
     )
     parser.add_argument(
