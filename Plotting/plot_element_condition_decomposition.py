@@ -40,6 +40,21 @@ def reconnection_label(sim_dir: Path) -> str:
     return "edge flip" if "edgeFlip" in sim_dir.name else "no reconnection"
 
 
+def reference_shear_from_name(sim_dir: Path) -> float | None:
+    for part in sim_dir.name.split("GP1")[1:]:
+        token = []
+        for char in part:
+            if char in "+-.0123456789eE":
+                token.append(char)
+            else:
+                break
+        if token:
+            return float("".join(token))
+    if "ReferenceTest" in sim_dir.name:
+        return 0.0
+    return None
+
+
 def triangle_connectivity(data: VTUData) -> np.ndarray:
     cell_blocks = data.mesh.cells
     if len(cell_blocks) != 1:
@@ -116,24 +131,65 @@ def collect_records(
     shears: list[int],
     local_loads: list[float],
     loops: int,
+    mode: str,
 ) -> list[dict]:
     records = []
-    for sim_dir in find_simulation_dirs(output_root):
-        reconnection = reconnection_label(sim_dir)
+    sim_dirs = find_simulation_dirs(output_root)
+    if mode == "current":
+        for sim_dir in sim_dirs:
+            reconnection = reconnection_label(sim_dir)
+            for shear in shears:
+                absolute_loads = [
+                    round(shear + local_load, 12) for local_load in local_loads
+                ]
+                files = vtu_files_at_loads(sim_dir, absolute_loads)
+                for local_load, absolute_load, vtu_file in zip(
+                    local_loads, absolute_loads, files
+                ):
+                    record = {
+                        "integer_shear": shear,
+                        "reference_shear": 0.0,
+                        "reconnection": reconnection,
+                        "local_load": local_load,
+                        "absolute_load": absolute_load,
+                    }
+                    record.update(summarize(vtu_file, loops=loops))
+                    records.append(record)
+    elif mode == "reference":
+        by_variant = {}
+        for sim_dir in sim_dirs:
+            reference_shear = reference_shear_from_name(sim_dir)
+            if reference_shear is None:
+                continue
+            key = (round(reference_shear, 12), reconnection_label(sim_dir))
+            if key in by_variant:
+                raise ValueError(f"Duplicate simulation directories for {key}.")
+            by_variant[key] = sim_dir
+
         for shear in shears:
-            absolute_loads = [round(shear + local_load, 12) for local_load in local_loads]
-            files = vtu_files_at_loads(sim_dir, absolute_loads)
-            for local_load, absolute_load, vtu_file in zip(
-                local_loads, absolute_loads, files
-            ):
-                record = {
-                    "integer_shear": shear,
-                    "reconnection": reconnection,
-                    "local_load": local_load,
-                    "absolute_load": absolute_load,
-                }
-                record.update(summarize(vtu_file, loops=loops))
-                records.append(record)
+            target_reference_shear = round(-float(shear), 12)
+            for reconnection in ("no reconnection", "edge flip"):
+                key = (target_reference_shear, reconnection)
+                if key not in by_variant:
+                    raise ValueError(
+                        f"Missing reference shear {target_reference_shear:g}, {reconnection}."
+                    )
+                absolute_loads = [round(local_load, 12) for local_load in local_loads]
+                files = vtu_files_at_loads(by_variant[key], absolute_loads)
+                for local_load, absolute_load, vtu_file in zip(
+                    local_loads, absolute_loads, files
+                ):
+                    record = {
+                        "integer_shear": shear,
+                        "reference_shear": target_reference_shear,
+                        "reconnection": reconnection,
+                        "local_load": local_load,
+                        "absolute_load": absolute_load,
+                    }
+                    record.update(summarize(vtu_file, loops=loops))
+                    records.append(record)
+    else:
+        raise ValueError(f"Unknown mode {mode!r}.")
     return sorted(
         records,
         key=lambda row: (row["integer_shear"], row["reconnection"], row["local_load"]),
@@ -150,7 +206,7 @@ def write_csv(records: list[dict], out_path: Path) -> None:
         writer.writerows(records)
 
 
-def plot_records(records: list[dict], out_path: Path) -> None:
+def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
     if not records:
         raise ValueError("No records to plot.")
 
@@ -206,7 +262,7 @@ def plot_records(records: list[dict], out_path: Path) -> None:
         ax.set_title(title)
         ax.grid(True, which="both", alpha=0.25)
 
-    axes[-1].set_xlabel(r"$\gamma-n$")
+    axes[-1].set_xlabel(r"$\gamma-n$" if mode == "current" else r"$\gamma$")
     shear_handles = [
         Line2D(
             [0],
@@ -226,7 +282,7 @@ def plot_records(records: list[dict], out_path: Path) -> None:
     ]
     shear_legend = axes[0].legend(
         handles=shear_handles,
-        title=r"$n$",
+        title=r"$n$" if mode == "current" else r"$-\gamma_{\mathrm{ref}}$",
         loc="upper left",
         ncol=2,
         fontsize=7.5,
@@ -271,6 +327,15 @@ def main() -> None:
     parser.add_argument("--shears", default="0,2,5,10")
     parser.add_argument("--loops", type=int, default=30)
     parser.add_argument(
+        "--mode",
+        choices=("current", "reference"),
+        default="current",
+        help=(
+            "current samples loads n+s from long simple-shear runs; reference "
+            "samples loads s from runs whose reference shear is GP1=-n."
+        ),
+    )
+    parser.add_argument(
         "--out",
         type=Path,
         default=Path("Plots/no_minimization_current_condition_decomposition.pdf"),
@@ -288,9 +353,10 @@ def main() -> None:
         shears=parse_shears(args.shears),
         local_loads=local_loads,
         loops=args.loops,
+        mode=args.mode,
     )
     write_csv(records, args.csv)
-    plot_records(records, args.out)
+    plot_records(records, args.out, mode=args.mode)
     print(args.out)
     print(args.csv)
 
