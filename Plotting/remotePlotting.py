@@ -50,11 +50,8 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "Management"))
 # Now we can import from Management
 from Management.connectToCluster import connectToCluster, Servers, download_folders
 from Management.configGenerator import ConfigGenerator, SimulationConfig
+from Plotting.remoteDataPaths import FOLDER_PATH, MACRO_PATH, PLOTS_PATH, RAW_DATA_PATH
 
-FOLDER_PATH = os.path.expanduser("~/Work/PhD/Code/remoteData")
-MACRO_PATH = os.path.join(FOLDER_PATH, "macro")
-PLOTS_PATH = os.path.join(FOLDER_PATH, "plots")
-RAW_DATA_PATH = os.path.join(FOLDER_PATH, "data")
 REMOTE_FOLDER_NAME = "MTS2D_output"
 CACHE_UPDATE_AFTER_HOURS = 12
 

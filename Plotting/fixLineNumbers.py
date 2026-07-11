@@ -125,8 +125,13 @@ def fix_csv_files_in_data_folder(folder_path, max_workers=10):
 
 
 if __name__ == "__main__":
+    try:
+        from Plotting.remoteDataPaths import FOLDER_PATH
+    except ModuleNotFoundError:
+        from remoteDataPaths import FOLDER_PATH
+
     # Example usage
-    folder_path = os.path.expanduser("~/Work/PhD/Code/remoteData/")
+    folder_path = FOLDER_PATH
 
     fix_missing_column(
         [

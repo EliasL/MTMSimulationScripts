@@ -1,0 +1,696 @@
+\chapter[Reconnecting MTM]{Reconnecting the Mesoscopic Tensorial Model}
+\label{chp4_ReMTM}
+\chaptermark{Reconnecting MTM}
+\ChapterToc
+% \chapter[Reconnecting]{ReMTM -- Reconnecting in MTM}\label{chp4_ReMTM}
+% \chaptermark{Reconnecting}
+% \ChapterToc
+
+%SP proposal
+% 4.1 Motivation: mesh locking in the MTM
+% 4.2 Local reconnection by edge flipping
+% 4.3 Reference update after reconnection
+% 4.4 Algorithm and numerical results
+
+% \chapter[Reconnecting MTM]{Reconnecting the Mesoscopic Tensorial Model}
+% \label{chp4_ReMTM}
+% \chaptermark{Reconnecting MTM}
+% \ChapterToc
+\cite{burkhart_finite_2013} % Survay finding that many paper do not evaluate mesh quality. Calls for the community to be more careful and evaluate mesh quality.
+
+\cite{alauzet_changing-topology_2014} % Mesh improvement using mesh connectivity changes (face swapping 3D)
+\cite{jiao_surface_2013} % Mesh optimization, edge flipping
+
+\section{Motivation: mesh locking in the MTM}
+\label{sec:ReMTMMotivation}
+
+\cite{pietroni_hex-mesh_2023}% General mesh generation survey
+\cite{blecua_elasticity-based_2023} % Mesh improvement (mesh quality matters)
+
+
+  \subsection{Fixed Lagrangian meshes}
+  \label{sec:FixedLagrangianMeshes}
+    \cite{lohner_arbitrary_2023} % example of lagrangian-eulerian mix, non-static reference state/mesh NB TO BE UNDERSTOOD BETTER. MESH IS NOT PHYSICAL, only for numerical performance
+    \cite{wicke_dynamic_2010} % Lets reference state evolve, and is non-continous
+   
+    
+  \subsection{Mesh locking and mesh dependence}
+  \label{sec:MeshLockingDependence}
+\cite{engrand_development_2026} % mesh locking discussed and shown, p57
+
+  \section{Global reconnection by Delaunay triangulation}
+  \label{sec:DelaunayGlobalRules}
+
+\section{Local reconnection by edge flipping}
+\label{sec:LocalReconnectionEdgeFlipping}
+
+  \subsection{Triangular meshes and edge flips}
+  \label{sec:TriangularMeshesEdgeFlips}
+
+  \subsection{Local reconnection criterion based on the order-3 elliptic neighbourhood}
+  \label{sec:OrderThreeEllipticNeighbourhood}
+
+\section{Reference update after reconnection}
+\label{sec:ReferenceUpdateReconnection}
+
+  \subsection{Canonical reference element}
+  \label{sec:CanonicalReferenceElement}
+
+  \subsection{Preserving the memory of plastic deformation}
+  \label{sec:PlasticMemory}
+
+\section{Algorithm and numerical results}
+\label{sec:ReMTMAlgorithmResults}
+
+  \subsection{ReMTM algorithm}
+  \label{sec:ReMTMAlgorithm}
+
+  \subsection{Numerical validation}
+  \label{sec:ReMTMValidation}
+
+\subsubsection{Element conditioning under simple shear}
+\label{sec:reconnecting_element_conditioning}
+
+We consider a periodic $3\times3$ system deformed by homogeneous simple shear,
+with minimization disabled. The load is written as
+\begin{equation}
+    \gamma = n+s,
+    \qquad
+    n\in\mathbb{Z},
+    \qquad
+    0<s<1 .
+\end{equation}
+Configurations with the same value of $s$ are periodically equivalent in the
+MTM energy. The purpose of the test is therefore to compare the numerical
+conditioning of the element tangent, not the energy itself.
+
+For one T3 element, we start from the parent triangle
+\begin{equation}
+    \widehat{T}
+    =
+    \{(\xi,\eta):\xi\geq0,\ \eta\geq0,\ \xi+\eta\leq1\},
+\end{equation}
+with parent nodes
+\begin{equation}
+    \widehat{\B{X}}_1=(0,0)^\T,
+    \qquad
+    \widehat{\B{X}}_2=(1,0)^\T,
+    \qquad
+    \widehat{\B{X}}_3=(0,1)^\T .
+\end{equation}
+The physical reference and current nodal positions are $\B{X}_a$ and
+$\B{x}_a$, respectively. We define
+\begin{equation}
+    \B{D}_X =
+    \begin{bmatrix}
+        \B{X}_2-\B{X}_1 & \B{X}_3-\B{X}_1
+    \end{bmatrix},
+    \qquad
+    \B{D}_x =
+    \begin{bmatrix}
+        \B{x}_2-\B{x}_1 & \B{x}_3-\B{x}_1
+    \end{bmatrix}.
+\end{equation}
+The reference area, current area, deformation gradient, Jacobian, and metric
+tensor are
+\begin{equation}
+    A_0 = \frac{1}{2}\det\B{D}_X,
+    \qquad
+    a = \frac{1}{2}\det\B{D}_x,
+    \qquad
+    \F = \B{D}_x \B{D}_X^{-1},
+    \qquad
+    J=\det\F,
+    \qquad
+    \C = \F^\T\F .
+\end{equation}
+We assume $\det\B{D}_X>0$ and $\det\B{D}_x>0$, so that the element is neither
+degenerate nor inverted. We write the MTM energy density as
+$\Phi(\F)=\phi(\C)$.
+
+The function $\kappa_2$ denotes the spectral condition number. For a
+nonsingular matrix $\B{A}$,
+\begin{equation}
+    \kappa_2(\B{A})
+    =
+    \|\B{A}\|_2\|\B{A}^{-1}\|_2
+    =
+    \frac{s_{\max}(\B{A})}{s_{\min}(\B{A})}.
+\end{equation}
+Here $\|\cdot\|_2$ is the operator norm induced by the Euclidean vector norm.
+The quantities $s_{\max}$ and $s_{\min}$ are the largest and smallest singular
+values. We use the letter $s$ for singular values to avoid confusion with the
+stress tensor $\B{\sigma}$. The singular values are not matrix components.
+They are defined from the eigenvalues $\lambda_i$ of $\B{A}^{\T}\B{A}$ by
+\begin{equation}
+    s_i(\B{A})
+    =
+    \sqrt{\lambda_i(\B{A}^{\T}\B{A})},
+    \qquad
+    s_{\max}(\B{A})=\max_i s_i(\B{A}),
+    \qquad
+    s_{\min}(\B{A})=\min_i s_i(\B{A}).
+\end{equation}
+If $s_{\min}(\B{A})=0$, then $\kappa_2(\B{A})=\infty$. For a symmetric
+positive definite matrix, the singular values are equal to the eigenvalues,
+and $\kappa_2$ is the ratio of the largest and smallest eigenvalues.
+
+Following Ref.~\cite{fried_condition_1972} and the condition-number note, we
+monitor separate geometric, kinematic, constitutive, and full tangent condition
+numbers. The reference and current geometric condition numbers are
+\begin{equation}
+    \kappa_X = \kappa_2(\B{D}_X),
+    \qquad
+    \kappa_x = \kappa_2(\B{D}_x).
+\end{equation}
+Equivalently, with
+\begin{equation}
+    \B{G}_X=\B{D}_X^\T\B{D}_X,
+    \qquad
+    \B{G}_x=\B{D}_x^\T\B{D}_x,
+\end{equation}
+one has
+\begin{equation}
+    \kappa_X^2=\kappa_2(\B{G}_X),
+    \qquad
+    \kappa_x^2=\kappa_2(\B{G}_x),
+\end{equation}
+because the eigenvalues of the Gram matrices are the squared singular values
+of $\B{D}_X$ and $\B{D}_x$. The relative deformation condition numbers are
+\begin{equation}
+    \kappa_F = \kappa_2(\F),
+    \qquad
+    \kappa_C = \kappa_2(\C) = \kappa_F^2 .
+\end{equation}
+
+The constitutive tangent is defined in the work-conjugate pair
+$(\B{E},\B{S})$. Let
+\begin{equation}
+    \B{E} = \frac{1}{2}(\C-\B{I}),
+    \qquad
+    \psi(\B{E})=\phi(\B{I}+2\B{E}) .
+\end{equation}
+The second Piola--Kirchhoff stress and the material tangent are then
+\begin{equation}
+    \B{S}
+    =
+    \frac{\partial\psi}{\partial\B{E}}
+    =
+    2\frac{\partial\phi}{\partial\C},
+    \qquad
+    \mathcal{C}^{E}
+    =
+    \frac{\partial\B{S}}{\partial\B{E}}
+    =
+    4\frac{\partial^2\phi}{\partial\C\partial\C}.
+\end{equation}
+In components,
+\begin{equation}
+    \delta S_{\alpha\beta}
+    =
+    \mathcal{C}^{E}_{\alpha\beta\gamma\delta}
+    \delta E_{\gamma\delta}.
+\end{equation}
+
+For two perturbations $\B{H}$ and $\B{G}$ of the deformation gradient, the
+second variation of the energy density is the bilinear form
+\begin{equation}
+    D^2\Phi[\F][\B{H},\B{G}]
+    =
+    \left.
+    \frac{\partial^2}{\partial \epsilon \partial \eta}
+    \Phi(\F+\epsilon\B{H}+\eta\B{G})
+    \right|_{\epsilon=\eta=0}.
+\end{equation}
+Since
+\begin{equation}
+    \delta\B{E}[\F;\B{H}]
+    =
+    \mathrm{sym}(\F^\T\B{H}),
+    \qquad
+    D^2\B{E}[\F][\B{H},\B{G}]
+    =
+    \mathrm{sym}(\B{H}^{\T}\B{G}),
+\end{equation}
+where
+\begin{equation}
+    \mathrm{sym}(\B{A})
+    =
+    \frac{1}{2}(\B{A}+\B{A}^{\T}),
+\end{equation}
+the full second variation is
+\begin{equation}
+    D^2\Phi[\F][\B{H},\B{G}]
+    =
+    \mathrm{sym}(\F^\T\B{H})
+    :
+    \mathcal{C}^{E}
+    :
+    \mathrm{sym}(\F^\T\B{G})
+    +
+    \B{S}
+    :
+    \mathrm{sym}(\B{H}^{\T}\B{G}).
+    \label{eq:second_variation_finite_stress}
+\end{equation}
+At zero stress this reduces to the form used in the condition-number note,
+\begin{equation}
+    D^2\Phi[\F][\B{H},\B{G}]
+    =
+    \mathrm{sym}(\F^\T\B{H})
+    :
+    \mathcal{C}^{E}
+    :
+    \mathrm{sym}(\F^\T\B{G}).
+    \label{eq:second_variation_zero_stress}
+\end{equation}
+Here $:$ denotes contraction over two tensor indices. More explicitly, for
+second-order tensors $\B{A}$ and $\B{B}$,
+\begin{equation}
+    \B{A}:\B{B}=A_{ij}B_{ij},
+\end{equation}
+and
+\begin{equation}
+    \B{A}:\mathcal{C}^{E}:\B{B}
+    =
+    A_{\alpha\beta}
+    \mathcal{C}^{E}_{\alpha\beta\gamma\delta}
+    B_{\gamma\delta}.
+\end{equation}
+
+We represent $\mathcal{C}^{E}$ in the orthonormal symmetric basis
+\begin{equation}
+    \B{M}_1=\B{e}_1\otimes\B{e}_1,
+    \qquad
+    \B{M}_2=\B{e}_2\otimes\B{e}_2,
+    \qquad
+    \B{M}_3=
+    \frac{\B{e}_1\otimes\B{e}_2+\B{e}_2\otimes\B{e}_1}{\sqrt{2}}.
+\end{equation}
+The corresponding $3\times3$ matrix is
+\begin{equation}
+    [\mathcal{C}^{E}]_{IJ}
+    =
+    \B{M}_I:\mathcal{C}^{E}:\B{M}_J,
+\end{equation}
+and the constitutive condition number is
+\begin{equation}
+    \kappa_{\mathrm{con}}
+    =
+    \kappa_2([\mathcal{C}^{E}]_{IJ}).
+\end{equation}
+The factor $1/\sqrt{2}$ in $\B{M}_3$ preserves the Frobenius norm of symmetric
+tensors. If $\mathcal{C}^{E}$ is not positive definite,
+$\kappa_{\mathrm{con}}$ is interpreted as a singular-value condition number,
+not as a stability measure.
+
+The element tangent is obtained by differentiating the element energy with
+respect to the six nodal displacement degrees of freedom. The reference
+shape-function gradients are constant:
+\begin{equation}
+    \B{g}_1 = \B{D}_X^{-\T}
+    \begin{bmatrix}
+        -1\\ -1
+    \end{bmatrix},
+    \qquad
+    \B{g}_2 = \B{D}_X^{-\T}
+    \begin{bmatrix}
+        1\\ 0
+    \end{bmatrix},
+    \qquad
+    \B{g}_3 = \B{D}_X^{-\T}
+    \begin{bmatrix}
+        0\\ 1
+    \end{bmatrix}.
+\end{equation}
+For nodal displacement increments $\delta\B{u}_a$,
+\begin{equation}
+    \delta\F
+    =
+    \sum_{a=1}^{3}\delta\B{u}_a\otimes\B{g}_a .
+\end{equation}
+With
+\begin{equation}
+    \delta\B{d}
+    =
+    \begin{bmatrix}
+        \delta u_{1x} &
+        \delta u_{1y} &
+        \delta u_{2x} &
+        \delta u_{2y} &
+        \delta u_{3x} &
+        \delta u_{3y}
+    \end{bmatrix}^{\T},
+\end{equation}
+and the ordering
+\begin{equation}
+    \mathrm{vec}(\delta\F)
+    =
+    \begin{bmatrix}
+        \delta F_{11} &
+        \delta F_{12} &
+        \delta F_{21} &
+        \delta F_{22}
+    \end{bmatrix}^{\T},
+\end{equation}
+we define $\B{B}_X$ by
+\begin{equation}
+    \mathrm{vec}(\delta\F)=\B{B}_X\delta\B{d}.
+\end{equation}
+Equivalently,
+\begin{equation}
+    \B{B}_X
+    =
+    \begin{bmatrix}
+        g_{11} & 0      & g_{21} & 0      & g_{31} & 0      \\
+        g_{12} & 0      & g_{22} & 0      & g_{32} & 0      \\
+        0      & g_{11} & 0      & g_{21} & 0      & g_{31} \\
+        0      & g_{12} & 0      & g_{22} & 0      & g_{32}
+    \end{bmatrix}.
+\end{equation}
+The first Piola--Kirchhoff stress is $\B{P}=\partial\Phi/\partial\F=\F\B{S}$,
+and the tangent with respect to $\F$ is
+\begin{equation}
+    \mathcal{A}_{iJkL}
+    =
+    \frac{\partial P_{iJ}}{\partial F_{kL}}
+    =
+    \frac{\partial^2\Phi}{\partial F_{iJ}\partial F_{kL}} .
+\end{equation}
+Using $\mathcal{C}^{E}$, this can be written in the direct MTM form
+\begin{equation}
+    \mathcal{A}_{iJkL}
+    =
+    F_{iR}\mathcal{C}^{E}_{RJSL}F_{kS}
+    +
+    S_{JL}\delta_{ik}.
+    \label{eq:direct_mtm_tangent}
+\end{equation}
+With $\B{A}_F$ denoting the $4\times4$ matrix representation of
+$\mathcal{A}_{iJkL}$, the total-Lagrangian T3 tangent is
+\begin{equation}
+    K^{ab}_{ik}
+    =
+    A_0\,
+    g_{aJ}\,
+    \mathcal{A}_{iJkL}\,
+    g_{bL},
+    \label{eq:T3_element_tangent}
+\end{equation}
+or, equivalently,
+\begin{equation}
+    \B{K}
+    =
+    A_0 \B{B}_X^\T \B{A}_F \B{B}_X .
+    \label{eq:T3_matrix_tangent}
+\end{equation}
+The raw $6\times6$ element matrix has two exact translation modes. We
+therefore define
+\begin{equation}
+    \B{K}_{\mathrm{red}} = \B{Z}^{\T}\B{K}\B{Z},
+\end{equation}
+where the columns of $\B{Z}$ are orthonormal and span the non-translation
+displacement subspace. The reported tangent condition number is
+\begin{equation}
+    \kappa_{\mathrm{tan}}
+    =
+    \kappa_2(\B{K}_{\mathrm{red}}).
+    \label{eq:kappa_tan}
+\end{equation}
+In the plotted implementation, this is evaluated from the four nonzero
+eigenvalues of the isolated element tangent, after removing the two translation
+modes. If the reduced tangent is indefinite, the singular-value condition
+number should be reported together with the smallest eigenvalue.
+
+Figure~\ref{fig:no_minimization_condition_decomposition} shows these
+diagnostics. The left column distorts the current geometry while keeping the
+reference geometry fixed. The first row is therefore $\kappa_x$. The right
+column distorts the reference geometry while keeping the current geometry in
+the small-load range. The first row is therefore $\kappa_X$.
+
+\begin{figure}
+    \centering
+    \includegraphics[width=\textwidth]
+        {ch4_Reconnecting/fig/no_minimization_conditioning_summary.pdf}
+    \caption{
+        Conditioning diagnostics for periodic simple-shear tests with
+        minimization disabled. Dashed lines use fixed connectivity, while solid
+        lines use edge flipping. The left column shows distorted current
+        geometry and the right column shows distorted reference geometry.
+    }
+    \label{fig:no_minimization_condition_decomposition}
+\end{figure}
+
+
+\subsubsection{Why reference distortion does not increase the element tangent condition}
+\label{sec:reference_distortion_tangent_invariance}
+
+In the reference-distorted simulations, $\kappa_X$, $\kappa_F$, $\kappa_C$,
+and $\kappa_{\mathrm{con}}$ can all become large, while
+$\kappa_{\mathrm{tan}}$ remains essentially unchanged. This does not mean that
+reference geometry is irrelevant in general. The relevant point is instead
+that any $\mathrm{GL}(2,\mathbb{Z})$ factor contained in the reference
+transformation is removable. The element tangent is insensitive to this factor
+because it appears both in the finite-element map from nodal displacements to
+$\delta\F$ and in the lattice-invariant material tangent. Therefore,
+$\kappa_{\mathrm{tan}}$ is controlled by the reduced reference element, not by
+the unreduced lattice representative. If the reduced reference element were
+badly shaped, this cancellation would not remove the resulting finite-element
+ill-conditioning.
+
+Let
+\begin{equation}
+    \B{M}_n =
+    \begin{pmatrix}
+        1 & n\\
+        0 & 1
+    \end{pmatrix},
+    \qquad
+    \det \B{M}_n = 1 .
+\end{equation}
+Write the reduced, low-load reference element as $\widehat{\B{D}}_X$. In the
+reference-distorted test, the unreduced reference element can be written as
+\begin{equation}
+    \B{D}^{(n)}_X
+    =
+    \B{M}_n^{-1}\widehat{\B{D}}_X .
+\end{equation}
+For the imposed simple-shear example, $\widehat{\B{D}}_X=\B{D}^{(0)}_X$, but
+the argument only uses that $\widehat{\B{D}}_X$ is the reduced,
+well-conditioned representative. If
+\begin{equation}
+    \widehat{\F}_s
+    =
+    \B{D}_x\widehat{\B{D}}_X^{-1},
+\end{equation}
+then
+\begin{equation}
+    \F^{(n)}
+    =
+    \B{D}_x(\B{D}^{(n)}_X)^{-1}
+    =
+    \widehat{\F}_s\B{M}_n .
+\end{equation}
+For the same current nodal displacement perturbation,
+\begin{equation}
+    \delta\F^{(n)}
+    =
+    \delta\B{D}_x(\B{D}^{(n)}_X)^{-1}
+    =
+    \delta\B{D}_x\widehat{\B{D}}_X^{-1}\B{M}_n
+    =
+    \delta\widehat{\F}\B{M}_n .
+    \label{eq:reference_distortion_deltaF}
+\end{equation}
+Thus the $\mathrm{GL}(2,\mathbb{Z})$ part of the reference distortion changes
+the finite-element map from nodal displacements to deformation-gradient
+perturbations by right multiplication with $\B{M}_n$.
+
+The MTM energy is invariant under the same lattice transformation,
+\begin{equation}
+    \Phi(\F\B{M}_n) = \Phi(\F).
+\end{equation}
+Consequently, for arbitrary perturbations $\B{H}$ and $\B{G}$,
+\begin{equation}
+    D^2\Phi[\widehat{\F}_s\B{M}_n]
+    [\B{H}\B{M}_n,\B{G}\B{M}_n]
+    =
+    D^2\Phi[\widehat{\F}_s][\B{H},\B{G}].
+    \label{eq:lattice_invariant_second_variation}
+\end{equation}
+In matrix notation, if $\B{T}_n$ represents the map
+$\B{H}\mapsto\B{H}\B{M}_n$, then
+\begin{equation}
+    \B{B}^{(n)}_X = \B{T}_n\widehat{\B{B}}_X,
+    \qquad
+    \B{T}_n^\T \B{A}^{(n)}_F \B{T}_n
+    =
+    \widehat{\B{A}}_F .
+\end{equation}
+Substituting these two relations into the element tangent gives
+\begin{equation}
+\begin{split}
+    \B{K}^{(n)}
+    &=
+    A_0
+    (\B{B}^{(n)}_X)^\T
+    \B{A}^{(n)}_F
+    \B{B}^{(n)}_X
+    \\
+    &=
+    A_0
+    \widehat{\B{B}}_X^\T
+    \B{T}_n^\T
+    \B{A}^{(n)}_F
+    \B{T}_n
+    \widehat{\B{B}}_X
+    \\
+    &=
+    A_0
+    \widehat{\B{B}}_X^\T
+    \widehat{\B{A}}_F
+    \widehat{\B{B}}_X
+    =
+    \widehat{\B{K}} .
+\end{split}
+\end{equation}
+The apparent ill-conditioning associated with the unreduced
+$\mathrm{GL}(2,\mathbb{Z})$ factor in $\B{B}^{(n)}_X$ is therefore cancelled
+by the corresponding transformation of $\B{A}^{(n)}_F$. Since
+$\det\B{M}_n=1$, the reference area $A_0$ is unchanged.
+
+This is why $\kappa_{\mathrm{tan}}$ remains low in the reference-distorted
+test. The large values of $\kappa_X$, $\kappa_F$, $\kappa_C$, and
+$\kappa_{\mathrm{con}}$ are real coordinate-space condition numbers, but they
+do not by themselves determine the conditioning of the composed
+finite-element quadratic form.
+
+The current-distorted test is different. There, $\B{B}_X$ is not transformed
+by the compensating lattice factor. The constitutive tangent may be evaluated
+at a large-shear representative, but the nodal perturbations are not mapped
+through the matching reference-basis transformation. The cancellation in
+Eq.~\eqref{eq:lattice_invariant_second_variation} is then absent, and
+$\kappa_{\mathrm{tan}}$ can grow.
+
+  \subsection{Effect on plastic flow}
+  \label{sec:ReMTMPlasticFlow}
+
+% - Lagrangian description
+
+% \section{Problems with static mesh}
+% - Lagrangian description
+% - Mesh locking
+    % - No steady state
+    % - Mesh dependance 
+    % - Stiffness / Condition number
+% - stress field not symmetric in vecinity of dislocation core
+
+% \section{reconnection}
+% - Note, only 2d triangular meshes.
+% - Only current mesh, reference condiguration later
+% \subsubsection{No area reference configuration}
+
+% \subsection{Delaney triangulation}
+
+% \subsection{Edge flipping}
+% - Local method
+% - Not generalized to 3D or other meshes.  
+% \section{Reconnecting criteria using the order-3 elliptic
+% neighborhood}
+%
+
+% Reference configuration
+
+% Umut trick. Note that by doing this, F is no longer physical, and needs special consideration, which we come backt to in section...
+
+% \subsection{Reference element update}
+
+% -Keeping the memory of plastic flow, plastic flow as a non thermodynamical non equilibirum process
+
+% Results
+% New method cures everything and gives access to memory
+
+% While using the standard MTM, we discovered strong meshing effects on the microscopic behavior in the model. In this chapter, we present the issues we observed, and how we introduced a dynamic topology to the mesh used in the MTM. 
+% \section{Mesh-locking}
+% \section{Edge flipping}
+% \subsection{Implementation}
+% \subsubsection{Degenerate reference configuration}
+
+
+% Figure \ref{fig:degenerateReferenceConfiguration} shows that, although reconnecting can resolve mesh locking, it also introduces new issues. In the example shown, a sequence of deformations and edge flips produces a mesh where one of the elements has a degenerate reference configuration. Specifically, the nodes $i,k,l$ in configuration 7 are collinear in the reference configuration, implying that the area is zero. The missing area has been \q{transferred} to the $ijl$ element which is shown in the reference configuration using dashed lines. 
+
+% The degenerate element $ikl$ poses a problem to our current model, since we rely on a deformation gradient to compute the forces in each element. As a reminder (See Section \ref{sec:FEM} for details), in order to determine the deformation gradient, we require $\frac{\partial \xi_i}{\partial \textbf{X}_j}$ which we compute using the matrix inverse of $\frac{\partial \textbf{X}_i}{\partial \xi_j}$:
+
+% \begin{equation}
+%     \F = 
+%     \textbf{I} + \frac{\partial \ub_i}{\partial \xi_j}  \frac{\partial \xi_i}{\partial \textbf{X}_j}
+%     =
+%     \textbf{I} + 
+%     \begin{pmatrix}
+%     u^2_1 - u^1_1 & u^3_1-u^1_1 \\
+%     u^2_2 - u^1_2 & u^3_2-u^1_2
+%     \end{pmatrix}
+%     \begin{pmatrix}
+%     X^2_1 - X^1_1 & X^3_1- X^1_1 \\
+%     X^2_2 - X^1_2 & X^3_2- X^1_2
+% \end{pmatrix}^{-1}.
+% \end{equation} 
+
+% Giving the nodes $ikl$ the reference positions $(0,2), (1,1), (2,0)$ respectively, 
+% \begin{equation}
+%         \frac{\partial  \textbf{X}_j}{\partial \xi_i}=
+%         \begin{pmatrix}
+%             X^2_1 - X^1_1 & X^3_1- X^1_1 \\
+%             X^2_2 - X^1_2 & X^3_2- X^1_2
+%         \end{pmatrix}=
+%         \begin{pmatrix}
+%             1&2\\-1&-2
+%         \end{pmatrix},
+% \end{equation}
+% which has a zero determinant, making the matrix inverse non existent.
+% This section is dedicated to illustrating one way to overcome this issue.
+
+% \begin{figure}
+%     \centering
+%     \includegraphics[width=0.7\linewidth]{ch4_Reconnecting/fig/DegenerateReferenceConfiguration.drawio.pdf}
+%     \caption{The following sequence of deformations and edge flips leaves the mesh with an element with a degenerate reference configuration. The figure shows four labeled and colored nodes $i, j, k,l$. In configuration 7, note that the nodes $i,k,l$ are collinear in the reference configuration, giving the reference element zero area. In contrast, element $ijl$ illustrated by dashed lines, now has a reference area twice as large as its current area.}% Note the additional node in configuration 7 to complete the edge flip.}
+%     \label{fig:degenerateReferenceConfiguration}
+% \end{figure}
+
+% We propose disregarding the true reference configuration, which might be degenerate, in favor of a static reference configuration. If we keep
+% \begin{equation}
+% \frac{\partial \textbf{X}_j}{\partial \xi_i} \equiv \begin{pmatrix}
+%     1 &0\\0&1\\
+% \end{pmatrix}
+% \end{equation}
+% fixed for all elements, we effectively assume a fixed reference configuration for all elements. Surprisingly, although this changes the forces on the nodes, the new forces are in a way more physically realistic, and more numerically performant. 
+
+% To see why, recall that our energy density function is invariant under $\mathrm{GL}(2,\mathbb{Z})$. As discussed in Chapter \ref{chp3_plasticR} (see Figure \ref{fig:simplePhiReductionExample}), the $\mathrm{GL}(2,\mathbb{Z})$ invariance guarantees that magnitude of the force is invariant, but not necessarily it's rotation. However, the rotational error we make by fixing the reference configuration is canceled, due to the mistake being make twice, and in opposite directions. Recall that the element force $f_i^j$ on the $i$-th node in element $j$ is given by
+% \begin{equation}
+%     f_i^j=-\frac{\partial\Phi}{\partial \B{u}}=-\B{P}\frac{\partial N^i}{\partial \X}.
+% \end{equation}
+% We derive the first Piola-Kirchhoff stress tensor $\B{P}$ from 
+% \begin{equation}
+%     \B{P}=\F\B{S}=2\F\B{M}\B{\Sigma}\B{M}^\T
+% \end{equation}
+% where $\B{S}$ is the second Piola-Kirchhoff stress tensor and
+% \begin{equation}
+%     \B{\Sigma}= \begin{pmatrix}
+%     \frac{\partial \Phi^0}{\partial \Ct_{11}} & \frac{1}{2}\frac{\partial \Phi^0}{\partial \Ct_{12}} \\
+%     \frac{1}{2}\frac{\partial \Phi^0}{\partial \Ct_{12}} & \frac{\partial \Phi^0}{\partial \Ct_{22}}
+%     \end{pmatrix}.
+% \end{equation}
+% See Section \ref{sec:EnergyDensityFunction} TODO BETTER REF for further details. 
+% Because 
+
+
+
+
+% \subsection{Reference element update}
+
+
+
+
+% \section{Delaney triangulation}
+% \section{Reconnecting criteria using the order-3 elliptic
+% neighborhood}

@@ -276,7 +276,7 @@ def longJob(nrThreads, nrSeeds, size=100, group_by_variant=False):
         rows=size,
         cols=size,
         startLoad=0.15,
-        maxLoad=5.0,
+        maxLoad=5.1,
         nrThreads=nrThreads,
         minimizer="LBFGS",
         loadIncrement=1e-5,
@@ -285,7 +285,6 @@ def longJob(nrThreads, nrSeeds, size=100, group_by_variant=False):
         LBFGSEpsg=1e-8,
         experiment="simpleShear",
         reconnectionMethod="edgeFlip",
-        makeDumpAt=1.4292,
     )
     return configs, labels
 

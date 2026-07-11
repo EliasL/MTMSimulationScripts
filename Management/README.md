@@ -52,12 +52,13 @@ Most plotting code uses helpers in `Plotting/remotePlotting.py`.
 Use `get_csv_files(configs, labels=...)` when you only need `macroData.csv`.
 It checks cached CSVs, local data under `Servers.local_path_mac/MTS2D_output`,
 then remote servers. Remote CSVs are downloaded into the `remoteData/macro`
-cache.
+cache, using `/Volumes/data/remoteData` when the external data drive is mounted
+and `~/Work/PhD/remoteData` otherwise.
 
 Use `get_folders_from_servers(configs)` when you need full simulation folders,
 for example VTU mesh files. It checks local folders and can download remote
-folders into `remoteData/data`. This is heavier than CSV lookup because it uses
-`rsync` on full folders.
+folders into `remoteData/data` in the same external-drive cache when available.
+This is heavier than CSV lookup because it uses `rsync` on full folders.
 
 Local-only folder lookup can be done with:
 

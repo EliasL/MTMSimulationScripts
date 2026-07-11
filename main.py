@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from Plotting.remoteDataPaths import RAW_DATA_PATH
 from Plotting.remotePlotting import plotLog, plotLog2, plotEnergy
 from Management import parameterExploring as pe
 from Management.configGenerator import SimulationConfig
@@ -464,7 +465,7 @@ def runOnLocalMachine():
     #configs, labels = reversibilityJob()
     # configs, labels = loadStepJob(reconnection="edgeFlip")
     #configs, labels = reconnectSSTest(reconnectionMethod="none")
-    configs, labels = smallPristineCrystal()
+    #configs, labels = smallPristineCrystal()
     # configs, labels = triangular_edge_flip_job(size=50)
     # configs, labels = stiffnessMatrixComparisonJob(size=50, referenceShear=0.5)
     # configs, labels = currentDistortionComparisonJob(size=50, startLoads=[0, 2, 5, 10])
@@ -478,7 +479,7 @@ def runOnLocalMachine():
     #configs, labels = remeshTest(diagonal="minor")
     # run_many_locally(configs, taskNames=labels, resume=False)
 
-    #configs, labels = longJob(5, 1, size=200)
+    configs, labels = longJob(5, 1, size=40)
     # configs, labels = longJobStatic(8, 1, size=300)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
@@ -632,7 +633,7 @@ if __name__ == "__main__":
     #startJobs()
 
 
-    #runOnLocalMachine()
+    runOnLocalMachine()
     #restartLongShearWithMinimizationLog()
 
     # plotPropperJob()
@@ -641,8 +642,8 @@ if __name__ == "__main__":
     # stopConditionJob()
     # threadTest()
     #benchmark()
-    reconnectingBenchmark()
+    #reconnectingBenchmark()
     # resumeSim(
-    #     "/Users/eliaslundheim/work/PhD/remoteData/data/simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
+    #     Path(RAW_DATA_PATH) / "simpleShear,s400x400l0.138,2e-05,1.0PBCt8LBFGSEpsx1e-06s0/dumps/dump_l0.16.xml.gz",
     #     newOutput=True,
     # )
