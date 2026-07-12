@@ -142,6 +142,17 @@ def _fit_xmin_batch_worker(args):
     return distances, params_out, valid_out
 
 
+def _fit_single_xmin_task(args):
+    drops, trial_xmin, xmax, dist_name = args
+    return Fit(
+        data=drops,
+        xmin=trial_xmin,
+        xmax=xmax,
+        xmin_distribution=dist_name,
+        verbose=0,
+    )
+
+
 def _upper_incomplete_gamma(a, x):
     """
     Compute Γ(a, x) for real a (including a<=0) using recurrence.
@@ -628,6 +639,10 @@ def evaluate_xmin(
     parallel=False,
     max_workers=None,
 ):
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    if drops.size < 3:
+        raise ValueError("Need at least three finite positive drops.")
     tasks = [(drops, trial_xmin, xmax, distType.name) for trial_xmin in xmin_values]
 
     if parallel:
@@ -645,15 +660,14 @@ def evaluate_xmin(
             )
     else:
         test_fits = []
-        for i, trial_xmin in enumerate(xmin_values):
-            desc = f"xmin:{trial_xmin:.2e}: {i + 1}/{len(xmin_values)}:"
+        for trial_xmin in xmin_values:
             fit = Fit(
                 data=drops,
                 xmin=trial_xmin,
                 xmax=xmax,
                 xmin_distribution=distType.name,
+                verbose=0,
             )
-            # fit.evaluate_fit(drops, parallel=False, tqdmDesc=desc)
             test_fits.append(fit)
 
     return test_fits
@@ -812,6 +826,8 @@ class Fit(powerlaw.Fit):
         xmin_distance="D",
         xmin_distribution="power_law",
         verbose=1,
+        xmin_samples_per_decade=30,
+        parallel_xmin=False,
     ):
         # The upstream powerlaw fit can emit OptimizeWarning/UserWarning during init.
         # Suppress them here so callers don't need to wrap every Fit construction.
@@ -822,6 +838,10 @@ class Fit(powerlaw.Fit):
             # the faster generator
             SUPPORTED_DISTRIBUTIONS["truncated_power_law"] = Truncated_Power_Law
             self.fast_xmin = fast_xmin
+            self.xmin_samples_per_decade = float(xmin_samples_per_decade)
+            if self.xmin_samples_per_decade <= 0:
+                raise ValueError("xmin_samples_per_decade must be positive.")
+            self.parallel_xmin = bool(parallel_xmin)
             super().__init__(
                 data,
                 discrete,
@@ -850,7 +870,11 @@ class Fit(powerlaw.Fit):
 
             return super().find_xmin()
 
-        xmin, xmin_fitting_results = my_dip_find_xmin(self.data)
+        xmin, xmin_fitting_results = my_dip_find_xmin(
+            self.data,
+            samples_per_decade=self.xmin_samples_per_decade,
+            parallel=self.parallel_xmin,
+        )
 
         # Set the Fit's xmin to the optimal xmin
         self.xmin = xmin

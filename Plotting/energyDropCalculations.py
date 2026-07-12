@@ -41,6 +41,20 @@ def is_piola_stress_column(stress_col):
     return str(stress_col).endswith("P12")
 
 
+def stress_corrected_drop_column(correction_order=2, tangent="current"):
+    if correction_order == 1:
+        return "stress_corrected_drop_first_order"
+    if correction_order == 2:
+        if tangent in {"current", "gamma", "gamma_i"}:
+            return "stress_corrected_drop_second_order"
+        if tangent in {"gamma0", "zero", "gamma_zero"}:
+            return "stress_corrected_drop_second_order_gamma0"
+    raise ValueError(
+        "Expected correction_order=1 or correction_order=2 with "
+        "tangent in {'current', 'gamma0'}."
+    )
+
+
 def volume_from_metadata(meta):
     if "L" in meta and meta["L"] is not None:
         L = float(meta["L"])
@@ -52,7 +66,7 @@ def volume_from_metadata(meta):
     return None
 
 
-def _simple_shear_tangent(load_i):
+def _simple_shear_tangent(load_i, *, bulk_modulus=4.0):
     tangent = np.full_like(load_i, np.nan, dtype=float)
     finite = np.isfinite(load_i)
     if not np.any(finite):
@@ -62,18 +76,39 @@ def _simple_shear_tangent(load_i):
     F_i[..., 0, 0] = 1.0
     F_i[..., 0, 1] = load_i[finite]
     F_i[..., 1, 1] = 1.0
-    tangent[finite] = ContiEnergy.elasticity_tensor(F_i, eulerian=True)[
+    tangent[finite] = ContiEnergy.elasticity_tensor(
+        F_i, K=bulk_modulus, eulerian=True
+    )[
         ..., 0, 1, 0, 1
     ]
     return tangent
 
 
-def _simple_shear_tangent_gamma0(shape):
+def _simple_shear_tangent_gamma0(shape, *, bulk_modulus=4.0):
     F0 = np.zeros((1, 2, 2), dtype=float)
     F0[..., 0, 0] = 1.0
     F0[..., 1, 1] = 1.0
-    tangent0 = ContiEnergy.elasticity_tensor(F0, eulerian=True)[..., 0, 1, 0, 1]
+    tangent0 = ContiEnergy.elasticity_tensor(
+        F0, K=bulk_modulus, eulerian=True
+    )[..., 0, 1, 0, 1]
     return np.full(shape, float(tangent0[0]), dtype=float)
+
+
+def _read_simulation_config(csv_path):
+    if csv_path is None:
+        return {}
+    config_path = csv_path.parent / "config.conf"
+    if not config_path.exists():
+        return {}
+
+    values = {}
+    for raw_line in config_path.read_text().splitlines():
+        line = raw_line.split("#", 1)[0].strip()
+        if not line or "=" not in line:
+            continue
+        key, value = (part.strip() for part in line.split("=", 1))
+        values[key] = value
+    return values
 
 
 def calculate_energy_step_data(
@@ -134,8 +169,19 @@ def calculate_energy_step_data(
     e_i = energy_total[:-1]
     e_real_next = energy_total[1:]
 
-    tangent_i = _simple_shear_tangent(load_i)
-    tangent_gamma0_i = _simple_shear_tangent_gamma0(load_i.shape)
+    config = _read_simulation_config(csv_path)
+    energy_function = config.get("energyFunction", "contiSquare")
+    if energy_function != "contiSquare":
+        raise ValueError(
+            "Second-order energy correction only supports energyFunction="
+            f"'contiSquare', got {energy_function!r}."
+        )
+    bulk_modulus = float(config.get("bulkModulus", 4.0))
+
+    tangent_i = _simple_shear_tangent(load_i, bulk_modulus=bulk_modulus)
+    tangent_gamma0_i = _simple_shear_tangent_gamma0(
+        load_i.shape, bulk_modulus=bulk_modulus
+    )
 
     e_pred_next = e_i + volume * stress_i * delta_gamma
     e_pred_next_second_order = e_pred_next + 0.5 * volume * tangent_i * delta_gamma**2
@@ -214,5 +260,74 @@ def calculate_energy_step_data(
         "energy_col": energy_col,
         "converted_avg_energy_to_total": use_average_energy,
         "used_piola_stress": is_piola_stress_column(stress_col),
+        "energy_function": energy_function,
+        "bulk_modulus": bulk_modulus,
     }
     return step_df, info
+
+
+def extract_energy_drops_from_dataframe(
+    df,
+    *,
+    csv_file_path=None,
+    metadata=None,
+    strain_lim=(-np.inf, np.inf),
+    energy_key="total_e_change_from_init",
+    average_energy=False,
+    stress_corrected=True,
+    correction_order=2,
+    tangent="current",
+    drop_sign="negative",
+    min_drop=0.0,
+    plastic_only=False,
+):
+    """Extract one positive drop array and its row mask from one dataframe."""
+    if drop_sign not in {"negative", "positive"}:
+        raise ValueError("drop_sign must be 'negative' or 'positive'.")
+    if not np.isfinite(min_drop) or min_drop < 0:
+        raise ValueError("min_drop must be finite and nonnegative.")
+
+    info = {}
+    if stress_corrected:
+        steps, info = calculate_energy_step_data(
+            csv_file_path,
+            df=df,
+            metadata=metadata,
+            average_energy=average_energy,
+        )
+        drop_column = stress_corrected_drop_column(correction_order, tangent)
+        step_drops = np.asarray(steps[drop_column], dtype=float)
+        signed_change = np.zeros(len(df), dtype=float)
+        signed_change[1:] = -step_drops
+        info["drop_column"] = drop_column
+    else:
+        if energy_key not in df:
+            raise KeyError(f"Missing energy-change column {energy_key!r}.")
+        signed_change = np.asarray(df[energy_key], dtype=float).copy()
+        if drop_sign == "positive":
+            signed_change *= -1.0
+        info["energy_col"] = energy_key
+        info["drop_column"] = energy_key
+
+    if "load_step" in df and df["load_step"].iloc[0] == 1:
+        signed_change[0] = 0.0
+    strain = np.asarray(df["load"], dtype=float)
+    mask = (
+        (-signed_change > min_drop)
+        & (strain > strain_lim[0])
+        & (strain < strain_lim[1])
+    )
+
+    if plastic_only:
+        candidates = (
+            "nr_elements_with_m3_fix_change",
+            "nr_elements_with_m3_change",
+        )
+        plastic_col = next((col for col in candidates if col in df), None)
+        if plastic_col is None:
+            raise KeyError(f"Missing plastic-event column; tried {candidates}.")
+        mask &= np.asarray(df[plastic_col] >= 1, dtype=bool)
+        info["plastic_event_col"] = plastic_col
+
+    mask = np.asarray(mask, dtype=bool)
+    return -signed_change[mask], mask, signed_change, info

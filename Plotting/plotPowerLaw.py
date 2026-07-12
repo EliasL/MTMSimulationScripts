@@ -1,4 +1,4 @@
-from .findXmin import find_xmin, find_xmin_rising_level
+from .findXmin import select_xmin
 from MTMath.energyFunction import ContiEnergy
 import numpy as np
 import pandas as pd
@@ -12,9 +12,8 @@ from Management.updateCSV import update_df_header, read_macrodata_csv
 from .makePlots import safePath, maybe_avg, energy_drop_label
 from .dataFunctions import get_metadata
 from .energyDropCalculations import (
-    calculate_energy_step_data,
+    extract_energy_drops_from_dataframe,
     infer_stress_column,
-    is_piola_stress_column,
 )
 import os
 import glob
@@ -223,7 +222,7 @@ def get_minimizer(df):
     # csv file, and seeing which of
     # LBFGS_Term_reason,CG_Term_reason,FIRE_Term_reason is non-zero
     if "LBFGS_Term_reason" in df:
-        if not len(df["LBFGS_Term_reason"]) >= 2:
+        if len(df["LBFGS_Term_reason"]) < 3:
             print("No data in file!")
             return "Unknown"
     else:
@@ -268,8 +267,9 @@ def get_system_size(csvPaths):
     if len(sizes) > 1:
         print("More than one size!")
         return -1
-    else:
-        return sizes.pop()
+    if not sizes:
+        raise ValueError("Could not infer system size from any CSV path.")
+    return sizes.pop()
 
 
 def _resolve_drop_label(info=None, *, energy_type=None, stress_corrected=False, averageEnergy=None):
@@ -285,20 +285,6 @@ def _resolve_drop_label(info=None, *, energy_type=None, stress_corrected=False, 
 def _stress_corrected_drop_label(use_piola=False, use_avg=None):
     symbol = "E_{SP}" if use_piola else "E_S"
     return maybe_avg(symbol, use_avg)
-
-
-def _stress_corrected_drop_column(correction_order=2, tangent="current"):
-    if correction_order == 1:
-        return "stress_corrected_drop_first_order"
-    if correction_order == 2:
-        if tangent in {"current", "gamma", "gamma_i"}:
-            return "stress_corrected_drop_second_order"
-        if tangent in {"gamma0", "zero", "gamma_zero"}:
-            return "stress_corrected_drop_second_order_gamma0"
-    raise ValueError(
-        "Expected correction_order=1 or correction_order=2 with "
-        "tangent in {'current', 'gamma0'}."
-    )
 
 
 def get_elastic_mu(report=False):
@@ -344,17 +330,25 @@ def get_energy_drops(
     stress_corrected=True,
     stress_correction_order=2,
     stress_tangent="current",
+    drop_sign="negative",
+    min_drop=0.0,
 ):
     """
     Strain energy drop data from CSV, filter by strain limits, and return drops.
-    When onlyStrainedEnergyDrops is true, we still use e_change_from_init, but only
-    when energy_change is negative (there is a drop between relaxed states).
+    When ``onlyStrainedEnergyDrops`` is true, retain only steps with a recorded
+    element-level plastic event.
     Stress-corrected drops use the shared Taylor expansion helper; by default
     this is second order with A1212 evaluated at the current strain gamma_i.
     If debug=True, plot intermediate energy and drop traces.
+
+    For stored energy-change columns, ``drop_sign`` explicitly specifies
+    whether drops are negative or positive. Taylor-corrected drops always use
+    their defined positive-drop convention.
     """
     if isinstance(csvPaths, str):
         csvPaths = [csvPaths]
+    if not np.isfinite(min_drop) or min_drop < 0:
+        raise ValueError("min_drop must be finite and nonnegative.")
 
     drops = []
     masks = []
@@ -392,31 +386,28 @@ def get_energy_drops(
                 resolved_strain_lim, df=df_local, postRegime=postRegime
             )
 
-        energy_col = None
-        signed_step_change = None
+        extracted, mask, signed_step_change, step_info = extract_energy_drops_from_dataframe(
+            df_local,
+            csv_file_path=singlePath,
+            metadata=get_metadata(singlePath),
+            strain_lim=resolved_strain_lim,
+            energy_key=energy_key,
+            average_energy=averageEnergy,
+            stress_corrected=stress_corrected,
+            correction_order=stress_correction_order,
+            tangent=stress_tangent,
+            drop_sign=drop_sign,
+            min_drop=min_drop,
+            plastic_only=onlyStrainedEnergyDrops,
+        )
+        strain = df_local["load"]
+        lim_mask = (strain > resolved_strain_lim[0]) & (strain < resolved_strain_lim[1])
+        energy_col = step_info["energy_col"]
         if stress_corrected:
-            step_df, step_info = calculate_energy_step_data(
-                singlePath,
-                df=df_local,
-                metadata=get_metadata(singlePath),
-                average_energy=averageEnergy,
-            )
-            used_piola_stress = (
-                used_piola_stress or step_info["used_piola_stress"]
-            )
-            energy_col = step_info["energy_col"]
+            used_piola_stress |= step_info["used_piola_stress"]
             use_average = step_info["converted_avg_energy_to_total"]
             if use_average_label is None:
                 use_average_label = use_average
-            drop_col = _stress_corrected_drop_column(
-                correction_order=stress_correction_order,
-                tangent=stress_tangent,
-            )
-            step_drop = np.asarray(step_df[drop_col], dtype=float)
-            signed_step_change = np.zeros(len(df_local), dtype=float)
-            # Convention: drops are negative in signed_step_change.
-            signed_step_change[1:] = -step_drop
-            signed_step_change[0] = 0.0
             correction_name = (
                 "first_order"
                 if stress_correction_order == 1
@@ -427,44 +418,14 @@ def get_energy_drops(
                 if use_average
                 else f"total_stress_corrected_energy_drop_{correction_name}"
             )
-        else:
-            signed_step_change = np.asarray(df_local[energy_key], dtype=float)
-            if drop_label is None:
-                drop_label = energy_drop_label(
-                    energy_type=energy_type,
-                    stress_corrected=False,
-                    use_avg=averageEnergy,
-                )
-
-        signed_step_change = np.array(signed_step_change, dtype=float, copy=True)
-
-        if np.all(signed_step_change >= 0):
-            # Umut code compatability: I'm just assuming if all the drops are positive
-            # they should probably be flipped.
-            print("Flipped for umut code!")
-            signed_step_change = -signed_step_change
-
-        strain = df_local["load"]
-
-        # The first minimization always has a unaturally large jump
-        # set the diff at load step 1 = 0
-        if "load_step" in df_local and df_local["load_step"].iloc[0] == 1:
-            signed_step_change[0] = 0
-
-        lim_mask = (strain > resolved_strain_lim[0]) & (strain < resolved_strain_lim[1])
-        drop_mask = signed_step_change < 0
-        mask = drop_mask & lim_mask
-
-        if onlyStrainedEnergyDrops:
-            # We use a negative change between relaxed states as a proxy to
-            # distinguish affine relaxation from plastic relaxation.
-            realPlasticDrop = (
-                df_local["nr_elements_with_m3_fix_change"] >= 1
+        elif drop_label is None:
+            drop_label = energy_drop_label(
+                energy_type=energy_type,
+                stress_corrected=False,
+                use_avg=averageEnergy,
             )
-            mask = mask & realPlasticDrop
 
-        mask = np.asarray(mask, dtype=bool)
-        drops.extend(-signed_step_change[mask])
+        drops.extend(extracted)
         masks.append(mask)
 
     drops = np.array(drops)
@@ -496,7 +457,8 @@ def get_energy_drops(
 
     if debug:
         # Only debug first seed when using labels
-        if label is not None and "seed=" in label and "seed=0" not in label:
+        label_text = ", ".join(map(str, label)) if isinstance(label, list) else str(label)
+        if label is not None and "seed=" in label_text and "seed=0" not in label_text:
             return drops, data_info
 
         strain_limited = strain[1:][lim_mask[1:]]
@@ -529,11 +491,11 @@ def get_energy_drops(
             ncol=2,
             frameon=True,
         )
-        # handle drops.max() = NaN case
-        if np.isnan(drops.max()):
+        finite_drops = drops[np.isfinite(drops)]
+        if finite_drops.size == 0:
             ax2.set_ylim(0, 1)
         else:
-            ax2.set_ylim(0, drops.max() * 1.5)
+            ax2.set_ylim(0, finite_drops.max() * 1.5)
 
         # ——— Compute 0.1%‐wide central slice ———
         mid = 0.5 * (resolved_strain_lim[0] + resolved_strain_lim[1])
@@ -543,10 +505,10 @@ def get_energy_drops(
         zoom_mask = (strain >= x1) & (strain <= x2)
 
         # find energy‐axis extents in that slice
-        y1, y2 = (
-            (-signed_step_change[zoom_mask]).min(),
-            (-signed_step_change[zoom_mask]).max(),
-        )
+        zoom_values = -signed_step_change[zoom_mask]
+        if zoom_values.size == 0:
+            raise ValueError("Debug zoom window contains no load points.")
+        y1, y2 = zoom_values.min(), zoom_values.max()
         zoomWidth = np.clip(x2 - x1, 0.01, None)
         zoomHeight = y2 - y1
 
@@ -577,7 +539,7 @@ def get_energy_drops(
         if np.isnan(x1) or np.isnan(x2):
             x1, x2 = 0, 1
         axins.set_xlim(x1, x2)
-        axins.set_itle("Zoom", fontsize=8)
+        axins.set_title("Zoom", fontsize=8)
 
         # twin‐axis for drops in the inset
         axins2 = axins.twinx()
@@ -585,10 +547,11 @@ def get_energy_drops(
         zoom_strain_mask &= strain_limited <= x2
         drops_zoom = plotDrops[zoom_strain_mask]
         axins2.plot(strain_limited[zoom_strain_mask], drops_zoom)
-        if np.isnan(drops_zoom.max()):
+        finite_zoom = drops_zoom[np.isfinite(drops_zoom)]
+        if finite_zoom.size == 0:
             axins2.set_ylim(0, 1)
         else:
-            axins2.set_ylim(0, drops_zoom.max() * 1.5)
+            axins2.set_ylim(0, finite_zoom.max() * 1.5)
 
         name = safePath(make_title(data_info))
 
@@ -1011,7 +974,7 @@ def plot_fit_pdf(
     show_legend=True,
     set_title=True,
     x_grid_mode="data",
-    xmin_only=False,
+    xmin_only=True,
     linewidth=None,
 ):
     dist, bins_for_model, likelihoods = _get_fit_curve_data(
@@ -1666,6 +1629,8 @@ def find_best_xmin(
     in the exponents. We make sure the p-value is larger than min_p. If the
     p-value is close to the min_p limit, we need to increaes the accuracy.
     """
+    if not 0 < max_accuracy <= start_accuracy:
+        raise ValueError("Require 0 < max_accuracy <= start_accuracy.")
 
     title = make_title(data_info)
     path_name = safePath(title)
@@ -1673,7 +1638,7 @@ def find_best_xmin(
 
     print(f"Testing xmins for {title}")
 
-    selected_xmin = selected_fit.xmin
+    selected_xmin = getattr(selected_fit, "xmin", None)
 
     if parallel and len(drops) > 5e4 and not use_memmap:
         parallel = False
@@ -1740,12 +1705,13 @@ def find_best_xmin(
             f for f in test_fits if f.xmin < new_min_xmin or f.xmin > new_max_xmin
         ]
 
+        refined_accuracy = max(max_accuracy, start_accuracy / 2)
         new_fits = explore_xmin(
             drops,
             new_min_xmin,
             new_max_xmin,
             nr_evaluation,
-            start_accuracy / 2,
+            refined_accuracy,
             DistType,
             debug,
             xmax,
@@ -2292,32 +2258,56 @@ def make_fit(
     use_cache=True,
     cache_dir: str = ".xmin_values",
     fast_xmin=False,
-    xmin_accuracy=1.0,
+    xmin_accuracy=None,
     parallel_xmin=None,
+    xmin_strategy=None,
+    xmin_strategy_kwargs=None,
     debug=False,
 ) -> Fit:
     """
     This is a wrapper for the Fit function. Finding xmin takes a long
     time, so we save the results locally and use a precomputed xmin if available.
+
+    ``xmin_accuracy`` is the candidate spacing in log10 decades for the fast
+    selector. For example, 0.1 evaluates about ten candidates per decade.
     """
+
+    if xmin_accuracy is not None and xmin_accuracy <= 0:
+        raise ValueError("xmin_accuracy must be positive or None.")
+    if xmin_range is not None and xmin_strategy is not None:
+        raise ValueError("Provide either xmin_range or xmin_strategy, not both.")
+    xmin_samples_per_decade = (
+        30.0 if xmin_accuracy is None else 1.0 / float(xmin_accuracy)
+    )
+    parallel_xmin = False if parallel_xmin is None else bool(parallel_xmin)
+    if xmin_strategy == "ks":
+        fast_xmin = False
+    elif xmin_strategy == "dip":
+        fast_xmin = True
 
     # --- try cache
     cache_path = None
+    xmin_fitting_results = None
     if use_cache:
         import os
         import json
         import gzip
 
-        xmin_fitting_results = None
         cache_path = _get_cache_path(
-            cache_dir, data, distType.name + f"{xmin_range}{fast_xmin}{xmin_accuracy}"
+            cache_dir,
+            data,
+            distType.name
+            + f"{xmin_range}{fast_xmin}{xmin_samples_per_decade}"
+            + f"{parallel_xmin}{xmin_strategy}{xmin_strategy_kwargs}",
         )
         cache_path_json = cache_path
         cache_path_gz = cache_path + ".gz"
         # Prefer the compressed cache if present; fall back to legacy .json
         if os.path.exists(cache_path_gz) or os.path.exists(cache_path_json):
             try:
-                with gzip.open(cache_path_gz, "rt", encoding="utf-8") as f:
+                opener = gzip.open if os.path.exists(cache_path_gz) else open
+                path = cache_path_gz if os.path.exists(cache_path_gz) else cache_path_json
+                with opener(path, "rt", encoding="utf-8") as f:
                     cache = json.load(f)
 
                 xmin_range = cache["xmin"]
@@ -2329,6 +2319,18 @@ def make_fit(
                 # fall through to recompute if loading fails
                 print(e)
 
+    if xmin_range is None and xmin_strategy not in {None, "ks", "dip"}:
+        strategy_kwargs = dict(xmin_strategy_kwargs or {})
+        strategy_kwargs.setdefault("distType", distType)
+        strategy_kwargs.setdefault("parallel", parallel_xmin)
+        xmin_range = select_xmin(
+            data,
+            strategy=xmin_strategy,
+            **strategy_kwargs,
+        )
+        if not np.isfinite(xmin_range):
+            raise RuntimeError(f"xmin strategy {xmin_strategy!r} returned no value.")
+
     # If xmin_range is a tuple, Fit will search for a good xmin, but if we
     # have loaded a precomputed xmin, it will be much faster
     fitObj = Fit(
@@ -2336,9 +2338,9 @@ def make_fit(
         xmin=xmin_range,
         xmin_distribution=distType.name,
         fast_xmin=fast_xmin,
+        xmin_samples_per_decade=xmin_samples_per_decade,
+        parallel_xmin=parallel_xmin,
     )
-    if parallel_xmin is not None:
-        fitObj.parallel_xmin = bool(parallel_xmin)
     if xmin_fitting_results:
         fitObj.xmin_fitting_results = xmin_fitting_results
 
@@ -2974,7 +2976,11 @@ def plot_powerlaw_compare(
     addFit=True,
     fast_xmin=True,
     min_xmin=1e-5,
-    xmin_accuracy=1.0,
+    xmin_accuracy=None,
+    parallel_xmin=False,
+    xmin_strategy=None,
+    xmin_strategy_kwargs=None,
+    fit_selection="selected",
     csvPaths=None,
     useCDF=False,
     drop_type="energy",
@@ -2985,6 +2991,8 @@ def plot_powerlaw_compare(
         raise ValueError(
             f"Unsupported drop_type: {drop_type!r}. Use 'energy' or 'stress'."
         )
+    if fit_selection not in {"selected", "p_value"}:
+        raise ValueError("fit_selection must be 'selected' or 'p_value'.")
 
     grouped_paths, grouped_labels = get_group_structure(group_paths, group_labels)
     if len(grouped_paths) <= 1:
@@ -3003,6 +3011,10 @@ def plot_powerlaw_compare(
             fast_xmin=fast_xmin,
             min_xmin=min_xmin,
             xmin_accuracy=xmin_accuracy,
+            parallel_xmin=parallel_xmin,
+            xmin_strategy=xmin_strategy,
+            xmin_strategy_kwargs=xmin_strategy_kwargs,
+            fit_selection=fit_selection,
             useCDF=useCDF,
             drop_type=drop_type,
         )
@@ -3012,8 +3024,11 @@ def plot_powerlaw_compare(
     if not colors:
         colors = list(MINIMIZER_COLORS.values())
 
-    selected_tag = ks_tag(fast_xmin=fast_xmin)
+    selected_tag = "p_value" if fit_selection == "p_value" else (
+        xmin_strategy or ks_tag(fast_xmin=fast_xmin)
+    )
     compare_infos = []
+    compare_fits = []
     legend_handles = []
     equation_entry = None
 
@@ -3038,18 +3053,31 @@ def plot_powerlaw_compare(
             continue
 
         group_xmin_range = xmin_range
-        if group_xmin_range is None and not fast_xmin:
+        if group_xmin_range is None and not fast_xmin and xmin_strategy is None:
             group_xmin_range = [min_xmin, None]
 
-        fit = make_fit(
+        selected_fit = make_fit(
             data=drops,
             xmin_range=group_xmin_range,
             distType=distType,
             fast_xmin=fast_xmin,
             xmin_accuracy=xmin_accuracy,
+            parallel_xmin=parallel_xmin,
+            xmin_strategy=xmin_strategy,
+            xmin_strategy_kwargs=xmin_strategy_kwargs,
         )
         if evaluate:
-            fit.evaluate_fit()
+            selected_fit.evaluate_fit()
+        fit = selected_fit
+        if fit_selection == "p_value":
+            fit = find_best_xmin(
+                drops,
+                debug=debug,
+                data_info=data_info,
+                xmin_results=getattr(selected_fit, "xmin_fitting_results", None),
+                fast_xmin=fast_xmin,
+                selected_fit=selected_fit,
+            )
 
         color = colors[idx % len(colors)]
         source_label = labels[0] if labels else ""
@@ -3136,6 +3164,7 @@ def plot_powerlaw_compare(
             )
         )
         compare_infos.append(data_info)
+        compare_fits.append(fit)
 
     if not compare_infos:
         plt.close(fig)
@@ -3178,6 +3207,7 @@ def plot_powerlaw_compare(
         plt.close(fig)
     else:
         setattr(fig, "path", None)
+    setattr(fig, "fits", compare_fits)
 
     return fig
 
@@ -3196,7 +3226,11 @@ def plot_powerlaw(
     addFit=True,
     fast_xmin=True,
     min_xmin=1e-5,
-    xmin_accuracy=1.0,
+    xmin_accuracy=None,
+    parallel_xmin=False,
+    xmin_strategy=None,
+    xmin_strategy_kwargs=None,
+    fit_selection="selected",
     csvPaths=None,
     useCDF=False,
     drop_type="energy",
@@ -3225,6 +3259,10 @@ def plot_powerlaw(
             fast_xmin=fast_xmin,
             min_xmin=min_xmin,
             xmin_accuracy=xmin_accuracy,
+            parallel_xmin=parallel_xmin,
+            xmin_strategy=xmin_strategy,
+            xmin_strategy_kwargs=xmin_strategy_kwargs,
+            fit_selection=fit_selection,
             useCDF=useCDF,
             drop_type=drop_type,
         )
@@ -3248,11 +3286,9 @@ def plot_powerlaw(
     if all_drops is None or len(all_drops) == 0:
         print(f"No {drop_type} drops found; skipping powerlaw fit.")
         return None
-    # find_xmin_rising_level(all_drops, debug=True)
-
-    #event_min_xmin = find_start_of_plastic_events(data_info, debug=True)
-
-    if xmin_range is None and not fast_xmin:
+    if fit_selection not in {"selected", "p_value"}:
+        raise ValueError("fit_selection must be 'selected' or 'p_value'.")
+    if xmin_range is None and not fast_xmin and xmin_strategy is None:
         # Not using fast_xmin is brutally slow. We add a default range here
         xmin_range = [min_xmin, None]
     selected_fit = make_fit(
@@ -3261,15 +3297,18 @@ def plot_powerlaw(
         distType=distType,
         fast_xmin=fast_xmin,
         xmin_accuracy=xmin_accuracy,
+        parallel_xmin=parallel_xmin,
+        xmin_strategy=xmin_strategy,
+        xmin_strategy_kwargs=xmin_strategy_kwargs,
     )
-    selected_tag = ks_tag(fast_xmin=fast_xmin)
+    selected_tag = xmin_strategy or ks_tag(fast_xmin=fast_xmin)
     print(f"{selected_tag} xmin:", selected_fit.xmin)
     if evaluate:
         selected_fit.evaluate_fit()
 
     ks_fit = None
     ks_xmin = None
-    if fast_xmin:
+    if fast_xmin and xmin_strategy is None:
         ks_xmin = get_lowest_distance_xmin(getattr(selected_fit, "xmin_fitting_results", None))
         if ks_xmin is not None:
             ks_fit = Fit(
@@ -3281,16 +3320,18 @@ def plot_powerlaw(
                 ks_fit.evaluate_fit()
             print(f"KS xmin: {ks_fit.xmin}")
 
-    p_fit = find_best_xmin(
-        all_drops,
-        debug=debug,
-        data_info=data_info,
-        xmin_results=getattr(selected_fit, "xmin_fitting_results", None),
-        fast_xmin=fast_xmin,
-        selected_fit=selected_fit,
-    )
+    reported_fit = selected_fit
+    if fit_selection == "p_value":
+        reported_fit = find_best_xmin(
+            all_drops,
+            debug=debug,
+            data_info=data_info,
+            xmin_results=getattr(selected_fit, "xmin_fitting_results", None),
+            fast_xmin=fast_xmin,
+            selected_fit=selected_fit,
+        )
 
-    d = dist_from_fit(p_fit)
+    d = dist_from_fit(reported_fit)
 
     attribute = get_attribute(data_info["label"][0])
     if attribute == "Unknown":
@@ -3306,7 +3347,7 @@ def plot_powerlaw(
         attribute = ""
 
     if evaluate:
-        p, mean_exp, exp_std = p_fit.evaluate_fit(all_drops, parallel=True)
+        p, mean_exp, exp_std = reported_fit.evaluate_fit(all_drops, parallel=True)
 
         thresholds = [0.05, 0.1, 0.3, float("inf")]
         ratings = ["bad", "poor", "good", "excellent"]
@@ -3316,41 +3357,8 @@ def plot_powerlaw(
             if p < t:
                 break
 
-        print(f"Number of drops in fit: {_count_fit_drops(p_fit)}")
+        print(f"Number of drops in fit: {_count_fit_drops(reported_fit)}")
         print(f"{attribute}: P value: {p:.2f} ({r}), exp: {d.alpha}, std: {exp_std}")
-
-    tag = selected_tag
-    # if event_min_xmin:
-    #     plot_ks_distance(
-    #         all_drops,
-    #         event_min_xmin,
-    #         data_info=data_info,
-    #         name="event-min-fit",
-    #         fast_xmin=fast_xmin,
-    #     )
-
-    #min_drop = np.min(all_drops)
-    # # We exclude the first two decades.
-    # exclude_factor = 100
-    # rmEnd_xmin = min_drop * exclude_factor
-    # plot_ks_distance(
-    #     all_drops,
-    #     rmEnd_xmin,
-    #     data_info=data_info,
-    #     name=f"rmEnd{exclude_factor}",
-    #     fast_xmin=fast_xmin,
-    # )
-
-    # plot_ks_distance(
-    #     all_drops, p_fit.xmin, data_info=data_info, name=r"$p$-fit", fast_xmin=fast_xmin
-    # )
-    # plot_ks_distance(
-    #     all_drops,
-    #     selected_fit.xmin,
-    #     data_info=data_info,
-    #     name=f"{tag}-fit",
-    #     fast_xmin=fast_xmin,
-    # )
     if ks_fit is not None:
         plot_ks_distance(
             all_drops,
@@ -3358,26 +3366,16 @@ def plot_powerlaw(
             data_info=data_info,
             name="KS-fit",
             fast_xmin=False,
+            save=save,
         )
 
-    title = make_title(data_info=data_info, fit=p_fit)
+    title = make_title(data_info=data_info, fit=reported_fit)
     if attribute and attribute not in title:
         title = attribute + " " + title
     plot_data_and_fit(
-        p_fit,
+        reported_fit,
         title=title,
         data_info=data_info,
-        color=color,
-        addFit=addFit,
-        save=save,
-        show=show,
-        useCDF=useCDF,
-    )
-    title = make_title(data_info=data_info, fit=selected_fit)
-    plot_data_and_fit(
-        selected_fit,
-        data_info=data_info,
-        title=title + f"_{tag}_xmin",
         color=color,
         addFit=addFit,
         save=save,
@@ -3397,20 +3395,7 @@ def plot_powerlaw(
             useCDF=useCDF,
         )
 
-    # rmEnd_fit = Fit(all_drops, xmin=rmEnd_xmin, xmin_distribution=distType.name)
-    # if evaluate:
-    #     rmEnd_fit.evaluate_fit()
-
-    # title = make_title(data_info=data_info, fit=rmEnd_fit)
-    # plot_data_and_fit(
-    #     rmEnd_fit,
-    #     title=title + "_rmEnd_Emin",
-    #     color=color,
-    #     addFit=addFit,
-    #     save=save,
-    #     show=show,
-    #     useCDF=useCDF,
-    # )
+    return reported_fit
 
 
 if __name__ == "__main__":

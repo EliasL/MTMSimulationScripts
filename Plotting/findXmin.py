@@ -1,6 +1,6 @@
 import numpy as np
 import warnings
-from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law
+from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law, evaluate_xmin
 from powerlaw import Distribution
 from matplotlib import pyplot as plt
 import os
@@ -1807,58 +1807,6 @@ def _plot_sylvain_debug(
     return _save_debug_fig(fig, "find_xmin_sylvain.pdf")
 
 
-def _fit_single_xmin_task(args):
-    drops, trial_xmin, xmax, dist_name = args
-    fit = Fit(
-        data=drops,
-        xmin=trial_xmin,
-        xmax=xmax,
-        xmin_distribution=dist_name,
-    )
-    # Avoid nested multiprocessing inside each worker.
-    # fit.evaluate_fit(drops, parallel=False)
-    return fit
-
-
-def evaluate_xmin(
-    drops,
-    xmin_values,
-    distType: type[Distribution] = Truncated_Power_Law,
-    xmax=None,
-    parallel=False,
-    max_workers=None,
-):
-    tasks = [(drops, trial_xmin, xmax, distType.name) for trial_xmin in xmin_values]
-
-    if parallel:
-        from concurrent.futures import ProcessPoolExecutor
-
-        with ProcessPoolExecutor(max_workers=max_workers) as ex:
-            fits_iter = ex.map(_fit_single_xmin_task, tasks)
-            test_fits = list(
-                tqdm(
-                    fits_iter,
-                    total=len(tasks),
-                    desc="Fitting xmins",
-                    disable=False,
-                )
-            )
-    else:
-        test_fits = []
-        for i, trial_xmin in enumerate(xmin_values):
-            desc = f"xmin:{trial_xmin:.2e}: {i + 1}/{len(xmin_values)}:"
-            fit = Fit(
-                data=drops,
-                xmin=trial_xmin,
-                xmax=xmax,
-                xmin_distribution=distType.name,
-            )
-            # fit.evaluate_fit(drops, parallel=False, tqdmDesc=desc)
-            test_fits.append(fit)
-
-    return test_fits
-
-
 def find_xmin_derivative(drops, debug=False, smoothing="spline", **kwargs):
     min_xmin = min(drops)
     max_xmin = max(drops)
@@ -2304,6 +2252,98 @@ def find_xmin_sizer(
     return fmin
 
 
+def find_xmin_dks_from_results(xmins, distances, valid_fits=None):
+    """Select the steepest KS decrease from an existing candidate grid."""
+    xmins = np.asarray(xmins, dtype=float)
+    distances = np.asarray(distances, dtype=float)
+    mask = np.isfinite(xmins) & np.isfinite(distances) & (xmins > 0)
+    if valid_fits is not None:
+        mask &= np.asarray(valid_fits, dtype=bool)
+    if mask.sum() < 2:
+        return np.nan
+    xmins = xmins[mask]
+    distances = distances[mask]
+    order = np.argsort(xmins)
+    xmins = xmins[order]
+    derivative = np.gradient(distances[order], np.log10(xmins))
+    return float(xmins[int(np.nanargmin(derivative))])
+
+
+def find_xmin_dks(drops, samples_per_decade=30, **kwargs):
+    """Select the steepest decrease of KS distance versus log10(xmin)."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    if drops.size < 3:
+        return np.nan
+    decades = np.log10(drops.max() / drops.min())
+    n_samples = max(20, int(np.ceil(decades * samples_per_decade)))
+    xmins = np.logspace(np.log10(drops.min()), np.log10(drops.max()), n_samples)
+    fits = evaluate_xmin(drops, xmins, **kwargs)
+    return find_xmin_dks_from_results(xmins, [fit.D for fit in fits])
+
+
+def find_xmin_ks(drops, distType=Truncated_Power_Law, xmax=None, **kwargs):
+    """Use the upstream minimum-KS selector."""
+    fit = Fit(
+        drops,
+        xmax=xmax,
+        xmin_distribution=distType.name,
+        fast_xmin=False,
+        verbose=0,
+    )
+    return float(fit.xmin)
+
+
+def find_xmin_dip(
+    drops,
+    distType=Truncated_Power_Law,
+    samples_per_decade=30,
+    parallel=False,
+    **kwargs,
+):
+    """Use the post-KS-drop knee selector implemented by the custom Fit."""
+    fit = Fit(
+        drops,
+        xmin_distribution=distType.name,
+        fast_xmin=True,
+        xmin_samples_per_decade=samples_per_decade,
+        parallel_xmin=parallel,
+        verbose=0,
+    )
+    return float(fit.xmin)
+
+
+def find_xmin_max_p(
+    drops,
+    distType=Truncated_Power_Law,
+    nr_evaluation=20,
+    confidence=0.1,
+    parallel=False,
+    **kwargs,
+):
+    """Select the candidate with the largest fixed-xmin bootstrap p-value."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    if drops.size < 3:
+        return np.nan
+    xmins = np.logspace(
+        np.log10(drops.min()),
+        np.log10(drops.max()),
+        int(nr_evaluation),
+    )
+    fits = evaluate_xmin(drops, xmins, distType=distType, parallel=False)
+    for fit in fits:
+        fit.evaluate_fit(
+            drops,
+            confidence=confidence,
+            parallel=parallel,
+        )
+    p_values = np.asarray([fit.p for fit in fits], dtype=float)
+    if not np.isfinite(p_values).any():
+        return np.nan
+    return float(xmins[int(np.nanargmax(p_values))])
+
+
 # def find_xmin(drops, **kwargs):
 # pass
 
@@ -2348,8 +2388,8 @@ def find_xmin(drops, debug=False, samples_per_decade=30, **kwargs):
             return np.nan
     param_vals = [
         [
-            getattr(fit, p, np.nan)
-            for p in list(getattr(fit.xmin_distribution, "parameter_names", []))
+            getattr(getattr(fit, fit.xmin_distribution.name), p, np.nan)
+            for p in fit.xmin_distribution.parameter_names
         ]
         for fit in fits
     ]
@@ -2415,4 +2455,117 @@ def find_xmin_rising_level(drops, debug=False, **kwargs):
 
     # Assuming that there is a roughly flat plateau, the minimum of this
     # measurement should give the height of the plateu.
-    # We then
+    # Select the first point after the KS minimum that rises back to that level.
+    min_idx = int(np.nanargmin(distances_valid))
+    right = np.arange(min_idx + 1, len(distances_valid))
+    crossings = right[distances_valid[right] >= plateau_h]
+    if crossings.size:
+        return float(x_valid[int(crossings[0])])
+    if right.size:
+        closest = right[int(np.nanargmin(np.abs(distances_valid[right] - plateau_h)))]
+        return float(x_valid[int(closest)])
+    return float(x_valid[min_idx])
+
+
+@dataclass(frozen=True)
+class XminStrategyResult:
+    strategy: str
+    xmin: float
+    n_tail: int
+
+
+XMIN_STRATEGIES = {
+    "min_ks": find_xmin_ks,
+    "ks": find_xmin_ks,
+    "dip": find_xmin_dip,
+    "max_p": find_xmin_max_p,
+    "plateau": find_xmin,
+    "derivative": find_xmin_derivative,
+    "dks": find_xmin_dks,
+    "rising_level": find_xmin_rising_level,
+    "sizer": find_xmin_sizer,
+    "sylvain": find_xmin_sylvain,
+}
+DEFAULT_XMIN_COMPARISON_STRATEGIES = (
+    "min_ks",
+    "dip",
+    "plateau",
+    "derivative",
+    "dks",
+    "rising_level",
+)
+
+
+def select_xmin(drops, strategy="plateau", **kwargs):
+    """Run one named xmin strategy while preserving each strategy's public API."""
+    try:
+        selector = XMIN_STRATEGIES[strategy]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown xmin strategy {strategy!r}; choose from {tuple(XMIN_STRATEGIES)}."
+        ) from exc
+    result = selector(drops, **kwargs)
+    return float(result[0] if isinstance(result, tuple) else result)
+
+
+def compare_xmin_strategies(drops, strategies=None, strategy_kwargs=None):
+    """Return comparable xmin and tail-size results for multiple strategies."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    if drops.size < 3:
+        raise ValueError("Need at least three finite positive drops.")
+    strategies = tuple(strategies or DEFAULT_XMIN_COMPARISON_STRATEGIES)
+    strategy_kwargs = strategy_kwargs or {}
+    results = {}
+    for strategy in strategies:
+        xmin = select_xmin(
+            drops,
+            strategy=strategy,
+            **strategy_kwargs.get(strategy, {}),
+        )
+        results[strategy] = XminStrategyResult(
+            strategy=strategy,
+            xmin=xmin,
+            n_tail=int(np.count_nonzero(drops >= xmin)) if np.isfinite(xmin) else 0,
+        )
+    return results
+
+
+def plot_xmin_strategy_comparison(
+    drops,
+    strategies=None,
+    strategy_kwargs=None,
+    *,
+    true_xmin=None,
+    ax=None,
+    save_path=None,
+):
+    """Plot selected xmin and retained tail size for named strategies."""
+    results = compare_xmin_strategies(
+        drops,
+        strategies=strategies,
+        strategy_kwargs=strategy_kwargs,
+    )
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 4))
+    else:
+        fig = ax.figure
+    names = list(results)
+    xmins = [results[name].xmin for name in names]
+    tails = [results[name].n_tail for name in names]
+    ax.plot(names, xmins, marker="o", linestyle="none", label=r"Selected $x_{min}$")
+    ax.set_yscale("log")
+    ax.set_ylabel(r"$x_{min}$")
+    ax.tick_params(axis="x", rotation=30)
+    if true_xmin is not None:
+        ax.axhline(true_xmin, linestyle="--", label=r"True $x_{min}$")
+    ax2 = ax.twinx()
+    ax2.plot(names, tails, marker="s", linestyle=":", label="Tail size")
+    ax2.set_ylabel("Drops retained")
+    handles1, labels1 = ax.get_legend_handles_labels()
+    handles2, labels2 = ax2.get_legend_handles_labels()
+    ax.legend(handles1 + handles2, labels1 + labels2)
+    fig.tight_layout()
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches="tight")
+    return fig, (ax, ax2), results

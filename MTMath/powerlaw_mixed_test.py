@@ -21,7 +21,7 @@ from Plotting.findXmin import (
     find_xmin_sylvain,
     find_xmin_rising_level,
     find_xmin_derivative,
-    find_xmin,
+    find_xmin_dks_from_results,
 )
 from comparePlots import combine_pdfs_grid
 from .evaluatePowerlawFit import Truncated_Power_Law
@@ -778,27 +778,6 @@ def _apply_subgrid_to_data(data, subgrid):
     return out
 
 
-def _find_dks_xmin(xmins, distances, valid_fits=None):
-    x = np.asarray(xmins, dtype=float)
-    D = np.asarray(distances, dtype=float)
-    mask = np.isfinite(x) & np.isfinite(D) & (x > 0)
-    if valid_fits is not None:
-        mask &= np.asarray(valid_fits, dtype=bool)
-    if mask.sum() < 2:
-        return np.nan
-    x = x[mask]
-    D = D[mask]
-    order = np.argsort(x)
-    x = x[order]
-    D = D[order]
-    logx = np.log10(x)
-    dD = np.gradient(D, logx)
-    if not np.isfinite(dD).any():
-        return np.nan
-    idx = int(np.nanargmin(dD))
-    return float(x[idx])
-
-
 def _format_sample_size(value):
     if value is None:
         return None
@@ -1383,13 +1362,12 @@ def grid_compare_xmin_generate(
                 p_fit, "Lambda_std", getattr(p_fit, "lambda_std", np.nan)
             )
 
-            dks_xmin = np.nan
-            if getattr(KS_fit, "xmin_fitting_results", None):
-                dks_xmin = _find_dks_xmin(
-                    KS_fit.xmin_fitting_results.get("xmins", []),
-                    KS_fit.xmin_fitting_results.get("distances", []),
-                    KS_fit.xmin_fitting_results.get("valid_fits", None),
-                )
+            xmin_results = getattr(KS_fit, "xmin_fitting_results", {}) or {}
+            dks_xmin = find_xmin_dks_from_results(
+                xmin_results.get("xmins", []),
+                xmin_results.get("distances", []),
+                xmin_results.get("valid_fits"),
+            )
             if np.isfinite(dks_xmin):
                 dks_fit = make_fit(
                     drops,

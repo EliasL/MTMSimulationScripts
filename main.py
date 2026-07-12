@@ -479,7 +479,7 @@ def runOnLocalMachine():
     #configs, labels = remeshTest(diagonal="minor")
     # run_many_locally(configs, taskNames=labels, resume=False)
 
-    configs, labels = longJob(5, 1, size=40)
+    configs, labels = longJob(5, 1, size=200)
     # configs, labels = longJobStatic(8, 1, size=300)
     # dump = "/Volumes/data/MTS2D_output/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0/dumps/dump_l0.89.mtsb"
     # configs, labels, dump = largeAvalanche(nrThreads=20)
