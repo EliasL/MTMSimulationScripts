@@ -74,7 +74,7 @@ def main():
     generate_ssh_key(key_path)
 
     # Loop through servers and copy the SSH key
-    for server in Servers.servers:
+    for server in Servers.search_servers:
         copy_ssh_key_to_server(server, username, key_path, password)
 
     # # Prompt for the new password

@@ -515,7 +515,7 @@ def startJobs():
         for server, confs in servers_confs.items():
             print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
             if confs:
-                queueJobs(server, confs, build=False, jobCopies=20)
+                queueJobs(server, confs, build=False, jobCopies=100)
                 pass
 
 

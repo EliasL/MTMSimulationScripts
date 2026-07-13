@@ -79,7 +79,7 @@ def distributeConfigs(
     else:
         return serverConfigDict
     print("Getting server info... ")
-    serverInfo = get_all_server_info()
+    serverInfo = get_all_server_info(Servers.run_servers)
 
     if onlyPrefered:
         names = list(serverInfo.keys())

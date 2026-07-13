@@ -8,6 +8,7 @@ import numpy as np
 from Plotting.sizeScalingCollapse import (
     _read_mixed_selected,
     collapse_variance,
+    exclude_size,
     fit_xmins,
     log_histogram,
     optimize_collapse,
@@ -30,7 +31,28 @@ class SizeScalingCollapseTests(unittest.TestCase):
 
         self.assertEqual(
             make_fit.call_args.kwargs["xmin_strategy_kwargs"],
-            {"samples_per_decade": 10.0},
+            {"samples_per_decade": 10.0, "tail_decades": 1.0},
+        )
+
+    def test_global_min_accuracy_controls_observed_candidate_stride(self):
+        fake_fit = _Fit(1.0)
+        with mock.patch(
+            "Plotting.sizeScalingCollapse.make_fit", return_value=fake_fit
+        ) as make_fit:
+            fit_xmins(
+                {50: np.array([1.0, 2.0, 3.0])},
+                "global_min",
+                0.1,
+                False,
+                Path("cache"),
+            )
+
+        self.assertEqual(
+            make_fit.call_args.kwargs["xmin_strategy_kwargs"],
+            {
+                "candidate_stride": 10,
+                "tail_decades": 1.0,
+            },
         )
 
     def test_mixed_header_reader_uses_each_segments_column_order(self):
@@ -108,6 +130,14 @@ class SizeScalingCollapseTests(unittest.TestCase):
     def test_log_histogram_rejects_too_few_positive_values(self):
         with self.assertRaisesRegex(ValueError, "three positive drops"):
             log_histogram([-1.0, 0.0, 1.0, np.nan])
+
+    def test_exclude_size_keeps_other_collapse_curves(self):
+        curves = {size: (np.ones(3), np.ones(3)) for size in (50, 100, 150, 200)}
+        self.assertEqual(set(exclude_size(curves, 50)), {100, 150, 200})
+
+    def test_exclude_size_rejects_missing_size(self):
+        with self.assertRaisesRegex(ValueError, "missing system size"):
+            exclude_size({100: (), 150: (), 200: ()}, 50)
 
 
 if __name__ == "__main__":

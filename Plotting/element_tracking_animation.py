@@ -21,20 +21,25 @@ from Plotting.vtuDataForSylvain import VTUData
 
 
 @dataclass(frozen=True)
-class TransitionTimeline:
-    """Shared frame timing for Poincare and mesh animations."""
+class GammaTimeline:
+    """Uniform-load frame timing shared by Poincare and mesh animations."""
 
     node_history_indices: np.ndarray
     node_coordinates: np.ndarray
-    segment_indices: np.ndarray
-    segment_progress: np.ndarray
+    path_history_indices: np.ndarray
+    frame_loads: np.ndarray
+    t_node_counts: np.ndarray
+    path_lower_indices: np.ndarray
+    path_progress: np.ndarray
     center_coordinates: np.ndarray
     mesh_history_indices: np.ndarray
 
     def __post_init__(self) -> None:
-        frame_count = len(self.segment_indices)
+        frame_count = len(self.frame_loads)
         arrays = (
-            self.segment_progress,
+            self.t_node_counts,
+            self.path_lower_indices,
+            self.path_progress,
             self.center_coordinates,
             self.mesh_history_indices,
         )
@@ -44,12 +49,21 @@ class TransitionTimeline:
             raise ValueError("node_coordinates must have shape (number of nodes, 2).")
         if len(self.node_history_indices) < 2:
             raise ValueError("At least two distinct matrix states are required.")
-        if np.any((self.segment_progress < 0) | (self.segment_progress > 1)):
-            raise ValueError("segment_progress must remain inside [0, 1].")
+        if len(self.path_history_indices) < 2:
+            raise ValueError("At least two distinct loads are required.")
+        if np.any(np.diff(self.frame_loads) <= 0):
+            raise ValueError("Frame loads must be strictly increasing.")
+        if np.any((self.path_progress < 0) | (self.path_progress > 1)):
+            raise ValueError("path_progress must remain inside [0, 1].")
+        invalid_node_count = (self.t_node_counts < 1) | (
+            self.t_node_counts > len(self.node_history_indices)
+        )
+        if np.any(invalid_node_count):
+            raise ValueError("t_node_counts contains an invalid node count.")
 
     @property
     def frame_count(self) -> int:
-        return len(self.segment_indices)
+        return len(self.frame_loads)
 
     @property
     def node_complex(self) -> np.ndarray:
@@ -73,17 +87,6 @@ class MeshNeighborhood:
         polygons = self.outer_polygons + self.neighbor_polygons + (self.target_polygon,)
         points = np.concatenate(polygons)
         return points.min(axis=0), points.max(axis=0)
-
-
-def eased_progress(progress: np.ndarray | float, strength: float = 0.35) -> np.ndarray:
-    """Blend linear motion with smoothstep for a slight acceleration/deceleration."""
-    if not 0 <= strength <= 1:
-        raise ValueError("strength must lie inside [0, 1].")
-    progress = np.asarray(progress, dtype=float)
-    if np.any((progress < 0) | (progress > 1)):
-        raise ValueError("progress must lie inside [0, 1].")
-    smooth = progress * progress * (3 - 2 * progress)
-    return (1 - strength) * progress + strength * smooth
 
 
 def mobius_to_origin(z: np.ndarray | complex, center: complex) -> np.ndarray:
@@ -120,73 +123,98 @@ def poincare_geodesic(
     return mobius_from_origin(relative, start)
 
 
-def build_transition_timeline(
+def build_gamma_timeline(
     history: ElementMatrixHistory,
+    loads: Sequence[float],
+    camera_history: ElementMatrixHistory,
     *,
-    frames_per_transition: int = 30,
-    hold_frames: int = 6,
-    easing_strength: float = 0.35,
-) -> TransitionTimeline:
-    """Build one fixed-duration segment for every distinct matrix transition."""
-    if frames_per_transition < 2:
-        raise ValueError("frames_per_transition must be at least two.")
-    if hold_frames < 0:
-        raise ValueError("hold_frames must be non-negative.")
+    gamma_per_frame: float = 0.002,
+    camera_smoothing_gamma: float = 0.04,
+) -> GammaTimeline:
+    """Sample time uniformly in load and smooth the camera along ``camera_history``."""
+    loads = np.asarray(loads, dtype=float)
+    if loads.shape != (len(history.paths),):
+        raise ValueError("loads must contain one value for every history state.")
+    if not np.all(np.isfinite(loads)) or np.any(np.diff(loads) < 0):
+        raise ValueError("loads must be finite and non-decreasing.")
+    if camera_history.paths != history.paths:
+        raise ValueError("The tracked and camera histories must use identical paths.")
+    if camera_history.element_index != history.element_index:
+        raise ValueError("The tracked and camera histories must use one element.")
+    if gamma_per_frame <= 0:
+        raise ValueError("gamma_per_frame must be positive.")
+    if camera_smoothing_gamma < 0:
+        raise ValueError("camera_smoothing_gamma must be non-negative.")
+
     change_mask = np.r_[
         True,
         np.any(history.matrices[1:] != history.matrices[:-1], axis=(1, 2)),
     ]
     node_indices = np.flatnonzero(change_mask)
     node_coordinates = history.poincare_coordinates()[node_indices]
-    nodes = node_coordinates[:, 0] + 1j * node_coordinates[:, 1]
 
-    segments: list[int] = []
-    progress_values: list[float] = []
-    centers: list[complex] = []
-    mesh_indices: list[int] = []
+    unique_loads, first_indices = np.unique(loads, return_index=True)
+    path_indices = np.r_[first_indices[1:] - 1, len(loads) - 1]
+    if len(unique_loads) < 2:
+        raise ValueError("The history must span at least two distinct loads.")
+    span = float(unique_loads[-1] - unique_loads[0])
+    frame_count = max(2, int(np.ceil(span / gamma_per_frame)) + 1)
+    frame_loads = np.linspace(unique_loads[0], unique_loads[-1], frame_count)
 
-    for _ in range(hold_frames):
-        segments.append(0)
-        progress_values.append(0)
-        centers.append(nodes[0])
-        mesh_indices.append(int(node_indices[0]))
-
-    for segment in range(len(nodes) - 1):
-        raw = np.arange(1, frames_per_transition + 1) / frames_per_transition
-        eased = eased_progress(raw, easing_strength)
-        geodesic = poincare_geodesic(nodes[segment], nodes[segment + 1], eased)
-        source_mesh = int(node_indices[segment])
-        target_mesh = int(node_indices[segment + 1])
-        mesh_for_segment = np.rint(
-            source_mesh + eased * (target_mesh - source_mesh)
-        ).astype(int)
-        segments.extend([segment] * frames_per_transition)
-        progress_values.extend(eased.tolist())
-        centers.extend(geodesic.tolist())
-        mesh_indices.extend(mesh_for_segment.tolist())
-        for _ in range(hold_frames):
-            segments.append(segment)
-            progress_values.append(1)
-            centers.append(nodes[segment + 1])
-            mesh_indices.append(target_mesh)
-
-    center_array = np.column_stack(
-        (np.asarray(centers).real, np.asarray(centers).imag)
+    upper = np.searchsorted(unique_loads, frame_loads, side="right")
+    lower = np.clip(upper - 1, 0, len(unique_loads) - 1)
+    upper = np.clip(upper, 0, len(unique_loads) - 1)
+    denominator = unique_loads[upper] - unique_loads[lower]
+    progress = np.divide(
+        frame_loads - unique_loads[lower],
+        denominator,
+        out=np.zeros_like(frame_loads),
+        where=denominator > 0,
     )
-    centered_current = mobius_to_origin(
-        center_array[:, 0] + 1j * center_array[:, 1],
-        center_array[:, 0] + 1j * center_array[:, 1],
+
+    camera_coordinates = camera_history.poincare_coordinates()[path_indices]
+    camera_nodes = camera_coordinates[:, 0] + 1j * camera_coordinates[:, 1]
+    camera_raw = np.asarray(
+        [
+            complex(poincare_geodesic(camera_nodes[lo], camera_nodes[hi], value))
+            for lo, hi, value in zip(lower, upper, progress, strict=True)
+        ]
     )
-    if not np.allclose(centered_current, 0, atol=1e-12):
-        raise RuntimeError("The generated Poincare timeline does not remain centered.")
-    return TransitionTimeline(
+    delta_gamma = float(frame_loads[1] - frame_loads[0])
+    camera = _gaussian_smooth(
+        camera_raw,
+        sigma_frames=camera_smoothing_gamma / delta_gamma,
+    )
+    if np.any(np.abs(camera) >= 1):
+        raise ValueError("The smoothed camera path left the Poincare disk.")
+    center_array = np.column_stack((camera.real, camera.imag))
+    t_node_counts = np.searchsorted(loads[node_indices], frame_loads, side="right")
+    t_node_counts = np.clip(t_node_counts, 1, len(node_indices))
+
+    return GammaTimeline(
         node_indices,
         node_coordinates,
-        np.asarray(segments, dtype=int),
-        np.asarray(progress_values),
+        path_indices,
+        frame_loads,
+        t_node_counts,
+        lower,
+        progress,
         center_array,
-        np.asarray(mesh_indices, dtype=int),
+        path_indices[lower],
     )
+
+
+def _gaussian_smooth(values: np.ndarray, *, sigma_frames: float) -> np.ndarray:
+    if sigma_frames < 0:
+        raise ValueError("sigma_frames must be non-negative.")
+    if sigma_frames < 0.5:
+        return np.asarray(values, dtype=complex).copy()
+    radius = int(np.ceil(3 * sigma_frames))
+    offsets = np.arange(-radius, radius + 1, dtype=float)
+    weights = np.exp(-0.5 * (offsets / sigma_frames) ** 2)
+    weights /= weights.sum()
+    padded = np.pad(np.asarray(values, dtype=complex), radius, mode="edge")
+    return np.convolve(padded, weights, mode="valid")
 
 
 def extract_poincare_grid_segments(
@@ -303,7 +331,7 @@ def mesh_half_width(snapshots: Sequence[MeshNeighborhood], margin: float = 1.06)
 
 def render_poincare_animation(
     history: ElementMatrixHistory,
-    timeline: TransitionTimeline,
+    timeline: GammaTimeline,
     output_path: str | Path,
     *,
     ffmpeg_executable: str | Path,
@@ -313,7 +341,7 @@ def render_poincare_animation(
     grid_depth: int = 10,
     grid_samples: int = 50,
 ) -> Path:
-    """Render T and an optional reconstructed total path while centring on T."""
+    """Render T and the reconstructed path with a smoothed moving camera."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if reconstructed_history is not None:
@@ -333,6 +361,7 @@ def render_poincare_animation(
     reconstructed_path = None
     if reconstructed_history is not None:
         coordinates = reconstructed_history.poincare_coordinates()
+        coordinates = coordinates[timeline.path_history_indices]
         reconstructed_nodes = coordinates[:, 0] + 1j * coordinates[:, 1]
         reconstructed_path = tuple(
             poincare_geodesic(
@@ -361,15 +390,17 @@ def render_poincare_animation(
     reconstructed_current = ax.scatter(
         [], [], s=58, facecolor="#2166ac", edgecolor="black", zorder=12
     )
-    ax.scatter([0], [0], s=72, facecolor="#d73027", edgecolor="black", zorder=12)
-    status = ax.text(
-        0.5,
-        0.98,
+    t_current = ax.scatter(
+        [], [], s=72, facecolor="#d73027", edgecolor="black", zorder=13
+    )
+    gamma_label = ax.text(
+        0.03,
+        0.97,
         "",
         transform=ax.transAxes,
-        ha="center",
+        ha="left",
         va="top",
-        fontsize=10,
+        fontsize=11,
         bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.9},
         zorder=30,
     )
@@ -394,34 +425,28 @@ def render_poincare_animation(
                 label=r"$F_E T$",
             )
         )
-    ax.legend(handles=handles, loc="upper left", frameon=False)
+    ax.legend(handles=handles, loc="lower left", frameon=False)
 
     writer = _writer(ffmpeg_executable, fps)
     with writer.saving(fig, str(output_path), dpi):
         for frame in range(timeline.frame_count):
             center = timeline.center_complex[frame]
-            segment = int(timeline.segment_indices[frame])
-            progress = float(timeline.segment_progress[frame])
+            completed_count = int(timeline.t_node_counts[frame])
             transformed_grid = [complex_to_xy(mobius_to_origin(curve, center)) for curve in grid]
             grid_collection.set_segments(transformed_grid)
 
-            traced = [t_path[index] for index in range(segment)]
-            partial_progress = np.linspace(0, progress, max(2, int(27 * progress) + 2))
-            traced.append(
-                poincare_geodesic(nodes[segment], nodes[segment + 1], partial_progress)
-            )
+            traced = list(t_path[: max(0, completed_count - 1)])
             t_collection.set_segments(
                 [complex_to_xy(mobius_to_origin(curve, center)) for curve in traced]
             )
-            completed_count = segment + 1 + int(np.isclose(progress, 1))
             completed = mobius_to_origin(nodes[:completed_count], center)
             visited.set_offsets(complex_to_xy(completed))
+            t_current.set_offsets(
+                complex_to_xy(mobius_to_origin(nodes[completed_count - 1], center))
+            )
             if reconstructed_nodes is not None and reconstructed_path is not None:
-                source_index = int(timeline.node_history_indices[segment])
-                target_index = int(timeline.node_history_indices[segment + 1])
-                history_position = source_index + progress * (target_index - source_index)
-                lower = min(int(np.floor(history_position)), len(reconstructed_nodes) - 1)
-                fraction = history_position - lower
+                lower = int(timeline.path_lower_indices[frame])
+                fraction = float(timeline.path_progress[frame])
                 reconstructed_traced = list(reconstructed_path[:lower])
                 if lower < len(reconstructed_nodes) - 1 and fraction > 1e-12:
                     reconstructed_traced.append(
@@ -449,7 +474,7 @@ def render_poincare_animation(
                 reconstructed_current.set_offsets(
                     complex_to_xy(mobius_to_origin(current, center))
                 )
-            status.set_text(f"element {history.element_index}    transition {segment + 1}/{len(nodes) - 1}")
+            gamma_label.set_text(rf"$\gamma = {timeline.frame_loads[frame]:.2f}$")
             writer.grab_frame(facecolor="white")
             if (frame + 1) % 30 == 0:
                 print(f"Poincare frames: {frame + 1}/{timeline.frame_count}", flush=True)
@@ -459,7 +484,7 @@ def render_poincare_animation(
 
 def render_mesh_animation(
     history: ElementMatrixHistory,
-    timeline: TransitionTimeline,
+    timeline: GammaTimeline,
     snapshots: Sequence[MeshNeighborhood],
     output_path: str | Path,
     *,
@@ -516,7 +541,7 @@ def compose_picture_in_picture(
     *,
     ffmpeg_executable: str | Path,
     inset_fraction: float = 0.34,
-    margin: int = 24,
+    margin: int = 60,
 ) -> Path:
     """Place the mesh video in the upper-right corner of the Poincare video."""
     if not 0.1 <= inset_fraction <= 0.6:

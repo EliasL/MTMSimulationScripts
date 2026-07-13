@@ -35,8 +35,8 @@ class Servers:
         condorcet,
         dalembert,
         poincare,
-        #fourier,
-        #descartes,
+        fourier,
+        descartes,
         legendre,
         duchemin,
         cauchy,  # richard wants cauchy
@@ -51,8 +51,8 @@ class Servers:
         condorcet,
         dalembert,
         poincare,
-        #fourier,
-        #descartes,
+        fourier,
+        descartes,
         legendre,
         duchemin,
         #cauchy,  # richard wants cauchy

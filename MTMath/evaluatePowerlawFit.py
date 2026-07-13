@@ -113,31 +113,31 @@ def _fit_xmin_batch_worker(args):
     else:
         data = data_spec
 
-    prev_params = _coerce_param_list(initial_params, parameter_names)
+    initial_params = _coerce_param_list(initial_params, parameter_names)
     distances = []
     params_out = []
     valid_out = []
 
-    for xmin in xmin_values:
-        pl = dist_cls(
-            xmin=xmin,
-            xmax=xmax,
-            discrete=discrete,
-            fit_method=fit_method,
-            data=data,
-            parameters=prev_params,
-            parameter_ranges=parameter_ranges,
-            parameter_constraints=parameter_constraints,
-            parent_Fit=None,
-            estimate_discrete=estimate_discrete,
-            verbose=0,
-        )
-        param_vals = [getattr(pl, p, nan) for p in parameter_names]
-        if parameter_names and np.isfinite(param_vals).any():
-            prev_params = param_vals
-        distances.append(getattr(pl, xmin_distance))
-        params_out.append(param_vals)
-        valid_out.append(pl.in_range() and not pl.noise_flag)
+    with warnings.catch_warnings():
+        _suppress_powerlaw_warnings()
+        for xmin in xmin_values:
+            pl = dist_cls(
+                xmin=xmin,
+                xmax=xmax,
+                discrete=discrete,
+                fit_method=fit_method,
+                data=data,
+                parameters=initial_params,
+                parameter_ranges=parameter_ranges,
+                parameter_constraints=parameter_constraints,
+                parent_Fit=None,
+                estimate_discrete=estimate_discrete,
+                verbose=0,
+            )
+            param_vals = [getattr(pl, p, nan) for p in parameter_names]
+            distances.append(getattr(pl, xmin_distance))
+            params_out.append(param_vals)
+            valid_out.append(pl.in_range() and not pl.noise_flag)
 
     return distances, params_out, valid_out
 
@@ -671,6 +671,77 @@ def evaluate_xmin(
             test_fits.append(fit)
 
     return test_fits
+
+
+def evaluate_xmin_distances(
+    drops,
+    xmin_values,
+    distType: type[Distribution] = Truncated_Power_Law,
+    xmax=None,
+    parallel=False,
+    max_workers=None,
+):
+    """Fit a candidate grid in batches and return lightweight diagnostics."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    xmin_values = np.asarray(xmin_values, dtype=float)
+    if drops.size < 3:
+        raise ValueError("Need at least three finite positive drops.")
+    if xmin_values.size == 0:
+        raise ValueError("Need at least one xmin candidate.")
+
+    parameter_names = list(distType.parameter_names)
+    if parallel and xmin_values.size > 1:
+        from concurrent.futures import ProcessPoolExecutor
+
+        max_workers = max_workers or max(
+            1, (os.cpu_count() or 1) - PARALLEL_UNUSED_CORES
+        )
+        batches = np.array_split(
+            xmin_values,
+            min(xmin_values.size, 4 * max_workers),
+        )
+    else:
+        max_workers = 1
+        batches = [xmin_values]
+
+    tasks = [
+        (
+            drops,
+            batch,
+            "D",
+            distType,
+            xmax,
+            False,
+            "likelihood",
+            None,
+            None,
+            None,
+            parameter_names,
+            None,
+        )
+        for batch in batches
+    ]
+    if parallel and len(tasks) > 1:
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            batch_results = list(
+                tqdm(
+                    executor.map(_fit_xmin_batch_worker, tasks),
+                    total=len(tasks),
+                    desc="Fitting xmin batches",
+                )
+            )
+    else:
+        batch_results = [_fit_xmin_batch_worker(tasks[0])]
+
+    distances = np.concatenate(
+        [np.asarray(result[0], dtype=float) for result in batch_results]
+    )
+    param_vals = [values for result in batch_results for values in result[1]]
+    valid = np.concatenate(
+        [np.asarray(result[2], dtype=bool) for result in batch_results]
+    )
+    return distances, param_vals, valid
 
 
 def _find_post_drop_knee(x, D, recovery_frac=0.25, use_recovery_frac=False):

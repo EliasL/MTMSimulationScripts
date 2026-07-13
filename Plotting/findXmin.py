@@ -1,6 +1,11 @@
 import numpy as np
 import warnings
-from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law, evaluate_xmin
+from MTMath.evaluatePowerlawFit import (
+    Fit,
+    Truncated_Power_Law,
+    evaluate_xmin,
+    evaluate_xmin_distances,
+)
 from powerlaw import Distribution
 from matplotlib import pyplot as plt
 import os
@@ -2269,17 +2274,87 @@ def find_xmin_dks_from_results(xmins, distances, valid_fits=None):
     return float(xmins[int(np.nanargmin(derivative))])
 
 
-def find_xmin_dks(drops, samples_per_decade=30, **kwargs):
-    """Select the steepest decrease of KS distance versus log10(xmin)."""
+def _log_xmin_candidates(drops, samples_per_decade, tail_decades=1.0):
     drops = np.asarray(drops, dtype=float)
     drops = drops[np.isfinite(drops) & (drops > 0)]
     if drops.size < 3:
-        return np.nan
-    decades = np.log10(drops.max() / drops.min())
+        raise ValueError("Need at least three finite positive drops.")
+    if samples_per_decade <= 0:
+        raise ValueError("samples_per_decade must be positive.")
+    if tail_decades <= 0:
+        raise ValueError("tail_decades must be positive.")
+    candidate_max = float(drops.max() / 10.0**tail_decades)
+    if candidate_max <= drops.min():
+        raise ValueError(
+            f"Data span fewer than {tail_decades:g} decade(s); no xmin candidates."
+        )
+    decades = np.log10(candidate_max / drops.min())
     n_samples = max(20, int(np.ceil(decades * samples_per_decade)))
-    xmins = np.logspace(np.log10(drops.min()), np.log10(drops.max()), n_samples)
+    xmins = np.logspace(np.log10(drops.min()), np.log10(candidate_max), n_samples)
+    return drops, xmins
+
+
+def _xmin_fit_results(fits, xmins):
+    distances = np.asarray([fit.D for fit in fits], dtype=float)
+    param_vals = [
+        [
+            getattr(getattr(fit, fit.xmin_distribution.name), parameter, np.nan)
+            for parameter in fit.xmin_distribution.parameter_names
+        ]
+        for fit in fits
+    ]
+    return {
+        "distances": distances,
+        "param_vals": param_vals,
+        "xmins": np.asarray(xmins, dtype=float),
+    }
+
+
+def find_xmin_dks(drops, samples_per_decade=30, tail_decades=1.0, **kwargs):
+    """Select the steepest decrease of KS distance versus log10(xmin)."""
+    drops, xmins = _log_xmin_candidates(
+        drops, samples_per_decade, tail_decades=tail_decades
+    )
     fits = evaluate_xmin(drops, xmins, **kwargs)
-    return find_xmin_dks_from_results(xmins, [fit.D for fit in fits])
+    results = _xmin_fit_results(fits, xmins)
+    return find_xmin_dks_from_results(xmins, results["distances"]), results
+
+
+def find_xmin_global_min(
+    drops,
+    candidate_stride=10,
+    tail_decades=1.0,
+    **kwargs,
+):
+    """Select the global KS minimum from strided observed sample values."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    if drops.size < 3:
+        raise ValueError("Need at least three finite positive drops.")
+    if int(candidate_stride) != candidate_stride or candidate_stride < 1:
+        raise ValueError("candidate_stride must be a positive integer.")
+    if tail_decades <= 0:
+        raise ValueError("tail_decades must be positive.")
+    candidate_max = float(drops.max() / 10.0**tail_decades)
+    candidates = np.unique(drops[drops <= candidate_max])
+    candidates = candidates[:: int(candidate_stride)]
+    if candidates.size < 2:
+        raise ValueError("Fewer than two sampled global-min xmin candidates.")
+    distances, param_vals, valid = evaluate_xmin_distances(
+        drops, candidates, **kwargs
+    )
+    results = {
+        "distances": distances,
+        "param_vals": param_vals,
+        "valid_fits": valid,
+        "xmins": candidates,
+    }
+    finite = np.isfinite(distances)
+    if not finite.any():
+        raise RuntimeError("No finite KS distances in the global-min search.")
+    valid_indices = np.flatnonzero(finite)
+    best = valid_indices[int(np.argmin(distances[finite]))]
+    return float(candidates[best]), results
 
 
 def find_xmin_ks(drops, distType=Truncated_Power_Law, xmax=None, **kwargs):
@@ -2348,15 +2423,12 @@ def find_xmin_max_p(
 # pass
 
 
-def find_xmin(drops, debug=False, samples_per_decade=30, **kwargs):
-    log_min_xmin = np.log10(min(drops))
-    log_max_xmin = np.log10(max(drops))
-    log_mid_xmin = log_min_xmin + 0.5 * (log_max_xmin - log_min_xmin)
-
-    decades = max(log_mid_xmin - log_min_xmin, 0.0)
-    nr_first_evaluation = int(max(20, np.ceil(decades * samples_per_decade)))
-    # Coarse grid (downsampled) to find dip_d1
-    coarse_xmin_values = np.logspace(log_min_xmin, log_mid_xmin, nr_first_evaluation)
+def find_xmin(
+    drops, debug=False, samples_per_decade=30, tail_decades=1.0, **kwargs
+):
+    drops, coarse_xmin_values = _log_xmin_candidates(
+        drops, samples_per_decade, tail_decades=tail_decades
+    )
     fits = evaluate_xmin(drops, coarse_xmin_values, **kwargs)
     distances = np.asarray([f.D for f in fits], dtype=float)
 
@@ -2386,18 +2458,9 @@ def find_xmin(drops, debug=False, samples_per_decade=30, **kwargs):
             xmin_local_min = float(x[start_idx + int(np.nanargmin(D[start_idx:]))])
         else:
             return np.nan
-    param_vals = [
-        [
-            getattr(getattr(fit, fit.xmin_distribution.name), p, np.nan)
-            for p in fit.xmin_distribution.parameter_names
-        ]
-        for fit in fits
-    ]
-    xmin_fitting_results = {
-        "distances": D,
-        "param_vals": param_vals,
-        "xmins": x,
-    }
+    xmin_fitting_results = _xmin_fit_results(fits, coarse_xmin_values)
+    xmin_fitting_results["distances"] = D
+    xmin_fitting_results["xmins"] = x
 
     # We now inspect the ks distance of the fits:
     if debug:
@@ -2477,22 +2540,21 @@ class XminStrategyResult:
 XMIN_STRATEGIES = {
     "min_ks": find_xmin_ks,
     "ks": find_xmin_ks,
+    "global_min": find_xmin_global_min,
     "dip": find_xmin_dip,
     "max_p": find_xmin_max_p,
     "plateau": find_xmin,
     "derivative": find_xmin_derivative,
     "dks": find_xmin_dks,
+    "slope": find_xmin_dks,
     "rising_level": find_xmin_rising_level,
     "sizer": find_xmin_sizer,
     "sylvain": find_xmin_sylvain,
 }
 DEFAULT_XMIN_COMPARISON_STRATEGIES = (
-    "min_ks",
-    "dip",
     "plateau",
-    "derivative",
-    "dks",
-    "rising_level",
+    "slope",
+    "global_min",
 )
 
 
