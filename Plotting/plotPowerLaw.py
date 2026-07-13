@@ -1,4 +1,4 @@
-from .findXmin import select_xmin
+from .findXmin import select_xmin, select_xmin_with_details
 from MTMath.energyFunction import ContiEnergy
 import numpy as np
 import pandas as pd
@@ -2287,6 +2287,7 @@ def make_fit(
 
     # --- try cache
     cache_path = None
+    cache_loaded = False
     xmin_fitting_results = None
     if use_cache:
         import os
@@ -2312,6 +2313,7 @@ def make_fit(
 
                 xmin_range = cache["xmin"]
                 xmin_fitting_results = cache.get("xmin_fitting_results")
+                cache_loaded = True
                 # xmin_range is no longer a tuple, but a single value
                 # That means that the fit will be much faster
 
@@ -2323,7 +2325,7 @@ def make_fit(
         strategy_kwargs = dict(xmin_strategy_kwargs or {})
         strategy_kwargs.setdefault("distType", distType)
         strategy_kwargs.setdefault("parallel", parallel_xmin)
-        xmin_range = select_xmin(
+        xmin_range, xmin_fitting_results = select_xmin_with_details(
             data,
             strategy=xmin_strategy,
             **strategy_kwargs,
@@ -2344,19 +2346,17 @@ def make_fit(
     if xmin_fitting_results:
         fitObj.xmin_fitting_results = xmin_fitting_results
 
-    # save xmin if the file does not exsist
-    if (
-        use_cache
-        and cache_path is not None
-        and not (os.path.exists(cache_path + ".gz") or os.path.exists(cache_path))
-    ):
+    # Save new results and replace any unreadable cache.
+    if use_cache and cache_path is not None and not cache_loaded:
         try:
             with gzip.open(cache_path + ".gz", "wt", encoding="utf-8") as f:
                 json.dump(
                     _make_json_serializable(
                         {
-                        "xmin": fitObj.xmin,
-                        "xmin_fitting_results": fitObj.xmin_fitting_results,
+                            "xmin": fitObj.xmin,
+                            "xmin_fitting_results": getattr(
+                                fitObj, "xmin_fitting_results", None
+                            ),
                         }
                     ),
                     f,

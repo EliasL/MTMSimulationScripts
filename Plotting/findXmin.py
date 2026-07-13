@@ -2496,8 +2496,8 @@ DEFAULT_XMIN_COMPARISON_STRATEGIES = (
 )
 
 
-def select_xmin(drops, strategy="plateau", **kwargs):
-    """Run one named xmin strategy while preserving each strategy's public API."""
+def select_xmin_with_details(drops, strategy="plateau", **kwargs):
+    """Run one named xmin strategy and retain any diagnostic search results."""
     try:
         selector = XMIN_STRATEGIES[strategy]
     except KeyError as exc:
@@ -2505,7 +2505,15 @@ def select_xmin(drops, strategy="plateau", **kwargs):
             f"Unknown xmin strategy {strategy!r}; choose from {tuple(XMIN_STRATEGIES)}."
         ) from exc
     result = selector(drops, **kwargs)
-    return float(result[0] if isinstance(result, tuple) else result)
+    if isinstance(result, tuple):
+        xmin, details = result
+        return float(xmin), details if isinstance(details, dict) else None
+    return float(result), None
+
+
+def select_xmin(drops, strategy="plateau", **kwargs):
+    """Run one named xmin strategy while preserving its public API."""
+    return select_xmin_with_details(drops, strategy=strategy, **kwargs)[0]
 
 
 def compare_xmin_strategies(drops, strategies=None, strategy_kwargs=None):

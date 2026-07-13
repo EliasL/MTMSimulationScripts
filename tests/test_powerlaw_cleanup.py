@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import gzip
+import json
 from pathlib import Path
 from unittest import mock
 
@@ -155,6 +157,27 @@ class XminCleanupTests(unittest.TestCase):
             )
         self.assertEqual(fit.kwargs["xmin_samples_per_decade"], 10.0)
         self.assertTrue(fit.kwargs["parallel_xmin"])
+
+    def test_fixed_xmin_cache_does_not_require_search_diagnostics(self):
+        class FakeFit:
+            def __init__(self, data, xmin=None, **kwargs):
+                self.xmin = xmin
+
+        with tempfile.TemporaryDirectory() as directory, mock.patch(
+            "Plotting.plotPowerLaw.Fit", FakeFit
+        ):
+            make_fit(
+                [1.0, 2.0, 3.0],
+                xmin_range=1.0,
+                use_cache=True,
+                cache_dir=directory,
+            )
+            cache_path = next(Path(directory).glob("*.json.gz"))
+            with gzip.open(cache_path, "rt", encoding="utf-8") as stream:
+                payload = json.load(stream)
+
+        self.assertEqual(payload["xmin"], 1.0)
+        self.assertIsNone(payload["xmin_fitting_results"])
 
 
 if __name__ == "__main__":

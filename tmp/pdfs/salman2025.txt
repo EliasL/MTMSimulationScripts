@@ -1,0 +1,899 @@
+                                                                                     Self-induced marginality in plastically deformed crystals
+
+                                                                                               O.U. Salman,1, 2 A. Ahadi,2 and L. Truskinovsky3
+                                                                                 1
+                                                                                   LSPM, CNRS UPR3407, Université Sorbonne Paris Nord, 93400, Villateneuse, France
+                                                                           2
+                                                                               Lund University, Department of Mechanical Engineering Sciences, SE-221 00 Lund, Sweden
+                                                                                     3
+                                                                                       PMMH, CNRS UMR 7636 ESPCI PSL, 10 Rue Vauquelin, 75005, Paris, France
+                                                                                                               (Dated: March 20, 2026)
+                                                                      Quasi-brittle plastic yielding is a salient feature of well-annealed glassy materials. Here we show that the
+                                                                   same behavior is characteristic of perfect crystals after they experience mechanically driven elastic instability
+                                                                   leading to massive nucleation of dislocations. We argue that such ’preparation’ effectively converts an atomic
+arXiv:2511.08187v2 [cond-mat.mtrl-sci] 19 Mar 2026
+
+
+
+
+                                                                   configuration from crystalline to quasi-amorphous. To understand the nature of the subsequent intermittent me-
+                                                                   chanical response we study a model 2D crystal subjected to AQS driving and show that both pre- and post-yield
+                                                                   dislocation avalanches exhibit power law statistics with similar exponents indicative of self-induced marginal
+                                                                   stability.
+
+
+                                                        The complexity of plastic response of strain-driven crys-                The main idea of the MTM approach is to associate with
+                                                     talline solids is revealed by intermittent stress fluctuations ac-       material points an effective energy landscape whose tensorial
+                                                     companied by scale-free spatial organization of dislocations             periodicity accounts for crystallographically-invariant defor-
+                                                     [1–4]. The same general features are also typical of amor-               mations. The resulting Landau-type model is characterized
+                                                     phous plasticity [5–8]. To build a conceptual link between               by infinitely many equivalent energy wells [17, 19, 21, 41–
+                                                     the two phenomena, we study in this Letter a relatively trans-           45] and plastically deformed crystals emerge as a multi-phase
+                                                     parent prototypical example of a 2D square crystal subjected             mixtures with dislocations playing the role of effective do-
+                                                     to athermal quasistatic (AQS) proportional loading by shear              main boundaries. The small scale regularization is achieved
+                                                     strain applied along one of the slip directions. To prepare a            by mesoscopic discretization. Despite operating with engi-
+                                                     ’generic’ crystal we start from a pristine dislocation-free crys-        neering concepts of stress and strain the resulting computa-
+                                                     tal and shear it it to the point of mechanical instability which         tional code correctly captures not only long-range elastic in-
+                                                     is resolved through massive dislocation nucleation. We argue             teractions of dislocations but also describes adequately their
+                                                     that such ’preparation’ effectively converts an atomic config-           short-range interactions involved in the formation of com-
+                                                     uration from crystalline to quasi-amorphous, e.g. [9]. This              plex dislocational entanglements, see also variations on the
+                                                     term is used to refer to a solid that is structurally crystalline        same theme in [46–49]. We also note that the 2D version of
+                                                     but mechanically amorphous in the sense that its mechanical              the MTM, used in our numerical experiments, has some for-
+                                                     response is dominated by non-affine relaxations, e.g. [10].              mal similarities with a single-slip-plane phase field model of
+                                                                                                                              Peierls-Nabarro type, which was found fully adequate to rep-
+                                                        We observe that plastic flow of such quasi-amorphous crys-
+                                                                                                                              resent the critical nature of plastic flows, e.g. [31, 50]. The
+                                                     tals begins with a hardening stage involving small spatially
+                                                                                                                              main difference of our approach is the use of finite strain bulk
+                                                     localized dislocation rearrangements. This ’microplasticity’
+                                                                                                                              elasticity compatible with multi-slip and capturing adequately
+                                                     regime is terminated abruptly with a quasi-brittle yield leading
+                                                                                                                              lattice rotations which produced different values of critical ex-
+                                                     to the formation of multi-grain pattern dominated by global
+                                                                                                                              ponents revealing the marginal stability of the underlying con-
+                                                     shear bands. The post-yield plastic flow is characterized by
+                                                                                                                              figurations.
+                                                     a stress plateau with superimposed fluctuations representing
+                                                     broadly distributed dislocation avalanches. Similar quasi-
+                                                                                                                                 Consider the continuum deformation field y = y(x),
+                                                     brittle yield has been observed in well-annealed glasses [11–
+                                                                                                                              where y and x are positions of material points in the current
+                                                     13]. Despite the absence of dislocations in amorphous plas-
+                                                                                                                              and reference configurations, respectively. Due to frame in-
+                                                     ticity, both phenomena can be viewed as representing the evo-
+                                                                                                                              difference constraint, the strain energy density φ can depend
+                                                     lution of elastic incompatibility with underlying elementary
+                                                                                                                              on the deformation gradient F = ∇y only through the met-
+                                                     mechanical events represented by shear eigenstrains [14–16].
+                                                                                                                              ric tensor C = FT F which then plays the role of a tenso-
+                                                        Our main tool is a novel mesoscopic tensorial model                   rial order parameter. In MTM we assume that the function
+                                                     (MTM) of crystal plasticity representing a conceptual trade-             φ(C) additionally respects the symmetry of an underlying
+                                                     off between continuum and atomic descriptions [17–24]. Cru-              Bravais lattice. Such symmetry is assumed to be global ex-
+                                                     cially, it allows one to capture the intermittent nature of dislo-       tending beyond the conventional point group and capturing
+                                                     cation avalanches while resolving topological (connectivity)             lattice invariant shears. In 2D it reduces to the constraint that
+                                                     restructuring involved in nucleation and annihilation of dis-            φ(C) = φ(mT Cm), where unimodular integer valued ma-
+                                                     locations without any specialized phenomenological assump-               trices m belong to GL(2, Z) [51]. In view of this symme-
+                                                     tions [25]. In contrast to other computational approaches to             try, the surface det C = 1 in the 3D space (C11 , C22 , C12 )
+                                                     micro-scale plasticity, e.g. [26–38], the MTM allows one                 is tessellated into an infinite number of equivalent periodicity
+                                                     to deal with statistically meaningful number of dislocations             domains; if the energy density φ(C) is known in one of such
+                                                     while accounting in a geometrically exact way for finite de-             domains, it can be extended to the whole configurational space
+                                                     formations [39, 40].                                                     of tensors C by the symmetry. To visualize the implied tessel-
+                                                                                                                                               2
+
+                                                                        where ei , i = 1, 2, is the orthonormal basis of the reference
+                                                                        square lattice. In this way we imposed simple shear along one
+                                                                        of the principal slip directions with shear amplitude α serv-
+                                                                        ing as the loading parameter. The loading was advance in
+                                                                        strain increments of order 10−6 and after each increment the
+                                                                        displacement field was updated by the energy minimization
+                                                                        algorithm. Details of the discretization, of the incremental en-
+                                                                        ergy minimization algorithm and of the implementation of the
+                                                                        loading protocol under periodic boundary conditions can be
+               (a)                              (b)                     found in [51].
+
+FIG. 1. (a) GL(2, Z)-induced tessellation of the configuration space
+of metric tensors C11 , C22 , C12 with det C = 1 stereographically
+projected on the Poincaré disk p2 + q 2 < 1 where p = t(C11 −
+C22 )/2, q = tC12 , and t = 2/(2 + C11 + C22 ). The highlighted
+domain D is the fundamental (minimal periodicity) domain. (b) Rep-
+resentative energy landscape with colors indicating the energy level.
+Only the lowest energy levels are visible with the bottoms of the
+wells corresponding to equivalent replicas of the reference square
+lattice.
+                                                                        FIG. 2. Dislocated configuration emerging after a homogeneous lat-
+                                                                        tice is mechanically driven to the threshold of elastic instability. Col-
+lation, it is convenient to project stereographically the infinite      ors indicate the level of the σxy component of the Cauchy stress ten-
+surface det C = 1 on a unit (Poincaré) disk, see Fig. 1(a). In         sor. The highest stress levels of both signs correspond to the location
+our numerical experiments we used the simplest piece-wise               of dislocation cores. Here N = 400.
+polynomial function φ(C) proposed in [44], see [51] for de-
+tails. In Fig. 1(b) we illustrate the corresponding multi-well             To obtain a ’generic’ sample, we first loaded a pristine
+energy landscape. Here the equivalent energy wells, which               (defect-free) crystal till the point of elastic instability of the
+are somewhat distorted due to strereographic projection, rep-           affine configuration. The recorded critical value of the load-
+resent the equivalent replicas of the reference square lattice.         ing parameter α = αc ≈ 0.138 was found to be very close
+A characteristic feature of such a landscape is a network of            to the threshold of positive definiteness of the acoustic tensor
+low-energy valleys corresponding in our case to simple shears           [53], see the explicit formulas in [51]. To trigger the a generic
+parallel to crystallographic slip planes. These valleys repre-          instability we imposed a small Gaussian quenched disorder
+sent conventional plastic ’mechanisms’ and are assumed to be            which was subsequently removed. The breakdown of an elas-
+flat in the classical continuum crystal plasticity.                     tic state took the form of a massive nucleation of dislocations
+   Since the MTM preserves the energy barriers separating               resulting in a highly inhomogeneous configuration of the type
+individual wells along the low-energy valleys, the function             shown in Fig. 2. It is natural to assume that the unfolding
+φ(C) ends up being highly nonconvex. The corresponding                  of the elastic instability was arrested at a state which is only
+continuum scale-free Landau model is then degenerate and                marginally stable and is therefore far from being random.
+needs to be regularized through the introduction of a cut-off              To study the mechanical response of the obtained ’generic’
+length scale. This is achieved through the projection of the            sample we continued to load it quasistatically while record-
+continuum problem on a uniform mesoscale grid while associ-             ing the ensuing stress-strain relation. The results are shown
+ating the nonconvex elastic energy to finite discrete elements.         in Fig. 3(a) for four different realization of disorder with
+In other words, the infinite dimensional space of continuum             the solid black curve indicating the average response. Its
+deformation fields is reduced to a finite dimensional set of            salient feature is the presence of irregularly placed elastic
+compatible, piece-wise affine mappings, with the linear scale           branches interrupted by intermittent stress drops; the latter
+of an individual finite element becoming a physical parameter           represent plastic avalanches involving partial unlocking of
+[51]. An incremental elastic energy minimization in a system            dislocation structures with superimposed distributed nucle-
+of this type subjected to quasistatic loading will generically          ation/anihilation of dislocations. A major diffuse stress drop,
+lead to a rich repertoire of instabilities with jump discontinu-        which we interpret as the indication of the beginning of plas-
+ities representing elastic branch switching events. The energy          tic yield, separates two markedly different regimes. While the
+losses associated with such jumps contribute to plastic dissi-          quasi-elastic pre-yield regime is characterized by finite over-
+pation; in the continuum limit the jumps will merge giving              all rigidity, the post-yield regime is represented by an effective
+rise to rate-independent plasticity [52].                               stress plateau; in both regimes we observe intense plastic fluc-
+   In our numerical experiments a square crystal was repre-             tuations, see Fig. 3(a).
+sented by N × N nodes, with N = 100, 200, 400. The nodes                   Our Fig. 3(b) illustrates the stress field in a typical pre-
+were arranged into triangular finite elements. We loaded the            yield state A. Comparing to Fig. 2, the overall stress level
+system quasi-statically by applying the affine displacement             is higher but the restructuring of the dislocation pattern is rel-
+field u(α, x) = (F̄(α) − 1)x, with F̄(α) = I + αe1 ⊗ e2 ,               atively minor with dislocations mostly displaced between the
+                                                                                                                                              3
+
+
+
+
+                                                                           FIG. 4. The micro-configuration configuration corresponding to the
+                                                                           state C marked in Fig. 3. Colors indicate the magnitude of strain-
+                                                                           energy density. The inset shows a single grain and details the dislo-
+                                                                           cation structure of the grain boundaries. Here N=400.
+
+
+                                                                           gressive maturation of the polycrystalline grain texture. Dur-
+FIG. 3. (a) Stress-strain responses of four different ’generic’ quasi-
+amorphous crystals of the type shown in Fig. 2; solid black curve
+                                                                           ing intermittent avalanches characterizing this regime larger
+indicates the average response. The stress-strain curves do not start      grains occasionally merge while smaller grains continue to
+from the origin because the global instability does not relaxes stresses   emerge. In this way the self-organization of dislocations con-
+to zero due to the emergence of self-equilibrated (residual) dislo-        tinues to generate additional scales which contribute to the
+cation configuration. (b) Dislocated configuration in a typical pre-       formation of the global hierarchical structure. The complexity
+yield state characterizing the stage of ’microplasticity’. (c,d) Dis-      of the emerging configuration is illustrated in Fig. 5(b) where
+located configuration characterizing different stages of unfolding of      we show the corresponding strain distribution in the Poincaré
+the quasi-brittle system size event. Colors indicate the level of the      disk. While in the reference state (pristine crystal) all config-
+σxy component of the Cauchy stress tensor. In (a-d) N=400.                 urational points were concentrated in the origin, now they are
+                                                                           spread all over the configurational space with expected accu-
+                                                                           mulation near the bottoms of at least five energy wells repre-
+preexisting locking sites. Such ’microplasticity’ response is              senting different replicas of the unstressed square lattice; for
+a characteristic pre-yield feature for both amorphous and (de-             comparison, in the pre-yield regime the system explores at
+fective) crystalline solids [1, 54–56] This regime ends with               most three energy wells immediately adjacent to the reference
+the system-size event which takes the form of single quasi-                state. In other words, plastic yield not only marks the tran-
+brittle plastic stress drop in well-annealed glasses and some              sitions from isolated dislocation motion to collective disloca-
+sub-micron crystals [57–60]. In Fig. 3(c,d) we show the snap-              tion behavior, but also implies the access to a much broader
+shots of the spatial stress configurations in the intermediate             repertoire of relaxation mechanisms. For instance, a more de-
+state B and the final state C ending the transition to post-yield          tailed analysis of the avalanche structure illustrated in [51]
+regime. The comparison of Fig. 3(b-d) shows that the associ-               shows that while in the pre-yield regime plastification takes
+ated global restructuring involves collective dislocation activ-           place primarily in the form of isolated, linear arrangements of
+ity leading to the formation of system-spanning shear bands.               transformed elements, a typical post-yield avalanche reveals
+   Additional aspects of the state C can be seen in Fig. 4                 extended plastified regions with complex branching.
+where instead of the stress field, as in our Fig. 3(d), we now                An important window into the micro-mechanics of solids
+show the strain-energy density field. In this representation               undergoing plastic flow is provided by the study of the statis-
+the locations of individual dislocations become visible. The               tical structure of plastic fluctuations [1, 61, 62]. In our case
+general pattern is the development of low-energy patches of                the relevant observables would be the energy dissipated at
+the original lattice forming polycrystalline grain texture with            a single avalanche ∆W and the corresponding macroscopic
+elastic energy localized around dislocation-rich grain bound-              stress drop ∆Σ = A∆σxy , where A is the surface area of
+aries. In the inset presented in Fig. 4 we show the zoom in on             the sample. It is known that in amorphous solids the proba-
+the configuration of elastic elements; individual dislocations             bility distribution of these observables is compatiblewith the
+were identified via Delaunay triangulation and the nodes with              finite-size scaling ansatz P (s; L) = s−x F LDs x , where
+five/seven neighbors were shown in blue/red. In particular,                L = N h is the linear system size, h is the size of an element,
+we see the ubiquitous presence of Σ5 grain boundaries which                x is the power-law exponent with x = τ for stress drops and
+can be explained by the fact that the misorientation of neigh-             x = ϵ for dissipated energy and Dx is the corresponding frac-
+boring grains is controlled by the overall compatibility of the            tal dimension (Dϵ or Dτ , respectively). Finally F(u) is a
+deformation field [23].                                                    universal scaling function. It is also known that in amorphous
+   The ensuing post-yield regime, characterized by the rela-               plasticity the exponents ϵ and τ are similar for pre-yield and
+tive stabilization of the average stress level, can be broadly             post-yield regimes while the exponents Dϵ and Dτ may be
+interpreted as a quasi-stationary non-equilibrium steady state.            different [15, 63–65].
+A representative snapshot of the micro-configuration of the                   To determine these power-law exponents for our numer-
+crystal in the state D is shown in Fig. 5(a) where we see pro-             ical experiments we employed a robust data-collapse opti-
+                                                                                                                                                                                                                                   4
+
+                                                                                                                                                                   the exponent ϵ = 1.0. The invariance of this exponent across
+                                                                                                                                                                   the yielding transition suggests that while the spatial organiza-
+                                                                                                                                                                   tion of plastic events changes drastically from local and non-
+                                                                                                                                                                   cooperative to global and collective, the statistical distribution
+                                                                                                                                                                   of energy drops remains insensitive to these details respond-
+                                                                                                                                                                   ing only to the global organization of the underlying energy
+                                                                                                                                                                   landscape [6, 68].
+                                                                                                                                                                      The value of the power-law exponent ϵ ≈ 1.0 is a signa-
+                                                   (a)                                                                           (b)                               ture of an archetypically ’wild’ crystal plasticity in the sense
+                                                                                                                                                                   of [61]. The same value was obtained in discrete disloca-
+FIG. 5. (a) Shear band development in the regime of stationary post-                                                                                               tion dynamics studies of disorder-free 2D samples contain-
+yield plastic flow represented by the state D in Fig. 3. Here N=400.
+                                                                                                                                                                   ing a fixed number of preexisting dislocations [34, 69] and
+Colors indicate the level of the shear component of the Cauchy stress
+tensor σxy . (b) Corresponding distribution of local values of the                                                                                                 was also recorded in numerical experiments on pristine crys-
+metric tensors in the configurational space projected on the Poincaré                                                                                             tals using a scalar version of the MTM [24]. The exponent
+disk. Background color represents the energy landscape whose 3D                                                                                                    ϵ ≈ 1.0 has been previously interpreted in crystal plasticity
+representation was shown in Fig. 1(b). The color of the gray dots                                                                                                  framework as representing either dislocation jamming or self-
+represents the number of the finite elements sharing the same metric                                                                                               induced glassiness [67, 70, 71].
+tensor.                                                                                                                                                               It is rather striking that exactly the same value of the ex-
+                                                                                                                                                                   ponent has been also recorded in the studies of plastic flows
+                                                                                                                                                                   in structural glasses [6, 72, 73]. A theoretical understanding
+mization procedure detailed in [51]. The resulting data col-
+                                                                                                                                                                   of the relation between the emergence of the power law ex-
+lapse is illustrated in Fig. 6. One can see that for our
+                                                                                                                                                                   ponent ϵ ≈ 1.0 and the structure of the underlying energy
+’generic’ quasi-amorphous crystals the statistics of avalanches
+                                                                                                                                                                   landscapes has been developed in the theory of spin glasses.
+follows the same pattern as for their amorphous counterparts.
+                                                                                                                                                                   Thus, it was shown that the hierarchical (ultrametric) organi-
+In particular, similar to the case of well-annealed glasses
+                                                                                                                                                                   zation of energy wells in the phase space results in an intermit-
+[1, 25, 34, 62, 66, 67], the scaling behavior remains basically
+                                                                                                                                                                   tent, scale-free response to quasistatic deformation [74–77].
+unchanged across the quasi-brittle yielding transition.
+                                                                                                                                                                   Moreover, it was rigorously proved that in the mean-field limit
+                                                                                                                                                                   the associated distribution of energy avalanches must be of a
+                          energy-drop pre-yield: = 0.9195, D = 0.3640                                    energy-drop post-yield: = 1.0207, D = 0.9836              power law with exponent ϵ ≈ 1.0. In the spin glass context it
+                    3                                                 L = 100                                                                          L = 100
+                                                                      L = 200                        4                                                 L = 200     has been also understood that the reason behind this particular
+                                                                      L = 400                                                                          L = 400
+                    2                                                                                2
+log10 (P(S) L D )
+
+
+
+
+                                                                                 log10 (P(S) L D )
+
+
+
+
+                                                                                                                                                                   value of the exponent is the marginal stability of the system
+                    1                                                                                0                                                             [74, 78, 79].
+                    0
+                                                                                                     2
+                    1
+                                                                                                                                                                      Since glasses can be viewed as liquids at a quenching
+                                                                                                     4
+                    2
+                                                                                                                                                                   threshold, their marginal stability is similar to marginality ex-
+                                                                                                     6
+                              4        3          2         1     0                                       6      5     4         3     2         1       0
+                                                                                                                                                                   hibited by granular matter at a jamming point. If such systems
+                                           log10 (S/L D )                                                               log10 (S/L D )                             are mechanically driven, the proximity to unstable modes
+                                            (a)                                                                            (b)                                     leads to the mixing of statics (stability) and dynamics (insta-
+                          stress-drop pre-yield: = 0.9070, D = 0.3987                                    stress-drop post-yield: = 1.2476, D = 1.4379
+                    0.5                                           L = 100                            3                                                 L = 100
+                                                                                                                                                                   bility) making the mechanical response inherently intermit-
+                    1.0                                           L = 200                                                                              L = 200
+                                                                  L = 400                            2                                                 L = 400     tent [80, 81]. Similarly, since our ’quasi-amorphous crystal’
+                    1.5
+log10 (P(S) L D )
+
+
+
+
+                                                                                 log10 (P(S) L D )
+
+
+
+
+                                                                                                     1                                                             emerged from arrested dynamics, one can argue that the asso-
+                    2.0
+                                                                                                     0                                                             ciated self-generated disorder brought the system from a solid
+                    2.5
+                                                                                                     1
+                    3.0                                                                                                                                            to an effectively glassy state. Furthermore, our results suggest
+                                                                                                     2
+                    3.5                                                                                                                                            that the implied marginality is not affected by the quasi-brittle
+                                                                                                     3
+                    4.0
+                              0.0     0.5       1.0      1.5    2.0        2.5                            2.5    2.0    1.5      1.0       0.5   0.0         0.5
+                                                                                                                                                                   yield, which apparently does not compromise the global or-
+                                           log10 (S/L D )                                                              log10 (S/L D )                              ganization of the energy landscape while, of course, affecting
+                                            (c)                                                                            (d)                                     the reachability of its different subdomains [82].
+                                                                                                                                                                      The situation is not exactly the same for the exponent τ
+FIG. 6. Optimal data collapses of the probability distributions onto
+                                                                                                                                                                   characterizing the power law statistics of the stress drops ∆Σ.
+universal master curves. (a, b) Collapse of the energy drops ∆W in
+the pre-yield generating exponents ϵ = 0.9195 and Dϵ = 0.3640
+                                                                                                                                                                   Note first that in the pre-yield regime, the power-law expo-
+(a) and post-yield regimes generating exponents ϵ = 1.0207 and                                                                                                     nents for stress and energy are rather similar, τ ≈ ϵ, which
+Dϵ = 0.9836 (b). Collapse of the macroscopic stress drops ∆Σ in                                                                                                    suggests that the dissipated energies and the stress drops are
+the pre-yield generating exponents τ = 0.9070 and Dτ = 0.3987                                                                                                      roughly proportional, ∆W ∼ ∆Σ. Such linear scaling im-
+(c) and post-yield regimes, generating exponents τ = 1.2476 and                                                                                                    plies some kind of caging, which means a highly constrained
+Dτ = 1.4379 (d).                                                                                                                                                   regime of dislocation motion with individual avalanches ar-
+                                                                                                                                                                   rested by a regular arrays of obstacles. This may be also the
+   More specifically, the obtained power law range for energy                                                                                                      reason behind the strong hardening behavior in the pre-yield
+drops extends over up to six decades with pre-yield and post-                                                                                                      regime.
+yield energy distributions sharing almost the same value of                                                                                                           Instead, in the post-yield regime the recovered exponents τ
+                                                                                                                                           5
+
+and ϵ are markedly different. Here individual avalanches are            the phenomenological yield thresholds of elasto-plastic mod-
+no longer hindered by local structural constraints and one can          els are replaced in the MTM by elastic instabilities originat-
+assume that the stress drop is only constrained by the corre-           ing from the non-convexity of the energy landscape. Accord-
+sponding strain increment due to the constraints of (nonlinear)         ingly, the fixed linear elastic propagators are replaced by the
+elasticity. Then, if we assume that ∆W ∼ ∆Σγ we can ex-                 solution ’on the fly’ of the corresponding nonlinear elastic-
+pect that ϵ − 1 = (τ − 1)/γ. In particular, if elasticity is linear,    ity problems. Note also that the crucial nonlinearity in the
+γ = 2, and the measured value is τ ≈ 1.2, we can expect that            MTM is of universal geometrical nature as it originates from
+ϵ ≈ 1.10 which is in reasonable agreement with our measured             the exact description of finite elastic deformations. However,
+value ϵ ≈ 1.02 given that the uncertainty for our relatively            the observed general agreement in the values of the computed
+small system is of the order ∼ ±0.2, see [51] for details.              exponents suggests that we are dealing with the same univer-
+   Note next that the pre-yield values of the cutoff parameters         sality class.
+LDx are much smaller than their post-yield values which in-
+                                                                           To conclude, we showed that mechanically driven perfect
+dicates that larger avalanches become more probable [8, 83].
+                                                                        crystals can exhibit quasi-brittle plastic yielding which is re-
+The emergent collective behavior, reflected in such broader
+                                                                        markably similar to the behavior of well-annealed glassy ma-
+extent of avalanche activity, reaches in post yield regime the
+                                                                        terials. The implied parallel features of the mechanical re-
+size of the system suggesting the divergence of the character-
+                                                                        sponse emerge after pristine crystals acquire self-generated
+istic length. Further differences between pre-yield and post-
+                                                                        disorder resulting from massive dislocation nucleation dur-
+yield mechanical responses emerge from the analysis of the
+                                                                        ing the breakdown of an affine elastic configuration. The
+values of the exponents Dx providing information about the
+                                                                        ensuing quasi-amorphous crystals exhibit pre- and post-yield
+morphology of the plastically deforming regions. Thus, in
+                                                                        avalanches with power law statistics whose matching expo-
+In the pre-yield regime the energy avalanches are character-
+                                                                        nents are indicative of the marginality of the associated me-
+ized by a low fractal dimension Dϵ ≈ 0.36, pointing towards
+                                                                        chanical system. Adaptation of the same model to realistic 3D
+highly localized, spatially scattered, macroscopically isolated
+                                                                        crystals will allow one to distinguish between edge and screw
+rearrangements. Instead, in the post-yield regime we obtain
+                                                                        dislocations opening the way to the adequate account of such
+the value Dϵ ≈ 0.98 which suggests the emergence of 1D-like
+                                                                        physically important effects as dislocation climb, cross slip
+system spanning bands. The latter reflect highly cooperative
+                                                                        and forest hardening. To be adequate such an analysis should
+nature of the underlying plastic deformation and the physical
+                                                                        be, of course, performed with the account of the effects of
+nature of the implied criticality is presently actively debated
+                                                                        finite temperature [91, 92].
+[24, 84–87].
+   Finally we mention that the observed similarity between the              Acknowledgments. The authors thank N. Gorbushin
+structure of intermittent plastic fluctuations in amorphous and         for helpful comments. The work of O.U.S. was sup-
+crystalline solids is supported by the fact that elasto-plastic         ported by the grants ANR–21-CE08-MESOCRYSP, ANR-20-
+models, typically used to model amorphous plasticity [73, 88–           CE91-0010, ANR-24-CE91-0002. L. T. was supported by
+90], are very similar to the MTM which operates within ba-              the grants ANR–21-CE08-MESOCRYSP and ERC-H2020-
+sically the same finite element setting. The difference is that         MSCA-RISE-2020-101008140.
+
+
+
+
+ [1] S. Papanikolaou, Y. Cui, and N. Ghoniem, Modell. Simul.            [13] M. Ozawa, L. Berthier, G. Biroli, A. Rosso, and G. Tarjus,
+     Mater. Sci. Eng. 26, 013001 (2017).                                     Proc. Natl. Acad. Sci. 115, 6656 (2018).
+ [2] T. Hochrainer, S. Sandfeld, M. Zaiser, and P. Gumbsch, J.          [14] G. Picard, A. Ajdari, F. Lequeux, and L. Bocquet, Europhysics
+     Mech. Phys. Solids 63, 167 (2014).                                      Journal E 15, 371 (2004).
+ [3] P. M. Derlet and R. Maaß, J. Appl. Phys. 120, 225101 (2016).       [15] Z. Budrikis, D. Castellanos, S. Sandfeld, M. Zaiser, and S. Zap-
+ [4] P. D. Ispánovity, I. Groma, G. Györgyi, F. F. Csikor, and             peri, Nat. Commun. 8, 15928 (2017).
+     D. Weygand, Phys. Rev. Lett. 105, 085503 (2010).                   [16] M. Baggioli, M. Landry, and A. Zaccone, Phys. Rev. E. 105,
+ [5] L. Berthier, G. Biroli, M. L. Manning, and F. Zamponi, arXiv            024602 (2022).
+     preprint arXiv:2401.09385 (2024).                                  [17] O. U. Salman and L. Truskinovsky, Phys. Rev. Lett. 106,
+ [6] B. Shang, P. Guan, and J. L. Barrat, Proc. Natl. Acad. Sci. 117,        175503 (2011).
+     86 (2020).                                                         [18] O. U. Salman and L. Truskinovsky, Int. J. Eng. Sci. 59, 219
+ [7] M. Singh, M. Ozawa, and L. Berthier, Phys. Rev. Mater. 4,               (2012).
+     025603 (2020).                                                     [19] R. Baggio, E. Arbib, P. Biscari, S. Conti, L. Truskinovsky,
+ [8] J. Lin, E. Lerner, A. Rosso, and M. Wyart, Proc. Natl. Acad.            G. Zanzotto, and O. U. Salman, Phys. Rev. Lett. 123, 205501
+     Sci. U. S. A. 111, 14382 (2014).                                        (2019).
+ [9] M. Ovaska, A. Lehtinen, M. J. Alava, L. Laurson, and S. Zap-       [20] O. U. Salman, R. Baggio, B. Bacroix, G. Zanzotto, N. Gor-
+     peri, Phys. Rev. Lett. 119, 265501 (2017).                              bushin, and L. Truskinovsky, C. R. Phys. 22, 201 (2021).
+[10] A. Zaccone and E. Scossa-Romano, Phys. Rev. B 83, 184205           [21] N. Perchikov and L. Truskinovsky, J. Mech. Phys. Solids 190,
+     (2011).                                                                 105704 (2024).
+[11] A. Tanguy, C. R. Phys. 22, 117 (2021).                             [22] R. Baggio, O. U. Salman, and L. Truskinovsky, Eur. J. Mech.
+[12] J. T. Parley and P. Sollich, Phys. Rev. E. 110, 045002 (2024).          A/Solids 99, 104897 (2023).
+                                                                                                                                          6
+
+[23] R. Baggio, O. U. Salman, and L. Truskinovsky, Phys. Rev. E         [56] Q. Rizzardi, P. M. Derlet, and R. Maaß, Phys. Rev. Mater. 6,
+     107, 025004 (2023).                                                     073602 (2022).
+[24] P. Zhang, O. U. Salman, J. Weiss, and L. Truskinovsky, Phys.       [57] Y. Cui, G. Po, and N. Ghoniem, Phys. Rev. B 95, 064103
+     Rev. E 102, 023006 (2020).                                              (2017).
+[25] J. Weiss, P. Zhang, O. U. Salman, G. Liu, and L. Truskinovsky,     [58] J. R. Greer and J. T. M. D. Hosson, Prog. Mater Sci. 56, 654
+     C. R. Phys. 22, 163 (2021).                                             (2011).
+[26] L. A. Zepeda-Ruiz, A. Stukowski, T. Oppelstrup, N. Bertin,         [59] A. Sharma, J. Hickman, N. Gazit, E. Rabkin, and Y. Mishin,
+     N. R. Barton, R. Freitas, and V. V. Bulatov, Nat. Mater. 20,            Nat. Commun. 9, 4102 (2018).
+     315 (2021).                                                        [60] D. Mordehai, O. David, and R. Kositski, Adv. Mater. 30,
+[27] P. Chan, G. Tsekenis, J. Dantzig, K. A. Dahmen, and N. Gold-            e1706710 (2018).
+     enfeld, Phys. Rev. Lett. 105, 015502 (2010).                       [61] J. Weiss, W. B. Rhouma, T. Richeton, S. Dechanel, F. Louchet,
+[28] M. Salvalaglio, L. Angheluta, Z. Huang, A. Voigt, K. R. Elder,          and L. Truskinovsky, Phys. Rev. Lett. 114, 105504 (2015).
+     and J. Viñals, J. Mech. Phys. Solids 137, 103856 (2020).          [62] M. J. Alava, L. Laurson, and S. Zapperi, Eur. Phys. J. Spec.
+[29] M. Javanbakht and V. I. Levitas, Int. J. Solids Struct. 82, 95          Top. 223, 2353 (2014).
+     (2016).                                                            [63] B. Tyukodi, C. A. Lemarchand, J. S. Hansen, and D. Vandem-
+[30] I. J. Beyerlein and A. Hunter, Philos. Trans. A Math. Phys. Eng.        broucq, Phys. Rev. E. 93, 023004 (2016).
+     Sci. 374 (2016).                                                   [64] E. Lerner, I. Procaccia, C. Rainone, and M. Singh, Phys. Rev.
+[31] M. Koslowski, A. M. Cuitiño, and M. Ortiz, J. Mech. Phys.              E 98, 063001 (2018).
+     Solids 50, 2597 (2002).                                            [65] M. Ozawa, L. Berthier, G. Biroli, and G. Tarjus, Phys. Rev.
+[32] Y. U. Wang, Y. M. Jin, and A. G. Khachaturyan, Acta Mater.              Res. 4 (2022).
+     51, 4209 (2003).                                                   [66] J. P. Sethna, K. A. Dahmen, and C. R. Myers, Nature 410, 242
+[33] B. Devincre, T. Hoc, and L. Kubin, Science 320, 1745 (2008).            (2001).
+[34] P. D. Ispánovity, L. Laurson, M. Zaiser, I. Groma, S. Zapperi,    [67] A. Lehtinen, G. Costantini, M. J. Alava, S. Zapperi, and
+     and M. J. Alava, Phys. Rev. Lett. 112, 235501 (2014).                   L. Laurson, Phys. Rev. B 94, 064101 (2016).
+[35] D. Gómez-Garcı́a, B. Devincre, and L. P. Kubin, Phys. Rev.        [68] N. Oyama, H. Mizuno, and A. Ikeda, Phys. Rev. E. 104, 015002
+     Lett. 96, 125503 (2006).                                                (2021).
+[36] G. Po, M. Lazar, D. Seif, and N. Ghoniem, J. Mech. Phys.           [69] H. Salmenjoki, L. Laurson, and M. J. Alava, Phys. Rev. Mater.
+     Solids (2014).                                                          5, 073601 (2021).
+[37] K. Starkey, G. Winther, and A. El-Azab, J. Mech. Phys. Solids      [70] M. Ovaska, L. Laurson, and M. J. Alava, Sci. Rep. 5, 10580
+     139, 103926 (2020).                                                     (2015).
+[38] Y. Zhang, R. Wu, and M. Zaiser, Model. Simul. Mat. Sci. Eng.       [71] X. Zhang, X. Zhang, Q. Li, and F. Shang, Chin. Physics Lett.
+     33 (2025).                                                              33, 106401 (2016).
+[39] P. Engel, Geometric Crystallography: An Axiomatic Introduc-        [72] B. Tyukodi, D. Vandembroucq, and C. E. Maloney, Phys. Rev.
+     tion to Crystallography (Springer Netherlands, 1986).                   E 100, 043003 (2019).
+[40] M. Pitteri and G. Zanzotto, Continuum models for phase tran-       [73] E. E. Ferrero and E. A. Jagla, Soft Matter 15, 9041 (2019).
+     sitions and twinning in crystals (Chapman and Hall/CRC, Boca       [74] S. Franz and S. Spigler, Phys. Rev. E 95, 022139 (2017).
+     Raton, 2002).                                                      [75] M. Müller and M. Wyart, Annu. Rev. Condens. Matter Phys. 6,
+[41] J. L. Ericksen, Int. J. Solids Struct. 6, 951 (1970).                   177 (2015).
+[42] G. P. Parry, Arch. Rational Mech. Anal. 145, 1 (1998).             [76] L. Berthier, G. Biroli, P. Charbonneau, E. I. Corwin, S. Franz,
+[43] I. Folkins, J. Math. Phys. 32, 1965 (1991).                             and F. Zamponi, J. Chem. Phys. 151, 010901 (2019).
+[44] S. Conti and G. Zanzotto, Arch. Ration. Mech. Anal. 173, 69        [77] R. C. Dennis and E. I. Corwin, Phys. Rev. Lett. 124, 078002
+     (2004).                                                                 (2020).
+[45] K. Bhattacharya, S. Conti, G. Zanzotto, and J. Zimmer, Nature      [78] F. Pázmándi, G. Zaránd, and G. T. Zimányi, Phys. Rev. Lett.
+     428, 55 (2004).                                                         83, 1034 (1999).
+[46] C. Denoual, A. Caucci, L. Soulard, and Y. Pellegrini, Phys.        [79] P. Doussal, M. Müller, and K. J. Wiese, Phys. Rev. B Condens.
+     Rev. Lett. 105, 035703 (2010).                                          Matter Mater. Phys. 85 (2012).
+[47] Y. Gao, Y. Wang, and Y. Zhang, IUCrJ 6, 96 (2019).                 [80] K. Lamp, N. Küchler, and J. Horbach, J. Chem. Phys. 157
+[48] P. Biscari, M. Urbano, A. Zanzottera, and G. Zanzotto, J. Elast.        (2022).
+     123, 85 (2015).                                                    [81] S. Rossi and G. Tarjus, J. Stat. Mech. 2022, 093301 (2022).
+[49] E. Arbib, P. Biscari, C. Patriarca, and G. Zanzotto, J. Elast.     [82] I. Regev, I. Attia, K. Dahmen, S. Sastry, and M. M., Phys. Rev.
+     155, 747 (2023).                                                        E. 103, 062614 (2021).
+[50] M. Koslowski, R. LeSar, and R. Thomson, Phys. Rev. Lett. 93,       [83] C. Ruscher and J. Rottler, Tribol. Lett. 69, 64 (2021).
+     125502 (2004).                                                     [84] G. Grinstein, in Scale Invariance, Interfaces, and Non-
+[51] “Supplemental material,” See Supplemental Material at url for           Equilibrium Dynamics (Springer US, Boston, MA, 1995) pp.
+     details on the fundamental domains, the specific elastic energy         261–293.
+     density function, the numerical method, and the implementa-        [85] A. Zippelius, M. Fuchs, A. Rosso, J. P. Sethna, and M. Wyart,
+     tion of the loading conditions.                                         in Spin Glass Theory and Far Beyond (WORLD SCIENTIFIC,
+[52] G. Puglisi and L. Truskinovsky, J. Mech. Phys. Solids 53, 655           2023) pp. 277–305.
+     (2005).                                                            [86] N. Oyama, H. Mizuno, and A. Ikeda, Soft Matter 19, 6074
+[53] Y. Grabovsky and L. Truskinovsky, J. Nonlinear Sci. 23, 891             (2023).
+     (2013).                                                            [87] Y. Xing, Y. Yuan, H. Yuan, S. Zhang, Z. Zeng, X. Zheng,
+[54] R. Maaß and P. M. Derlet, Acta Mater. 143, 338 (2018).                  C. Xia, and Y. Wang, Nat. Phys. 20, 646 (2024).
+[55] G. Sparks, Y. Cui, G. Po, Q. Rizzardi, J. Marian, and R. Maaß,     [88] A. Nicolas, E. E. Ferrero, K. Martens, and J. Barrat, Rev. Mod.
+     Phys. Rev. Mater. 3, 080601 (2019).                                     Phys. 90 (2018).
+                                                                                                                                     7
+
+[89] S. Rossi, G. Biroli, M. Ozawa, G. Tarjus, and F. Zamponi,         [91] X. Zhang et al., Acta Mater. 260, 119201 (2023).
+     Phys. Rev. Lett. 129, 228002 (2022).                              [92] Y. Li, I. Lalani, M. Maron, W. Hixson, B. Wang, N. Ghoniem,
+[90] D. Fernández Castellanos, S. Roux, and S. Patinet, C. R. Phys.        and G. Po, arXiv preprint arXiv:2409.16987 (2024).
+     22, 135 (2021).
+            Self-induced marginality in plastically deformed crystals: Supplemental Material
+
+                                         O.U. Salman,1, 2 A. Ahadi,2 and L. Truskinovsky3
+                           1
+                             LSPM, CNRS UPR3407, Université Sorbonne Paris Nord, 93400, Villateneuse, France
+                     2
+                         Lund University, Department of Mechanical Engineering Sciences, SE-221 00 Lund, Sweden
+                               3
+                                 PMMH, CNRS UMR 7636 ESPCI PSL, 10 Rue Vauquelin, 75005, Paris, France
+                                                         (Dated: March 20, 2026)
+
+
+
+   a. Fundamental and elastic domains. Consider the                              1.00
+                                                                                                                                             Stability boundary (det Q = 0)
+                                                                                                                                                                              10
+
+
+
+
+energy density function φ(C) with tensorial symmetry
+GL(2, Z) = {m, mIJ ∈ Z, det(m) = ±1} . We refer to the                           0.75
+
+
+restriction of such periodic energy density to the minimal peri-                 0.50
+                                                                                                                                                                              8
+
+
+
+
+odicity (fundamental) domain as φD (C̃). Here C̃ = mT Cm
+is the projection of a general metric tensor C into the do-                      0.25
+
+
+
+
+                                                                                                                                                                                   Strain-Energy Density
+                                                                                                                                                                              6
+
+
+main D and m is the corresponding unimodular integer val-                        0.00
+
+
+
+
+                                                                            q
+ued matrix that performs the projection while ensuring that
+φ(C) = φD (C̃). The actual configuration of the fundamental                     −0.25                                                                                         4
+
+
+
+domain D is well known [1–4]
+                                                                                −0.50
+                                                    
+                                                 C11
+         D = 0 < C11 ≤ C22 , 0 ≤ C12 ≤
+                                                                                                                                                                              2
+
+                                                       ,    (1)                 −0.75
+                                                   2
+                                                                                −1.00
+where det C = 1. Given a generic metric C, the task of find-                            −1.00   −0.75   −0.50   −0.25   0.00   0.25   0.50         0.75            1.00
+                                                                                                                                                                              0
+
+
+
+ing a unimodular matrix m ensuring that C̃ ∈ D (and there-                                                               p
+
+fore φ(C) = φD (C̃)) can be formulated as a recursive algo-
+rithm which is also well known (Lagrange reduction) [2, 3].          FIG. 1.       Strain-energy density in the configurational space
+Specifically, if we define the matrices                              C11 , C22 , C12 with det C = 1 stereographically projected on the
+                                                               Poincaré disk. Thin white lines represent the GL(2, Z) tessellation
+           1 0                  0 1            1 −1                  of the a Poincaré disk into equivalent periodicity domains. Colors
+   m1 =             , m2 =            , m3 =         , (2)           represent energy levels following Fig. ??(b) in the main text. Elastic
+           0 −1                 1 0            0 1
+                                                                     stability boundary given by (10) is shown by the thick black contour
+and start with an assumption that m = I, we can proceed              surrounding the reference state. Small black squares and triangles
+through the following steps: (i ) if C12 < 0, change sign of         correspond to equivalent square and triangular lattices, respectively.
+C12 using the mapping m →mm1 ; (ii) if C22 < C11 , swap
+these two components using the mapping m →mm2 ; (iii)
+if 2C12 > C11 , set C12 = C12 − C11 using the mapping
+m →mm3 . Note that the action of m1 is a reflection that en-
+sures an acute angle between two lattice vectors of the square       shear term is chosen in the form a sixth-order polynomial
+lattice ei where i = 1, 2; the action of the matrix m2 is also       which is the minimal requirement ensuring stress continuity
+a reflection as it swaps two lattice vectors ei . Both of these      over the whole configurational space [1, 2]. It depends on a
+operations belong to the point group and propagate the met-          single parameter β allowing one to associate ground state ei-
+ric only inside the corresponding ’elastic domain’ (Ericksen-        ther with square or triangular (hexagonal) lattice
+Pitteri neighborhood) composed of the four copies of the min-
+imal domain D [4, 5]. Instead, the mapping defined by matrix
+m3 brings the metric outside the ’elastic domain’ and there-
+fore represents a quantized analog of the macroscopic plastic                                    !                                 !!
+strain.                                                                        C̃                                           C̃
+                                                                                                                            C̃
+                                                                     φ0                 = βψ1                                        +ψ2
+                                                                                                                                     .
+   b. Elastic energy density. While the single-period Lan-                 (det C̃)1/2                                  (det C̃)1/2
+                                                                                                                       (det C̃)1/2
+dau potential φD (C̃) can be constructed using the classical                                                                    (4)
+Cauchy-Born approach, see for instance [5, 6], in this paper         The requirement of stress continuity across the whole periodic
+we used, for simplicity, the phenomenological expression pro-        energy landscape specifies the functions ψ1 and ψ2
+posed in [2]. Specifically, the elastic energy density is repre-
+sented as a sum of two terms:
+                                      !
+                              C̃
+           φ(C̃) = φ0                   + φv (det C̃),       (3)                           41 3     7             1 2
+                          (det C̃)1/2                                            ψ1 = I14 I2 − I + I1 I2 I3 +       I ,                                                                                    (5)
+                                                                                           99 2 66              1056 3
+where φ0 accounts for contributions due to shear while φv                              4 3          8            17 2
+                                                                                 ψ2 =   I + I13 I3 − I1 I2 I3 +    I .                                                                                     (6)
+penalizes volumetric deformations. The GL(2, Z) invariant                             11 2          11          528 3
+                                                                                                                               2
+
+where we used the known hexagonal invariants of the metric        size of the mesoscopic particle. For the choice of the scale
+tensor                                                            b it is natural to require that the Cauchy-Born energy density
+               1                                                  computed for a lattice fragment with scale b exhibits a high
+         I1 = (C̃11 + C̃22 − C̃12 ),                   (7)        level of periodicity within the range of strains reached in a
+               3
+               1                                                  particular numerical experiment. We have checked that in our
+         I2 = (C̃11 − C̃22 )2                                     case the assumption that b ∼ 10a is sufficient.
+               4
+                                                                     d. Numerical method. Numerical implementation of the
+                  1
+              + (C̃11 + C̃22 − 4C̃12 )2 ,              (8)        MTM approach reduces to solving an elastic finite element
+                 12                                               problem. The goal is to follow the displacements of the net-
+         I3 = (C̃11 − C̃22 )2 (C̃11 + C̃22 − 4C̃12 )              work of discrete nodes labeled by integer-valued coordinates
+                 1                                                I = 1, ..., N 2 .
+              − (C̃11 + C̃22 − 4C̃12 )3 .              (9)           Specifically, we assume that each of the elements is a de-
+                 9
+                                                                  formable triangle and employ the standard linear 3-node el-
+We select β = −1/4 to ensure that global energy minimizers
+                                                                  ements [7, 8]. The displacement field inside each of the el-
+correspond to square lattices. The volumetric part of the en-
+                                                                  ements, represented inPdimensionless form, can be written
+ergy density, which primarily influences the fine structure of                                     a      a           a
+the dislocation cores and also controls the formation of voids,
+                                                                  in the form u(z) =          a N (z; h)u , where N (z; h) are
+                                                                                                                    a
+                                                                  compactly supported linear shape functions, u are the are
+is assumed to be of a generic form preventing infinite com-
+                                                                  the nodal displacements and summation is assumed over re-
+pression φv (s) = µ(s − log(s)). To keep in our numerical
+                                                                  peated indexes; the interpolation functions for each element
+experiments the strain field close to the surface det C = 1, we
+                                                                  are defined in terms of a local dimensionless coordinate sys-
+adopted a sufficiently high value of the bulk modulus, µ = 5.
+                                                                  tem. The mesoscopic deformation gradient is then F(z; h) =
+   The isochoric part of the energy landscape is illustrated in
+                                                                  I + ua ⊗ ∇N a (z; h).
+Fig. 2 of the main paper. Here we also show the same Landau-
+                                                                     In terms of macroscopic reference coordinates, the elas-
+type potential in Fig. 1, but now in the level set representa-
+                                                                  tic energy inside each element can be computed using the
+tion. Dark blue regions correspond to the equivalent square
+                                                                  simplest quadrature scheme w(x; h) = 21 φ(F(x; h))J(x, h),
+energy wells. Red domains show effectively inaccessible re-
+                                                                  where J is the Jacobian of the transformation from local (z)
+gions where the energy is very high (truncated). Relatively
+                                                                  to global (x) coordinate system. Note that in view of our as-
+low energy valleys colored in yellow correspond roughly to
+                                                                  sumptions the energy of a deformed triangular element de-
+two simple shear plastic ’mechanisms’ available in square lat-
+                                                                  pends on three parameters: the deformed lengths of the bonds
+tices.
+                                                                  and the deformed value of the angle between them.
+   c. Internal length scale. The lack of convexity of the po-
+                                                                     Finding a solution of an elasticR problem implies local min-
+tential is a property which the MTM shares with other simi-
+                                                                  imization of the energy W = Ω w(x; h)dx, which is pre-
+lar Landau-type continuum theories. In the MTM approach
+                                                                  scribed on a triangulated domain Ω. The conditions of me-
+the necessary regularization is introduced by bringing into the
+                                                                  chanical equilibrium take the form ∇ · P = 0 where we intro-
+model an internal scale h through explicit spatial discretiza-
+                                                                  duced the first Piola-Kirchhoff stress tensor
+tion. If L is the linear size of the macroscopic domain and N 2
+is the number of nodes in the mesoscopic grid, then the pa-                             P = 2FmΣmT ,
+rameter h = L/N introduces elastic finite elements imitating
+mesoscopic aggregates of atomic particles and defines in this     with
+way the cutoff beyond which the deformation is considered                                 "                         #
+homogeneous (affine). The corresponding small parameter is                                      ∂w       1 ∂w
+                                                                                                         2 ∂ C̃12
+δ = h/L = 1/N . Another small parameter in the problem                              Σ=         ∂ C̃11
+                                                                                              1 ∂w         ∂w           .
+                                                                                              2 ∂ C̃12    ∂ C̃22
+is ϵ = a/L where a is the interatomic distance and we are
+interested in the double limit: ϵ → 0 and δ → 0 while δ ≫ ϵ.      In the finite element representation these equations reduce to
+In the MTM approach we first implicitly perform the limit
+ϵ → 0 and recover in this way the continuum constitutive                       ∂W
+                                                                                      Z
+response using the Cauchy-Born rule. Then instead of per-                           =     P(x; h)∇N a (x; h)dx = 0.
+                                                                               ∂ua      Ω
+forming the classical δ → 0 and obtaining the conventional
+scale-free continuum theory, we preserve in the theory a small       The ensuing nonlinear equilibrium problem is solved nu-
+but finite value of the parameter δ. In this way we effectively   merically using the L-BFGS algorithm [9], which constructs
+account for finite size effects. In particular, the size of the   a positive definite approximation to the Hessian, enabling
+dislocation cores is overestimated while the number of dislo-     quasi-Newton steps that progressively reduce the total energy.
+cations is underestimated. However, the resulting approach        Iterations continue until the energy change per iteration falls
+preserves the basic nature of both long-range and short-range     below a prescribed tolerance. At each iteration, starting from
+interactions of dislocations at least when they are away from     an approximate solution wa , we compute a displacement cor-
+the boundaries. For instance, the blown up dislocations will      rection dwa = ua − wa by solving the linearized equilibrium
+still nucleate and self-lock adequately.                          equations via LU factorization [10, 11]:
+   In our numerical code we used dimensionless parameters
+                                                                                        ab
+h̃ = h/b = 1 and L̃ = L/b = 1/N , where the b is the                                   Kij dwjb + Ria = 0,
+                                                                                                                                       3
+
+where
+
+                  ab                 ∂N a ∂N b
+                 Kij = Aipjq (F)
+                                     ∂xp ∂xq
+is the global stiffness matrix and
+                                     ∂N a
+                     Ria = Pip (F)        ,
+                                     ∂xp
+                                                                    FIG. 2. The periodicity unit of the computational mesh Tch obtained
+is the residual force vector with summation implied over re-
+                                                                    by periodic Delaunay triangulation. The central computational do-
+peated indices. Note that we introduced the tensor of tangen-       main Ω0 is limited by the brown box. Only triangles with at least
+tial elastic moduli                                                 one vertex in Ω0 are selected for the mesh (shown by the thin lines),
+                                                                    ensuring proper connectivity across periodic boundaries while avoid-
+                               ∂ 2 φD (C̃)                          ing redundant counting of triangles.
+                     Aiajb =               .
+                               ∂Fia ∂Fjb
+which can be used construct the Eulerian acoustic tensor
+                                                                    their representatives in Ω0 and using the sorted tuple of these
+                  Qij = Fla Fmb Aiajb nl nm ,                       representatives as a canonical identifier.
+                                                                       Specifically, a triangle is included in the chosen mesh Tch
+where n is an arbitrary unit vector. The Legendre-Hadamard          only upon its first encounter, ensuring that each physical tri-
+condition which marks the threshold of elastic instability in       angle is counted exactly once. The ensuing periodicity unit
+continuum theory can be then written in the form                    of the computational mesh Tch is illustrated in Fig. 2, where
+                                                                    we show the central domain Ω0 (limited by the brown box)
+                         det(Q) = 0.                        (10)    together with triangles associated with the nodes constituting
+                                                                    this domain. Such selection procedure ensures that: (i) Each
+The corresponding stability boundary is referred to in the main     triangle in the computational mesh is counted exactly once,
+paper and it is illustrated for the chosen elastic energy land-     eliminating redundancy from the periodic extension; (ii) All
+scape in Fig. 1.                                                    triangles connected to the original domain are included, main-
+   e. Implementation of the loading conditions.          To sim-    taining proper connectivity across periodic boundaries; (iii)
+ulate an effectively infinite crystal under controlled macro-       The triangulation naturally incorporates the macroscopic de-
+scopic affine deformation, we use the method of domain repli-       formation through the deformed positions of the periodic im-
+cation. Starting from the computational domain Ω0 with di-          ages.
+mensions Lx × Ly , we generate a periodic        lattice of do-
+                                                                      The selected set of triangles Tch was used as the compu-
+                                           nx Lx                    tational mesh in the MTM based numerical experiments en-
+mains using translation vectors tn =               , where n =
+                                           ny Ly                    suring both, compatibility with the periodic boundary condi-
+(nx , ny ) ∈ {−1, 0, 1}2 . Let F̄(α) denote the macroscopic         tions and consistency with the applied macroscopic deforma-
+deformation gradient tensor at the parameter value α. Un-           tion gradient F̄(α).
+der such affine deformation, the position of replicated do-            f. Dynamics in the configuration space. Here we pro-
+mains relative to the central domain Ω0 is given by: Rn =           vide additional illustrations detailing the evolution of system
+F̄(α) · tn , where Rn represents the displacement vector of         in the configurational space of local values of the metric ten-
+the origin of the domain associated with tn . Then, for a           sors projected on Poincaré disk, see Fig. 3 (a-d). In the pre-
+node located at position xi in the central domain Ω0 , its pe-      yield micro-plastic regime, the system predominantly occu-
+riodic image, associated with the translation vector tn , is at:    pies three primary energy wells, corresponding to early-stage,
+  (n)
+xi = xi + Rn = xi + F̄(α) · tn . Such correspondence                isolated dislocation gliding along the fundamental x and y
+ensures that the macroscopic deformation gradient F̄(α) is          crystalline orientations. Conversely, in the post-yield regime,
+consistently applied across all periodic images of Ω0 . After       accumulated plastic strain and the macroscopic formation of
+establishing the positions of all nodes across the nine domains     shear bands cause the system to populate a much broader land-
+(original domain Ω0 and its eight periodic images), we per-         scape of potential wells. Moreover, the stability envelopes de-
+form a Delaunay triangulation on the complete set of parti-         rived from macroscopic acoustic tensor analysis strictly bound
+                                  (n)
+cles: P = {xi : i ∈ I0 } ∪ {xi : i ∈ I0 , n ̸= 0}, where            the local regions surrounding each distinct well. This clear
+I0 denotes the set of particle indices in the original domain       correlation demonstrates that the vast majority of mesoscopic
+and 0 = (0, 0) corresponds to the null translation vector. Us-      units remain localized inside these ’locally’ stable regions,
+ing the obtained global triangulation T , we select the triangles   leaving only the highly energetic, actively moving dislocation
+that have at least one vertex belonging to the original domain      cores exposed as they traverse the unstable saddles connecting
+Ω0 .                                                                the energy minima.
+   Note that since triangles near periodic boundaries may be           g. Finite size scaling and data collapse. To determine
+counted multiple times through different domain images, we          the power-law exponent and the finite-size scaling exponent
+need to ensure uniqueness by mapping all vertex indices to          (often interpreted as the fractal dimension of the avalanches),
+                                                                                                                                                                                                                                                              4
+
+                                                                                                        We define the valid index set V as the subset of grid indices
+                                                                                                     j such that the grid point cj lies strictly within the measured
+                               17.5
+                                               103
+                                                                                                     domain of all NL interpolated curves, ensuring no extrapola-
+                               15.0
+
+
+                               12.5
+
+                                               102
+                                                                                                     tion is required. The quality of the collapse is quantified by
+
+
+
+
+                                                     Density
+                                      Energy
+                               10.0
+
+
+                               7.5
+
+                                               101
+                                                                                                     computing the average variance across this valid set:
+                               5.0
+
+
+                               2.5
+
+
+                                               100                                                                                        NL
+                                                                                                                                                                     !
+                                                                                                                      1 X          1
+                               0.0
+
+
+
+                                                                                                                                                                   2
+                                                                                                                                         X
+                                                                     17.5                               Q(x, Dx ) =                           [v̂k (cj ) − v̄(cj )] ,
+                                                                     15.0
+                                                                                     103
+                                                                                                                     |V|        NL − 1
+                                                                                                                                       j∈V                                              k=1
+                                                                     12.5
+
+
+             (a)                                               (b)                   102                                                                           (12)
+
+
+
+
+                                                                                           Density
+                                                                            Energy
+                                                                     10.0                                                              PNL
+                                                                     7.5                             where v̄(cj ) = N1L      k=1 v̂k (cj ) is the mean value of the in-
+                                                                     5.0
+                                                                                     101
+                                                                                                     terpolated curves at the fixed grid point cj .
+                                                                     2.5
+
+
+                                                                     0.0             100
+                                                                                                        Evaluating this collapse variance provides a highly sensi-
+                                                                                                     tive measure of how well the distributions coincide. We em-
+                                                                                                     ploy a two-stage grid-search (first coarse, then fine) in the
+                                                                                                     (x, Dx ) parameter space to locate the global minimum of the
+                                                                                                     variance, Qmin . The coordinates of this minimum define the
+                                                                                                     optimal scaling exponents, (x∗ , Dx∗ ).
+                                                                                                        To estimate the uncertainties of these exponents, we ana-
+             (c)                                               (d)                                   lyze the curvature of the Q landscape immediately surround-
+                                                                                                     ing the minimum. For each parameter, we project the vari-
+FIG. 3. Distribution of values of the local metric tensors in the                                    ance onto a 1-D profile and fit it with a parabola. Because
+Poincaré configurational space at four values of loading parameter.                                 traditional statistical error models do not strictly apply to this
+Background color represents the energy landscape whose 3D rep-                                       data-collapse metric, we establish an operational threshold for
+resentation was shown in Fig. 1(b) in the main text. The color of                                    the error: the 1-σ confidence interval is defined as the param-
+the gray dots represents the number of the finite elements sharing                                   eter deviation required to double the variance from its optimal
+the same metric tensor. (a) α = 0.3 (generic pre-yield state), (b)                                   value (i.e., the half-width where the fit reaches 2Qmin ). Con-
+α = 0.5 (pre-yield state close to the yield threshold), (c) α = 0.6
+                                                                                                     sequently, a sharp, narrow minimum in the variance landscape
+(immediate post-yield state), and (d) α = 0.75 (mature post-yield
+state). The states (a,b) show to the development of the micro-plastic
+                                                                                                     clearly demonstrates that the scaling parameters are tightly
+regime and show how small are the associated changes in the con-                                     constrained by the overlapping data.
+figuration of the elements. The (c, d) illustrate the proliferation of
+plastic strain in the post-yield regime with the number of populated                                                           (a)                                                                       (b)
+                                                                                                         Collapse quality map: energy-drop pre-yield                               Collapse quality map: energy-drop post-yield
+energy wells gradually increasing.                                                                          2.50
+                                                                                                                           optimum
+                                                                                                                                                       0.16                           2.50                                        0.30
+                                                                                                                                                                                                      optimum
+                                                                                                            2.25            =0.9195, D =0.3640         0.48
+                                                                                                                                                         log (collapse variance)      2.25             =1.0207, D =0.9836         0.55
+
+
+
+
+                                                                                                                                                                                                                                    log (collapse variance)
+                                                                                                            2.00                                       0.80                           2.00                                        0.80
+                                                                                                            1.75                                       1.12                           1.75                                        1.05
+we employ a robust data-collapse optimization procedure.                                                    1.50                                       1.44                           1.50                                        1.30
+                                                                                                            1.25                                       1.76                           1.25                                        1.55
+   Rather than relying on the algebraic moment spectrum, we                                                 1.00                                       2.08                           1.00                                        1.80
+directly rescale the axes to collapse distributions from all sys-                                           0.75                                       2.40                           0.75                                        2.05
+                                                                                                            0.50                                       2.72                           0.50                                        2.30
+tem sizes onto a single master curve. We define the rescaled                                                         0.5      1.0     1.5        2.0                                            0.5      1.0     1.5        2.0
+                                                                                                                              D                                                                          D
+variables:
+                  s                                                                                  FIG. 4. Landscapes of the quality metric Q for the pre- and post-
+   x̃(s, L) = Dx ,          ỹ(s, L) = P (s; L) · LDx x . (11)
+                L                                                                                    yield regimes. (a) configuration of Q(ϵ, Dϵ ) in pre-yield regime, and
+                                                                                                     (b) similar graph for the post-yield regime. The deep, well-defined
+The optimal parameters (x∗ , Dx∗ ) are determined by minimiz-                                        global minima in these variance surfaces allow us to choose the op-
+ing the residual spread between the rescaled curves across                                           timal scaling exponents and determine the associated geometric 1-σ
+their common overlapping range. For a discrete set of sys-                                           uncertainties.
+tem sizes {Lk } = Nk h, the quality of the collapse at
+a trial pair (x, Dx ) is evaluated systematically. First, we                                            The variance spread landscapes and the resulting optimal
+compute the discrete logarithmic data points (uk,i , vk,i ) =                                        data collapses are presented in Fig. 4 and Fig. 6 in the main
+(log10 x̃k,i , log10 ỹk,i ) for each system size Lk .                                               paper. As can be seen directly from these plots the scaled
+   Next, we determine the common logarithmic interval by                                             probability distributions for different system sizes L = N h
+identifying the overlapping limits umin = maxk [mini (uk,i )]                                        fall remarkably well onto a single universal master curve in
+and umax = mink [maxi (uk,i )]. For our datasets, a robust                                           both the pre-yield and post-yield regimes. This excellent vi-
+overlap domain naturally exists near the optimal scaling ex-                                         sual overlap, spanning several decades in both probability and
+ponents. We then define a uniform grid of 80 points {cj }                                            avalanche size, serves as strong empirical validation of the
+spanning the interval [umin , umax ]. To evaluate the curves on                                      finite-size scaling ansatz and confirms the reliability of the ex-
+this common grid, we construct a continuous function v̂k (u)                                         tracted exponents.
+for each system size using linear interpolation between the                                             h. Spatial patterns. The emerging values of the fractal
+discrete points (uk,i , vk,i ).                                                                      dimensions of Dϵ and Dτ in pre and post yield regimes re-
+                                                                                                                                         5
+
+                                                                         flect the difference in spatial structures of the correspond-
+                                                                         ing avalanches. Thus, in the pre-yield microplasticity regime
+                                                                         we see individual avalanches represented by highly localized,
+                                                                         spatially scattered, microscopically isolated rearrangements.
+                                                                         Instead, in the post-yield regime such seemingly non con-
+                                                                         nected plastification zones are replaced by highly correlated,
+                                                                         system-spanning macroscopic structures, with plasticification
+                                                                         zones showing noticeable branching, see Fig. 5. The typi-
+                                                                         cal avalanches in this regime involve broadening of the shear
+                                                                         bands and may include correlated restructuring of the grain-
+FIG. 5. Visualization of the geometric morphology of plastically ac-     boundaries whose total length is comparable with linear size
+tive regions during typical avalanche events in the post-yield regime.   of the system. One can then talk about the transition in struc-
+Domains undergoing almost 100% plastic deformation are seen as           tural topology from almost 0D avalanches (isolated clusters)
+red. Plastic deformation is seen to be localized into highly cor-        almost to 1D avalanches (extended anisotropic bands). The
+related, system-spanning branched 1D structures, with the typical
+                                                                         suggested qualitative picture is, of course, in full agreement
+spread comparable to the linear size of the system. See also the at-
+tached supplemental movie 1.                                             with the values of the fractal dimension extracted from the
+                                                                         data-collapse optimization for pre and post yield regimes.
+
+
+
+
+ [1] G. P. Parry, Arch. Rational Mech. Anal. 145, 1 (1998).               [5] R. Baggio, O. U. Salman, and L. Truskinovsky, Eur. J. Mech.
+ [2] S. Conti and G. Zanzotto, Arch. Ration. Mech. Anal. 173, 69              A/Solids 99, 104897 (2023).
+     (2004).                                                              [6] R. Baggio, O. U. Salman, and L. Truskinovsky, Phys. Rev. E
+ [3] P. Engel, Geometric Crystallography: An Axiomatic Introduc-              107, 025004 (2023).
+     tion To Crystallography (Springer Science & Business Media,          [7] B. M. Irons, AIAA J. 4, 2035 (1966).
+     Dordrecht, 2012).                                                    [8] J. H. Bramble and M. Zlámal, Math. Comp. 24, 809 (1970).
+ [4] M. Pitteri and G. Zanzotto, Continuum models for phase tran-         [9] S. Bochkanov and V. Bystritsky, Available from: www alglib
+     sitions and twinning in crystals (Chapman and Hall/CRC, Boca             net (2013).
+     Raton, 2002).                                                       [10] C. Sanderson and R. Curtin, J Open Source Softw 1, 26 (2016).
+                                                                         [11] M. Fishman, S. White, and E. Stoudenmire, SciPost Phys.
+                                                                              Codebases , 004 (2022).
+
