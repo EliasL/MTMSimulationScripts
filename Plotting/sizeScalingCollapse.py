@@ -268,8 +268,16 @@ def fit_xmins(size_drops, strategy, accuracy, parallel, cache_dir: Path):
             )
         else:
             strategy_kwargs = {}
-            if accuracy is not None and strategy in {"plateau", "dks"}:
-                strategy_kwargs["samples_per_decade"] = 1.0 / accuracy
+            if strategy in {"plateau", "dks", "slope"}:
+                strategy_kwargs["tail_decades"] = 1.0
+                if accuracy is not None:
+                    strategy_kwargs["samples_per_decade"] = 1.0 / accuracy
+            elif strategy == "global_min":
+                strategy_kwargs["tail_decades"] = 1.0
+                if accuracy is not None:
+                    strategy_kwargs["candidate_stride"] = max(
+                        1, int(round(1.0 / accuracy))
+                    )
             elif accuracy is not None and strategy == "sizer":
                 strategy_kwargs["samplesPerDecade"] = 1.0 / accuracy
             fit = make_fit(
@@ -304,6 +312,16 @@ def tail_histogram_curves(size_drops, xmins, bins_per_decade):
             )
         curves[size] = log_histogram(tail, bins_per_decade=bins_per_decade)
     return curves
+
+
+def exclude_size(curves, excluded_size):
+    """Return a collapse dataset without one explicitly requested system size."""
+    if excluded_size not in curves:
+        raise ValueError(f"Cannot exclude missing system size L={excluded_size}.")
+    filtered = {size: curve for size, curve in curves.items() if size != excluded_size}
+    if len(filtered) < 3:
+        raise ValueError("A collapse comparison requires at least three system sizes.")
+    return filtered
 
 
 def collapse_variance(curves, exponent, dimension, n_points=80):
@@ -404,8 +422,18 @@ def plot_raw_and_xmin(
     }
     fig, (ax_pdf, ax_xmin) = plt.subplots(1, 2, figsize=(11, 4.2))
     for size, (drop, density) in raw_curves.items():
-        ax_pdf.plot(drop, density, marker="o", ms=3, linestyle="none", label=f"L={size}")
-        ax_pdf.axvline(applied_xmins[size], alpha=0.25)
+        pdf_points = ax_pdf.plot(
+            drop,
+            density,
+            marker="o",
+            ms=3,
+            linestyle="none",
+            label=f"L={size}",
+        )[0]
+        color = pdf_points.get_color()
+        ax_pdf.axvline(
+            applied_xmins[size], color=color, alpha=0.25, zorder=0
+        )
         results = getattr(fits[size], "xmin_fitting_results", None) or {}
         xmins = np.asarray(results.get("xmins", []), dtype=float)
         distances = np.asarray(results.get("distances", []), dtype=float)
@@ -414,10 +442,22 @@ def plot_raw_and_xmin(
             order = np.argsort(xmins[mask])
             valid_xmins = xmins[mask][order]
             valid_distances = distances[mask][order]
-            ax_xmin.plot(valid_xmins, valid_distances, label=f"L={size}")
+            ax_xmin.plot(
+                valid_xmins,
+                valid_distances,
+                color=color,
+                label=f"L={size}",
+            )
+            ax_xmin.axvline(
+                applied_xmins[size],
+                color=color,
+                alpha=0.25,
+                zorder=0,
+            )
             ax_xmin.scatter(
                 [applied_xmins[size]],
                 [np.interp(applied_xmins[size], valid_xmins, valid_distances)],
+                color=color,
                 s=20,
             )
     ax_pdf.set(xscale="log", yscale="log", xlabel="Energy drop $s$", ylabel="$P(s;L)$")
@@ -468,7 +508,7 @@ def plot_collapse(curves, result, protocol, regime, path: Path, xmin_note=None):
 
 
 def plot_protocol_comparison(
-    all_curves, results, output_path: Path, shared_xmins=None
+    all_curves, results, output_path: Path, shared_xmins=None, figure_note=None
 ):
     fig, axes = plt.subplots(len(PROTOCOLS), len(REGIMES), figsize=(10, 13), squeeze=False)
     for row, protocol in enumerate(PROTOCOLS):
@@ -500,7 +540,11 @@ def plot_protocol_comparison(
             if col == 0:
                 ax.set_ylabel("$P(s;L)L^{D_x x}$")
     axes[0, 0].legend(ncol=3, fontsize="small")
-    fig.tight_layout()
+    if figure_note:
+        fig.suptitle(figure_note)
+        fig.tight_layout(rect=(0, 0, 1, 0.97))
+    else:
+        fig.tight_layout()
     fig.savefig(output_path, bbox_inches="tight")
     fig.savefig(output_path.with_suffix(".png"), dpi=180, bbox_inches="tight")
     plt.close(fig)
@@ -628,6 +672,8 @@ def run(args):
     all_raw_curves = {protocol: {} for protocol in PROTOCOLS}
     all_curves = {protocol: {} for protocol in PROTOCOLS}
     all_results = {protocol: {} for protocol in PROTOCOLS}
+    all_curves_without_l50 = {protocol: {} for protocol in PROTOCOLS}
+    all_results_without_l50 = {protocol: {} for protocol in PROTOCOLS}
     summary = {"inventory": inventory, "seeds_per_size": args.seeds_per_size, "results": {}}
     for protocol in PROTOCOLS:
         summary["results"][protocol] = {}
@@ -683,6 +729,31 @@ def run(args):
                 analysis_dir / f"{protocol}_{regime}_collapse.pdf",
                 xmin_note=f"Per-size {args.xmin_strategy} xmin; tail PDFs renormalized",
             )
+            curves_without_l50 = exclude_size(curves, 50)
+            result_without_l50 = optimize_collapse(
+                curves_without_l50,
+                analysis_dir
+                / "without_L50"
+                / "cache"
+                / "collapse"
+                / f"{protocol}_{regime}.npz",
+                force=args.force,
+            )
+            all_curves_without_l50[protocol][regime] = curves_without_l50
+            all_results_without_l50[protocol][regime] = result_without_l50
+            plot_collapse(
+                curves_without_l50,
+                result_without_l50,
+                protocol,
+                regime,
+                analysis_dir
+                / "without_L50"
+                / f"{protocol}_{regime}_collapse_without_L50.pdf",
+                xmin_note=(
+                    f"Per-size {args.xmin_strategy} xmin; L=50 excluded; "
+                    "tail PDFs renormalized"
+                ),
+            )
             summary["results"][protocol][regime] = {
                 "x": float(result["x"]),
                 "dimension": float(result["dimension"]),
@@ -694,6 +765,14 @@ def run(args):
                     str(size): int(np.count_nonzero(values >= xmins[size]))
                     for size, values in size_drops.items()
                 },
+                "collapse_without_L50": {
+                    "x": float(result_without_l50["x"]),
+                    "dimension": float(result_without_l50["dimension"]),
+                    "quality": float(result_without_l50["quality"]),
+                    "optimum_on_search_boundary": bool(
+                        result_without_l50["boundary"]
+                    ),
+                },
             }
     if args.stage == "xmin":
         return
@@ -703,6 +782,14 @@ def run(args):
             all_curves,
             all_results,
             analysis_dir / "protocol_collapse_comparison.pdf",
+        )
+        plot_protocol_comparison(
+            all_curves_without_l50,
+            all_results_without_l50,
+            analysis_dir
+            / "without_L50"
+            / "protocol_collapse_comparison_without_L50.pdf",
+            figure_note="Collapse excluding the L=50 system; per-size xmin",
         )
         (analysis_dir / "collapse_results.json").write_text(
             json.dumps(summary, indent=2)
@@ -716,6 +803,8 @@ def run(args):
     shared_xmins = {protocol: {} for protocol in PROTOCOLS}
     shared_curves = {protocol: {} for protocol in PROTOCOLS}
     shared_results = {protocol: {} for protocol in PROTOCOLS}
+    shared_curves_without_l50 = {protocol: {} for protocol in PROTOCOLS}
+    shared_results_without_l50 = {protocol: {} for protocol in PROTOCOLS}
     parameter_results = {protocol: {} for protocol in PROTOCOLS}
     shared_summary = {
         "inventory": inventory,
@@ -781,6 +870,36 @@ def run(args):
                     "quality": float(result["quality"]),
                     "optimum_on_search_boundary": bool(result["boundary"]),
                 }
+                curves_without_l50 = exclude_size(curves, 50)
+                result_without_l50 = optimize_collapse(
+                    curves_without_l50,
+                    shared_dir
+                    / "without_L50"
+                    / "cache"
+                    / "collapse"
+                    / f"{protocol}_{regime}.npz",
+                    force=args.force,
+                )
+                shared_curves_without_l50[protocol][regime] = curves_without_l50
+                shared_results_without_l50[protocol][regime] = result_without_l50
+                plot_collapse(
+                    curves_without_l50,
+                    result_without_l50,
+                    protocol,
+                    regime,
+                    shared_dir
+                    / "without_L50"
+                    / f"{protocol}_{regime}_collapse_shared_xmin_without_L50.pdf",
+                    xmin_note=f"{note}; L=50 excluded",
+                )
+                regime_summary["collapse_without_L50"] = {
+                    "x": float(result_without_l50["x"]),
+                    "dimension": float(result_without_l50["dimension"]),
+                    "quality": float(result_without_l50["quality"]),
+                    "optimum_on_search_boundary": bool(
+                        result_without_l50["boundary"]
+                    ),
+                }
 
             if do_parameters:
                 records = fixed_xmin_parameter_fits(
@@ -808,6 +927,15 @@ def run(args):
             shared_results,
             shared_dir / "protocol_collapse_comparison_shared_xmin.pdf",
             shared_xmins=shared_xmins,
+        )
+        plot_protocol_comparison(
+            shared_curves_without_l50,
+            shared_results_without_l50,
+            shared_dir
+            / "without_L50"
+            / "protocol_collapse_comparison_shared_xmin_without_L50.pdf",
+            shared_xmins=shared_xmins,
+            figure_note="Collapse excluding the L=50 system; shared L=250 xmin",
         )
     if do_parameters:
         plot_parameter_vs_size(

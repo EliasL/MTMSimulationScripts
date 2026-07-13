@@ -12,8 +12,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter
 from matplotlib.collections import LineCollection, PolyCollection
+from matplotlib.colors import PowerNorm
 from matplotlib.lines import Line2D
-from matplotlib.patches import Circle
+from matplotlib.patches import Circle, Rectangle
 
 from MTMath.poincareEnergy import drawPoincareGrid, prepPoincareFig
 from Plotting.element_tracking import ElementMatrixHistory
@@ -21,20 +22,25 @@ from Plotting.vtuDataForSylvain import VTUData
 
 
 @dataclass(frozen=True)
-class TransitionTimeline:
-    """Shared frame timing for Poincare and mesh animations."""
+class GammaTimeline:
+    """Uniform-load frame timing shared by Poincare and mesh animations."""
 
     node_history_indices: np.ndarray
     node_coordinates: np.ndarray
-    segment_indices: np.ndarray
-    segment_progress: np.ndarray
+    path_history_indices: np.ndarray
+    frame_loads: np.ndarray
+    t_node_counts: np.ndarray
+    path_lower_indices: np.ndarray
+    path_progress: np.ndarray
     center_coordinates: np.ndarray
     mesh_history_indices: np.ndarray
 
     def __post_init__(self) -> None:
-        frame_count = len(self.segment_indices)
+        frame_count = len(self.frame_loads)
         arrays = (
-            self.segment_progress,
+            self.t_node_counts,
+            self.path_lower_indices,
+            self.path_progress,
             self.center_coordinates,
             self.mesh_history_indices,
         )
@@ -44,12 +50,21 @@ class TransitionTimeline:
             raise ValueError("node_coordinates must have shape (number of nodes, 2).")
         if len(self.node_history_indices) < 2:
             raise ValueError("At least two distinct matrix states are required.")
-        if np.any((self.segment_progress < 0) | (self.segment_progress > 1)):
-            raise ValueError("segment_progress must remain inside [0, 1].")
+        if len(self.path_history_indices) < 2:
+            raise ValueError("At least two distinct loads are required.")
+        if np.any(np.diff(self.frame_loads) <= 0):
+            raise ValueError("Frame loads must be strictly increasing.")
+        if np.any((self.path_progress < 0) | (self.path_progress > 1)):
+            raise ValueError("path_progress must remain inside [0, 1].")
+        invalid_node_count = (self.t_node_counts < 1) | (
+            self.t_node_counts > len(self.node_history_indices)
+        )
+        if np.any(invalid_node_count):
+            raise ValueError("t_node_counts contains an invalid node count.")
 
     @property
     def frame_count(self) -> int:
-        return len(self.segment_indices)
+        return len(self.frame_loads)
 
     @property
     def node_complex(self) -> np.ndarray:
@@ -75,15 +90,22 @@ class MeshNeighborhood:
         return points.min(axis=0), points.max(axis=0)
 
 
-def eased_progress(progress: np.ndarray | float, strength: float = 0.35) -> np.ndarray:
-    """Blend linear motion with smoothstep for a slight acceleration/deceleration."""
-    if not 0 <= strength <= 1:
-        raise ValueError("strength must lie inside [0, 1].")
-    progress = np.asarray(progress, dtype=float)
-    if np.any((progress < 0) | (progress > 1)):
-        raise ValueError("progress must lie inside [0, 1].")
-    smooth = progress * progress * (3 - 2 * progress)
-    return (1 - strength) * progress + strength * smooth
+@dataclass(frozen=True)
+class PeriodicMeshSnapshot:
+    """One full mesh wrapped into a square periodic cell."""
+
+    polygons: np.ndarray
+    energies: np.ndarray
+    region_outlines: tuple[np.ndarray, ...]
+    source_path: Path
+
+    def __post_init__(self) -> None:
+        if self.polygons.ndim != 3 or self.polygons.shape[1:] != (3, 2):
+            raise ValueError("polygons must have shape (number of triangles, 3, 2).")
+        if self.energies.shape != (len(self.polygons),):
+            raise ValueError("One energy value is required for every plotted triangle.")
+        if not np.all(np.isfinite(self.polygons)) or not np.all(np.isfinite(self.energies)):
+            raise ValueError(f"Non-finite periodic-mesh data in {self.source_path}")
 
 
 def mobius_to_origin(z: np.ndarray | complex, center: complex) -> np.ndarray:
@@ -120,73 +142,98 @@ def poincare_geodesic(
     return mobius_from_origin(relative, start)
 
 
-def build_transition_timeline(
+def build_gamma_timeline(
     history: ElementMatrixHistory,
+    loads: Sequence[float],
+    camera_history: ElementMatrixHistory,
     *,
-    frames_per_transition: int = 30,
-    hold_frames: int = 6,
-    easing_strength: float = 0.35,
-) -> TransitionTimeline:
-    """Build one fixed-duration segment for every distinct matrix transition."""
-    if frames_per_transition < 2:
-        raise ValueError("frames_per_transition must be at least two.")
-    if hold_frames < 0:
-        raise ValueError("hold_frames must be non-negative.")
+    gamma_per_frame: float = 0.002,
+    camera_smoothing_gamma: float = 0.04,
+) -> GammaTimeline:
+    """Sample time uniformly in load and smooth the camera along ``camera_history``."""
+    loads = np.asarray(loads, dtype=float)
+    if loads.shape != (len(history.paths),):
+        raise ValueError("loads must contain one value for every history state.")
+    if not np.all(np.isfinite(loads)) or np.any(np.diff(loads) < 0):
+        raise ValueError("loads must be finite and non-decreasing.")
+    if camera_history.paths != history.paths:
+        raise ValueError("The tracked and camera histories must use identical paths.")
+    if camera_history.element_index != history.element_index:
+        raise ValueError("The tracked and camera histories must use one element.")
+    if gamma_per_frame <= 0:
+        raise ValueError("gamma_per_frame must be positive.")
+    if camera_smoothing_gamma < 0:
+        raise ValueError("camera_smoothing_gamma must be non-negative.")
+
     change_mask = np.r_[
         True,
         np.any(history.matrices[1:] != history.matrices[:-1], axis=(1, 2)),
     ]
     node_indices = np.flatnonzero(change_mask)
     node_coordinates = history.poincare_coordinates()[node_indices]
-    nodes = node_coordinates[:, 0] + 1j * node_coordinates[:, 1]
 
-    segments: list[int] = []
-    progress_values: list[float] = []
-    centers: list[complex] = []
-    mesh_indices: list[int] = []
+    unique_loads, first_indices = np.unique(loads, return_index=True)
+    path_indices = np.r_[first_indices[1:] - 1, len(loads) - 1]
+    if len(unique_loads) < 2:
+        raise ValueError("The history must span at least two distinct loads.")
+    span = float(unique_loads[-1] - unique_loads[0])
+    frame_count = max(2, int(np.ceil(span / gamma_per_frame)) + 1)
+    frame_loads = np.linspace(unique_loads[0], unique_loads[-1], frame_count)
 
-    for _ in range(hold_frames):
-        segments.append(0)
-        progress_values.append(0)
-        centers.append(nodes[0])
-        mesh_indices.append(int(node_indices[0]))
-
-    for segment in range(len(nodes) - 1):
-        raw = np.arange(1, frames_per_transition + 1) / frames_per_transition
-        eased = eased_progress(raw, easing_strength)
-        geodesic = poincare_geodesic(nodes[segment], nodes[segment + 1], eased)
-        source_mesh = int(node_indices[segment])
-        target_mesh = int(node_indices[segment + 1])
-        mesh_for_segment = np.rint(
-            source_mesh + eased * (target_mesh - source_mesh)
-        ).astype(int)
-        segments.extend([segment] * frames_per_transition)
-        progress_values.extend(eased.tolist())
-        centers.extend(geodesic.tolist())
-        mesh_indices.extend(mesh_for_segment.tolist())
-        for _ in range(hold_frames):
-            segments.append(segment)
-            progress_values.append(1)
-            centers.append(nodes[segment + 1])
-            mesh_indices.append(target_mesh)
-
-    center_array = np.column_stack(
-        (np.asarray(centers).real, np.asarray(centers).imag)
+    upper = np.searchsorted(unique_loads, frame_loads, side="right")
+    lower = np.clip(upper - 1, 0, len(unique_loads) - 1)
+    upper = np.clip(upper, 0, len(unique_loads) - 1)
+    denominator = unique_loads[upper] - unique_loads[lower]
+    progress = np.divide(
+        frame_loads - unique_loads[lower],
+        denominator,
+        out=np.zeros_like(frame_loads),
+        where=denominator > 0,
     )
-    centered_current = mobius_to_origin(
-        center_array[:, 0] + 1j * center_array[:, 1],
-        center_array[:, 0] + 1j * center_array[:, 1],
+
+    camera_coordinates = camera_history.poincare_coordinates()[path_indices]
+    camera_nodes = camera_coordinates[:, 0] + 1j * camera_coordinates[:, 1]
+    camera_raw = np.asarray(
+        [
+            complex(poincare_geodesic(camera_nodes[lo], camera_nodes[hi], value))
+            for lo, hi, value in zip(lower, upper, progress, strict=True)
+        ]
     )
-    if not np.allclose(centered_current, 0, atol=1e-12):
-        raise RuntimeError("The generated Poincare timeline does not remain centered.")
-    return TransitionTimeline(
+    delta_gamma = float(frame_loads[1] - frame_loads[0])
+    camera = _gaussian_smooth(
+        camera_raw,
+        sigma_frames=camera_smoothing_gamma / delta_gamma,
+    )
+    if np.any(np.abs(camera) >= 1):
+        raise ValueError("The smoothed camera path left the Poincare disk.")
+    center_array = np.column_stack((camera.real, camera.imag))
+    t_node_counts = np.searchsorted(loads[node_indices], frame_loads, side="right")
+    t_node_counts = np.clip(t_node_counts, 1, len(node_indices))
+
+    return GammaTimeline(
         node_indices,
         node_coordinates,
-        np.asarray(segments, dtype=int),
-        np.asarray(progress_values),
+        path_indices,
+        frame_loads,
+        t_node_counts,
+        lower,
+        progress,
         center_array,
-        np.asarray(mesh_indices, dtype=int),
+        path_indices[lower],
     )
+
+
+def _gaussian_smooth(values: np.ndarray, *, sigma_frames: float) -> np.ndarray:
+    if sigma_frames < 0:
+        raise ValueError("sigma_frames must be non-negative.")
+    if sigma_frames < 0.5:
+        return np.asarray(values, dtype=complex).copy()
+    radius = int(np.ceil(3 * sigma_frames))
+    offsets = np.arange(-radius, radius + 1, dtype=float)
+    weights = np.exp(-0.5 * (offsets / sigma_frames) ** 2)
+    weights /= weights.sum()
+    padded = np.pad(np.asarray(values, dtype=complex), radius, mode="edge")
+    return np.convolve(padded, weights, mode="valid")
 
 
 def extract_poincare_grid_segments(
@@ -243,20 +290,7 @@ def extract_mesh_neighborhood(
         raise IndexError(
             f"Element {element_index} is outside a mesh with {len(triangles)} cells."
         )
-    target_nodes = set(triangles[element_index])
-    first_with_target = {
-        index
-        for index, triangle in enumerate(triangles)
-        if target_nodes.intersection(triangle)
-    }
-    first_ring = first_with_target - {element_index}
-    first_nodes = set(triangles[list(first_with_target)].reshape(-1))
-    through_second = {
-        index
-        for index, triangle in enumerate(triangles)
-        if first_nodes.intersection(triangle)
-    }
-    second_ring = through_second - first_with_target
+    second_ring, first_ring = _neighborhood_rings(triangles, element_index)
     center = points[triangles[element_index]].mean(axis=0)
 
     def polygons(indices: Sequence[int]) -> tuple[np.ndarray, ...]:
@@ -272,6 +306,138 @@ def extract_mesh_neighborhood(
     if not np.all(np.isfinite([lower, upper])):
         raise ValueError(f"Non-finite local mesh coordinates in {vtu_path}")
     return result
+
+
+def _neighborhood_rings(
+    triangles: np.ndarray,
+    element_index: int,
+) -> tuple[set[int], set[int]]:
+    target_nodes = set(triangles[element_index])
+    first_with_target = {
+        index
+        for index, triangle in enumerate(triangles)
+        if target_nodes.intersection(triangle)
+    }
+    first_ring = first_with_target - {element_index}
+    first_nodes = set(triangles[list(first_with_target)].reshape(-1))
+    through_second = {
+        index
+        for index, triangle in enumerate(triangles)
+        if first_nodes.intersection(triangle)
+    }
+    second_ring = through_second - first_with_target
+    return second_ring, first_ring
+
+
+def extract_periodic_mesh(
+    vtu_path: str | Path,
+    element_index: int,
+    load: float,
+    *,
+    box_size: float,
+    energy_field: str = "energy_field",
+) -> PeriodicMeshSnapshot:
+    """Wrap a sheared periodic mesh into a square fractional-coordinate box."""
+    if not np.isfinite(load) or box_size <= 0:
+        raise ValueError("load must be finite and box_size must be positive.")
+    data = VTUData(vtu_path)
+    points = np.asarray(data.points[:, :2], dtype=float)
+    triangles = np.asarray(data.triangles, dtype=int)
+    energies = _cell_energy_values(data, len(triangles), energy_field)
+    if not 0 <= element_index < len(triangles):
+        raise IndexError(
+            f"Element {element_index} is outside a mesh with {len(triangles)} cells."
+        )
+    if "refIndex" not in data.mesh.point_data:
+        raise KeyError(f"refIndex is required to locate the periodic origin in {vtu_path}")
+    reference_indices = np.asarray(data.mesh.point_data["refIndex"]).reshape(-1)
+    origin_candidates = points[reference_indices == 0]
+    if len(origin_candidates) == 0:
+        raise ValueError(f"No refIndex=0 periodic origin found in {vtu_path}")
+    origin = origin_candidates[0]
+    box = np.array([[box_size, load * box_size], [0.0, box_size]])
+    fractional = (points - origin) @ np.linalg.inv(box).T
+    wrapped = fractional - np.floor(fractional)
+
+    polygons = wrapped[triangles]
+    delta = polygons - polygons[:, :1]
+    polygons = polygons[:, :1] + delta - np.round(delta)
+    polygons -= np.floor(polygons.mean(axis=1))[:, None, :]
+    plotted_polygons, plotted_energies = _tile_triangles(polygons, energies)
+
+    second_ring, first_ring = _neighborhood_rings(triangles, element_index)
+    region_cells = sorted(second_ring | first_ring | {element_index})
+    region_nodes = np.unique(triangles[region_cells])
+    target = wrapped[triangles[element_index]]
+    target = target[:1] + (target - target[:1]) - np.round(target - target[:1])
+    target_center = target.mean(axis=0)
+    region = wrapped[region_nodes]
+    region = target_center + (region - target_center) - np.round(region - target_center)
+    padding = 0.008
+    lower = region.min(axis=0) - padding
+    upper = region.max(axis=0) + padding
+    rectangle = np.array(
+        [
+            [lower[0], lower[1]],
+            [upper[0], lower[1]],
+            [upper[0], upper[1]],
+            [lower[0], upper[1]],
+            [lower[0], lower[1]],
+        ]
+    )
+    outlines = _periodic_curve_copies(rectangle)
+    return PeriodicMeshSnapshot(
+        plotted_polygons,
+        plotted_energies,
+        outlines,
+        Path(vtu_path),
+    )
+
+
+def _cell_energy_values(
+    data: VTUData,
+    cell_count: int,
+    energy_field: str,
+) -> np.ndarray:
+    energies, location, _ = data.field(energy_field)
+    energies = np.asarray(energies, dtype=float)
+    if location != "cell" or energies.shape != (cell_count,):
+        raise ValueError(f"{energy_field} must contain one value per triangle.")
+    if np.any(~np.isfinite(energies)) or np.any(energies < 0):
+        raise ValueError(f"{energy_field} must contain finite non-negative values.")
+    return energies
+
+
+def _tile_triangles(
+    polygons: np.ndarray,
+    values: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    plotted: list[np.ndarray] = []
+    plotted_values: list[np.ndarray] = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            shifted = polygons + np.array([dx, dy])
+            lower = shifted.min(axis=1)
+            upper = shifted.max(axis=1)
+            inside = np.all(upper >= 0, axis=1) & np.all(lower <= 1, axis=1)
+            if np.any(inside):
+                plotted.append(shifted[inside])
+                plotted_values.append(values[inside])
+    if not plotted:
+        raise RuntimeError("Periodic wrapping produced no visible triangles.")
+    return np.concatenate(plotted), np.concatenate(plotted_values)
+
+
+def _periodic_curve_copies(curve: np.ndarray) -> tuple[np.ndarray, ...]:
+    copies: list[np.ndarray] = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            shifted = curve + np.array([dx, dy])
+            if np.all(shifted.max(axis=0) >= 0) and np.all(shifted.min(axis=0) <= 1):
+                copies.append(shifted)
+    if not copies:
+        raise RuntimeError("Periodic wrapping produced no visible region outline.")
+    return tuple(copies)
 
 
 def load_mesh_neighborhoods(
@@ -291,6 +457,26 @@ def load_mesh_neighborhoods(
     return tuple(snapshots)
 
 
+def load_periodic_meshes(
+    vtu_paths: Sequence[str | Path],
+    loads: Sequence[float],
+    element_index: int,
+    *,
+    box_size: float,
+    progress_every: int = 50,
+) -> tuple[PeriodicMeshSnapshot, ...]:
+    if len(vtu_paths) != len(loads):
+        raise ValueError("One load is required for every periodic mesh snapshot.")
+    snapshots: list[PeriodicMeshSnapshot] = []
+    for index, (path, load) in enumerate(zip(vtu_paths, loads, strict=True)):
+        snapshots.append(
+            extract_periodic_mesh(path, element_index, load, box_size=box_size)
+        )
+        if progress_every and (index + 1) % progress_every == 0:
+            print(f"loaded periodic meshes: {index + 1}/{len(vtu_paths)}", flush=True)
+    return tuple(snapshots)
+
+
 def mesh_half_width(snapshots: Sequence[MeshNeighborhood], margin: float = 1.06) -> float:
     if not snapshots:
         raise ValueError("At least one mesh snapshot is required.")
@@ -303,7 +489,7 @@ def mesh_half_width(snapshots: Sequence[MeshNeighborhood], margin: float = 1.06)
 
 def render_poincare_animation(
     history: ElementMatrixHistory,
-    timeline: TransitionTimeline,
+    timeline: GammaTimeline,
     output_path: str | Path,
     *,
     ffmpeg_executable: str | Path,
@@ -313,7 +499,7 @@ def render_poincare_animation(
     grid_depth: int = 10,
     grid_samples: int = 50,
 ) -> Path:
-    """Render T and an optional reconstructed total path while centring on T."""
+    """Render T and the reconstructed path with a smoothed moving camera."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if reconstructed_history is not None:
@@ -333,6 +519,7 @@ def render_poincare_animation(
     reconstructed_path = None
     if reconstructed_history is not None:
         coordinates = reconstructed_history.poincare_coordinates()
+        coordinates = coordinates[timeline.path_history_indices]
         reconstructed_nodes = coordinates[:, 0] + 1j * coordinates[:, 1]
         reconstructed_path = tuple(
             poincare_geodesic(
@@ -361,15 +548,17 @@ def render_poincare_animation(
     reconstructed_current = ax.scatter(
         [], [], s=58, facecolor="#2166ac", edgecolor="black", zorder=12
     )
-    ax.scatter([0], [0], s=72, facecolor="#d73027", edgecolor="black", zorder=12)
-    status = ax.text(
-        0.5,
-        0.98,
+    t_current = ax.scatter(
+        [], [], s=72, facecolor="#d73027", edgecolor="black", zorder=13
+    )
+    gamma_label = ax.text(
+        0.03,
+        0.97,
         "",
         transform=ax.transAxes,
-        ha="center",
+        ha="left",
         va="top",
-        fontsize=10,
+        fontsize=11,
         bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.9},
         zorder=30,
     )
@@ -394,34 +583,28 @@ def render_poincare_animation(
                 label=r"$F_E T$",
             )
         )
-    ax.legend(handles=handles, loc="upper left", frameon=False)
+    ax.legend(handles=handles, loc="lower left", frameon=False)
 
     writer = _writer(ffmpeg_executable, fps)
     with writer.saving(fig, str(output_path), dpi):
         for frame in range(timeline.frame_count):
             center = timeline.center_complex[frame]
-            segment = int(timeline.segment_indices[frame])
-            progress = float(timeline.segment_progress[frame])
+            completed_count = int(timeline.t_node_counts[frame])
             transformed_grid = [complex_to_xy(mobius_to_origin(curve, center)) for curve in grid]
             grid_collection.set_segments(transformed_grid)
 
-            traced = [t_path[index] for index in range(segment)]
-            partial_progress = np.linspace(0, progress, max(2, int(27 * progress) + 2))
-            traced.append(
-                poincare_geodesic(nodes[segment], nodes[segment + 1], partial_progress)
-            )
+            traced = list(t_path[: max(0, completed_count - 1)])
             t_collection.set_segments(
                 [complex_to_xy(mobius_to_origin(curve, center)) for curve in traced]
             )
-            completed_count = segment + 1 + int(np.isclose(progress, 1))
             completed = mobius_to_origin(nodes[:completed_count], center)
             visited.set_offsets(complex_to_xy(completed))
+            t_current.set_offsets(
+                complex_to_xy(mobius_to_origin(nodes[completed_count - 1], center))
+            )
             if reconstructed_nodes is not None and reconstructed_path is not None:
-                source_index = int(timeline.node_history_indices[segment])
-                target_index = int(timeline.node_history_indices[segment + 1])
-                history_position = source_index + progress * (target_index - source_index)
-                lower = min(int(np.floor(history_position)), len(reconstructed_nodes) - 1)
-                fraction = history_position - lower
+                lower = int(timeline.path_lower_indices[frame])
+                fraction = float(timeline.path_progress[frame])
                 reconstructed_traced = list(reconstructed_path[:lower])
                 if lower < len(reconstructed_nodes) - 1 and fraction > 1e-12:
                     reconstructed_traced.append(
@@ -449,7 +632,7 @@ def render_poincare_animation(
                 reconstructed_current.set_offsets(
                     complex_to_xy(mobius_to_origin(current, center))
                 )
-            status.set_text(f"element {history.element_index}    transition {segment + 1}/{len(nodes) - 1}")
+            gamma_label.set_text(rf"$\gamma = {timeline.frame_loads[frame]:.2f}$")
             writer.grab_frame(facecolor="white")
             if (frame + 1) % 30 == 0:
                 print(f"Poincare frames: {frame + 1}/{timeline.frame_count}", flush=True)
@@ -459,7 +642,7 @@ def render_poincare_animation(
 
 def render_mesh_animation(
     history: ElementMatrixHistory,
-    timeline: TransitionTimeline,
+    timeline: GammaTimeline,
     snapshots: Sequence[MeshNeighborhood],
     output_path: str | Path,
     *,
@@ -509,24 +692,122 @@ def render_mesh_animation(
     return output_path
 
 
+def render_periodic_mesh_animation(
+    timeline: GammaTimeline,
+    vtu_paths: Sequence[str | Path],
+    loads: Sequence[float],
+    element_index: int,
+    output_path: str | Path,
+    *,
+    box_size: float,
+    ffmpeg_executable: str | Path,
+    fps: int = 30,
+    dpi: int = 120,
+    energy_field: str = "energy_field",
+    energy_sample_count: int = 64,
+) -> Path:
+    """Stream the full energy-coloured mesh inside a square periodic box."""
+    if len(vtu_paths) != len(loads):
+        raise ValueError("One load is required for every periodic mesh state.")
+    if len(vtu_paths) <= int(np.max(timeline.mesh_history_indices)):
+        raise ValueError("Periodic mesh states do not cover the animation timeline.")
+    if energy_sample_count < 1:
+        raise ValueError("energy_sample_count must be positive.")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sample_indices = np.unique(
+        np.linspace(
+            0,
+            len(vtu_paths) - 1,
+            min(energy_sample_count, len(vtu_paths)),
+            dtype=int,
+        )
+    )
+    samples: list[np.ndarray] = []
+    for index in sample_indices:
+        data = VTUData(vtu_paths[int(index)])
+        cell_count = len(data.triangles)
+        values = _cell_energy_values(data, cell_count, energy_field)
+        stride = max(1, len(values) // 4096)
+        samples.append(values[::stride])
+    upper_energy = float(np.quantile(np.concatenate(samples), 0.995))
+    if upper_energy <= 0:
+        raise ValueError("The periodic mesh has no positive energy values.")
+    norm = PowerNorm(gamma=0.5, vmin=0, vmax=upper_energy, clip=True)
+
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=dpi)
+    fig.patch.set_alpha(0)
+    ax.set_facecolor("none")
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    energy = PolyCollection([], cmap="magma", norm=norm, edgecolors="none")
+    region = LineCollection(
+        [], colors="#d73027", linewidths=4.0, linestyles="--", zorder=5
+    )
+    ax.add_collection(energy)
+    ax.add_collection(region)
+    ax.add_patch(
+        Rectangle((0, 0), 1, 1, fill=False, edgecolor="0.2", linewidth=1.8, zorder=6)
+    )
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_aspect("equal")
+    ax.set_axis_off()
+
+    writer = _alpha_writer(ffmpeg_executable, fps)
+    previous_index = -1
+    snapshot: PeriodicMeshSnapshot | None = None
+    with writer.saving(fig, str(output_path), dpi):
+        for frame, mesh_index in enumerate(timeline.mesh_history_indices):
+            mesh_index = int(mesh_index)
+            if mesh_index != previous_index:
+                snapshot = extract_periodic_mesh(
+                    vtu_paths[mesh_index],
+                    element_index,
+                    loads[mesh_index],
+                    box_size=box_size,
+                    energy_field=energy_field,
+                )
+                previous_index = mesh_index
+            if snapshot is None:
+                raise RuntimeError("No periodic mesh snapshot was loaded.")
+            energy.set_verts(snapshot.polygons)
+            energy.set_array(snapshot.energies)
+            region.set_segments(snapshot.region_outlines)
+            writer.grab_frame(transparent=True, facecolor="none")
+            if (frame + 1) % 30 == 0:
+                print(
+                    f"periodic mesh frames: {frame + 1}/{timeline.frame_count}",
+                    flush=True,
+                )
+    plt.close(fig)
+    return output_path
+
+
 def compose_picture_in_picture(
     poincare_video: str | Path,
     mesh_video: str | Path,
+    periodic_mesh_video: str | Path,
     output_path: str | Path,
     *,
     ffmpeg_executable: str | Path,
     inset_fraction: float = 0.34,
-    margin: int = 24,
+    periodic_inset_fraction: float = 0.30,
+    margin: int = 60,
 ) -> Path:
-    """Place the mesh video in the upper-right corner of the Poincare video."""
-    if not 0.1 <= inset_fraction <= 0.6:
-        raise ValueError("inset_fraction must lie inside [0.1, 0.6].")
+    """Place local and full periodic mesh videos along the right edge."""
+    invalid_inset = not 0.1 <= inset_fraction <= 0.6
+    invalid_periodic_inset = not 0.1 <= periodic_inset_fraction <= 0.6
+    if invalid_inset or invalid_periodic_inset:
+        raise ValueError("Inset fractions must lie inside [0.1, 0.6].")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     scale_expression = (
         f"[1:v]format=rgba,scale=w=trunc(iw*{inset_fraction}/2)*2:"
-        f"h=trunc(ih*{inset_fraction}/2)*2[mesh];"
-        f"[0:v][mesh]overlay=W-w-{margin}:{margin}:shortest=1[out]"
+        f"h=trunc(ih*{inset_fraction}/2)*2[local];"
+        f"[2:v]format=rgba,scale=w=trunc(iw*{periodic_inset_fraction}/2)*2:"
+        f"h=trunc(ih*{periodic_inset_fraction}/2)*2[periodic];"
+        f"[0:v][local]overlay=W-w-{margin}:{margin}:shortest=1[withlocal];"
+        f"[withlocal][periodic]overlay=W-w-{margin}:H-h-{margin}:shortest=1[out]"
     )
     command = [
         str(ffmpeg_executable),
@@ -535,6 +816,8 @@ def compose_picture_in_picture(
         str(poincare_video),
         "-i",
         str(mesh_video),
+        "-i",
+        str(periodic_mesh_video),
         "-filter_complex",
         scale_expression,
         "-map",

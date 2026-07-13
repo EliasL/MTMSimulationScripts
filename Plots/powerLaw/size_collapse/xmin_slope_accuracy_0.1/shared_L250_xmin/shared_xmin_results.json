@@ -1,0 +1,200 @@
+{
+  "inventory": {
+    "250": 6,
+    "200": 6,
+    "150": 10,
+    "100": 10,
+    "50": 10
+  },
+  "seeds_per_size": 6,
+  "xmin_source_size": 250,
+  "xmin_strategy": "slope",
+  "uncertainty_accuracy": 0.05,
+  "bootstrap_sets": 99,
+  "results": {
+    "second_order": {
+      "pre": {
+        "shared_xmin": 0.008565072809508086,
+        "tail_count": {
+          "50": 266,
+          "100": 786,
+          "150": 1283,
+          "200": 1838,
+          "250": 3259
+        },
+        "collapse": {
+          "x": 1.2316666666666667,
+          "dimension": 0.7933333333333333,
+          "quality": 0.010501288100289958,
+          "optimum_on_search_boundary": false
+        },
+        "collapse_without_L50": {
+          "x": 1.435,
+          "dimension": 0.89,
+          "quality": 0.008390770448789456,
+          "optimum_on_search_boundary": false
+        }
+      },
+      "post": {
+        "shared_xmin": 0.007095755543349724,
+        "tail_count": {
+          "50": 354,
+          "100": 659,
+          "150": 1220,
+          "200": 1832,
+          "250": 3003
+        },
+        "collapse": {
+          "x": 1.1783333333333332,
+          "dimension": 0.9783333333333333,
+          "quality": 0.014744802895230169,
+          "optimum_on_search_boundary": false
+        },
+        "collapse_without_L50": {
+          "x": 1.2583333333333333,
+          "dimension": 0.8683333333333333,
+          "quality": 0.011523912376035329,
+          "optimum_on_search_boundary": false
+        }
+      }
+    },
+    "first_order": {
+      "pre": {
+        "shared_xmin": 0.008752909370934779,
+        "tail_count": {
+          "50": 266,
+          "100": 783,
+          "150": 1280,
+          "200": 1835,
+          "250": 3040
+        },
+        "collapse": {
+          "x": 1.1966666666666665,
+          "dimension": 0.795,
+          "quality": 0.009755483064356304,
+          "optimum_on_search_boundary": false
+        },
+        "collapse_without_L50": {
+          "x": 1.3633333333333333,
+          "dimension": 0.8666666666666667,
+          "quality": 0.0072823847961243585,
+          "optimum_on_search_boundary": false
+        }
+      },
+      "post": {
+        "shared_xmin": 0.006818739171981812,
+        "tail_count": {
+          "50": 355,
+          "100": 661,
+          "150": 1221,
+          "200": 1843,
+          "250": 3595
+        },
+        "collapse": {
+          "x": 1.24,
+          "dimension": 0.6816666666666666,
+          "quality": 0.018623160795937167,
+          "optimum_on_search_boundary": false
+        },
+        "collapse_without_L50": {
+          "x": 1.4266666666666667,
+          "dimension": 0.8916666666666666,
+          "quality": 0.013985343619531965,
+          "optimum_on_search_boundary": false
+        }
+      }
+    },
+    "previous_energy": {
+      "pre": {
+        "shared_xmin": 0.0026661537037248784,
+        "tail_count": {
+          "50": 297,
+          "100": 846,
+          "150": 1345,
+          "200": 1853,
+          "250": 2472
+        },
+        "collapse": {
+          "x": 1.0883333333333334,
+          "dimension": 0.8583333333333333,
+          "quality": 0.010490975075571346,
+          "optimum_on_search_boundary": false
+        },
+        "collapse_without_L50": {
+          "x": 1.1816666666666664,
+          "dimension": 0.8866666666666666,
+          "quality": 0.007731208749016739,
+          "optimum_on_search_boundary": false
+        }
+      },
+      "post": {
+        "shared_xmin": 0.5710125591027195,
+        "tail_count": {
+          "50": 136,
+          "100": 295,
+          "150": 532,
+          "200": 827,
+          "250": 1043
+        },
+        "collapse": {
+          "x": 1.1516666666666666,
+          "dimension": 0.6000000000000001,
+          "quality": 0.014560556978252712,
+          "optimum_on_search_boundary": false
+        },
+        "collapse_without_L50": {
+          "x": 1.2966666666666666,
+          "dimension": 1.0933333333333335,
+          "quality": 0.010062629060328267,
+          "optimum_on_search_boundary": false
+        }
+      }
+    },
+    "initial_guess_energy": {
+      "pre": {
+        "shared_xmin": 9.917604432560826e-06,
+        "tail_count": {
+          "50": 355,
+          "100": 1111,
+          "150": 2043,
+          "200": 3151,
+          "250": 4929
+        },
+        "collapse": {
+          "x": 0.8483333333333334,
+          "dimension": 0.29333333333333333,
+          "quality": 0.01611829801276215,
+          "optimum_on_search_boundary": false
+        },
+        "collapse_without_L50": {
+          "x": 0.6849999999999999,
+          "dimension": 0.4233333333333333,
+          "quality": 0.01430994453601327,
+          "optimum_on_search_boundary": false
+        }
+      },
+      "post": {
+        "shared_xmin": 4.047495539686126e-06,
+        "tail_count": {
+          "50": 431,
+          "100": 1027,
+          "150": 1838,
+          "200": 2886,
+          "250": 8064
+        },
+        "collapse": {
+          "x": 1.5299999999999998,
+          "dimension": 0.2875,
+          "quality": 0.03413003743105346,
+          "optimum_on_search_boundary": false
+        },
+        "collapse_without_L50": {
+          "x": 1.6683333333333334,
+          "dimension": 0.6483333333333333,
+          "quality": 0.02855038150542143,
+          "optimum_on_search_boundary": false
+        }
+      }
+    }
+  }
+}

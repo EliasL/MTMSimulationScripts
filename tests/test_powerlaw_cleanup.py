@@ -8,12 +8,19 @@ from unittest import mock
 import numpy as np
 import pandas as pd
 
-from MTMath.evaluatePowerlawFit import Truncated_Power_Law
+from MTMath.evaluatePowerlawFit import (
+    Truncated_Power_Law,
+    evaluate_xmin,
+    evaluate_xmin_distances,
+)
 from Plotting.energyDropCalculations import calculate_energy_step_data
 from Plotting.findXmin import (
+    DEFAULT_XMIN_COMPARISON_STRATEGIES,
     XMIN_STRATEGIES,
+    _log_xmin_candidates,
     compare_xmin_strategies,
     find_xmin_dks_from_results,
+    find_xmin_global_min,
 )
 from Plotting.plotPowerLaw import get_energy_drops, make_fit
 
@@ -116,9 +123,57 @@ class EnergyDropTests(unittest.TestCase):
 class XminCleanupTests(unittest.TestCase):
     def test_all_comparison_strategies_are_registered(self):
         self.assertTrue(
-            {"min_ks", "dip", "max_p", "plateau", "derivative", "dks", "sizer", "sylvain"}
+            {
+                "min_ks",
+                "global_min",
+                "dip",
+                "max_p",
+                "plateau",
+                "derivative",
+                "dks",
+                "slope",
+                "sizer",
+                "sylvain",
+            }
             <= set(XMIN_STRATEGIES)
         )
+
+    def test_default_comparison_runs_global_min_last(self):
+        self.assertEqual(
+            DEFAULT_XMIN_COMPARISON_STRATEGIES,
+            ("plateau", "slope", "global_min"),
+        )
+
+    def test_log_candidate_ceiling_leaves_one_decade_of_tail(self):
+        _, candidates = _log_xmin_candidates(
+            [1.0, 2.0, 100.0], samples_per_decade=10
+        )
+        self.assertAlmostEqual(candidates[-1], 10.0)
+
+    def test_global_min_samples_every_tenth_observed_candidate(self):
+        captured = {}
+
+        def fake_evaluate_xmin(_drops, candidates, **_kwargs):
+            captured.setdefault("candidates", np.asarray(candidates))
+            return -np.asarray(candidates), [[] for _ in candidates], np.ones(
+                len(candidates), dtype=bool
+            )
+
+        with mock.patch(
+            "Plotting.findXmin.evaluate_xmin_distances",
+            side_effect=fake_evaluate_xmin,
+        ):
+            xmin, _ = find_xmin_global_min(np.arange(1.0, 1001.0))
+
+        np.testing.assert_allclose(captured["candidates"], np.arange(1.0, 101.0, 10.0))
+        self.assertEqual(xmin, 91.0)
+
+    def test_lightweight_xmin_batches_match_full_fixed_xmin_fits(self):
+        drops = np.geomspace(1.0, 100.0, 80)
+        candidates = np.array([1.0, 2.0, 5.0])
+        full_fits = evaluate_xmin(drops, candidates)
+        distances, _, _ = evaluate_xmin_distances(drops, candidates)
+        np.testing.assert_allclose(distances, [fit.D for fit in full_fits], atol=1e-12)
 
     def test_dks_reuses_existing_grid(self):
         xmin = find_xmin_dks_from_results(

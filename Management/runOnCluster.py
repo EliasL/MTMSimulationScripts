@@ -263,8 +263,9 @@ def build_on_all_servers(uploadOnly=False, onlyPrefered=False):
     if onlyPrefered:
         servers = Servers.preferedServers
     else:
-        servers = Servers.servers
+        servers = Servers.run_servers
     with ThreadPoolExecutor(max_workers=len(servers)) as executor:
+        failed_servers = []
         # Future to server mapping
         future_to_server = {
             executor.submit(build_on_server, server, uploadOnly): server
@@ -277,7 +278,10 @@ def build_on_all_servers(uploadOnly=False, onlyPrefered=False):
                 future.result()  # Get the result from future
             except Exception as exc:
                 print(f"{server} generated an exception: {exc}")
-                continue
+                failed_servers.append(server)
+
+    if failed_servers:
+        raise RuntimeError(f"Upload/build failed on: {failed_servers}")
 
 
 if __name__ == "__main__":
