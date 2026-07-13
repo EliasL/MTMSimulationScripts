@@ -4,3 +4,5 @@ media
 bootstrapData
 .DS_Store
 _*
+Plots/powerLaw/**/cache/
+Plots/powerLaw/*_cache/
