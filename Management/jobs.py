@@ -890,7 +890,7 @@ def umutJobs(loadIncrement=2e-5):
     return all_configs, all_labels
 
 
-def size_scaling_job():
+def size_scaling_job(reconnection="none"):
     """
     Generates a job for size scaling tests.
     """
@@ -913,6 +913,7 @@ def size_scaling_job():
             nrThreads=threads,
             minimizer="LBFGS",
             LBFGSEpsx=1e-6,
+            reconnectionMethod=reconnection,
             # epsR=1e-6,
             experiment="simpleShear",
         )

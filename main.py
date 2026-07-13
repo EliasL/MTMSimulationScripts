@@ -500,23 +500,83 @@ def runOnLocalMachine():
     )
 
 
-def startJobs():
-    #build_on_all_servers(onlyPrefered=False)
+def edgeFlipJobPlan():
+    size_groups, _ = size_scaling_job(reconnection="edgeFlip")
+    cluster_groups = list(size_groups)
+    local_configs = []
+    local_labels = []
 
     for batch in range(1, 9):
-        configs, labels = sylvainBatches(batch, reconnection="none")
-        if not configs:
-            continue
-
-        print(f"Batch {batch}: distributing jobs and searching for existing folders...")
-        servers_confs = distributeConfigs(
-            configs, configs[0].nrThreads, allowWaiting=True, onlyPrefered=False
+        is_local = batch in (5, 8)
+        configs, labels = sylvainBatches(
+            batch,
+            threads=2 if is_local else 3,
+            reconnection="edgeFlip",
         )
-        for server, confs in servers_confs.items():
-            print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
-            if confs:
-                queueJobs(server, confs, build=False, jobCopies=100)
-                pass
+        if is_local:
+            local_configs.extend(configs)
+            local_labels.extend(f"Sylvain batch {batch}, {label}" for label in labels)
+        else:
+            cluster_groups.append(configs)
+
+    cluster_configs = [config for group in cluster_groups for config in group]
+    all_configs = cluster_configs + local_configs
+    if len(cluster_configs) != 74 or len(local_configs) != 8:
+        raise RuntimeError("Unexpected number of edge-flip jobs.")
+    if len({config.name for config in all_configs}) != len(all_configs):
+        raise RuntimeError("The edge-flip job plan contains duplicate configuration names.")
+    if any(config.reconnectionMethod != "edgeFlip" for config in all_configs):
+        raise RuntimeError("The edge-flip job plan contains another reconnection method.")
+    if any(config.nrThreads != 2 for config in local_configs):
+        raise RuntimeError("Every local job must use exactly two threads.")
+
+    return cluster_groups, local_configs, local_labels
+
+
+def queueClusterConfigs(configs, jobCopies=100, submit=False):
+    if not configs:
+        return
+    nr_threads = configs[0].nrThreads
+    if any(config.nrThreads != nr_threads for config in configs):
+        raise ValueError("All configurations distributed together must use the same thread count.")
+
+    servers_confs = distributeConfigs(
+        configs, nr_threads, allowWaiting=True, onlyPrefered=False
+    )
+    for server, confs in servers_confs.items():
+        print(f"Server: {get_server_short_name(server)}, jobs: {len(confs)}")
+        for config in confs:
+            print(f"  {config.name}")
+        if confs and submit:
+            queueJobs(server, confs, build=False, jobCopies=jobCopies)
+
+
+def configsByThreads(cluster_groups):
+    configs_by_threads = {}
+    for config in (config for group in cluster_groups for config in group):
+        configs_by_threads.setdefault(config.nrThreads, []).append(config)
+    return configs_by_threads
+
+
+def startJobs(submit=False):
+    cluster_groups, local_configs, local_labels = edgeFlipJobPlan()
+    print(f"{'SUBMITTING' if submit else 'DRY RUN'} edge-flip jobs")
+    for configs in configsByThreads(cluster_groups).values():
+        queueClusterConfigs(configs, jobCopies=100, submit=submit)
+
+    print(f"Local jobs: {len(local_configs)}")
+    for config in local_configs:
+        print(f"  {config.name}")
+
+    if submit:
+        run_many_locally(
+            local_configs,
+            taskNames=local_labels,
+            maxWorkers=4,
+            resume=False,
+        )
+    else:
+        print("DRY RUN COMPLETE: no jobs were submitted or started")
 
 
 def stopJobs(configs=None):
@@ -616,7 +676,7 @@ def cleanDescartes(dryRun=True, force=False):
 
 if __name__ == "__main__":
     ONLYPREFERED = False
-    # build_on_all_servers(onlyPrefered=ONLYPREFERED)
+    build_on_all_servers(uploadOnly=True, onlyPrefered=ONLYPREFERED)
     # 150x150 64 threads -> 23 days
     # 150x150 32 threads -> 22 days
     # 150x150 16 threads -> 16 days
@@ -632,8 +692,7 @@ if __name__ == "__main__":
     # cleanData()
     #startJobs()
 
-
-    runOnLocalMachine()
+    # runOnLocalMachine()
     #restartLongShearWithMinimizationLog()
 
     # plotPropperJob()

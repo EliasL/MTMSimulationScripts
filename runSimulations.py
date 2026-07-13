@@ -12,7 +12,7 @@ def task(config, **kwargs):
     run_locally(config, **kwargs)
 
 
-def run_many_locally(configs, taskNames=None, build=True, **kwargs):
+def run_many_locally(configs, taskNames=None, build=True, maxWorkers=None, **kwargs):
     def _is_grouped(items):
         return (
             isinstance(items, (list, tuple))
@@ -47,7 +47,7 @@ def run_many_locally(configs, taskNames=None, build=True, **kwargs):
     kwargs["build"] = False
 
     # Use ThreadPoolExecutor to run the task on different threads
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=maxWorkers) as executor:
         # Partial function with additional kwargs
         def task_with_name(config, taskName):
             local_kwargs = dict(kwargs)

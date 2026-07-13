@@ -12,8 +12,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import FFMpegWriter
 from matplotlib.collections import LineCollection, PolyCollection
+from matplotlib.colors import PowerNorm
 from matplotlib.lines import Line2D
-from matplotlib.patches import Circle
+from matplotlib.patches import Circle, Rectangle
 
 from MTMath.poincareEnergy import drawPoincareGrid, prepPoincareFig
 from Plotting.element_tracking import ElementMatrixHistory
@@ -87,6 +88,24 @@ class MeshNeighborhood:
         polygons = self.outer_polygons + self.neighbor_polygons + (self.target_polygon,)
         points = np.concatenate(polygons)
         return points.min(axis=0), points.max(axis=0)
+
+
+@dataclass(frozen=True)
+class PeriodicMeshSnapshot:
+    """One full mesh wrapped into a square periodic cell."""
+
+    polygons: np.ndarray
+    energies: np.ndarray
+    region_outlines: tuple[np.ndarray, ...]
+    source_path: Path
+
+    def __post_init__(self) -> None:
+        if self.polygons.ndim != 3 or self.polygons.shape[1:] != (3, 2):
+            raise ValueError("polygons must have shape (number of triangles, 3, 2).")
+        if self.energies.shape != (len(self.polygons),):
+            raise ValueError("One energy value is required for every plotted triangle.")
+        if not np.all(np.isfinite(self.polygons)) or not np.all(np.isfinite(self.energies)):
+            raise ValueError(f"Non-finite periodic-mesh data in {self.source_path}")
 
 
 def mobius_to_origin(z: np.ndarray | complex, center: complex) -> np.ndarray:
@@ -271,20 +290,7 @@ def extract_mesh_neighborhood(
         raise IndexError(
             f"Element {element_index} is outside a mesh with {len(triangles)} cells."
         )
-    target_nodes = set(triangles[element_index])
-    first_with_target = {
-        index
-        for index, triangle in enumerate(triangles)
-        if target_nodes.intersection(triangle)
-    }
-    first_ring = first_with_target - {element_index}
-    first_nodes = set(triangles[list(first_with_target)].reshape(-1))
-    through_second = {
-        index
-        for index, triangle in enumerate(triangles)
-        if first_nodes.intersection(triangle)
-    }
-    second_ring = through_second - first_with_target
+    second_ring, first_ring = _neighborhood_rings(triangles, element_index)
     center = points[triangles[element_index]].mean(axis=0)
 
     def polygons(indices: Sequence[int]) -> tuple[np.ndarray, ...]:
@@ -302,6 +308,138 @@ def extract_mesh_neighborhood(
     return result
 
 
+def _neighborhood_rings(
+    triangles: np.ndarray,
+    element_index: int,
+) -> tuple[set[int], set[int]]:
+    target_nodes = set(triangles[element_index])
+    first_with_target = {
+        index
+        for index, triangle in enumerate(triangles)
+        if target_nodes.intersection(triangle)
+    }
+    first_ring = first_with_target - {element_index}
+    first_nodes = set(triangles[list(first_with_target)].reshape(-1))
+    through_second = {
+        index
+        for index, triangle in enumerate(triangles)
+        if first_nodes.intersection(triangle)
+    }
+    second_ring = through_second - first_with_target
+    return second_ring, first_ring
+
+
+def extract_periodic_mesh(
+    vtu_path: str | Path,
+    element_index: int,
+    load: float,
+    *,
+    box_size: float,
+    energy_field: str = "energy_field",
+) -> PeriodicMeshSnapshot:
+    """Wrap a sheared periodic mesh into a square fractional-coordinate box."""
+    if not np.isfinite(load) or box_size <= 0:
+        raise ValueError("load must be finite and box_size must be positive.")
+    data = VTUData(vtu_path)
+    points = np.asarray(data.points[:, :2], dtype=float)
+    triangles = np.asarray(data.triangles, dtype=int)
+    energies = _cell_energy_values(data, len(triangles), energy_field)
+    if not 0 <= element_index < len(triangles):
+        raise IndexError(
+            f"Element {element_index} is outside a mesh with {len(triangles)} cells."
+        )
+    if "refIndex" not in data.mesh.point_data:
+        raise KeyError(f"refIndex is required to locate the periodic origin in {vtu_path}")
+    reference_indices = np.asarray(data.mesh.point_data["refIndex"]).reshape(-1)
+    origin_candidates = points[reference_indices == 0]
+    if len(origin_candidates) == 0:
+        raise ValueError(f"No refIndex=0 periodic origin found in {vtu_path}")
+    origin = origin_candidates[0]
+    box = np.array([[box_size, load * box_size], [0.0, box_size]])
+    fractional = (points - origin) @ np.linalg.inv(box).T
+    wrapped = fractional - np.floor(fractional)
+
+    polygons = wrapped[triangles]
+    delta = polygons - polygons[:, :1]
+    polygons = polygons[:, :1] + delta - np.round(delta)
+    polygons -= np.floor(polygons.mean(axis=1))[:, None, :]
+    plotted_polygons, plotted_energies = _tile_triangles(polygons, energies)
+
+    second_ring, first_ring = _neighborhood_rings(triangles, element_index)
+    region_cells = sorted(second_ring | first_ring | {element_index})
+    region_nodes = np.unique(triangles[region_cells])
+    target = wrapped[triangles[element_index]]
+    target = target[:1] + (target - target[:1]) - np.round(target - target[:1])
+    target_center = target.mean(axis=0)
+    region = wrapped[region_nodes]
+    region = target_center + (region - target_center) - np.round(region - target_center)
+    padding = 0.008
+    lower = region.min(axis=0) - padding
+    upper = region.max(axis=0) + padding
+    rectangle = np.array(
+        [
+            [lower[0], lower[1]],
+            [upper[0], lower[1]],
+            [upper[0], upper[1]],
+            [lower[0], upper[1]],
+            [lower[0], lower[1]],
+        ]
+    )
+    outlines = _periodic_curve_copies(rectangle)
+    return PeriodicMeshSnapshot(
+        plotted_polygons,
+        plotted_energies,
+        outlines,
+        Path(vtu_path),
+    )
+
+
+def _cell_energy_values(
+    data: VTUData,
+    cell_count: int,
+    energy_field: str,
+) -> np.ndarray:
+    energies, location, _ = data.field(energy_field)
+    energies = np.asarray(energies, dtype=float)
+    if location != "cell" or energies.shape != (cell_count,):
+        raise ValueError(f"{energy_field} must contain one value per triangle.")
+    if np.any(~np.isfinite(energies)) or np.any(energies < 0):
+        raise ValueError(f"{energy_field} must contain finite non-negative values.")
+    return energies
+
+
+def _tile_triangles(
+    polygons: np.ndarray,
+    values: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    plotted: list[np.ndarray] = []
+    plotted_values: list[np.ndarray] = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            shifted = polygons + np.array([dx, dy])
+            lower = shifted.min(axis=1)
+            upper = shifted.max(axis=1)
+            inside = np.all(upper >= 0, axis=1) & np.all(lower <= 1, axis=1)
+            if np.any(inside):
+                plotted.append(shifted[inside])
+                plotted_values.append(values[inside])
+    if not plotted:
+        raise RuntimeError("Periodic wrapping produced no visible triangles.")
+    return np.concatenate(plotted), np.concatenate(plotted_values)
+
+
+def _periodic_curve_copies(curve: np.ndarray) -> tuple[np.ndarray, ...]:
+    copies: list[np.ndarray] = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            shifted = curve + np.array([dx, dy])
+            if np.all(shifted.max(axis=0) >= 0) and np.all(shifted.min(axis=0) <= 1):
+                copies.append(shifted)
+    if not copies:
+        raise RuntimeError("Periodic wrapping produced no visible region outline.")
+    return tuple(copies)
+
+
 def load_mesh_neighborhoods(
     vtu_paths: Sequence[str | Path],
     element_index: int,
@@ -316,6 +454,26 @@ def load_mesh_neighborhoods(
         )
         if progress_every and (index + 1) % progress_every == 0:
             print(f"loaded mesh neighbourhoods: {index + 1}/{len(vtu_paths)}", flush=True)
+    return tuple(snapshots)
+
+
+def load_periodic_meshes(
+    vtu_paths: Sequence[str | Path],
+    loads: Sequence[float],
+    element_index: int,
+    *,
+    box_size: float,
+    progress_every: int = 50,
+) -> tuple[PeriodicMeshSnapshot, ...]:
+    if len(vtu_paths) != len(loads):
+        raise ValueError("One load is required for every periodic mesh snapshot.")
+    snapshots: list[PeriodicMeshSnapshot] = []
+    for index, (path, load) in enumerate(zip(vtu_paths, loads, strict=True)):
+        snapshots.append(
+            extract_periodic_mesh(path, element_index, load, box_size=box_size)
+        )
+        if progress_every and (index + 1) % progress_every == 0:
+            print(f"loaded periodic meshes: {index + 1}/{len(vtu_paths)}", flush=True)
     return tuple(snapshots)
 
 
@@ -534,24 +692,122 @@ def render_mesh_animation(
     return output_path
 
 
+def render_periodic_mesh_animation(
+    timeline: GammaTimeline,
+    vtu_paths: Sequence[str | Path],
+    loads: Sequence[float],
+    element_index: int,
+    output_path: str | Path,
+    *,
+    box_size: float,
+    ffmpeg_executable: str | Path,
+    fps: int = 30,
+    dpi: int = 120,
+    energy_field: str = "energy_field",
+    energy_sample_count: int = 64,
+) -> Path:
+    """Stream the full energy-coloured mesh inside a square periodic box."""
+    if len(vtu_paths) != len(loads):
+        raise ValueError("One load is required for every periodic mesh state.")
+    if len(vtu_paths) <= int(np.max(timeline.mesh_history_indices)):
+        raise ValueError("Periodic mesh states do not cover the animation timeline.")
+    if energy_sample_count < 1:
+        raise ValueError("energy_sample_count must be positive.")
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    sample_indices = np.unique(
+        np.linspace(
+            0,
+            len(vtu_paths) - 1,
+            min(energy_sample_count, len(vtu_paths)),
+            dtype=int,
+        )
+    )
+    samples: list[np.ndarray] = []
+    for index in sample_indices:
+        data = VTUData(vtu_paths[int(index)])
+        cell_count = len(data.triangles)
+        values = _cell_energy_values(data, cell_count, energy_field)
+        stride = max(1, len(values) // 4096)
+        samples.append(values[::stride])
+    upper_energy = float(np.quantile(np.concatenate(samples), 0.995))
+    if upper_energy <= 0:
+        raise ValueError("The periodic mesh has no positive energy values.")
+    norm = PowerNorm(gamma=0.5, vmin=0, vmax=upper_energy, clip=True)
+
+    fig, ax = plt.subplots(figsize=(7, 7), dpi=dpi)
+    fig.patch.set_alpha(0)
+    ax.set_facecolor("none")
+    fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
+    energy = PolyCollection([], cmap="magma", norm=norm, edgecolors="none")
+    region = LineCollection(
+        [], colors="#d73027", linewidths=4.0, linestyles="--", zorder=5
+    )
+    ax.add_collection(energy)
+    ax.add_collection(region)
+    ax.add_patch(
+        Rectangle((0, 0), 1, 1, fill=False, edgecolor="0.2", linewidth=1.8, zorder=6)
+    )
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_aspect("equal")
+    ax.set_axis_off()
+
+    writer = _alpha_writer(ffmpeg_executable, fps)
+    previous_index = -1
+    snapshot: PeriodicMeshSnapshot | None = None
+    with writer.saving(fig, str(output_path), dpi):
+        for frame, mesh_index in enumerate(timeline.mesh_history_indices):
+            mesh_index = int(mesh_index)
+            if mesh_index != previous_index:
+                snapshot = extract_periodic_mesh(
+                    vtu_paths[mesh_index],
+                    element_index,
+                    loads[mesh_index],
+                    box_size=box_size,
+                    energy_field=energy_field,
+                )
+                previous_index = mesh_index
+            if snapshot is None:
+                raise RuntimeError("No periodic mesh snapshot was loaded.")
+            energy.set_verts(snapshot.polygons)
+            energy.set_array(snapshot.energies)
+            region.set_segments(snapshot.region_outlines)
+            writer.grab_frame(transparent=True, facecolor="none")
+            if (frame + 1) % 30 == 0:
+                print(
+                    f"periodic mesh frames: {frame + 1}/{timeline.frame_count}",
+                    flush=True,
+                )
+    plt.close(fig)
+    return output_path
+
+
 def compose_picture_in_picture(
     poincare_video: str | Path,
     mesh_video: str | Path,
+    periodic_mesh_video: str | Path,
     output_path: str | Path,
     *,
     ffmpeg_executable: str | Path,
     inset_fraction: float = 0.34,
+    periodic_inset_fraction: float = 0.30,
     margin: int = 60,
 ) -> Path:
-    """Place the mesh video in the upper-right corner of the Poincare video."""
-    if not 0.1 <= inset_fraction <= 0.6:
-        raise ValueError("inset_fraction must lie inside [0.1, 0.6].")
+    """Place local and full periodic mesh videos along the right edge."""
+    invalid_inset = not 0.1 <= inset_fraction <= 0.6
+    invalid_periodic_inset = not 0.1 <= periodic_inset_fraction <= 0.6
+    if invalid_inset or invalid_periodic_inset:
+        raise ValueError("Inset fractions must lie inside [0.1, 0.6].")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     scale_expression = (
         f"[1:v]format=rgba,scale=w=trunc(iw*{inset_fraction}/2)*2:"
-        f"h=trunc(ih*{inset_fraction}/2)*2[mesh];"
-        f"[0:v][mesh]overlay=W-w-{margin}:{margin}:shortest=1[out]"
+        f"h=trunc(ih*{inset_fraction}/2)*2[local];"
+        f"[2:v]format=rgba,scale=w=trunc(iw*{periodic_inset_fraction}/2)*2:"
+        f"h=trunc(ih*{periodic_inset_fraction}/2)*2[periodic];"
+        f"[0:v][local]overlay=W-w-{margin}:{margin}:shortest=1[withlocal];"
+        f"[withlocal][periodic]overlay=W-w-{margin}:H-h-{margin}:shortest=1[out]"
     )
     command = [
         str(ffmpeg_executable),
@@ -560,6 +816,8 @@ def compose_picture_in_picture(
         str(poincare_video),
         "-i",
         str(mesh_video),
+        "-i",
+        str(periodic_mesh_video),
         "-filter_complex",
         scale_expression,
         "-map",

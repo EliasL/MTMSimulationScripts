@@ -47,7 +47,7 @@ class Servers:
         galois,
         pascal,
         schwartz,
-        lagrange,
+        # lagrange,  # root filesystem is full; do not upload, build, or run
         condorcet,
         dalembert,
         poincare,
@@ -169,10 +169,13 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         "Visuals/",
         "Plots/",
         "venv/",
+        ".venv/",
         "bootstrapData",
         "_gael_2D",
         "profiling",
         "MTMath",
+        "tmp/",
+        "output/",
     ]
 
     # Step 1: Create directories on the cluster
