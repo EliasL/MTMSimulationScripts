@@ -579,6 +579,28 @@ def startJobs(submit=False):
         print("DRY RUN COMPLETE: no jobs were submitted or started")
 
 
+def restartSizeScalingSeed(size, seed, server, jobCopies=100, submit=False):
+    size_groups, _ = size_scaling_job(reconnection="edgeFlip")
+    matches = [
+        config
+        for group in size_groups
+        for config in group
+        if config.rows == size and config.cols == size and config.seed == seed
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected one L{size} seed {seed} edge-flip config, found {len(matches)}."
+        )
+
+    config = matches[0]
+    print(
+        f"{'SUBMITTING' if submit else 'DRY RUN'} {jobCopies} copies of "
+        f"{config.name} on {get_server_short_name(server)}"
+    )
+    if submit:
+        queueJobs(server, [config], build=False, jobCopies=jobCopies)
+
+
 def stopJobs(configs=None):
     j = JobManager()
     j.findSlurmJobs()
@@ -676,7 +698,8 @@ def cleanDescartes(dryRun=True, force=False):
 
 if __name__ == "__main__":
     ONLYPREFERED = False
-    build_on_all_servers(uploadOnly=True, onlyPrefered=ONLYPREFERED)
+    # build_on_all_servers(uploadOnly=False, onlyPrefered=ONLYPREFERED)
+    # restartSizeScalingSeed(250, 1, Servers.duchemin, submit=True)
     # 150x150 64 threads -> 23 days
     # 150x150 32 threads -> 22 days
     # 150x150 16 threads -> 16 days

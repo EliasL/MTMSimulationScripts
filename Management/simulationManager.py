@@ -14,6 +14,8 @@ sys.path.append(str(Path(__file__).resolve().parent.parent / "Plotting"))
 # Now we can import from Management
 from settings import settings
 
+DUMP_LOAD_ERROR_EXIT_CODE = 2
+
 
 class SimulationManager:
     def __init__(
@@ -122,16 +124,6 @@ class SimulationManager:
         if build:
             self.build()
 
-        # if the name is set, we search for that file name,
-        # otherwise, we sort the files by date created and choose the newest
-        # (index 0)
-        if dumpFile is None:
-            dumpFile = self.findDumpFile(index, name)
-        else:
-            if " " in dumpFile:
-                raise ValueError(f"Dump path cannot contain white space! {dumpFile}")
-
-        start_time = time.time()
         # We can choose to use the previous settings, or overwrite them using new ones
         # Resolve config path if requested
         resolved_config_path = None
@@ -143,51 +135,69 @@ class SimulationManager:
                 )
             resolved_config_path = str(resolved_config_path)
 
-        # Initialize the base command
-        command = [self.program_path, "-d", dumpFile]
-        if self.configObj.makeDumpAt !=-1:
-            command += ["--makeDumpAt" ,f"{self.configObj.makeDumpAt}"]
-        # Conditionally add flags and paths based on inputs
-        if overwriteSettings:
-            if resolved_config_path is None and autoConfig:
-                # Try to infer config path from the dump folder
-                try:
-                    dump_path = Path(dumpFile)
+        choose_dump_automatically = dumpFile is None and name is None
+        attempts = 2 if choose_dump_automatically else 1
+        failed_dumps = []
+
+        for _ in range(attempts):
+            try:
+                selected_dump = (
+                    self.findDumpFile(index, name) if dumpFile is None else dumpFile
+                )
+            except Warning as error:
+                if failed_dumps:
+                    raise RuntimeError(
+                        f"Could not load {failed_dumps[-1]} and no previous dump exists."
+                    ) from error
+                raise
+
+            dump_path = Path(selected_dump)
+            if " " in str(dump_path):
+                raise ValueError(f"Dump path cannot contain white space! {dump_path}")
+            if dump_path.stat().st_size == 0:
+                print(f"Deleting empty dump: {dump_path}")
+                dump_path.unlink()
+                failed_dumps.append(str(dump_path))
+                if not choose_dump_automatically:
+                    break
+                continue
+
+            command = [self.program_path, "-d", str(dump_path)]
+            if self.configObj.makeDumpAt != -1:
+                command += ["--makeDumpAt", f"{self.configObj.makeDumpAt}"]
+            if overwriteSettings:
+                if resolved_config_path is None and autoConfig:
                     inferred = dump_path.parent.parent / settings["CONFIGNAME"]
                     if inferred.exists():
                         resolved_config_path = str(inferred)
-                except Exception:
-                    resolved_config_path = None
+                command.extend(["-c", resolved_config_path or self.conf_file])
+            if newOutput:
+                command.extend(["-o", self.outputPath])
+            if overwriteData:
+                command.append("-r")
 
-            command.extend(["-c", resolved_config_path or self.conf_file])
+            start_time = time.time()
+            error = run_command(
+                " ".join(command), echo=not silent, taskName=self.taskName
+            )
+            duration = time.time() - start_time
+            if error == 0:
+                return duration
+            if error != DUMP_LOAD_ERROR_EXIT_CODE:
+                raise RuntimeError(
+                    f"Simulation failed after loading {dump_path} (exit code {error})."
+                )
 
-        if newOutput:
-            # outputPath does not specify the folder, but only the storage drive path
-            # The data folder inside the output folder is completely determined by
-            # the name variable in the config file
-            command.extend(["-o", self.outputPath])
+            broken_path = dump_path.with_name(f"broken_{dump_path.name}")
+            if broken_path.exists():
+                raise FileExistsError(f"Cannot quarantine dump; {broken_path} exists.")
+            dump_path.rename(broken_path)
+            print(f"Quarantined unreadable dump as: {broken_path}")
+            failed_dumps.append(str(dump_path))
+            if not choose_dump_automatically:
+                break
 
-        if overwriteData:
-            # If the data folder already contains a csv macrodata file with
-            # a load value equal to the maxLoad value, it will not run and
-            # overwrite values unless this flag is set
-            command.append("-r")
-
-        # Join the command list into a single string
-        final_command = " ".join(command)
-
-        # Now pass the final command to the run_command function
-        run_command(
-            final_command,
-            echo=not silent,
-            taskName=self.taskName,
-        )
-        # Stop the timer right after the command completes
-        end_time = time.time()
-        # Calculate the duration
-        duration = end_time - start_time
-
-        return duration
+        raise RuntimeError(f"Could not load dump(s): {', '.join(failed_dumps)}")
 
     def findDumpFile(self, index=0, name=None):
         """Find a dump file.
@@ -214,9 +224,11 @@ class SimulationManager:
                     return file
             raise FileNotFoundError(f"No file named {name} found in {dumpFolderPath}")
 
-        files = list(
-            filter(os.path.isfile, glob.iglob(os.path.join(dumpFolderPath, "*")))
-        )
+        files = [
+            path
+            for path in glob.iglob(os.path.join(dumpFolderPath, "*"))
+            if os.path.isfile(path) and not os.path.basename(path).startswith("broken_")
+        ]
 
         def _parse_load_value(path):
             """Extract load value from filenames like `dump_l0.17.xml.gz`.

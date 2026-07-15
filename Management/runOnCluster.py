@@ -187,7 +187,10 @@ def run_remote_command(server_hostname, command, hide=False, silent=True):
             if not silent:
                 print(f"{server_hostname}: Command executed successfully.")
         else:
-            print(f"{server_hostname}: Command execution failed: {result.stderr}")
+            raise RuntimeError(
+                f"{server_hostname}: Command execution failed: {result.stderr}"
+            )
+        return result.stdout
 
 
 # This function is depricated. It's slow to start jobs like this.
