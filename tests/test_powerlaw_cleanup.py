@@ -7,8 +7,13 @@ from unittest import mock
 
 import numpy as np
 import pandas as pd
+import matplotlib
+
+matplotlib.use("Agg")
+from matplotlib import pyplot as plt
 
 from MTMath.evaluatePowerlawFit import (
+    Fit,
     Truncated_Power_Law,
     evaluate_xmin,
     evaluate_xmin_distances,
@@ -22,7 +27,14 @@ from Plotting.findXmin import (
     find_xmin_dks_from_results,
     find_xmin_global_min,
 )
-from Plotting.plotPowerLaw import get_energy_drops, make_fit
+from Plotting.plotPowerLaw import (
+    get_energy_drops,
+    make_fit,
+    plot_data_and_fit,
+    plot_energy_drop_trace,
+    plot_ks_distance,
+    plot_ks_distance_marker,
+)
 
 
 class EnergyDropTests(unittest.TestCase):
@@ -233,6 +245,94 @@ class XminCleanupTests(unittest.TestCase):
 
         self.assertEqual(payload["xmin"], 1.0)
         self.assertIsNone(payload["xmin_fitting_results"])
+
+
+class FlowchartPlotControlTests(unittest.TestCase):
+    def test_fit_annotations_title_and_legend_can_be_hidden(self):
+        data = np.geomspace(1.0, 100.0, 80)
+        fit = Fit(
+            data,
+            xmin=1.0,
+            xmin_distribution=Truncated_Power_Law.name,
+            verbose=0,
+        )
+        fig, ax = plt.subplots()
+        plot_data_and_fit(
+            fit,
+            ax=ax,
+            color="C3",
+            data_color="C3",
+            save=False,
+            close=False,
+            show_fit_region=False,
+            show_cutoff=False,
+            show_title=False,
+            show_legend=False,
+        )
+        self.assertEqual(ax.get_title(), "")
+        self.assertIsNone(ax.get_legend())
+        self.assertEqual(len(ax.patches), 0)
+        self.assertEqual(ax.lines[0].get_color(), "C3")
+        self.assertEqual(ax.lines[1].get_color(), "C3")
+        plt.close(fig)
+
+    def test_ks_panel_title_and_legend_can_be_hidden(self):
+        data = np.geomspace(1.0, 100.0, 80)
+        fig, ax = plt.subplots()
+        plot_ks_distance(
+            data,
+            xmin=1.0,
+            ax=ax,
+            save=False,
+            close=False,
+            set_title=False,
+            show_legend=False,
+            empirical_color="C3",
+            show_inset=True,
+        )
+        self.assertEqual(ax.get_title(), "")
+        self.assertIsNone(ax.get_legend())
+        self.assertEqual(ax.lines[0].get_color(), "C3")
+        self.assertEqual(len(ax.child_axes), 1)
+        self.assertEqual(len(ax.child_axes[0].get_xticks()), 0)
+        plt.close(fig)
+
+    def test_ks_marker_checks_both_sides_of_empirical_jumps(self):
+        fig, ax = plt.subplots()
+        distance = plot_ks_distance_marker(
+            ax,
+            sorted_data=np.array([0.4, 0.9]),
+            ecdf=np.array([0.5, 0.0]),
+            model_ccdf=np.array([0.6, 0.1]),
+        )
+        self.assertAlmostEqual(distance, 0.4)
+        plt.close(fig)
+
+    def test_energy_drop_inset_ticks_can_be_suppressed(self):
+        strain = np.linspace(0.0, 1.0, 101)
+        energy = strain**2
+        drop_strain = strain[1:]
+        drops = np.full(drop_strain.shape, 1.0e-3)
+        drops[50] = 1.0
+        fig, ax = plt.subplots()
+        drop_ax, inset_ax, inset_drop_ax = plot_energy_drop_trace(
+            ax,
+            strain,
+            energy,
+            drop_strain,
+            drops,
+            min_drop=1.0e-4,
+            inset_show_y_ticks=False,
+        )
+        self.assertEqual(drop_ax.get_yscale(), "linear")
+        self.assertEqual(drop_ax.lines[0].get_color(), "C1")
+        self.assertEqual(drop_ax.lines[0].get_linestyle(), "-")
+        self.assertAlmostEqual(inset_ax.patch.get_alpha(), 0.9)
+        self.assertFalse(any(label.get_visible() for label in inset_ax.get_yticklabels()))
+        self.assertFalse(
+            any(label.get_visible() for label in inset_drop_ax.get_yticklabels())
+        )
+        plt.close(fig)
 
 
 if __name__ == "__main__":

@@ -53,7 +53,11 @@ from MTMath.poincareTiling import (
     drawRotation2ExplanationFigs,
 )
 from MTMath.decomposeElasticPlastic import showDecomposition
-from MTMath.poincareEnergy import generate_cauchy_stress_grid, generate_energy_grid
+from MTMath.poincareEnergy import (
+    generate_cauchy_stress_grid,
+    generate_energy_grid,
+    plot_reduction_history,
+)
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     plotLog2,
@@ -243,6 +247,63 @@ def energyField():
     # print(np.round(g, 2))
 
     # make3DEnergyField(g, x, y, zScale=0.6, add_front_hole=True)
+
+
+def plotSquareContiYieldSurface(
+    resolution=800,
+    energy_cap=0.37,
+    output_path="Plots/square_conti_yield_surface.pdf",
+    show=True,
+):
+    """Plot the square Conti energy and its strong-ellipticity boundary."""
+    from MTMath.poincareEnergy import plotEnergyField
+
+    energy = generate_energy_grid(
+        resolution=resolution,
+        energy_lim=[0, energy_cap],
+    )
+    ax = plotEnergyField(
+        energy,
+        save=False,
+        add_title=False,
+        scale=1.0,
+        remove_max_color=False,
+        withGrid=True,
+        withYieldSurface=True,
+    )
+    for line in ax.lines:
+        if line.get_zorder() >= 10:
+            plt.setp(line, color="black", linewidth=1.0, alpha=0.9)
+        else:
+            plt.setp(line, color="grey", linewidth=0.5, alpha=0.6)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ax.figure.savefig(output_path, dpi=300, bbox_inches="tight", facecolor="white")
+    print(f"Saved plot to {output_path.resolve()}")
+    if show:
+        plt.show()
+    return ax.figure, ax
+
+
+def plotReductionHistory(show=True):
+    F = np.array([[-0.43, 1.21], [-1.19, 1.02]])
+    fig, ax = plot_reduction_history(
+        F,
+        resolution=1000,
+        grid_depth=6,
+        show_grid=True,
+        show_legend=True,
+    )
+    output_stem = Path("Plots/reduction_history")
+    output_stem.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path = output_stem.with_suffix(".pdf")
+    png_path = output_stem.with_suffix(".png")
+    fig.savefig(pdf_path, dpi=600, bbox_inches="tight", facecolor="white")
+    fig.savefig(png_path, dpi=300, bbox_inches="tight", facecolor="white")
+    print(f"Saved plots to {pdf_path} and {png_path}")
+    if show:
+        plt.show()
+    return fig, ax
 
 
 def showPoincareDisk():
@@ -547,10 +608,12 @@ def plotMinimizationCriteriaData():
         )
 
         # Save as separate PDF pages
-        with PdfPages(f"Plots/combined_L{L}.pdf") as pdf:
+        output_path = Path(f"Plots/combined_L{L}.pdf")
+        with PdfPages(output_path) as pdf:
             pdf.savefig(fig1, bbox_inches="tight")
             pdf.savefig(fig2, bbox_inches="tight")
             pdf.savefig(fig3, bbox_inches="tight")
+        print(f"Saved plot to {output_path.resolve()}")
 
 
 def plotShowMinCriteria():
@@ -779,6 +842,22 @@ def testRealData():
         plot_KS_fitting(fit, save=True, show=False)
 
 
+def plotTruncatedPowerLawFlowchart(regenerateSubplots=None, show=False):
+    """Generate the truncated-power-law analysis flowchart.
+
+    Set ``regenerateSubplots=False`` to reuse the cached panels while adjusting
+    the layout. Leaving it as ``None`` follows ``REGENERATE_SUBPLOTS`` in the
+    flowchart script.
+    """
+
+    from Plotting.truncated_powerlaw_flowchart import generate_flowchart
+
+    return generate_flowchart(
+        regenerate_subplots=regenerateSubplots,
+        show=show,
+    )
+
+
 def analyseLongData():
     configs, labels = longJob(8, 1, size=300)
 
@@ -910,6 +989,7 @@ if __name__ == "__main__":
 
     # debugPlotAll()
     # energyField()
+    #plotReductionHistory()
     #showPoincareDisk()
     # showInstabilityAngle()
     # plotThreadTest()
@@ -927,7 +1007,7 @@ if __name__ == "__main__":
     # drawRotationExplanationFigs()
     # drawRotation2ExplanationFigs()
     # plotStressFromRealF(grid_size=400, nr_theta=400, stress_type="stability")
-    # tryAllRotations()
+    #tryAllRotations()
     # plotsLotsOfRealFStress("stability", reduced=True)
     # bug_hunting()
     # elasticReductionPlots()
@@ -942,9 +1022,10 @@ if __name__ == "__main__":
     # syntheticDataPlotting()
     # testDist()
     # testRealData()
+    plotTruncatedPowerLawFlowchart()
     # investigateJobs()
     # print_remote_runtimes()
-    plotSylvainBatches()
+    #plotSylvainBatches()
     # plotPristineCrystalPredictionError()
     # compare_center_node_forces()
     # compare_energy_three_sims()

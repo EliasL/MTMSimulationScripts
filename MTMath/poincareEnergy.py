@@ -16,8 +16,17 @@ from matplotlib.patches import Circle
 import scipy.interpolate as interpolate
 from matplotlib import colors
 from matplotlib import cm
+from matplotlib.lines import Line2D
+import matplotlib.patheffects as path_effects
 from scipy.stats import gaussian_kde
 from matplotlib.colors import LogNorm, PowerNorm
+
+from .reduction import (
+    elastic_domain_quadrant,
+    elastic_reduction,
+    elastic_reduction_history,
+    lagrange_reduction_history,
+)
 
 
 def oneDPotential():
@@ -374,6 +383,30 @@ def generate_grid(
         return grid
 
 
+def generate_elastic_quadrant_grid(
+    resolution=500,
+    zoom=1,
+    transformation=None,
+    loops=1000,
+):
+    """Return well-quadrant identifiers over the Poincare disk.
+
+    Values inside the disk are the integer labels 0--3 returned after elastic
+    reduction.  Points outside the disk, and any unclassified points, are NaN
+    so plotting code can leave the surrounding canvas transparent or white.
+    """
+    C, outside = generate_poincare_disk(
+        resolution=resolution,
+        zoom=zoom,
+        returnMask=True,
+        transformation=transformation,
+    )
+    C_reduced, _ = elastic_reduction(C, loops=loops)
+    quadrants = elastic_domain_quadrant(C_reduced).astype(float)
+    quadrants[outside | (quadrants < 0)] = np.nan
+    return quadrants
+
+
 def generate_angle_region(resolution=500, zoom=1):
     C, r_mask = generate_poincare_disk(resolution, zoom, returnMask=True)
     # Create a boolean mask for the region that should be transparent
@@ -536,7 +569,7 @@ def drawC(
     C=None,
     grid_size=200,
     zoom=1,
-    c: (str | None) = "black",
+    c: str | None = "black",
     linestyle="-",
     linewidth=0.6,
     transformation=None,
@@ -549,11 +582,18 @@ def drawC(
     cmap="coolwarm",  # colormap
     cbarLims=None,  # colorbar limits when using shade_values
     agg="mean",  # aggregation method when using shade_values
-    F=None,  # optional: underlying deformation gradients for debugging
+    F=None,  # retained for compatibility with drawF callers
     **kwargs,
 ):
+    """Draw one or more metric tensors in the configured coordinate plane.
+
+    ``C`` may be a single ``(2, 2)`` tensor or a batch with shape
+    ``(..., 2, 2)``.  Matplotlib treats the coordinates of a single tensor as
+    scalars, so point-like modes normalize them to flat arrays before plotting
+    and labeling.  This keeps scalar, list, and NumPy-array labels consistent.
+    """
     if ax is None:
-        fig, ax = prepPoincareFig(grid_size=grid_size, zoom=zoom)
+        _, ax = prepPoincareFig(grid_size=grid_size, zoom=zoom)
 
     x, y = C2Plane(C, transformation=transformation)
 
@@ -564,25 +604,63 @@ def drawC(
     x_plot = x * zoom * grid_size / 2 + grid_size / 2
     y_plot = y * zoom * grid_size / 2 + grid_size / 2
 
-    plt_kwargs = {k: v for k, v in kwargs.items() if not k.startswith("label_")}
+    # Text styling belongs to addLabel, not to Matplotlib's line/scatter
+    # artists.  Accept the existing label_* convention as well as the common
+    # unprefixed text aliases used by older call sites.
+    text_aliases = {
+        "fontsize": "label_fontsize",
+        "ha": "label_ha",
+        "va": "label_va",
+        "bbox": "label_bbox",
+    }
+    label_kwargs = {k: v for k, v in kwargs.items() if k.startswith("label_")}
+    for source, destination in text_aliases.items():
+        if source in kwargs and destination not in label_kwargs:
+            label_kwargs[destination] = kwargs[source]
+
+    plt_kwargs = {
+        k: v
+        for k, v in kwargs.items()
+        if not k.startswith("label_") and k not in text_aliases
+    }
+
+    # Scatter points and arrow midpoints are conceptually one-dimensional,
+    # even when C has several leading batch dimensions.
+    x_points = np.asarray(x_plot).reshape(-1)
+    y_points = np.asarray(y_plot).reshape(-1)
 
     if scatter:
-        ax.scatter(x_plot, y_plot, c=c, **plt_kwargs)
-        xm = x_plot
-        ym = y_plot
+        ax.scatter(x_points, y_points, c=c, **plt_kwargs)
+        label_x = x_points
+        label_y = y_points
     elif arrow:
-        # Expect two endpoints
-        assert len(x_plot) == len(y_plot) == 2, "Arrow mode requires two points (x,y)."
+        if x_points.size != 2 or y_points.size != 2:
+            raise ValueError("Arrow mode requires exactly two tensor endpoints")
+        if not np.all(np.isfinite(x_points)) or not np.all(np.isfinite(y_points)):
+            raise ValueError("Arrow endpoints must map to finite coordinates")
+
+        arrowprops = {
+            "arrowstyle": "-|>",
+            "mutation_scale": 20,
+            "color": "black" if c is None else c,
+            "linewidth": linewidth,
+            "linestyle": linestyle,
+        }
+        if "alpha" in plt_kwargs:
+            arrowprops["alpha"] = plt_kwargs["alpha"]
+
+        annotation_kwargs = {}
+        if "zorder" in plt_kwargs:
+            annotation_kwargs["zorder"] = plt_kwargs["zorder"]
         ax.annotate(
             "",
-            xy=(x_plot[1], y_plot[1]),
-            xytext=(x_plot[0], y_plot[0]),
-            arrowprops=dict(
-                arrowstyle="-|>", mutation_scale=20, color=c, linewidth=linewidth
-            ),
+            xy=(x_points[1], y_points[1]),
+            xytext=(x_points[0], y_points[0]),
+            arrowprops=arrowprops,
+            **annotation_kwargs,
         )
-        xm = [(x_plot[0] + x_plot[1]) / 2]
-        ym = [(y_plot[0] + y_plot[1]) / 2]
+        label_x = np.array([(x_points[0] + x_points[1]) / 2])
+        label_y = np.array([(y_points[0] + y_points[1]) / 2])
     elif shade:
         # --- convert all valid points to pixel indices ---
         xv = x_plot[valid]
@@ -607,108 +685,37 @@ def drawC(
                 zoom=zoom,
                 label=label,
                 c=shadeColor if shadeColor is not None else c,
-                **kwargs,
+                **(plt_kwargs | label_kwargs),
             )
         else:
             # --- scalar field case: build a float grid ---
             # align shade_values with valid & mask
-            vals = shade_values[valid]
+            try:
+                values = np.broadcast_to(np.asarray(shade_values), np.shape(x_plot))
+            except ValueError as exc:
+                raise ValueError(
+                    "shade_values must be scalar or match the leading shape of C"
+                ) from exc
+            vals = values[valid]
             vals = vals[mask]
 
+            finite_values = np.isfinite(vals)
+            ix = ix[finite_values]
+            iy = iy[finite_values]
+            vals = vals[finite_values]
+
             pixels = np.full((grid_size, grid_size), np.nan, dtype=float)
-
-            # Temporary check of values. Remove later.
-            # Do the overlapping values have similar magnitudes?
-            # nan-safe max
-            if False:
-                tmp = np.full_like(pixels, -np.inf)
-                np.maximum.at(tmp, (iy, ix), vals)
-                tmp[tmp == -np.inf] = np.nan
-                max_vals = tmp
-                sum_ = np.zeros_like(pixels)
-                cnt_ = np.zeros_like(pixels)
-                np.add.at(sum_, (iy, ix), vals)
-                np.add.at(cnt_, (iy, ix), 1.0)
-                average_vals = np.where(cnt_ > 0, sum_ / cnt_, np.nan)
-                print(
-                    "Shade values aggregation check: max vs mean difference statistics:"
-                )
-                diff = np.abs(max_vals - average_vals)
-                print(
-                    "  max - mean (min, max, mean):  ",
-                    np.nanmin(diff),
-                    np.nanmax(diff),
-                    np.nanmean(diff),
-                )
-                print("max nr overlapping values per pixel:", np.nanmax(cnt_))
-
-                # --- Debug information: locate pixels with largest max-vs-mean difference ---
-                # Only consider pixels where we truly have overlap (more than one value)
-                overlap_mask = (cnt_ > 1) & np.isfinite(diff)
-                if np.any(overlap_mask):
-                    # Indices (iy, ix) of pixels with overlap
-                    overlap_indices = np.argwhere(overlap_mask)
-                    diff_flat = diff[overlap_mask]
-
-                    # How many pixels to inspect (up to 3)
-                    k = min(3, diff_flat.size)
-                    # Indices of top-k differences (sorted descending)
-                    top_k_idx = np.argsort(diff_flat)[-k:][::-1]
-                    top_pixels = overlap_indices[top_k_idx]
-
-                    print(
-                        "Top pixels by |max-mean| difference (only where overlap occurs):"
-                    )
-
-                    # If F is available, align it with the same valid/mask selection as vals
-                    F_vals = None
-                    if F is not None:
-                        try:
-                            F_vals = F[valid]
-                            F_vals = F_vals[mask]
-                        except Exception as e:
-                            print("Warning: could not align F with shade_values:", e)
-
-                    for rank, (py, px) in enumerate(top_pixels, start=1):
-                        d_val = diff[py, px]
-                        count_here = int(cnt_[py, px])
-                        print(
-                            f"  #{rank}: pixel (ix={px}, iy={py}), diff={d_val}, count={count_here}"
-                        )
-
-                        # Collect all samples that landed in this pixel
-                        same_pixel = (ix == px) & (iy == py)
-                        pixel_vals = vals[same_pixel]
-                        print("    shade_values at this pixel:", pixel_vals)
-
-                        if F_vals is not None:
-                            pixel_F = F_vals[same_pixel]
-                            print(
-                                "    Associated F values (one per overlapping point):"
-                            )
-                            for i_F, Fmat in enumerate(pixel_F):
-                                # Fmat expected shape (2,2)
-                                print(f"      F[{i_F}]:\n{Fmat}")
-
-                        # Also mark these pixels visually with circles on the plot
-                        try:
-                            circ = Circle(
-                                (px + 0.5, py + 0.5),
-                                radius=3.0,
-                                edgecolor="black",
-                                facecolor="none",
-                                linewidth=1.5,
-                                zorder=10,
-                            )
-                            ax.add_patch(circ)
-                        except Exception as e:
-                            print("Warning: could not draw debug circle:", e)
 
             if agg == "max":
                 # nan-safe max
                 tmp = np.full_like(pixels, -np.inf)
                 np.maximum.at(tmp, (iy, ix), vals)
                 tmp[tmp == -np.inf] = np.nan
+                pixels = tmp
+            elif agg == "min":
+                tmp = np.full_like(pixels, np.inf)
+                np.minimum.at(tmp, (iy, ix), vals)
+                tmp[tmp == np.inf] = np.nan
                 pixels = tmp
             elif agg == "mean":
                 sum_ = np.zeros_like(pixels)
@@ -732,7 +739,7 @@ def drawC(
             # Optional: add a colorbar
             if cbarLims is not None:
                 im.set_clim(*cbarLims)
-            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
     else:
         ax.plot(
@@ -746,17 +753,29 @@ def drawC(
         return ax  # No label in line mode
 
     if label is not None and not shade:
-        # If we shade, the label is taken care of in drawRegion
-        # ensure x and y are numbers (not arrays) and scatter is True
-        if isinstance(label, str):
-            label = [label]
-            xm = np.asarray(xm)
-            ym = np.asarray(ym)
+        # A scalar label and a one-item iterable are equivalent.  Batched
+        # points still require one label per point, as before, but now produce
+        # a useful error instead of failing while iterating a NumPy scalar.
+        labels = np.asarray(label, dtype=object)
+        if labels.ndim == 0:
+            labels = labels.reshape(1)
+        else:
+            labels = labels.reshape(-1)
 
-        assert len(label) == xm.size, "Number of labels does not match number of points"
+        if labels.size != label_x.size:
+            raise ValueError(
+                f"Received {labels.size} label(s) for {label_x.size} plotted point(s)"
+            )
 
-        for x, y, lab in zip(xm, ym, label):
-            addLabel(ax, x, y, lab, **kwargs)
+        for x_value, y_value, point_label in zip(label_x, label_y, labels):
+            if np.isfinite(x_value) and np.isfinite(y_value):
+                addLabel(
+                    ax,
+                    x_value,
+                    y_value,
+                    point_label,
+                    **label_kwargs,
+                )
     return ax
 
 
@@ -778,12 +797,10 @@ def drawRegion(ax, region, grid_size=200, zoom=1, label=None, **kwargs):
     mask = np.isfinite(arr) & (arr > 0)
 
     # Compute extent in pixel coordinates so everything aligns with other layers
-    extent = [
-        (grid_size / 2) * (1 - 1 / zoom),
-        (grid_size / 2) * (1 + 1 / zoom),
-        (grid_size / 2) * (1 - 1 / zoom),
-        (grid_size / 2) * (1 + 1 / zoom),
-    ]
+    # generate_poincare_disk samples [-1/zoom, 1/zoom], while drawC multiplies
+    # projected coordinates by zoom.  The resulting image therefore always
+    # spans the full plotting canvas, independently of zoom.
+    extent = [0, grid_size, 0, grid_size]
     xmin, xmax, ymin, ymax = extent
 
     # Build an RGBA image where only mask==True pixels carry the given color+alpha; others are fully transparent
@@ -1683,6 +1700,7 @@ def plotEnergyField(
     minimalTicks=False,
     transformation=None,
     yieldSurface_kwargs=None,
+    output_path="energy_field.pdf",
 ):
     grid_size = len(energy_grid)
 
@@ -1744,13 +1762,14 @@ def plotEnergyField(
         ax.set_title("Energy field in a Poincaré disk")
 
     if save:
-        output_pdf_path = "energy_field.pdf"
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         fig.savefig(
-            output_pdf_path,
-            format="pdf",
+            output_path,
             dpi=600,
             bbox_inches="tight",
         )
+        print(f"Saved plot to {output_path.resolve()}")
     return ax
 
 
@@ -1865,6 +1884,167 @@ def prepPoincareFig(
     ax.set_xlim(center - half, center + half)
     ax.set_ylim(center - half, center + half)
     ax.set_aspect("equal")
+    return fig, ax
+
+
+def plot_reduction_history(
+    F,
+    ax=None,
+    histories=None,
+    resolution=500,
+    grid_depth=6,
+    transformation=None,
+    show_grid=True,
+    show_colorbar=False,
+    show_legend=True,
+    show_axes=True,
+    colorbar_label=None,
+    lagrange_color="#00940F",
+    elastic_color="#9DFA9B",
+    grid_color="#555555",
+    linewidth=2.0,
+    white_background=True,
+):
+    """Plot reduction histories in configuration space.
+
+    Parameters are deliberately Matplotlib-oriented so this function is useful
+    both for static figures and for callers such as the interactive reduction
+    visualizer.  ``F`` is a single 2x2 deformation gradient.  By default the
+    Lagrange and unit-step elastic histories are shown.  Pass ``histories`` as
+    ``(history, color, label)`` triples to compare other reduction paths.
+    """
+    F = np.asarray(F, dtype=float)
+    if F.shape != (2, 2):
+        raise ValueError("F must have shape (2, 2)")
+    if not np.all(np.isfinite(F)) or abs(np.linalg.det(F)) <= 1e-12:
+        raise ValueError("F must be finite and invertible")
+
+    if ax is None:
+        fig, ax = prepPoincareFig(
+            grid_size=resolution,
+            withCircle=False,
+            withGrid=False,
+            withYieldSurface=False,
+        )
+    else:
+        fig = ax.get_figure()
+
+    if white_background:
+        fig.patch.set_facecolor("white")
+        ax.set_facecolor("white")
+
+    C = F.T @ F
+    quadrant_grid = generate_elastic_quadrant_grid(
+        resolution=resolution,
+        transformation=transformation,
+    )
+    quadrant_cmap = colors.ListedColormap(
+        plt.colormaps["coolwarm"](np.linspace(0, 1, 4)),
+        name="well_quadrants",
+    )
+    quadrant_cmap.set_bad("white" if white_background else (0, 0, 0, 0))
+    quadrant_norm = colors.BoundaryNorm(np.arange(-0.5, 4.5), 4)
+    image = ax.imshow(
+        quadrant_grid,
+        origin="lower",
+        extent=(0, resolution, 0, resolution),
+        interpolation="nearest",
+        cmap=quadrant_cmap,
+        norm=quadrant_norm,
+        zorder=0,
+    )
+
+    if show_grid:
+        drawPoincareGrid(
+            ax=ax,
+            grid_size=resolution,
+            depth=grid_depth,
+            c=grid_color,
+            alpha=0.55,
+            linewidth=0.45,
+            transformation=transformation,
+            zorder=1,
+        )
+
+    if histories is None:
+        histories = (
+            (lagrange_reduction_history(C), lagrange_color, "Lagrange reduction"),
+            (elastic_reduction_history(C), elastic_color, "Elastic reduction"),
+        )
+    else:
+        histories = tuple(histories)
+
+    for history, color, _ in histories:
+        x, y = C2PoincareDisk(history, transformation=transformation)
+        points = np.column_stack(
+            (
+                x * resolution / 2 + resolution / 2,
+                y * resolution / 2 + resolution / 2,
+            )
+        )
+        for start, end in zip(points[:-1], points[1:]):
+            annotation = ax.annotate(
+                "",
+                xy=end,
+                xytext=start,
+                arrowprops={
+                    "arrowstyle": "-|>",
+                    "color": color,
+                    "linewidth": linewidth,
+                    "mutation_scale": 14,
+                    "shrinkA": 0,
+                    "shrinkB": 0,
+                },
+                zorder=4,
+            )
+
+
+    start_x, start_y = C2PoincareDisk(C, transformation=transformation)
+    ax.scatter(
+        start_x * resolution / 2 + resolution / 2,
+        start_y * resolution / 2 + resolution / 2,
+        s=50,
+        c=elastic_color,
+        edgecolors=lagrange_color,
+        linewidths=1.5,
+        zorder=6,
+    )
+
+    circle = Circle(
+        (resolution / 2, resolution / 2),
+        resolution / 2,
+        fill=False,
+        edgecolor=grid_color,
+        linewidth=0.8,
+        zorder=5,
+    )
+    ax.add_patch(circle)
+
+    if show_colorbar:
+        colorbar = fig.colorbar(
+            image,
+            ax=ax,
+            ticks=np.arange(4),
+            fraction=0.02,
+            pad=-0.05,
+            shrink=0.20,
+            anchor=(0, 0.03),
+        )
+        if colorbar_label:
+            colorbar.set_label(colorbar_label)
+
+    if show_legend:
+        handles = [
+            Line2D([0], [0], color=color, linewidth=linewidth, label=label)
+            for _, color, label in histories
+        ]
+        ax.legend(handles=handles, loc="upper left")
+
+    ax.set_xlim(0, resolution)
+    ax.set_ylim(0, resolution)
+    ax.set_aspect("equal")
+    if not show_axes:
+        ax.set_axis_off()
     return fig, ax
 
 
@@ -2241,6 +2421,7 @@ def make3DEnergyField(
     remove_max_color=True,
     left_arch=False,
     right_arch=True,
+    output_path="Plots/3DEnergy.png",
 ):
     print("Plotting energy field...")
 
@@ -2335,5 +2516,8 @@ def make3DEnergyField(
     ax.set_zlim(*lim(zScale, energy_lim))
     ax.view_init(elev=35, azim=80)  # Set the view angle (elevation and azimuth)
     fig.tight_layout()
-    plt.savefig("Plots/3DEnergy.png", dpi=500)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(output_path, dpi=500)
+    print(f"Saved plot to {output_path.resolve()}")
     plt.show()

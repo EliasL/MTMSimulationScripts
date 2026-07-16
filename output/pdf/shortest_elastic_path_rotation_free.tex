@@ -1,0 +1,383 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=24mm]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{booktabs}
+\usepackage{microtype}
+\usepackage{tabularx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+
+\newcommand{\trans}{\mathsf{T}}
+\newcommand{\E}{\mathcal E}
+\newcommand{\K}{\mathcal K}
+\newcommand{\Sset}{\mathcal S}
+\newcommand{\SLZ}{\mathrm{SL}(2,\mathbb Z)}
+\newcommand{\Aut}{\operatorname{Aut}_{\mathbb Z}}
+\newcommand{\wordprod}{\Pi}
+\newcommand{\Uplus}{U_{+}}
+\newcommand{\Uminus}{U_{-}}
+\newcommand{\Lplus}{L_{+}}
+\newcommand{\Lminus}{L_{-}}
+
+\definecolor{proofblue}{HTML}{1F5A94}
+\definecolor{softblue}{HTML}{EDF4FA}
+\definecolor{softgray}{HTML}{F3F4F5}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{corollary}{Corollary}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+
+\title{Why a Shortest Elastic-Reduction Path\\
+Contains No Integer Rotation}
+\author{Technical note}
+\date{14 July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The unit-shear elastic reduction searches words in four integer simple
+shears.  This note proves that a globally shortest word reaching the elastic
+domain cannot contain a nonempty path segment whose product is a lattice
+rotation.  The proof uses two exact facts: the elastic domain is invariant
+under integer rotations, and conjugating a unit shear by an integer rotation
+gives another unit shear.  A rotational segment can therefore be moved to
+the end of the path and removed, contradicting shortestness.  This makes the
+comparison between the two elastic quadrants precise.  The shortest path is
+rotation-free in the path-segment sense, while, for a generic elastic
+representative, every path to the other quadrant differs from it by a
+quarter turn.  A longer word need not display that quarter turn as a visible
+three-shear block; its rotational content is instead exposed by the relative
+matrix quotient.
+\end{abstract}
+
+\section{Definitions and the exact claim}
+
+Let the four allowed unit-shear generators be
+\begin{equation}
+ \Sset=\{\Uplus,\Uminus,\Lplus,\Lminus\},
+ \qquad
+ \Uplus=\begin{pmatrix}1&1\\0&1\end{pmatrix},\quad
+ \Lplus=\begin{pmatrix}1&0\\1&1\end{pmatrix},
+ \qquad
+ \Uminus=\Uplus^{-1},\quad \Lminus=\Lplus^{-1}.
+ \label{eq:generators}
+\end{equation}
+A BFS path is a word \(w=s_1s_2\cdots s_n\) with \(s_i\in\Sset\), and
+\(\wordprod(w)=s_1s_2\cdots s_n\in\SLZ\) is its accumulated right-side
+transformation.  Starting from a positive-definite metric \(\mathbf C_0\),
+the endpoint is
+\begin{equation}
+ \mathbf C_w=\wordprod(w)^\trans\mathbf C_0\wordprod(w).
+ \label{eq:pathaction}
+\end{equation}
+
+The integer proper-rotation group is
+\begin{equation}
+ \K=\mathrm{SO}(2)\cap\SLZ
+ =\{\mathbf I,\mathbf Q,-\mathbf I,-\mathbf Q\},
+ \qquad
+ \mathbf Q=\begin{pmatrix}0&1\\-1&0\end{pmatrix}.
+ \label{eq:rotationgroup}
+\end{equation}
+These are rotations through \(0,-\pi/2,\pi,\pi/2\), respectively.  There
+are no others: every column of an integer orthogonal matrix is an integer
+unit vector, hence one of the signed coordinate vectors.
+
+\begin{definition}[Rotational segment]
+A word \(w\) \emph{contains a nontrivial rotation} if it has a nonempty
+contiguous subword \(\rho=s_i\cdots s_j\) for which
+\(\wordprod(\rho)\in\K\setminus\{\mathbf I\}\).
+\end{definition}
+
+Contiguity is essential: a path segment consists of consecutive moves.  It
+would not be meaningful merely to ask whether the final matrix admits some
+factorization containing \(\mathbf Q\), because every matrix can be written
+trivially as
+\(\mathbf M=(\mathbf M\mathbf Q^{-1})\mathbf Q\).
+
+The theoretical elastic domain tested by the implementation can be written
+compactly as
+\begin{equation}
+ \E=\left\{
+ \begin{pmatrix}a&b\\b&c\end{pmatrix}\succ0:
+ 2|b|\leq \min(a,c)
+ \right\}.
+ \label{eq:elasticdomain}
+\end{equation}
+Indeed, the four sign-and-swap variants of the fundamental inequalities
+\(b\geq0\), \(c\geq a\), and \(2b\leq a\) give exactly
+Equation~\eqref{eq:elasticdomain}.  A \emph{globally shortest elastic word}
+is a word of minimum length among all words satisfying \(\mathbf C_w\in\E\).
+This is the notion of ``short path'' used below.  It minimizes over the full
+elastic domain, not over a preselected quadrant.
+
+\section{The two algebraic ingredients}
+
+First, the elastic domain is invariant under every \(\mathbf R\in\K\).  It
+is enough to check the generator \(\mathbf Q\):
+\begin{equation}
+ \mathbf Q^\trans
+ \begin{pmatrix}a&b\\b&c\end{pmatrix}
+ \mathbf Q
+ =\begin{pmatrix}c&-b\\-b&a\end{pmatrix}.
+ \label{eq:domaininvariance}
+\end{equation}
+This swaps \(a\) and \(c\) and changes the sign of \(b\), leaving
+\(2|b|\leq\min(a,c)\) unchanged.  Therefore
+\begin{equation}
+ \mathbf C\in\E
+ \quad\Longleftrightarrow\quad
+ \mathbf R^\trans\mathbf C\mathbf R\in\E
+ \qquad(\mathbf R\in\K).
+ \label{eq:Einvariant}
+\end{equation}
+
+Second, \(\K\) normalizes the unit-shear generator set.  Direct multiplication
+gives
+\begin{equation}
+ \begin{aligned}
+ \mathbf Q\Uplus\mathbf Q^{-1}&=\Lminus,&
+ \mathbf Q\Uminus\mathbf Q^{-1}&=\Lplus,\\
+ \mathbf Q\Lplus\mathbf Q^{-1}&=\Uminus,&
+ \mathbf Q\Lminus\mathbf Q^{-1}&=\Uplus.
+ \end{aligned}
+ \label{eq:conjugation}
+\end{equation}
+Conjugation by \(-\mathbf I\) does nothing, and conjugation by
+\(-\mathbf Q\) is the same as conjugation by \(\mathbf Q\).  Hence
+\begin{equation}
+ \mathbf R\Sset\mathbf R^{-1}=\Sset
+ \qquad(\mathbf R\in\K).
+ \label{eq:normalizes}
+\end{equation}
+Consequently, if \(v=t_1\cdots t_m\) is a shear word, then
+\(\mathbf R\wordprod(v)\mathbf R^{-1}\) is represented by the word obtained
+by conjugating every \(t_i\).  The new word has exactly the same length.
+
+\section{The shortest path is rotation-free}
+
+\begin{theorem}[No rotational segment in a shortest elastic word]
+Let \(\mathbf C_0\succ0\), and let \(w\) be a globally shortest word in
+\(\Sset\) for which \(\mathbf C_w\in\E\).  Then \(w\) contains no nonempty
+contiguous subword whose product belongs to
+\(\K\setminus\{\mathbf I\}\).
+\label{thm:main}
+\end{theorem}
+
+\begin{proof}
+Assume the opposite.  Factor the word as
+\begin{equation}
+ w=\alpha\,\rho\,\beta,
+ \qquad
+ \wordprod(\alpha)=\mathbf A,
+ \quad \wordprod(\rho)=\mathbf R\in\K\setminus\{\mathbf I\},
+ \quad \wordprod(\beta)=\mathbf B.
+\end{equation}
+Because \(\mathbf R\) normalizes \(\Sset\), conjugating every letter of
+\(\beta\) produces another shear word \(\beta'\) of the same length, with
+\begin{equation}
+ \wordprod(\beta')=\mathbf R\mathbf B\mathbf R^{-1}.
+ \label{eq:conjugatedsuffix}
+\end{equation}
+The total matrix can now be rearranged exactly:
+\begin{equation}
+ \wordprod(w)=\mathbf A\mathbf R\mathbf B
+ =\mathbf A(\mathbf R\mathbf B\mathbf R^{-1})\mathbf R
+ =\underbrace{\mathbf A\wordprod(\beta')}_{\widetilde{\mathbf M}}
+  \mathbf R.
+ \label{eq:pushrotation}
+\end{equation}
+Thus the original elastic endpoint is
+\begin{equation}
+ \mathbf C_w
+ =\mathbf R^\trans
+  (\widetilde{\mathbf M}^\trans\mathbf C_0\widetilde{\mathbf M})
+  \mathbf R\in\E.
+\end{equation}
+By rotation-invariance of \(\E\), it follows that
+\begin{equation}
+ \widetilde{\mathbf M}^\trans\mathbf C_0\widetilde{\mathbf M}\in\E.
+\end{equation}
+But \(\widetilde{\mathbf M}\) is represented by the word
+\(\alpha\beta'\), whose length is
+\begin{equation}
+ |\alpha\beta'|=|w|-|\rho|<|w|.
+\end{equation}
+This is a strictly shorter path into the elastic domain, contradicting the
+minimality of \(w\).  If joining \(\alpha\) to \(\beta'\) creates adjacent
+inverse shears, cancelling them only shortens the replacement further.
+\end{proof}
+
+\begin{corollary}
+A globally shortest elastic word also contains no nonempty contiguous
+subword with product \(\mathbf I\).
+\end{corollary}
+
+\begin{proof}
+Such a subword can be deleted directly without changing the accumulated
+matrix.  The resulting word reaches the same endpoint and is shorter.
+\end{proof}
+
+\noindent
+\colorbox{softblue}{%
+\parbox{\dimexpr\textwidth-2\fboxsep}{%
+\textbf{What has been proved.}
+The short path cannot hide a quarter turn, a half turn, or an identity loop
+as any consecutive sequence of its shear moves.  The result is exact and
+does not require a generic metric, a unique endpoint, or a trivial lattice
+stabilizer.  It relies only on Equations~\eqref{eq:Einvariant} and
+\eqref{eq:normalizes}.}}
+
+\section{What this says about the other quadrant}
+
+Theorem~\ref{thm:main} concerns the literal shear word.  The complementary
+statement about \emph{all} paths to the two elastic representatives is most
+cleanly expressed by a relative matrix quotient.
+
+Let \(\mathbf M_{\mathrm s}\) be a shortest transformation and set
+\begin{equation}
+ \mathbf C_{\mathrm s}
+ =\mathbf M_{\mathrm s}^\trans\mathbf C_0\mathbf M_{\mathrm s}.
+\end{equation}
+For any other terminal transformation \(\mathbf M\), define
+\(\mathbf R=\mathbf M_{\mathrm s}^{-1}\mathbf M\).  Then
+\begin{equation}
+ \mathbf M^\trans\mathbf C_0\mathbf M
+ =\mathbf R^\trans\mathbf C_{\mathrm s}\mathbf R.
+ \label{eq:relativeendpoint}
+\end{equation}
+If the endpoint equals \(\mathbf C_{\mathrm s}\), then
+\begin{equation}
+ \mathbf R\in\Aut(\mathbf C_{\mathrm s})
+ :=\{\mathbf A\in\SLZ:
+ \mathbf A^\trans\mathbf C_{\mathrm s}\mathbf A
+ =\mathbf C_{\mathrm s}\}.
+ \label{eq:stabilizer}
+\end{equation}
+If instead the endpoint is the quarter-turned representative
+\(\mathbf Q^\trans\mathbf C_{\mathrm s}\mathbf Q\), then
+\begin{equation}
+ \mathbf R=\mathbf A\mathbf Q
+ \quad\text{for some}\quad
+ \mathbf A\in\Aut(\mathbf C_{\mathrm s}).
+ \label{eq:othercoset}
+\end{equation}
+For a generic positive-definite metric the integer stabilizer is only
+\(\{\pm\mathbf I\}\).  Equations~\eqref{eq:stabilizer}--\eqref{eq:othercoset}
+then reduce to the sharp classification
+\begin{equation}
+ \boxed{
+ \begin{aligned}
+ \text{same representative:}\quad
+ &\mathbf M_{\mathrm s}^{-1}\mathbf M\in\{\pm\mathbf I\},\\
+ \text{other representative:}\quad
+ &\mathbf M_{\mathrm s}^{-1}\mathbf M\in\{\pm\mathbf Q\}.
+ \end{aligned}}
+ \label{eq:classification}
+\end{equation}
+This statement includes arbitrarily long words: however many extra shears a
+path uses, its net difference from the short path lies in the indicated
+rotation class whenever it reaches the same exact representative.
+
+There is an important limitation.  Equation~\eqref{eq:classification} does
+\emph{not} imply that every displayed longer word contains a contiguous
+three-letter copy of \(\mathbf Q\).  Group relations and cancellations can
+spread that rotational content throughout the word.  What is true is:
+\begin{enumerate}
+ \item the globally shortest word has no removable rotational segment, by
+       Theorem~\ref{thm:main}; and
+ \item every word reaching the other generic representative has a net
+       quarter-turn relative to that shortest word, by
+       Equation~\eqref{eq:classification}.
+\end{enumerate}
+Together these two statements justify assigning the extra lattice rotation
+to the other-quadrant description without falsely claiming that it must be
+visible as a local block in every possible word.
+
+\section{The simple-shear example}
+
+For
+\begin{equation}
+ \mathbf F=\begin{pmatrix}1&1.6\\0&1\end{pmatrix},
+ \qquad
+ \mathbf C_0=\mathbf F^\trans\mathbf F
+ =\begin{pmatrix}1&1.6\\1.6&3.56\end{pmatrix},
+\end{equation}
+the shortest BFS word and the first word reaching the other representative
+are
+\begin{align}
+ w_{\mathrm s}&=\Uminus\Uminus,
+ &\mathbf M_{\mathrm s}&=
+ \begin{pmatrix}1&-2\\0&1\end{pmatrix},\\
+ w_{\ell}&=\Uminus\Lminus\Uplus,
+ &\mathbf M_{\ell}&=
+ \begin{pmatrix}2&1\\-1&0\end{pmatrix}.
+\end{align}
+The short word plainly has no rotational subword; Theorem~\ref{thm:main}
+shows that this is structural rather than an accident of its length.  The
+relative quotient exposes the other path's quarter turn:
+\begin{equation}
+ \mathbf M_{\mathrm s}^{-1}\mathbf M_{\ell}
+ =\mathbf Q,
+ \qquad
+ \mathbf M_{\ell}=\mathbf M_{\mathrm s}\mathbf Q.
+ \label{eq:examplequotient}
+\end{equation}
+At word level, the same calculation is
+\begin{equation}
+ (\Uminus\Uminus)^{-1}
+ (\Uminus\Lminus\Uplus)
+ =\Uplus\Uplus\Uminus\Lminus\Uplus
+ \longrightarrow \Uplus\Lminus\Uplus
+ =\mathbf Q,
+ \label{eq:wordcancellation}
+\end{equation}
+where the arrow cancels the adjacent \(\Uplus\Uminus\) pair.  The terminal
+metrics are therefore the two quarter-turned elastic representatives
+\begin{align}
+ \mathbf C_{\mathrm s}
+ &=\begin{pmatrix}1&-0.4\\-0.4&1.16\end{pmatrix},&
+ \mathbf C_{\ell}
+ &=\begin{pmatrix}1.16&0.4\\0.4&1\end{pmatrix}
+ =\mathbf Q^\trans\mathbf C_{\mathrm s}\mathbf Q.
+\end{align}
+
+\begin{table}[htbp]
+\centering
+\caption{Computational checks used while developing the algebraic statement.
+They support the theorem but are not part of its proof.}
+\label{tab:checks}
+\small
+\renewcommand{\arraystretch}{1.22}
+\begin{tabularx}{\textwidth}{@{}Xrr@{}}
+\toprule
+Check & Cases examined & Failures \\
+\midrule
+Global shortest word had a contiguous nontrivial rotational segment
+ & 73 generic starts & 0 \\
+All terminal paths obeyed the same/other relative-rotation classification
+ & 2414 terminal paths from 75 starts & 0 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Conclusion}
+
+The missing logical step is now supplied: the shortest elastic-reduction
+path is not merely shorter than a path carrying a relative quarter turn; it
+is provably free of every removable integer-rotation segment.  If such a
+segment existed, rotation invariance of the target and rotational closure of
+the shear generators would construct a strictly shorter elastic path.
+
+For generic metrics, any path to the other elastic representative differs
+from this rotation-free shortest path by \(\pm\mathbf Q\), while paths to the
+same representative differ by \(\pm\mathbf I\).  At exceptional symmetric
+metrics the stabilizer in Equation~\eqref{eq:stabilizer} can be larger, so
+the cosets in Equation~\eqref{eq:classification} must be replaced by the
+full stabilizer and its \(\mathbf Q\)-coset.  The rotation-free theorem itself
+is unaffected by that exception.
+
+\end{document}
