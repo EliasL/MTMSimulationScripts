@@ -13,7 +13,7 @@ def get_batch_script(command, job_name, nrThreads, outPath):
     batch_script = textwrap.dedent(f"""
         #!/bin/bash
         #SBATCH --job-name={job_name}
-        #SBATCH --time=1-00:01:00
+        #SBATCH --time=1-00:05:00
         #SBATCH --nodes=1
         #SBATCH --ntasks=1
         #SBATCH --cpus-per-task={nrThreads}

@@ -17,7 +17,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Circle, Rectangle
 
 from MTMath.poincareEnergy import drawPoincareGrid, prepPoincareFig
-from Plotting.element_tracking import ElementMatrixHistory
+from Plotting.element_tracking import ElementMatrixHistory, read_matrix_component
 from Plotting.vtuDataForSylvain import VTUData
 
 
@@ -106,6 +106,39 @@ class PeriodicMeshSnapshot:
             raise ValueError("One energy value is required for every plotted triangle.")
         if not np.all(np.isfinite(self.polygons)) or not np.all(np.isfinite(self.energies)):
             raise ValueError(f"Non-finite periodic-mesh data in {self.source_path}")
+
+
+def load_element_matrix_histories(
+    vtu_paths: Sequence[str | Path],
+    element_index: int,
+    matrix_names: Sequence[str],
+    *,
+    progress_every: int = 50,
+) -> tuple[ElementMatrixHistory, ...]:
+    """Load several matrix histories while opening each VTU only once."""
+    paths = tuple(Path(path) for path in vtu_paths)
+    names = tuple(matrix_names)
+    if not paths or not names or len(set(names)) != len(names):
+        raise ValueError("Paths and unique matrix names are required.")
+    if element_index < 0:
+        raise ValueError("element_index must be non-negative.")
+    matrices = {name: np.empty((len(paths), 2, 2), dtype=float) for name in names}
+    for state_index, path in enumerate(paths):
+        data = VTUData(path)
+        for name in names:
+            for i in (1, 2):
+                for j in (1, 2):
+                    values = read_matrix_component(data, name, i, j, symmetric=False)
+                    if element_index >= len(values):
+                        raise IndexError(
+                            f"Element {element_index} is outside {name} in {path}."
+                        )
+                    matrices[name][state_index, i - 1, j - 1] = values[element_index]
+        if progress_every and (state_index + 1) % progress_every == 0:
+            print(f"loaded matrix histories: {state_index + 1}/{len(paths)}", flush=True)
+    return tuple(
+        ElementMatrixHistory(paths, matrices[name], element_index, name) for name in names
+    )
 
 
 def mobius_to_origin(z: np.ndarray | complex, center: complex) -> np.ndarray:
@@ -241,8 +274,9 @@ def extract_poincare_grid_segments(
     depth: int = 5,
     samples_per_line: int = 50,
     grid_size: int = 800,
+    transformation: np.ndarray | None = None,
 ) -> tuple[np.ndarray, ...]:
-    """Generate the standard SimulationScripts grid as downsampled disk curves."""
+    """Generate a standard grid patch after an optional exact congruence."""
     if depth < 0 or samples_per_line < 2:
         raise ValueError("Invalid grid depth or samples_per_line.")
     fig, ax = plt.subplots()
@@ -254,7 +288,13 @@ def extract_poincare_grid_segments(
         withYieldSurface=False,
         minimalTicks=True,
     )
-    drawPoincareGrid(ax, grid_size=grid_size, depth=depth, c="gray")
+    drawPoincareGrid(
+        ax,
+        grid_size=grid_size,
+        depth=depth,
+        transformation=transformation,
+        c="gray",
+    )
     half = grid_size / 2
     segments: list[np.ndarray] = []
     for line in ax.lines:
@@ -496,7 +536,7 @@ def render_poincare_animation(
     reconstructed_history: ElementMatrixHistory | None = None,
     fps: int = 30,
     dpi: int = 120,
-    grid_depth: int = 10,
+    grid_depth: int = 5,
     grid_samples: int = 50,
 ) -> Path:
     """Render T and the reconstructed path with a smoothed moving camera."""
@@ -507,8 +547,29 @@ def render_poincare_animation(
             raise ValueError("The T and reconstructed histories must use identical paths.")
         if reconstructed_history.element_index != history.element_index:
             raise ValueError("The T and reconstructed histories must track one element.")
-    grid = extract_poincare_grid_segments(
-        depth=grid_depth, samples_per_line=grid_samples
+    grid_cache: dict[tuple[int, int, int, int], tuple[np.ndarray, ...]] = {}
+    node_grids: list[tuple[np.ndarray, ...]] = []
+    for history_index in timeline.node_history_indices:
+        matrix = history.matrices[int(history_index)]
+        rounded = np.rint(matrix).astype(int)
+        if not np.allclose(matrix, rounded, atol=1e-12, rtol=0):
+            raise ValueError(f"T is not integer-valued at history index {history_index}.")
+        determinant = rounded[0, 0] * rounded[1, 1] - rounded[0, 1] * rounded[1, 0]
+        if determinant != 1:
+            raise ValueError(
+                f"T is not in SL(2,Z) at history index {history_index}: det={determinant}."
+            )
+        key = tuple(int(value) for value in rounded.reshape(-1))
+        if key not in grid_cache:
+            grid_cache[key] = extract_poincare_grid_segments(
+                depth=grid_depth,
+                samples_per_line=grid_samples,
+                transformation=rounded,
+            )
+        node_grids.append(grid_cache[key])
+    print(
+        f"local Poincare grids: {len(grid_cache)} unique wells at depth {grid_depth}",
+        flush=True,
     )
     nodes = timeline.node_complex
     t_path = tuple(
@@ -590,6 +651,7 @@ def render_poincare_animation(
         for frame in range(timeline.frame_count):
             center = timeline.center_complex[frame]
             completed_count = int(timeline.t_node_counts[frame])
+            grid = node_grids[completed_count - 1]
             transformed_grid = [complex_to_xy(mobius_to_origin(curve, center)) for curve in grid]
             grid_collection.set_segments(transformed_grid)
 
@@ -633,7 +695,7 @@ def render_poincare_animation(
                     complex_to_xy(mobius_to_origin(current, center))
                 )
             gamma_label.set_text(rf"$\gamma = {timeline.frame_loads[frame]:.2f}$")
-            writer.grab_frame(facecolor="white")
+            writer.grab_frame(facecolor="white", transparent=False)
             if (frame + 1) % 30 == 0:
                 print(f"Poincare frames: {frame + 1}/{timeline.frame_count}", flush=True)
     plt.close(fig)
@@ -736,12 +798,19 @@ def render_periodic_mesh_animation(
     norm = PowerNorm(gamma=0.5, vmin=0, vmax=upper_energy, clip=True)
 
     fig, ax = plt.subplots(figsize=(7, 7), dpi=dpi)
-    fig.patch.set_alpha(0)
-    ax.set_facecolor("none")
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
     fig.subplots_adjust(left=0, right=1, bottom=0, top=1)
-    energy = PolyCollection([], cmap="magma", norm=norm, edgecolors="none")
+    energy = PolyCollection(
+        [],
+        cmap="coolwarm",
+        norm=norm,
+        edgecolors="face",
+        linewidths=0.35,
+        antialiaseds=False,
+    )
     region = LineCollection(
-        [], colors="#d73027", linewidths=4.0, linestyles="--", zorder=5
+        [], colors="#00a651", linewidths=4.0, linestyles="--", zorder=5
     )
     ax.add_collection(energy)
     ax.add_collection(region)
@@ -753,7 +822,7 @@ def render_periodic_mesh_animation(
     ax.set_aspect("equal")
     ax.set_axis_off()
 
-    writer = _alpha_writer(ffmpeg_executable, fps)
+    writer = _writer(ffmpeg_executable, fps)
     previous_index = -1
     snapshot: PeriodicMeshSnapshot | None = None
     with writer.saving(fig, str(output_path), dpi):
@@ -773,7 +842,7 @@ def render_periodic_mesh_animation(
             energy.set_verts(snapshot.polygons)
             energy.set_array(snapshot.energies)
             region.set_segments(snapshot.region_outlines)
-            writer.grab_frame(transparent=True, facecolor="none")
+            writer.grab_frame(facecolor="white", transparent=False)
             if (frame + 1) % 30 == 0:
                 print(
                     f"periodic mesh frames: {frame + 1}/{timeline.frame_count}",
@@ -791,14 +860,17 @@ def compose_picture_in_picture(
     *,
     ffmpeg_executable: str | Path,
     inset_fraction: float = 0.34,
-    periodic_inset_fraction: float = 0.30,
-    margin: int = 60,
+    periodic_inset_fraction: float = 0.60,
+    local_margin: int = 130,
+    periodic_margin: int = 130,
 ) -> Path:
     """Place local and full periodic mesh videos along the right edge."""
     invalid_inset = not 0.1 <= inset_fraction <= 0.6
     invalid_periodic_inset = not 0.1 <= periodic_inset_fraction <= 0.6
     if invalid_inset or invalid_periodic_inset:
         raise ValueError("Inset fractions must lie inside [0.1, 0.6].")
+    if local_margin < 0 or periodic_margin < 0:
+        raise ValueError("Inset margins must be non-negative.")
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     scale_expression = (
@@ -806,8 +878,9 @@ def compose_picture_in_picture(
         f"h=trunc(ih*{inset_fraction}/2)*2[local];"
         f"[2:v]format=rgba,scale=w=trunc(iw*{periodic_inset_fraction}/2)*2:"
         f"h=trunc(ih*{periodic_inset_fraction}/2)*2[periodic];"
-        f"[0:v][local]overlay=W-w-{margin}:{margin}:shortest=1[withlocal];"
-        f"[withlocal][periodic]overlay=W-w-{margin}:H-h-{margin}:shortest=1[out]"
+        f"[0:v][local]overlay=W-w-{local_margin}:{local_margin}:shortest=1[withlocal];"
+        f"[withlocal][periodic]overlay=W-w-{periodic_margin}:"
+        f"H-h-{periodic_margin}:shortest=1[out]"
     )
     command = [
         str(ffmpeg_executable),

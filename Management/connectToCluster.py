@@ -106,7 +106,12 @@ def create_directories(cluster_address, cluster_base_path, verbose=False):
 
 
 def sync_folders(
-    cluster_address, cluster_base_path, exclude_list, local_paths, verbose=False
+    cluster_address,
+    cluster_base_path,
+    exclude_list,
+    local_paths,
+    verbose=False,
+    delete=False,
 ):
     """
     Sync local folders to the cluster using rsync.
@@ -127,6 +132,8 @@ def sync_folders(
             # "--protocol=31",
             "--progress",
         ]
+        if delete:
+            rsync_command.append("--delete")
         for item in exclude_list:
             rsync_command.extend(["--exclude", item])
         rsync_command.extend([source_path, f"{cluster_address}:{cluster_base_path}"])
@@ -188,6 +195,14 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         exclude_list=exclude_list,
         local_paths=[local_path_MTS2D, local_path_SS],
         verbose=verbose,
+    )
+    sync_folders(
+        cluster_address=f"{cluster_address}",
+        cluster_base_path=f"{cluster_base_path}MTS2D/src/",
+        exclude_list=[],
+        local_paths=[f"{local_path_MTS2D}/src/"],
+        verbose=verbose,
+        delete=True,
     )
 
     # Step 3: Optionally run setup
