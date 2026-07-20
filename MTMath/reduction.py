@@ -98,6 +98,55 @@ def lagrange_reduction(C, loops=1000):
     return C_out, M
 
 
+def lagrange_reduction_history(C, loops=1000):
+    """Return every metric visited by the scalar 2D Lagrange reduction.
+
+    The first entry is the input metric and the last entry is the same reduced
+    metric returned by :func:`lagrange_reduction`.  Keeping this small,
+    non-vectorized trace here avoids coupling static plots to the Qt reduction
+    visualizer.
+    """
+    C_current = np.asarray(C, dtype=float).copy()
+    if C_current.shape != (2, 2):
+        raise ValueError("C must have shape (2, 2)")
+    if not np.allclose(C_current, C_current.T):
+        raise ValueError("C must be symmetric")
+    if not np.all(np.isfinite(C_current)) or np.linalg.det(C_current) <= 0:
+        raise ValueError("C must be a finite positive-definite metric")
+
+    history = [C_current.copy()]
+    for _ in range(loops):
+        changed = False
+
+        if C_current[1, 1] < C_current[0, 0]:
+            C_current[0, 0], C_current[1, 1] = (
+                C_current[1, 1],
+                C_current[0, 0],
+            )
+            history.append(C_current.copy())
+            changed = True
+
+        if C_current[0, 1] < 0:
+            C_current[0, 1] *= -1
+            C_current[1, 0] = C_current[0, 1]
+            history.append(C_current.copy())
+            changed = True
+
+        if 2 * C_current[0, 1] > C_current[0, 0]:
+            C_current[1, 1] += (
+                C_current[0, 0] - 2 * C_current[0, 1]
+            )
+            C_current[0, 1] -= C_current[0, 0]
+            C_current[1, 0] = C_current[0, 1]
+            history.append(C_current.copy())
+            changed = True
+
+        if not changed:
+            return np.stack(history)
+
+    raise RuntimeError(f"Lagrange reduction did not converge in {loops} iterations")
+
+
 def lagrange_reduction_F(F, loops=1000, returnM=False):
     """
     Lagrange reduction acting on F in place.
@@ -164,8 +213,8 @@ def elastic_domain_quadrant(C) -> NDArray[np.int_]:
     return labels
 
 
-def elastic_reduction_components(C11, C22, C12, loops=1000, compute_M=False):
-    """Vectorized elastic reduction of symmetric 2x2 C via component updates.
+def plastic_reduction_components(C11, C22, C12, loops=1000, compute_M=False):
+    """Vectorized plastic reduction of symmetric 2x2 C via component updates.
     Also returns M such that C_reduced = M.T @ C @ M. If compute_M=False,
     M is a small zero placeholder to keep the return signature consistent.
     """
@@ -190,7 +239,8 @@ def elastic_reduction_components(C11, C22, C12, loops=1000, compute_M=False):
 
     def _in_elastic(a_, b_, c_):
         Cmin = np.minimum(a_, b_)
-        return (Cmin >= 0) & (np.abs(c_) <= 0.5 * Cmin)
+        invalid = ~np.isfinite(a_) | ~np.isfinite(b_) | ~np.isfinite(c_)
+        return invalid | ((Cmin >= 0) & (np.abs(c_) <= 0.5 * Cmin))
 
     done = False
     for _ in range(loops):
@@ -200,8 +250,10 @@ def elastic_reduction_components(C11, C22, C12, loops=1000, compute_M=False):
             done = True
             break
 
-        use_U = active & (a < b)
-        use_V = active & ~use_U  # includes a >= b
+        # The active-shear implementation tries horizontal shears first, so
+        # ties (a == b) follow U rather than V.
+        use_U = active & (a <= b)
+        use_V = active & ~use_U
 
         # m = sign(-c/a) or sign(-c/b), but avoid divide-by-zero / NaNs
         mU = np.zeros_like(a)
@@ -209,14 +261,12 @@ def elastic_reduction_components(C11, C22, C12, loops=1000, compute_M=False):
 
         if np.any(use_U):
             denom = np.where(a == 0, 1.0, a)
-            x = -c / denom
-            mU = np.sign(x) * np.floor(np.abs(x) + 0.5)
+            mU = np.sign(-c / denom)
             mU = np.where(np.isfinite(mU), mU, 0.0)
 
         if np.any(use_V):
             denom = np.where(b == 0, 1.0, b)
-            x = -c / denom
-            mV = np.sign(x) * np.floor(np.abs(x) + 0.5)
+            mV = np.sign(-c / denom)
             mV = np.where(np.isfinite(mV), mV, 0.0)
 
         # --- Apply U_m where selected: W = [[1,m],[0,1]] ---
@@ -264,7 +314,7 @@ def elastic_reduction_components(C11, C22, C12, loops=1000, compute_M=False):
                 M[use_V] = M_mask @ W
 
     if not done:
-        print("Warning! Not enough loops in elastic reduction!")
+        print("Warning! Not enough loops in plastic reduction!")
     if not compute_M:
         # Placeholder to keep return signature consistent without large allocations.
         M = np.zeros((2, 2), dtype=float)
@@ -274,8 +324,8 @@ def elastic_reduction_components(C11, C22, C12, loops=1000, compute_M=False):
     return a, b, c, M
 
 
-def elastic_reduction(C, loops=1000, compute_M=False):
-    """Return an elastically reduced copy of symmetric 2x2 matrices C.
+def plastic_reduction(C, loops=1000, compute_M=False):
+    """Return a plastic-reduced copy of symmetric 2x2 matrices C.
 
     This function does **not** modify the input `C`.
     Returns (C_reduced, M) where C_reduced = M.T @ C @ M. If compute_M=False,
@@ -293,7 +343,7 @@ def elastic_reduction(C, loops=1000, compute_M=False):
     # Extract views (no copy) from the output array
     C11, C22, C12 = C_out[..., 0, 0], C_out[..., 1, 1], C_out[..., 0, 1]
 
-    C11r, C22r, C12r, M = elastic_reduction_components(
+    C11r, C22r, C12r, M = plastic_reduction_components(
         C11, C22, C12, loops=loops, compute_M=compute_M
     )
 
@@ -304,17 +354,79 @@ def elastic_reduction(C, loops=1000, compute_M=False):
 
     return C_out, M
 
+
+def plastic_reduction_history(
+    C,
+    loops=1000,
+    return_M=False,
+    require_convergence=True,
+):
+    """Return every metric visited by the scalar plastic reduction.
+
+    This is the reusable metric-space form of
+    ``rotation_free_active_shear_reduction`` in
+    ``LagrangeReduction/LagrangeReduction.py``.  It follows the same unit
+    horizontal/vertical shear choices without depending on the Qt visualizer.
+    """
+    C_current = np.asarray(C, dtype=float).copy()
+    if C_current.shape != (2, 2):
+        raise ValueError("C must have shape (2, 2)")
+    if not np.allclose(C_current, C_current.T):
+        raise ValueError("C must be symmetric")
+    if not np.all(np.isfinite(C_current)) or np.linalg.det(C_current) <= 0:
+        raise ValueError("C must be a finite positive-definite metric")
+
+    history = [C_current.copy()]
+    M_total = np.eye(2, dtype=int)
+
+    def result():
+        history_array = np.stack(history)
+        if return_M:
+            return history_array, M_total
+        return history_array
+
+    for _ in range(loops):
+        a = C_current[0, 0]
+        b = C_current[1, 1]
+        c = C_current[0, 1]
+        if min(a, b) >= 0 and abs(c) <= 0.5 * min(a, b):
+            return result()
+
+        denominator = a if a <= b else b
+        if denominator == 0:
+            raise RuntimeError("Plastic reduction encountered a zero diagonal")
+        m = int(np.sign(-c / denominator))
+        if m == 0:
+            raise RuntimeError("Plastic reduction made no progress")
+
+        if a <= b:
+            shear = np.array([[1, m], [0, 1]], dtype=int)
+            C_current[0, 1] = c + m * a
+            C_current[1, 0] = C_current[0, 1]
+            C_current[1, 1] = b + 2 * m * c + m * m * a
+        else:
+            shear = np.array([[1, 0], [m, 1]], dtype=int)
+            C_current[0, 1] = c + m * b
+            C_current[1, 0] = C_current[0, 1]
+            C_current[0, 0] = a + 2 * m * c + m * m * b
+        M_total = M_total @ shear
+        history.append(C_current.copy())
+
+    if require_convergence:
+        raise RuntimeError(f"Plastic reduction did not converge in {loops} iterations")
+    return result()
+
     ########
 
 
 def reduce_components(C11, C22, C12, loops=1000, fullReduction=False):
     """
-    Elastic reduction of (C11, C22, C12) in place.
+    Plastic reduction of (C11, C22, C12) in place.
     If fullReduction=True, apply the final m1/m2 operations to map into the
     fundamental domain (C12 >= 0 and C11 <= C22).
     Returns (C11, C22, C12, M) where C_reduced = M.T @ C @ M.
     """
-    C11r, C22r, C12r, M = elastic_reduction_components(
+    C11r, C22r, C12r, M = plastic_reduction_components(
         C11, C22, C12, loops=loops, compute_M=True
     )
 
@@ -353,7 +465,7 @@ def reduce_components(C11, C22, C12, loops=1000, fullReduction=False):
 
 
 def reduce(C, loops=1000, fullReduction=False):
-    """Return an elastically reduced copy of symmetric 2x2 matrices C.
+    """Return a plastic-reduced copy of symmetric 2x2 matrices C.
 
     If fullReduction=True, apply the final m1/m2 operations to map into the
     fundamental domain (C12 >= 0 and C11 <= C22).
@@ -410,7 +522,7 @@ def MCheck_reductions():
     C = F.T @ F
     # Easy
     MCheck_reduction(lagrange_reduction, C)
-    MCheck_reduction(lambda C: elastic_reduction(C, compute_M=True), C)
+    MCheck_reduction(lambda C: plastic_reduction(C, compute_M=True), C)
     MCheck_reduction(reduce, C)
     MCheck_reduction(lambda C: reduce(C, fullReduction=True), C)
     C_lr, _ = lagrange_reduction(C)
@@ -420,7 +532,7 @@ def MCheck_reductions():
     F2 = F @ F @ F.T @ np.array([[1, -1.4], [0, 1]])
     C2 = F2.T @ F2
     MCheck_reduction(lagrange_reduction, C2)
-    MCheck_reduction(lambda C: elastic_reduction(C, compute_M=True), C2)
+    MCheck_reduction(lambda C: plastic_reduction(C, compute_M=True), C2)
     MCheck_reduction(reduce, C2)
     MCheck_reduction(lambda C: reduce(C, fullReduction=True), C2)
     C2_lr, _ = lagrange_reduction(C2)
@@ -431,10 +543,10 @@ def MCheck_reductions():
     print("Passed M checks!")
 
 
-def debug_elastic_reduction():
+def debug_plastic_reduction():
     F = np.array([[1, 1], [0, 1]])
     C = F.T @ F
-    C_R = elastic_reduction(C)
+    C_R = plastic_reduction(C)
     print(C)
     print(C_R)
 
@@ -473,7 +585,7 @@ def speedTest_reduction(n=1, steps=80, seed=0):
     MCheck_reduction(lagrange_reduction, C)
     t1 = time.perf_counter()
 
-    print("Elastic reduction")
+    print("Plastic reduction")
     t2 = time.perf_counter()
 
     def r(C):

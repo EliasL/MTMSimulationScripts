@@ -5,6 +5,7 @@ from collections import deque
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 from MTMath.energyFunction import EnergyFunction, rotation, F_from_C
+from MTMath.reduction import plastic_reduction_history
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -222,49 +223,15 @@ def rotation_free_active_shear_reduction(v1, v2, max_iters=20):
     Columns are basis vectors: F = [v1 v2]. We apply F <- M @ F, M ∈ SL(2,Z).
     Returns reduced (v1r, v2r), the accumulated unimodular Z, and a history.
     """
-    # F = np.column_stack((np.asarray(v1, float), np.asarray(v2, float)))
-    F, _ = generate_matrix(v1, v2)
-
-    Z = np.eye(2, dtype=int)
-    history = []
-
-    # Four unit shears (left action)
-    Sx_plus = np.array([[1, 1], [0, 1]], dtype=int)  # row1 <- row1 + row2
-    Sx_minus = np.array([[1, -1], [0, 1]], dtype=int)  # row1 <- row1 - row2
-    Sy_plus = np.array([[1, 0], [1, 1]], dtype=int)  # row2 <- row2 + row1
-    Sy_minus = np.array([[1, 0], [-1, 1]], dtype=int)  # row2 <- row2 - row1
-    moves = (Sx_plus, Sx_minus, Sy_plus, Sy_minus)
-
-    def score(F):
-        x, y = C2PoincareDisk(F2C(F))
-        return x**2 + y**2
-
-    prev = score(F)
-    history.append(F2C(F))
-    for i in range(max_iters):
-        # Try all four unit shears, choose the one with the best score
-        best = None
-        for j, M in enumerate(moves):
-            F2 = F @ M
-            sc = score(F2)
-            # print(j, sc)
-            if best is None or sc < best[0]:
-                best = (sc, M, F2)
-
-        # If no improvement, stop (numerical plateau)
-        if best[0] >= prev:
-            break
-
-        # Apply the best shear
-        _, Mbest, F = best
-        history.append(F2C(F))
-        Z = Z @ Mbest
-        prev = best[0]
-        if i == max_iters - 1:
-            print("Too few itterations (Stuck)")
-
-    # Fallback: return current state
-    return F[:, 0], F[:, 1], Z, history
+    F, C = generate_matrix(v1, v2)
+    history, Z = plastic_reduction_history(
+        C,
+        loops=max_iters,
+        return_M=True,
+        require_convergence=False,
+    )
+    F_reduced = F @ Z
+    return F_reduced[:, 0], F_reduced[:, 1], Z, list(history)
 
 
 def align_matrix(F, align_to="x"):

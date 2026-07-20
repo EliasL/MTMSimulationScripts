@@ -1,10 +1,42 @@
-from .vector import Vector
 import numpy as np
-from PyQt5.QtCore import QPointF
+import pyqtgraph as pg
+from PyQt5.QtCore import QPointF, Qt
+
+from .vector import Vector
 
 
 class VectorPair:
-    def __init__(self, view, colorS="y", colorH="r", handelable=True, width=2) -> None:
+    def __init__(
+        self,
+        view,
+        colorS="y",
+        colorH="r",
+        handelable=True,
+        width=2,
+        *,
+        basis_colors=None,
+        basis_widths=None,
+        basis_styles=None,
+    ) -> None:
+        """Draw a basis and its reduced parallelogram in ``view``.
+
+        ``colorH`` and ``width`` remain the defaults for both basis vectors.
+        The optional two-item ``basis_*`` arguments make e1 and e2 independently
+        styleable without changing existing callers.
+        """
+        if basis_colors is None:
+            basis_colors = (colorH, colorH)
+        if basis_widths is None:
+            basis_widths = (width, width)
+        if basis_styles is None:
+            basis_styles = (Qt.SolidLine, Qt.SolidLine)
+
+        basis_style_values = (basis_colors, basis_widths, basis_styles)
+        if not all(len(values) == 2 for values in basis_style_values):
+            raise ValueError(
+                "basis_colors, basis_widths, and basis_styles must have two items"
+            )
+
         self.r1 = Vector(
             [(0, 0), (1, 0)],
             handleable=(False, False),
@@ -35,11 +67,17 @@ class VectorPair:
         view.addItem(self.r4)
 
         self.e1 = Vector(
-            [(0, 0), (1, 0)], handleable=(False, handelable), pen=colorH, width=width
+            [(0, 0), (1, 0)],
+            handleable=(False, handelable),
+            pen=pg.mkPen(color=basis_colors[0], style=basis_styles[0]),
+            width=basis_widths[0],
         )
         view.addItem(self.e1)
         self.e2 = Vector(
-            [(0, 0), (0, 1)], handleable=(False, handelable), pen=colorH, width=width
+            [(0, 0), (0, 1)],
+            handleable=(False, handelable),
+            pen=pg.mkPen(color=basis_colors[1], style=basis_styles[1]),
+            width=basis_widths[1],
         )
         view.addItem(self.e2)
 
@@ -103,8 +141,8 @@ class VectorPair:
             self.r3.setVisible(reduced)
             self.r4.setVisible(reduced)
         if main is not None:
-            self.e1.setVisible(reduced)
-            self.e2.setVisible(reduced)
+            self.e1.setVisible(main)
+            self.e2.setVisible(main)
 
     def isVisible(self, both=None, main=None, reduced=None):
         if both is not None:

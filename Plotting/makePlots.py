@@ -1200,11 +1200,11 @@ def compute_predicted_next_energy(csv_file_path):
     Compute predicted next-step total energy using first- and second-order
     simple-shear Taylor approximations:
 
-        E_{i+1}^{pred,1} = E_i + V * P_{12,i} * delta_gamma_i
+        E_{i+1}^{pred,1} = E_i + V_0 * P_{12,i} * delta_gamma_i
         E_{i+1}^{pred,2} = E_{i+1}^{pred,1}
-            + 0.5 * V * a_{1212,i} * delta_gamma_i^2
-        E_{i+1}^{pred,2}(a_{1212}(0)) = E_{i+1}^{pred,1}
-            + 0.5 * V * a_{1212}(0) * delta_gamma_i^2
+            + 0.5 * V_0 * A_{1212,i} * delta_gamma_i^2
+        E_{i+1}^{pred,2}(A_{1212}(0)) = E_{i+1}^{pred,1}
+            + 0.5 * V_0 * A_{1212}(0) * delta_gamma_i^2
 
     where A is dP/dF evaluated along F = [[1, gamma], [0, 1]], and compare
     to measured E_{i+1}.
@@ -1223,7 +1223,7 @@ def plot_predicted_energy_error(
     use_color_matrix_legend=True,
     y_log=True,
     strain_lim=(None, None),
-    show_sigma=False,
+    show_piola=False,
     show_first_order_reference=False,
     first_order_alpha=0.2,
     reference_prediction=None,
@@ -1232,6 +1232,10 @@ def plot_predicted_energy_error(
     x_column="load_ip1",
     show=False,
     save=True,
+    legend_title=None,
+    normalize_by_reference_volume=False,
+    figsize=None,
+    show_title=True,
 ):
     if isinstance(csv_file_paths, (str, Path)):
         csv_paths = [str(csv_file_paths)]
@@ -1261,6 +1265,12 @@ def plot_predicted_energy_error(
     if error_metric not in allowed_metrics:
         raise ValueError(
             f"Unknown error_metric '{error_metric}'. Expected one of {sorted(allowed_metrics)}."
+        )
+
+    if normalize_by_reference_volume and error_metric.startswith("relative_"):
+        raise ValueError(
+            "Relative prediction errors are already dimensionless and cannot be "
+            "normalized by reference volume."
         )
 
     reference_aliases = {
@@ -1301,8 +1311,8 @@ def plot_predicted_energy_error(
         strain_min, strain_max = None, None
 
     if fig is None or ax is None:
-        fig, ax = plt.subplots()
-    sigma_ax = ax.twinx() if show_sigma else None
+        fig, ax = plt.subplots(figsize=figsize)
+    piola_ax = ax.twinx() if show_piola else None
 
     metric_label_map = {
         "prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},1}$",
@@ -1311,9 +1321,9 @@ def plot_predicted_energy_error(
         "second_order_prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}$",
         "abs_second_order_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}|$",
         "relative_second_order_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}| / |E_{i+1}^{\mathrm{real}}|$",
-        "second_order_gamma0_prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(a_{1212}(0))$",
-        "abs_second_order_gamma0_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(a_{1212}(0))|$",
-        "relative_second_order_gamma0_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(a_{1212}(0))| / |E_{i+1}^{\mathrm{real}}|$",
+        "second_order_gamma0_prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(A_{1212}(0))$",
+        "abs_second_order_gamma0_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(A_{1212}(0))|$",
+        "relative_second_order_gamma0_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(A_{1212}(0))| / |E_{i+1}^{\mathrm{real}}|$",
     }
 
     reference_metric_maps = {
@@ -1333,7 +1343,7 @@ def plot_predicted_energy_error(
     }
     reference_text_map = {
         "first_order": "Transparent markers: first-order approximation",
-        "second_order_gamma0": r"Transparent markers: second order with $a_{1212}(0)$",
+        "second_order_gamma0": r"Transparent markers: second order with $A_{1212}(0)$",
     }
     signed_error_metrics = {
         "prediction_error",
@@ -1358,7 +1368,11 @@ def plot_predicted_energy_error(
 
         representative_step = float(np.median(positive_steps))
         target = max(1, int(round(20 * -np.log(representative_step))))
-        if target >= indices.size:
+        retained_fraction = target / indices.size
+        # Near-complete downsampling creates conspicuous isolated holes while
+        # saving almost no markers. Keep all points unless at least 20% can be
+        # removed.
+        if retained_fraction >= 0.8:
             return indices
 
         sampled = np.linspace(0, indices.size - 1, target)
@@ -1405,10 +1419,19 @@ def plot_predicted_energy_error(
 
     plot_data = []
     for i, (csv_path, label) in enumerate(zip(csv_paths, labels)):
-        prediction_df, _ = compute_predicted_next_energy(csv_path)
+        prediction_df, prediction_info = compute_predicted_next_energy(csv_path)
+        error_scale = (
+            float(prediction_info["reference_volume"])
+            if normalize_by_reference_volume
+            else 1.0
+        )
+        if not np.isfinite(error_scale) or error_scale <= 0:
+            raise ValueError(
+                f"Invalid reference volume {error_scale!r} for {csv_path}."
+            )
         x = np.asarray(prediction_df[x_column], dtype=float)
-        y = _plot_values(prediction_df, error_metric)
-        sigma = np.asarray(prediction_df["sigma_i"], dtype=float)
+        y = _plot_values(prediction_df, error_metric) / error_scale
+        piola = np.asarray(prediction_df["P12_i"], dtype=float)
 
         finite = np.isfinite(x) & np.isfinite(y)
         if strain_min is not None:
@@ -1432,7 +1455,9 @@ def plot_predicted_energy_error(
         reference_y = None
         reference_indices = None
         if reference_metric is not None:
-            reference_y = _plot_values(prediction_df, reference_metric)
+            reference_y = (
+                _plot_values(prediction_df, reference_metric) / error_scale
+            )
             reference_finite = np.isfinite(x) & np.isfinite(reference_y)
             if strain_min is not None:
                 reference_finite &= x >= strain_min
@@ -1446,16 +1471,16 @@ def plot_predicted_energy_error(
                     np.asarray(prediction_df["delta_gamma"], dtype=float),
                 )
 
-        if show_sigma:
-            sigma_finite = np.isfinite(x) & np.isfinite(sigma)
+        if show_piola:
+            piola_finite = np.isfinite(x) & np.isfinite(piola)
             if strain_min is not None:
-                sigma_finite &= x >= strain_min
+                piola_finite &= x >= strain_min
             if strain_max is not None:
-                sigma_finite &= x <= strain_max
-            if np.any(sigma_finite):
-                sigma_ax.plot(
-                    x[sigma_finite],
-                    sigma[sigma_finite],
+                piola_finite &= x <= strain_max
+            if np.any(piola_finite):
+                piola_ax.plot(
+                    x[piola_finite],
+                    piola[piola_finite],
                     color="0.45",
                     linestyle="--",
                     linewidth=0.8,
@@ -1527,31 +1552,39 @@ def plot_predicted_energy_error(
     ax.set_xlabel(x_label_map[x_column])
     if y_log and error_metric in signed_error_metrics:
         label_key = f"abs_{error_metric}"
-        ax.set_ylabel(metric_label_map[label_key])
+        y_label = metric_label_map[label_key]
     else:
-        ax.set_ylabel(metric_label_map[error_metric])
+        y_label = metric_label_map[error_metric]
+    if normalize_by_reference_volume:
+        y_label = rf"$\left({y_label[1:-1]}\right)/V_0$"
+    ax.set_ylabel(y_label)
     if y_log:
         ax.set_yscale("log")
-        ax.set_ylim(None, 1e2)
-    if show_sigma:
-        sigma_ax.set_ylabel(r"$\sigma_{12}$", color="0.35")
-        sigma_ax.tick_params(axis="y", colors="0.35")
+    if show_piola:
+        piola_ax.set_ylabel(r"$P_{12}$", color="0.35")
+        piola_ax.tick_params(axis="y", colors="0.35")
     if "second_order_gamma0" in error_metric:
         title_formula = (
-            r"$E_{i+1}^{\mathrm{pred},2}(a_{1212}(0))="
-            r"E_i+V P_{12,i}\Delta\gamma_i"
-            r"+\frac{1}{2}V a_{1212}(0)(\Delta\gamma_i)^2$"
+            r"$E_{i+1}^{\mathrm{pred},2}(A_{1212}(0))="
+            r"E_i+V_0 P_{12,i}\Delta\gamma_i"
+            r"+\frac{1}{2}V_0 A_{1212}(0)(\Delta\gamma_i)^2$"
         )
     elif "second_order" in error_metric:
         title_formula = (
-            r"$E_{i+1}^{\mathrm{pred},2}=E_i+V P_{12,i}\Delta\gamma_i"
-            r"+\frac{1}{2}V a_{1212,i}(\Delta\gamma_i)^2$"
+            r"$E_{i+1}^{\mathrm{pred},2}=E_i+V_0 P_{12,i}\Delta\gamma_i"
+            r"+\frac{1}{2}V_0 A_{1212,i}(\Delta\gamma_i)^2$"
         )
     else:
         title_formula = (
-            r"$E_{i+1}^{\mathrm{pred},1}=E_i+V P_{12,i}\Delta\gamma_i$"
+            r"$E_{i+1}^{\mathrm{pred},1}=E_i+V_0 P_{12,i}\Delta\gamma_i$"
         )
-    ax.set_title("Energy Prediction Error\n" + title_formula)
+    title = (
+        "Energy Prediction Error per Reference Area"
+        if normalize_by_reference_volume
+        else "Energy Prediction Error"
+    )
+    if show_title:
+        ax.set_title(title + "\n" + title_formula)
     if reference_prediction is not None:
         ax.text(
             0.98,
@@ -1577,7 +1610,7 @@ def plot_predicted_energy_error(
             marker_color="lower_left_white",
         )
     else:
-        ax.legend(loc="best")
+        ax.legend(loc="best", title=legend_title)
     fig.tight_layout()
 
     if save:

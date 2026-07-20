@@ -139,13 +139,13 @@ def benchmark():
     # New functions (slight algebraic alteration) (16.02.26) (with another simulation running)
     # 1% RT: 2m 5s   ETR: 2h 48m 18s Load: 0.160390
 
-    # Elastic reduction (20.02.26) (with another simulation running)
+    # Plastic reduction (20.02.26) (with another simulation running)
     # 0% RT: 2m 2s   ETR: 4h 32m 57s Load: 0.156210
     # 0% RT: 20s     ETR: 2h 36m 39s Load: 0.151810
     # 1% RT: 2m 3s   ETR: 3h 22m 42s Load: 0.158500
     # Too much variability.
 
-    # Elastic reduction (02.04.26)
+    # Plastic reduction (02.04.26)
     # 2% RT: 2m 10s  ETR: 1h 33m 38s Load: 0.167000
     # Optimizations (split update function)
     # 2% RT: 1m 51s  ETR: 1h 11m 35s Load: 0.170570 

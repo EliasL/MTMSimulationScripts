@@ -15,13 +15,17 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch
 import numpy as np
 
-from MTMath.meshUtils import perfect_grid_nodes
+from MTMath.meshUtils import (
+    element_deformation_gradients,
+    perfect_grid_nodes,
+    structured_triangle_connectivity,
+)
 from MTMath.poincareEnergy import C2Plane, drawTriangularElasticDomain, prepPoincareFig
+from Plotting.mesh_plotting import MeshStyle, draw_triangle_mesh
 
 
 plt.rcParams.update(
@@ -58,42 +62,6 @@ def sheared_nodes(nodes: np.ndarray, gamma: float) -> np.ndarray:
     return nodes @ simple_shear_F(gamma).T
 
 
-def triangular_elements(n_cells: int, diagonal: str) -> np.ndarray:
-    n = n_cells + 1
-    elements = []
-    for j in range(n_cells):
-        for i in range(n_cells):
-            bl = j * n + i
-            br = bl + 1
-            tl = (j + 1) * n + i
-            tr = tl + 1
-
-            if diagonal == "major":
-                # Major diagonal: upper-left to bottom-right.
-                elements.append([tl, bl, br])
-                elements.append([tl, br, tr])
-            elif diagonal == "minor":
-                elements.append([bl, br, tr])
-                elements.append([bl, tr, tl])
-            else:
-                raise ValueError(f"Unknown diagonal orientation: {diagonal}")
-
-    return np.asarray(elements, dtype=int)
-
-
-def mesh_edges(elements: np.ndarray) -> np.ndarray:
-    edges = set()
-    for a, b, c in elements:
-        edges.add(tuple(sorted((a, b))))
-        edges.add(tuple(sorted((b, c))))
-        edges.add(tuple(sorted((c, a))))
-    return np.asarray(sorted(edges), dtype=int)
-
-
-def mesh_segments(nodes: np.ndarray, edges: np.ndarray) -> np.ndarray:
-    return np.asarray([[nodes[i], nodes[j]] for i, j in edges], dtype=float)
-
-
 def gram_from_two_shortest_edges(nodes: np.ndarray, element: np.ndarray) -> np.ndarray:
     a, b, c = [int(index) for index in element]
     edges = [
@@ -117,21 +85,6 @@ def gram_from_two_shortest_edges(nodes: np.ndarray, element: np.ndarray) -> np.n
 
     V = np.column_stack(vectors)
     return V.T @ V
-
-
-def element_deformation_gradients(
-    reference_nodes: np.ndarray,
-    current_nodes: np.ndarray,
-    elements: np.ndarray,
-) -> np.ndarray:
-    gradients = []
-    for element in elements:
-        X = reference_nodes[element]
-        x = current_nodes[element]
-        dX = np.column_stack((X[1] - X[0], X[2] - X[0]))
-        dx = np.column_stack((x[1] - x[0], x[2] - x[0]))
-        gradients.append(dx @ np.linalg.inv(dX))
-    return np.asarray(gradients)
 
 
 def assert_uniform_matrices(
@@ -240,28 +193,35 @@ def plot_disk_paths(
 
 
 def plot_mesh_panel(ax, nodes: np.ndarray, elements: np.ndarray, title: str) -> None:
-    edges = mesh_edges(elements)
     right_nodes = sheared_nodes(nodes, SHEAR_MAX)
     left_nodes = sheared_nodes(nodes, -SHEAR_MAX)
 
     for deformed, color in ((right_nodes, RIGHT_COLOR), (left_nodes, LEFT_COLOR)):
-        ax.add_collection(
-            LineCollection(
-                mesh_segments(deformed, edges),
-                colors=color,
-                linewidths=1.1,
-                alpha=0.28,
-                zorder=1,
-            )
+        draw_triangle_mesh(
+            ax,
+            deformed,
+            elements,
+            style=MeshStyle(
+                color=color,
+                edge_alpha=0.28,
+                linewidth=1.1,
+                draw_faces=False,
+                draw_nodes=False,
+                zorder=0,
+            ),
         )
 
-    ax.add_collection(
-        LineCollection(
-            mesh_segments(nodes, edges),
-            colors=ORIGINAL_COLOR,
-            linewidths=1.25,
-            zorder=3,
-        )
+    draw_triangle_mesh(
+        ax,
+        nodes,
+        elements,
+        style=MeshStyle(
+            color=ORIGINAL_COLOR,
+            linewidth=1.25,
+            draw_faces=False,
+            draw_nodes=False,
+            zorder=2,
+        ),
     )
 
     top_y = float(nodes[:, 1].max()) + 0.18
@@ -315,7 +275,9 @@ def make_figure() -> plt.Figure:
         ("minor", "Minor mesh"),
     ]
     for row, (diagonal, label) in enumerate(row_specs):
-        elements = triangular_elements(N_CELLS, diagonal)
+        elements = structured_triangle_connectivity(
+            (N_CELLS + 1, N_CELLS + 1), diagonal=diagonal
+        )
         c_right = C_path(nodes, elements, right_gammas)
         c_left = C_path(nodes, elements, left_gammas)
         g_right = G_path(nodes, elements, right_gammas)

@@ -17,7 +17,7 @@ from MTMath.poincareEnergy import (
     drawCScatter,
     C2Plane,
 )
-from MTMath.reduction import elastic_reduction
+from MTMath.reduction import plastic_reduction
 from Management.jobs import propperJob
 
 from MTMath.energyFunction import ContiEnergy
@@ -1450,7 +1450,7 @@ def _bin_poincare_velocity_field(x, y, u, v, bins=40, zoom=1):
 
 
 def plot_in_poincare_disk(
-    vtu_file, ax=None, fig=None, do_elastic_reduction=False, **kwargs
+    vtu_file, ax=None, fig=None, do_plastic_reduction=False, **kwargs
 ):
     if ax is None:
         poincare_kwargs = dict(kwargs)
@@ -1471,9 +1471,9 @@ def plot_in_poincare_disk(
     )
     if element_indices is not None:
         disk_matrix = disk_matrix[element_indices]
-    if do_elastic_reduction:
-        # Do the elastic reduction
-        disk_matrix, _ = elastic_reduction(disk_matrix)
+    if do_plastic_reduction:
+        # Do the plastic reduction
+        disk_matrix, _ = plastic_reduction(disk_matrix)
         zoom = 3
     else:
         zoom = 1
@@ -1524,7 +1524,7 @@ def plot_velocity_field_in_poincare_disk(
     vtu_file,
     ax=None,
     fig=None,
-    do_elastic_reduction=False,
+    do_plastic_reduction=False,
     previous_frame_vtu_file=None,
     next_frame_vtu_file=None,
     delx=None,
@@ -1550,7 +1550,7 @@ def plot_velocity_field_in_poincare_disk(
         C = C[element_indices]
     C_raw = C.copy()
     M = None
-    if do_elastic_reduction:
+    if do_plastic_reduction:
         M = data.get_M(elastic_M=True)
         if element_indices is not None:
             M = M[element_indices]
@@ -1650,7 +1650,7 @@ def plot_velocity_field_in_poincare_disk(
 
     ref_data = VTUData(ref_frame_vtu_file)
     C_prev = ref_data.get_C()
-    M_prev = ref_data.get_M(elastic_M=True) if do_elastic_reduction else None
+    M_prev = ref_data.get_M(elastic_M=True) if do_plastic_reduction else None
     if element_indices is not None:
         element_indices = element_indices[element_indices < len(C_prev)]
         if element_indices.size == 0:
@@ -1673,7 +1673,7 @@ def plot_velocity_field_in_poincare_disk(
         if M_prev is not None:
             M_prev = M_prev[:n]
     C_prev_raw = C_prev.copy()
-    if do_elastic_reduction:
+    if do_plastic_reduction:
         M_prev_T = np.swapaxes(M_prev, -1, -2)
         C_prev = np.matmul(np.matmul(M_prev_T, C_prev_raw), M_prev)
         if M is not None and M_prev is not None:
@@ -1862,18 +1862,18 @@ def plot_and_save_g_in_poincare_disk(**kwargs):
     )
 
 
-def plot_and_save_in_e_reduced_poincare_disk(**kwargs):
+def plot_and_save_in_plastic_reduced_poincare_disk(**kwargs):
     return plot_and_save(
         plot_func=plot_in_poincare_disk,
-        do_elastic_reduction=True,
+        do_plastic_reduction=True,
         **kwargs,
     )
 
 
-def plot_and_save_velocity_field_in_e_reduced_poincare_disk(**kwargs):
+def plot_and_save_velocity_field_in_plastic_reduced_poincare_disk(**kwargs):
     return plot_and_save(
         plot_func=plot_velocity_field_in_poincare_disk,
-        do_elastic_reduction=True,
+        do_plastic_reduction=True,
         **kwargs,
     )
 

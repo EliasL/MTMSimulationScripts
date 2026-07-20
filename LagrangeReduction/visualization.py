@@ -22,9 +22,13 @@ from MTMath.poincareEnergy import (
     generate_cauchy_stress_grid,
     generate_piola_stress_grid,
     drawPoincareGrid,
+    generate_elastic_quadrant_grid,
 )
 from MTMath.energyFunction import ContiEnergy, SShear, PieceWiseQuadratic
-from MTMath.reduction import elastic_domain_quadrant, elastic_reduction
+from MTMath.reduction import (
+    plastic_reduction_history,
+    lagrange_reduction_history,
+)
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -62,12 +66,14 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         # Colors and line size
         self.background_line_color = np.array([100, 100, 100])
-        self.handleColor = "#008B8B"
+        self.basisVectorColors = ("#00A6A6", "#00A6A6")
+        self.basisVectorStyles = (Qt.SolidLine, Qt.DashLine)
+        self.basisVectorWidths = (8, 8)
+        self.handleColor = self.basisVectorColors[0]
         self.reducedColor = "#FF6347"
-        self.elasticReducedColor = "#0073FF"
+        self.plasticReducedColor = "#0073FF"
         self.lineSize = 2
         self.markerSize = 15
-        self.vectorWidth = 8
 
         # Default energy parameters
         self.currentBeta = -0.25
@@ -80,9 +86,9 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # "det", "trace","N1", "J2", "sqrtJ2", or "i,j" for components
         self.stress_mode = "0,1"
         self.stressLim = (-0.2, 0.2)
-        # Elastic reduction
-        self.showElasticReduction=True
-        assert not(self.showStress and self.showElasticReduction), "Only show one"
+        # Plastic reduction
+        self.showPlasticReduction=True
+        assert not(self.showStress and self.showPlasticReduction), "Only show one"
 
         # Div
         self.showHistory = False
@@ -109,7 +115,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         for plot in [self.PCS_plot]:
             plot.addItem(self.reduced_marker)
             plot.addItem(self.normal_marker)
-            plot.addItem(self.elastic_reduced_marker)
+            plot.addItem(self.plastic_reduced_marker)
 
         # Set up table
         self.setUpTables(self.l_MatrixRow)
@@ -142,8 +148,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.GV_plot.getViewBox().sigRangeChanged.connect(self.onViewRangeChanged)
 
         # Hide Lagrange reduction by default
-        self.elastic_reduced_marker.setVisible(
-            not self.elastic_reduced_marker.isVisible()
+        self.plastic_reduced_marker.setVisible(
+            not self.plastic_reduced_marker.isVisible()
         )
         self.LR_VP.setVisible(reduced=False)
         self.GV_VP.setVisible(reduced=False)
@@ -220,7 +226,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             colorS=self.reducedColor,
             colorH=self.handleColor,
             handelable=True,
-            width=self.vectorWidth,
+            width=self.basisVectorWidths[0],
+            basis_colors=self.basisVectorColors,
+            basis_styles=self.basisVectorStyles,
+            basis_widths=self.basisVectorWidths,
         )
         # self.GV_VP.setVisible(reduced=False)
 
@@ -274,7 +283,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             self.LR_plot,
             colorS=self.reducedColor,
             colorH=self.handleColor,
-            width=self.vectorWidth,
+            width=self.basisVectorWidths[0],
+            basis_colors=self.basisVectorColors,
+            basis_styles=self.basisVectorStyles,
+            basis_widths=self.basisVectorWidths,
         )
 
         # Hide by default
@@ -315,10 +327,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             brush=pg.mkBrush(self.reducedColor),  # Fill color
             pen=pg.mkPen(color="white", width=2),  # Outline color and width
         )
-        self.elastic_reduced_marker = pg.ScatterPlotItem(
+        self.plastic_reduced_marker = pg.ScatterPlotItem(
             pos=np.array([(0, 0)]),
             size=self.markerSize,
-            brush=pg.mkBrush(self.elasticReducedColor),  # Fill color
+            brush=pg.mkBrush(self.plasticReducedColor),  # Fill color
             pen=pg.mkPen(color="white", width=2),  # Outline color and width
         )
 
@@ -632,12 +644,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             with np.errstate(invalid="ignore"):
                 field = self.compute_stress_scalar_field(stress, mode=stress_mode)
                 field = np.clip(field, *stressLim)
-        elif self.showElasticReduction:
-            def CToQuadrant(C):
-                C_R = elastic_reduction(C, loops=100)
-                #TODO replace -1 with nan
-                return elastic_domain_quadrant(C_R).replace()
-            field = generate_grid(function=CToQuadrant,resolution=ppu)
+        elif self.showPlasticReduction:
+            field = generate_elastic_quadrant_grid(resolution=ppu, loops=100)
         else:
             field = generate_energy_grid(
                 E_func=self.energyFunc,
@@ -728,8 +736,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             quantity = (
                 f"{e_type}_{self.stress_type}_stress_{self.stress_mode}_clip{self.stressLim[1]}"
             )
-        elif self.showElasticReduction:
-            quantity="elasticReduction"
+        elif self.showPlasticReduction:
+            quantity="plasticReduction"
         else:
             quantity = e_type
 
@@ -1079,7 +1087,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # in case no vetor pair is defined
         if not hasattr(self, "VP"):
             self.VP = self.LR_VP
-        rePos1, rePos2, C_R, C_E_R, M, m1, m2, m3, ms, history1, history2 = (
+        rePos1, rePos2, C_R, C_E_R, M, m1, m2, m3, ms, _, _ = (
             lagrange_reduction(self.VP.pos1(), self.VP.pos2())
         )
         # rePos1, rePos2, m1, m2, m3 = old_lagrange_reduction(
@@ -1109,8 +1117,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         reduced_pos = C2PoincareDisk(C_R)
         self.reduced_marker.setData(pos=np.array([reduced_pos]))
 
-        elastic_reduced_pos = C2PoincareDisk(C_E_R)
-        self.elastic_reduced_marker.setData(pos=np.array([elastic_reduced_pos]))
+        plastic_reduced_pos = C2PoincareDisk(C_E_R)
+        self.plastic_reduced_marker.setData(pos=np.array([plastic_reduced_pos]))
 
         # Calculate P
         F_grid = F[np.newaxis, np.newaxis, :, :]  # shape (1, 1, 2, 2)
@@ -1119,11 +1127,13 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.updateInfoDisplay(F, C, C_R, M, P, ms, m1, m2, m3)
         # Draw the histories (first clears, second overlays)
         if self.showHistory:
+            history1 = lagrange_reduction_history(C)
+            history2 = plastic_reduction_history(C)
             self.drawHistory(
                 history1, color=self.reducedColor, width=3, zValue=4, clear=True
             )
             self.drawHistory(
-                history2, color=self.elasticReducedColor, width=2, zValue=4, clear=False
+                history2, color=self.plasticReducedColor, width=2, zValue=4, clear=False
             )
         else:
             self.drawHistory([], clear=True)
@@ -1197,6 +1207,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         # Track Home key pressed state for rotation mode
         if event.key() == Qt.Key_Home:
             self.home_held = True
+        if event.key() == Qt.Key_Escape:
+            self.home_held = True
         self.alt_held = event.modifiers() & Qt.AltModifier  # Check if Alt is held
         self.meta_held = event.modifiers() & Qt.MetaModifier
 
@@ -1228,6 +1240,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self._reset_axis_locks_if_needed(event)
 
         if event.key() == Qt.Key_Home:
+            self.home_held = False
+        if event.key() == Qt.Key_Escape:
             self.home_held = False
 
         self.alt_held = event.modifiers() & Qt.AltModifier  # Check if Alt is held
@@ -1358,8 +1372,8 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             return True
 
         if k == Qt.Key_L:
-            self.elastic_reduced_marker.setVisible(
-                not self.elastic_reduced_marker.isVisible()
+            self.plastic_reduced_marker.setVisible(
+                not self.plastic_reduced_marker.isVisible()
             )
             self.LR_VP.setVisible(reduced=not self.LR_VP.isVisible(reduced=True))
             self.GV_VP.setVisible(reduced=not self.GV_VP.isVisible(reduced=True))

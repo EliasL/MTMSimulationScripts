@@ -12,7 +12,7 @@ from matplotlib import animation
 from matplotlib import pyplot as plt
 
 from MTMath.energyFunction import ContiEnergy, rotation
-from MTMath.meshUtils import _compute_dN_dX, perfect_grid_nodes
+from MTMath.meshUtils import element_deformation_gradients, perfect_grid_nodes
 from MTMath.miniMTM import simpleShearSystem2
 
 
@@ -32,15 +32,6 @@ def _element_connectivity(elements) -> np.ndarray:
 def _rotate_points(points: np.ndarray, theta: float, center: np.ndarray) -> np.ndarray:
     R = rotation(theta)
     return (points - center) @ R.T + center
-
-
-def _compute_F_from_positions(
-    reference_positions: np.ndarray,
-    current_positions: np.ndarray,
-    connectivity: np.ndarray,
-) -> np.ndarray:
-    dN_dX = _compute_dN_dX(reference_positions, connectivity)
-    return np.einsum("eai,eaj->eij", current_positions[connectivity], dN_dX)
 
 
 def _assert_equal_across_elements(values: np.ndarray, name: str) -> None:
@@ -88,7 +79,9 @@ def build_rotation_study(
     for i, theta in enumerate(thetas):
         ref_rot = _rotate_points(reference_positions, theta, center)
         rotated_reference_positions[i] = ref_rot
-        F_values[i] = _compute_F_from_positions(ref_rot, current_positions, connectivity)
+        F_values[i] = element_deformation_gradients(
+            ref_rot, current_positions, connectivity
+        )
 
     P = ContiEnergy.P_from_F(F_values)
     sigma = ContiEnergy.cauchy_from_F(F_values)

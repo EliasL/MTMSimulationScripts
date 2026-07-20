@@ -925,24 +925,248 @@ def plot_data_cdf(
     )
 
 
-def plot_ks_distance_marker(
-    ax, sorted_data, ecdf, model_ccdf, color="red", fast_xmin=None
+def plot_energy_drop_trace(
+    ax,
+    strain,
+    energy,
+    drop_strain,
+    drops,
+    *,
+    energy_label=r"$E$",
+    drop_label=r"$s$",
+    color_energy=None,
+    color_drop=None,
+    min_drop=0.0,
+    log_drop_axis=False,
+    drop_marker=None,
+    drop_linestyle="-",
+    drop_linewidth=0.8,
+    zoom_center=None,
+    zoom_width=None,
+    inset_bounds=(0.49, 0.08, 0.47, 0.43),
+    inset_background_alpha=0.9,
+    inset_show_x_ticks=True,
+    inset_show_y_ticks=True,
+    title=None,
+    set_title=False,
+    show_legend=True,
 ):
-    diffs = np.abs(ecdf - model_ccdf)
-    max_index = np.argmax(diffs)
-    D_val = diffs[max_index]
+    """Plot an energy--strain trace with energy-drop magnitudes and an inset.
+
+    This is the reusable form of the debug visualization used by
+    :func:`get_energy_drops`.  The input arrays are deliberately decoupled from
+    CSV loading so the plot can be embedded in composite figures without
+    generating a standalone file or a simulation-derived title.
+
+    Returns
+    -------
+    tuple
+        ``(drop_axis, inset_energy_axis, inset_drop_axis)``.
+    """
+
+    strain = np.asarray(strain, dtype=float)
+    energy = np.asarray(energy, dtype=float)
+    drop_strain = np.asarray(drop_strain, dtype=float)
+    drops = np.asarray(drops, dtype=float)
+    if strain.ndim != 1 or energy.ndim != 1 or strain.shape != energy.shape:
+        raise ValueError("strain and energy must be matching one-dimensional arrays.")
+    if drop_strain.ndim != 1 or drops.ndim != 1 or drop_strain.shape != drops.shape:
+        raise ValueError("drop_strain and drops must be matching one-dimensional arrays.")
+
+    finite_energy = np.isfinite(strain) & np.isfinite(energy)
+    min_drop = float(min_drop)
+    plot_drops = np.clip(drops, 0.0, np.inf)
+    finite_drop_values = np.isfinite(drop_strain) & np.isfinite(plot_drops)
+    if min_drop == 0.0:
+        finite_drops = finite_drop_values & (plot_drops >= min_drop)
+    else:
+        finite_drops = finite_drop_values & (plot_drops > min_drop)
+    positive_drops = (
+        np.isfinite(drop_strain)
+        & np.isfinite(plot_drops)
+        & (plot_drops > min_drop)
+    )
+    if not np.any(finite_energy):
+        raise ValueError("No finite energy--strain values to plot.")
+    if not np.any(positive_drops):
+        raise ValueError("No finite positive drops above min_drop to plot.")
+
+    energy_line = ax.plot(
+        strain[finite_energy],
+        energy[finite_energy],
+        color=color_energy,
+        linewidth=1.0,
+        label=energy_label,
+    )[0]
+    if color_energy is None:
+        color_energy = energy_line.get_color()
+    ax.set_xlabel(r"$\gamma$")
+    ax.set_ylabel(energy_label)
+
+    drop_ax = ax.twinx()
+    if color_drop is None:
+        color_drop = "C1"
+    drop_line = drop_ax.plot(
+        drop_strain[finite_drops],
+        plot_drops[finite_drops],
+        marker=drop_marker,
+        markersize=2.0,
+        linestyle=drop_linestyle,
+        linewidth=drop_linewidth,
+        alpha=0.85,
+        color=color_drop,
+        label=drop_label,
+    )[0]
+    drop_ax.set_ylabel(drop_label)
+    if log_drop_axis:
+        drop_ax.set_yscale("log")
+    else:
+        drop_ax.set_ylim(0.0, 1.5 * float(np.nanmax(plot_drops[positive_drops])))
+
+    finite_drop_strain = drop_strain[finite_drops]
+    retained_drop_values = plot_drops[finite_drops]
+    if zoom_center is None:
+        zoom_center = float(finite_drop_strain[np.argmax(retained_drop_values)])
+    else:
+        zoom_center = float(zoom_center)
+
+    finite_strain = strain[finite_energy]
+    if zoom_width is None:
+        unique_strain = np.unique(finite_strain)
+        positive_steps = np.diff(unique_strain)
+        positive_steps = positive_steps[positive_steps > 0]
+        median_step = float(np.median(positive_steps)) if positive_steps.size else 0.0
+        zoom_width = max(80.0 * median_step, 0.002 * np.ptp(finite_strain))
+    zoom_width = float(zoom_width)
+    if not np.isfinite(zoom_width) or zoom_width <= 0.0:
+        raise ValueError("zoom_width must be finite and positive.")
+
+    x_lo = zoom_center - 0.5 * zoom_width
+    x_hi = zoom_center + 0.5 * zoom_width
+    zoom_energy = finite_energy & (strain >= x_lo) & (strain <= x_hi)
+    if np.count_nonzero(zoom_energy) < 3:
+        nearest = np.argsort(np.abs(strain - zoom_center))[: min(20, strain.size)]
+        x_lo = float(np.min(strain[nearest]))
+        x_hi = float(np.max(strain[nearest]))
+        zoom_energy = finite_energy & (strain >= x_lo) & (strain <= x_hi)
+
+    inset_ax = ax.inset_axes(inset_bounds)
+    inset_ax.set_facecolor("white")
+    inset_ax.patch.set_alpha(float(inset_background_alpha))
+    inset_ax.plot(
+        strain[zoom_energy],
+        energy[zoom_energy],
+        color=color_energy,
+        linewidth=0.8,
+    )
+    inset_ax.set_xlim(x_lo, x_hi)
+    inset_ax.tick_params(labelsize=6, pad=1)
+    if not inset_show_x_ticks:
+        inset_ax.tick_params(axis="x", labelbottom=False)
+    if not inset_show_y_ticks:
+        inset_ax.tick_params(axis="y", labelleft=False)
+
+    inset_drop_ax = inset_ax.twinx()
+    zoom_drops = finite_drops & (drop_strain >= x_lo) & (drop_strain <= x_hi)
+    if np.any(zoom_drops):
+        inset_drop_ax.plot(
+            drop_strain[zoom_drops],
+            plot_drops[zoom_drops],
+            marker=drop_marker,
+            markersize=1.8,
+            linestyle=drop_linestyle,
+            linewidth=drop_linewidth,
+            color=color_drop,
+            alpha=0.9,
+        )
+        if log_drop_axis:
+            inset_drop_ax.set_yscale("log")
+        else:
+            zoom_max = float(np.nanmax(plot_drops[zoom_drops]))
+            inset_drop_ax.set_ylim(0.0, 1.5 * zoom_max if zoom_max > 0.0 else 1.0)
+    inset_drop_ax.tick_params(labelsize=6, pad=1)
+    if not inset_show_y_ticks:
+        inset_drop_ax.tick_params(axis="y", labelright=False)
+
+    zoom_energy_values = energy[zoom_energy]
+    if zoom_energy_values.size:
+        y_lo = float(np.nanmin(zoom_energy_values))
+        y_hi = float(np.nanmax(zoom_energy_values))
+        y_pad = max(0.08 * (y_hi - y_lo), np.finfo(float).eps)
+        rect = Rectangle(
+            (x_lo, y_lo - y_pad),
+            x_hi - x_lo,
+            (y_hi - y_lo) + 2.0 * y_pad,
+            linewidth=0.9,
+            edgecolor="0.25",
+            linestyle="--",
+            facecolor="none",
+            zorder=5,
+        )
+        ax.add_patch(rect)
+
+    if set_title:
+        ax.set_title("" if title is None else title)
+    if show_legend:
+        lines, labels = ax.get_legend_handles_labels()
+        lines2, labels2 = drop_ax.get_legend_handles_labels()
+        ax.legend(lines + lines2, labels + labels2, loc="upper left")
+
+    return drop_ax, inset_ax, inset_drop_ax
+
+
+def plot_ks_distance_marker(
+    ax,
+    sorted_data,
+    ecdf,
+    model_ccdf,
+    color="red",
+    empirical_color="blue",
+    model_color="gray",
+    fast_xmin=None,
+    ecdf_before=None,
+):
+    sorted_data = np.asarray(sorted_data, dtype=float)
+    ecdf = np.asarray(ecdf, dtype=float)
+    model_ccdf = np.asarray(model_ccdf, dtype=float)
+    if ecdf.size == 0:
+        raise ValueError("Cannot calculate a KS distance from an empty CCDF.")
+    if ecdf_before is None:
+        ecdf_before = np.concatenate(([1.0], ecdf[:-1]))
+    else:
+        ecdf_before = np.asarray(ecdf_before, dtype=float)
+    if (
+        sorted_data.shape != ecdf.shape
+        or ecdf.shape != model_ccdf.shape
+        or ecdf_before.shape != ecdf.shape
+    ):
+        raise ValueError("Empirical and model CCDF arrays must have matching shapes.")
+
+    # The empirical CCDF jumps at every observed value.  The KS supremum can
+    # occur on either side of a jump, so evaluate both the pre- and post-jump
+    # values rather than sampling only the plotted post-jump curve.
+    post_jump_diffs = np.abs(ecdf - model_ccdf)
+    pre_jump_diffs = np.abs(ecdf_before - model_ccdf)
+    if np.max(pre_jump_diffs) > np.max(post_jump_diffs):
+        max_index = int(np.argmax(pre_jump_diffs))
+        empirical_at_D = ecdf_before[max_index]
+        D_val = pre_jump_diffs[max_index]
+    else:
+        max_index = int(np.argmax(post_jump_diffs))
+        empirical_at_D = ecdf[max_index]
+        D_val = post_jump_diffs[max_index]
     x_D = sorted_data[max_index]
     tag = ks_tag(fast_xmin=fast_xmin)
     ax.vlines(
         x_D,
         model_ccdf[max_index],
-        ecdf[max_index],
+        empirical_at_D,
         color=color,
         linestyle="--",
         label=f"{tag} Distance D = {D_val:.3f}",
     )
-    ax.scatter([x_D], [ecdf[max_index]], color="blue")
-    ax.scatter([x_D], [model_ccdf[max_index]], color="gray")
+    ax.scatter([x_D], [empirical_at_D], color=empirical_color)
+    ax.scatter([x_D], [model_ccdf[max_index]], color=model_color)
     return D_val
 
 
@@ -1243,6 +1467,7 @@ def plot_data_and_fit(
     title="",
     data_info=None,
     color=None,
+    data_color=None,
     addFit=True,
     useCDF=False,
     useCCDF=True,
@@ -1250,6 +1475,10 @@ def plot_data_and_fit(
     extraPath="",
     show=False,
     close=True,
+    show_fit_region=True,
+    show_cutoff=True,
+    show_title=True,
+    show_legend=True,
 ):
     if ax is None:
         fig, ax = plt.subplots()
@@ -1265,23 +1494,42 @@ def plot_data_and_fit(
             ax,
             fit.data_original,
             label=f"{dist_label} of {fit_drop_count_label} drops in fit",
+            color=data_color,
             use_ccdf=useCCDF,
             drop_label=drop_label,
+            show_legend=False,
         )
     else:
         plot_data_pdf(
             ax,
             fit.data_original,
             label=f"PDF of {fit_drop_count_label} drops in fit",
+            color=data_color,
             drop_label=drop_label,
+            show_legend=False,
         )
 
     # plot the fit
     if addFit:
         if useCDF:
-            plot_fit_cdf(ax, fit, color=color, use_ccdf=useCCDF, drop_label=drop_label)
+            plot_fit_cdf(
+                ax,
+                fit,
+                color=color,
+                use_ccdf=useCCDF,
+                drop_label=drop_label,
+                set_title=False,
+                show_legend=False,
+            )
         else:
-            plot_fit_pdf(ax, fit, color=color, drop_label=drop_label)
+            plot_fit_pdf(
+                ax,
+                fit,
+                color=color,
+                drop_label=drop_label,
+                set_title=False,
+                show_legend=False,
+            )
 
         # Add shaded fit region with formula in label
         if fit.xmax is None:
@@ -1289,17 +1537,18 @@ def plot_data_and_fit(
         else:
             xmax = fit.xmax
         dist = dist_from_fit(fit)
-        ax.axvspan(
-            fit.xmin,
-            xmax,
-            color="gray",
-            alpha=0.2,
-            label=rf"Fit region. $\alpha={dist.alpha:.2f}, \lambda=$ {dist.Lambda:.2e}",
-        )
+        if show_fit_region:
+            ax.axvspan(
+                fit.xmin,
+                xmax,
+                color="gray",
+                alpha=0.2,
+                label=rf"Fit region. $\alpha={dist.alpha:.2f}, \lambda=$ {dist.Lambda:.2e}",
+            )
 
         # Mark x = 1/lambda with a dashed vertical line through the full plot height.
         lambda_val = float(getattr(dist, "Lambda", np.nan))
-        if np.isfinite(lambda_val) and lambda_val > 0.0:
+        if show_cutoff and np.isfinite(lambda_val) and lambda_val > 0.0:
             x_inv_lambda = 1.0 / lambda_val
             ax.axvline(
                 x_inv_lambda,
@@ -1310,10 +1559,14 @@ def plot_data_and_fit(
                 label=r"$1/\lambda$",
             )
 
-    ax.legend()
-    if title == "" and data_info is not None:
-        title = make_title(data_info)
-    ax.set_title(title)
+    if show_legend:
+        ax.legend()
+    if show_title:
+        if title == "" and data_info is not None:
+            title = make_title(data_info)
+        ax.set_title(title)
+    else:
+        ax.set_title("")
 
     if show:
         plt.show()
@@ -1403,6 +1656,17 @@ def plot_ks_distance(
     close=True,
     extraPath="",
     fast_xmin=None,
+    set_title=True,
+    show_legend=True,
+    empirical_color="blue",
+    model_color="gray",
+    ks_color="red",
+    show_inset=False,
+    inset_bounds=(0.57, 0.33, 0.39, 0.34),
+    inset_x_factor=1.15,
+    inset_background_alpha=0.92,
+    inset_grid=False,
+    legend_usetex=False,
 ):
     """
     Plot the empirical CCDF vs the fitted CCDF and visually show the KS distance (D).
@@ -1412,8 +1676,12 @@ def plot_ks_distance(
     dist = getattr(fitObj, dist_name)
     # Get the ECDF and model CCDF
     data = fitObj.data
-    sorted_data = np.sort(data[data >= xmin])
-    ecdf = 1.0 - np.arange(1, len(sorted_data) + 1) / len(sorted_data)
+    sorted_tail = np.sort(data[data >= xmin])
+    sorted_data, counts = np.unique(sorted_tail, return_counts=True)
+    cumulative_counts = np.cumsum(counts)
+    n_tail = len(sorted_tail)
+    ecdf = 1.0 - cumulative_counts / n_tail
+    ecdf_before = 1.0 - (cumulative_counts - counts) / n_tail
 
     model_ccdf = dist.ccdf(sorted_data)
 
@@ -1422,15 +1690,33 @@ def plot_ks_distance(
         fig, ax = plt.subplots()
     else:
         fig = ax.figure
-    ax.step(sorted_data, ecdf, where="post", label="Empirical CCDF", color="blue")
+    ax.step(
+        sorted_data,
+        ecdf,
+        where="post",
+        label=r"$\widehat{P}_{>}(x)$",
+        color=empirical_color,
+    )
     ax.plot(
         sorted_data,
         model_ccdf,
-        label=rf"Model CCDF ($\alpha={dist.alpha:.2f}, \lambda=$ {dist.Lambda:.2e})",
-        color="gray",
+        label=(
+            rf"$P_>^{{\mathrm{{TPL}}}}(x)$ "
+            rf"($\hat{{\alpha}}={dist.alpha:.2f}, "
+            rf"\hat{{\lambda}}={dist.Lambda:.2e}$)"
+        ),
+        color=model_color,
     )
     D_val = plot_ks_distance_marker(
-        ax, sorted_data, ecdf, model_ccdf, fast_xmin=fast_xmin
+        ax,
+        sorted_data,
+        ecdf,
+        model_ccdf,
+        color=ks_color,
+        empirical_color=empirical_color,
+        model_color=model_color,
+        fast_xmin=fast_xmin,
+        ecdf_before=ecdf_before,
     )
     ax.set_xscale("log")
     # ax.set_yscale("log")
@@ -1443,8 +1729,95 @@ def plot_ks_distance(
     )
     if data_info is not None:
         title += make_title_from_data_info(data_info)
-    ax.set_title(title)
-    ax.legend()
+    if set_title:
+        ax.set_title(title)
+    else:
+        ax.set_title("")
+    if show_legend:
+        legend = ax.legend()
+        for legend_text in legend.get_texts():
+            legend_text.set_usetex(bool(legend_usetex))
+
+    if show_inset:
+        if not np.isfinite(inset_x_factor) or inset_x_factor <= 1.0:
+            raise ValueError("inset_x_factor must be finite and greater than 1.")
+        post_jump_diffs = np.abs(ecdf - model_ccdf)
+        pre_jump_diffs = np.abs(ecdf_before - model_ccdf)
+        if np.max(pre_jump_diffs) > np.max(post_jump_diffs):
+            max_index = int(np.argmax(pre_jump_diffs))
+            empirical_at_D = ecdf_before[max_index]
+        else:
+            max_index = int(np.argmax(post_jump_diffs))
+            empirical_at_D = ecdf[max_index]
+        x_distance = float(sorted_data[max_index])
+        x_low = x_distance / float(inset_x_factor)
+        x_high = x_distance * float(inset_x_factor)
+        local = (sorted_data >= x_low) & (sorted_data <= x_high)
+        if np.count_nonzero(local) < 4:
+            lo = max(0, max_index - 8)
+            hi = min(sorted_data.size, max_index + 9)
+            local = np.zeros(sorted_data.size, dtype=bool)
+            local[lo:hi] = True
+            x_low = float(sorted_data[lo])
+            x_high = float(sorted_data[hi - 1])
+
+        inset_ax = ax.inset_axes(inset_bounds)
+        inset_ax.set_facecolor("white")
+        inset_ax.patch.set_alpha(float(inset_background_alpha))
+        inset_ax.step(
+            sorted_data[local],
+            ecdf[local],
+            where="post",
+            color=empirical_color,
+            linewidth=1.0,
+        )
+        inset_ax.plot(
+            sorted_data[local],
+            model_ccdf[local],
+            color=model_color,
+            linewidth=1.0,
+        )
+        inset_ax.vlines(
+            x_distance,
+            model_ccdf[max_index],
+            empirical_at_D,
+            color=ks_color,
+            linestyle="--",
+            linewidth=1.2,
+            zorder=4,
+        )
+        inset_ax.scatter(
+            [x_distance],
+            [empirical_at_D],
+            color=empirical_color,
+            s=10,
+            zorder=5,
+        )
+        inset_ax.scatter(
+            [x_distance],
+            [model_ccdf[max_index]],
+            color=model_color,
+            s=10,
+            zorder=5,
+        )
+        inset_ax.set_xscale("log")
+        inset_ax.set_xlim(x_low, x_high)
+        y_low = float(min(empirical_at_D, model_ccdf[max_index]))
+        y_high = float(max(empirical_at_D, model_ccdf[max_index]))
+        y_span = max(y_high - y_low, 1.0e-4)
+        inset_ax.set_ylim(
+            max(0.0, y_low - 0.8 * y_span),
+            min(1.0, y_high + 0.8 * y_span),
+        )
+        inset_ax.tick_params(labelsize=5.5, pad=1)
+        inset_ax.tick_params(axis="x", bottom=False, labelbottom=False)
+        inset_ax.set_xticks([], minor=False)
+        inset_ax.set_xticks([], minor=True)
+        inset_ax.xaxis.offsetText.set_visible(False)
+        if inset_grid:
+            inset_ax.grid(True, color="0.9", linewidth=0.4)
+        else:
+            inset_ax.grid(False, which="both")
     fig.tight_layout()
     # Save the plot
     safe_title = safePath(title)

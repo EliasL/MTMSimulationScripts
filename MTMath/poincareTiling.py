@@ -26,7 +26,10 @@ from MTMath.energyFunction import (
     get_rotation,
     lagrange_reduction,
 )
-from .reduction import lagrange_reduction_F
+from .reduction import (
+    elastic_domain_quadrant,
+    lagrange_reduction_F,
+)
 import os
 import string
 
@@ -1113,6 +1116,11 @@ def getQuadrantSylvain(C, eFunc: type[EnergyFunction] = ContiEnergy):
 
 # Vectorized version of getIDOfF for batch arrays of F
 def getIdOfF(F: np.ndarray, theta: np.ndarray = np.array(0)) -> np.ndarray:
+    """Return ``(sigma_12, (sigma_11-sigma_22)/2)`` for Cauchy stress.
+
+    ``theta`` rotates the spatial Cauchy-stress tensor before its two ID
+    components are extracted.
+    """
     s = ContiEnergy.cauchy_from_F(F)
     # s = ContiEnergy.S_from_F(F)
     R = rotation(theta)
@@ -1135,19 +1143,39 @@ def tryAllRotations(
     n_theta: int = int(1e6),
     first_tolerance: float = 1e-4,
     second_tolerance: float = 1e-3,
+    reduction_max_depth: int = 5,
+    save: bool = True,
+    show: bool = True,
 ):
     """
-    Search over rotations of four candidate deformation gradients and compare
-    their stress-based IDs to the ID of a reference F, using a vectorized
-    implementation over the rotation angles.
+    Find the two elastic-domain endpoints with the unit-shear BFS and search
+    their lifted deformation gradients for the Cauchy-stress ID of the
+    reference F.  The lift is kept as ``F @ M``; reconstructing it from the
+    endpoint metric would discard its spatial rotation.
     """
+    if grid_size < 1:
+        raise ValueError("grid_size must be positive")
+    if n_theta < 2:
+        raise ValueError("n_theta must be at least 2")
+    if not np.isfinite(angle_max) or angle_max <= 0:
+        raise ValueError("angle_max must be finite and positive")
+    if first_tolerance < 0 or second_tolerance < 0:
+        raise ValueError("tolerances must be non-negative")
+    if reduction_max_depth < 1:
+        raise ValueError("reduction_max_depth must be positive")
+
     # row of two plots
     fig, axs = plt.subplots(1, 2, figsize=(12, 6))
     ax = axs[0]
     right_ax = axs[1]
 
     # Base grid and deformation
-    prepPoincareFig(ax=ax)
+    prepPoincareFig(
+        ax=ax,
+        grid_size=grid_size,
+        withGrid=False,
+        withYieldSurface=False,
+    )
     ax = drawPoincareGrid(ax=ax, grid_size=grid_size)
     F = (
         SShear(1.6, s_conponent=(0, 1))
@@ -1169,105 +1197,105 @@ def tryAllRotations(
     C = F.T @ F
     print("Original F:\n", F)
     printRot(F, "Original F")
-    reduced_C, M = lagrange_reduction(C)
-    F_reduced = F @ M
-    # F_reduced = F_from_C(reduced_C)
 
-    printRot(F_reduced, "Reduced F")
-    printRot(M, "Reduction matrix M")
+    candidate_Cs, candidate_paths = plasticReductionBFS(
+        C,
+        max_depth=reduction_max_depth,
+        eFunc=ContiEnergy,
+        stress_measure="cauchy",
+        plot=False,
+        return_paths=True,
+    )
 
-    assert np.allclose(reduced_C, F_reduced.T @ F_reduced)
-
-    # Symmetry matrices
-    m1 = np.array([[1.0, 0.0], [0.0, -1.0]], dtype=float)
-    m2 = np.array([[0.0, 1.0], [1.0, 0.0]], dtype=float)
-    # Generate the 4 candidates via symmetry operations
-    F_candidate1 = F_reduced
-    F_candidate2 = F_reduced @ m1
-    F_candidate3 = F_reduced @ m2
-    F_candidate4 = F_candidate3 @ m1
-
-    F_candidate1 = F_reduced
-    F_candidate2 = rotation(np.pi / 4).T @ F_reduced @ rotation(np.pi / 4)
-    F_candidate3 = rotation(np.pi / 4) @ F_reduced @ rotation(np.pi / 4).T
-    F_candidate4 = rotation(np.pi / 4) @ F_candidate3 @ rotation(np.pi / 4).T
-
-    F_candidate1 = F_reduced
-    F_candidate2 = m1 @ F_reduced @ m1
-    F_candidate3 = m2 @ F_reduced @ m2
-    F_candidate4 = m1 @ F_candidate3 @ m1
-
-    # F_candidate1 = F_reduced
-    # F_candidate2 = F_reduced @ Rotation(np.pi / 4)
-    # F_candidate3 = F_reduced @ Rotation(np.pi / 4).T
-    # F_candidate4 = F_candidate3 @ Rotation(np.pi / 4).T
-
-    F_candidates = [F_candidate1, F_candidate2, F_candidate3, F_candidate4]
-    for f in F_candidates:
-        print("ID:", getIdOfF(f))
-        print("F:\n", f)
-
-    # Plot the C candidates (green)
-    for i, F_cand in enumerate(F_candidates):
-        drawF(
-            ax,
-            F_cand,
-            grid_size=grid_size,
-            scatter=True,
-            s=40,
-            c="green" if np.linalg.det(F_cand) > 0 else "red",
-            label=rf"$\tilde{{\mathbf{{F}}}}_{i}$",
-            label_va="top",
+    # Pick the first (therefore shortest) BFS path reaching each distinct
+    # endpoint and retain its actual deformation-gradient lift.  The previous
+    # F_from_C(candidate_C) reconstruction was the source of the false
+    # non-zero rotations.
+    representative_paths = []
+    F_candidates = []
+    for candidate_number, candidate_C in enumerate(candidate_Cs):
+        representative = next(
+            path
+            for path in candidate_paths
+            if path["candidate_index"] == candidate_number
         )
+        candidate_F = F @ representative["M"]
+        if not np.allclose(candidate_F.T @ candidate_F, candidate_C):
+            raise RuntimeError("BFS lift is inconsistent with its endpoint metric")
+        representative_paths.append(representative)
+        F_candidates.append(candidate_F)
+
+    if np.any(elastic_domain_quadrant(candidate_Cs) < 0):
+        raise RuntimeError("BFS did not finish in the elastic domain")
+
+    candidate_colors = tuple(
+        ("tab:blue", "tab:orange", "tab:green", "tab:red")[: len(F_candidates)]
+    )
+    candidate_linestyles = tuple(("-", "--", ":", "-.")[: len(F_candidates)])
+
+    print(f"Plastic-reduction BFS found {len(F_candidates)} distinct endpoints")
+    for i, (candidate_C, candidate_F) in enumerate(
+        zip(candidate_Cs, F_candidates)
+    ):
+        print(f"Candidate {i} C:\n", candidate_C)
+        print(f"Candidate {i} lifted F:\n", candidate_F)
+        print(f"Candidate {i} path:", " -> ".join(representative_paths[i]["path"]))
+        print(f"Candidate {i} unrotated ID:", getIdOfF(candidate_F))
 
     # ID of the original F
     solution_id = np.array(getIdOfF(F), dtype=float)
-    right_ax.plot(solution_id[0], solution_id[1], "bo", label=r"$\mathbf{F}$")
+    right_ax.plot(
+        solution_id[0],
+        solution_id[1],
+        "ko",
+        markersize=5,
+        zorder=5,
+        label=r"$\mathbf{F}$",
+    )
     print(f"Solution IDs: {solution_id}")
 
     # Angle sampling and precomputed rotation matrices
     theta = np.linspace(0.0, angle_max, n_theta)
 
-    # We now want to compare the 4 candidates to the solution, and find
-    # at which rotation angle they match (within a tolerance).
-    matches = []
-    for i, F_cand in enumerate(F_candidates):
+    def find_rotation_matches(F_cand, route_name):
+        """Return the sampled stress-ID curve and best match per crossing."""
         match_angles = []
-        # Vectorized rotation: F_rotated(theta) = R(theta)^T @ F_cand
-        # Result shape: (n_theta, 2, 2)
-        # this function calculates the cauchy stress, and all rotated cauchy stresses
-        # then returns some id of the stress state
+        # getIdOfF calculates the Cauchy stress once and evaluates its rotated
+        # stress-state ID over all theta values.
         candidate_ids = getIdOfF(F_cand, theta)  # shape (n_theta, 2)
-        right_ax.plot(
-            candidate_ids[:: int(1 + len(candidate_ids) / 1000), 0],
-            candidate_ids[:: int(1 + len(candidate_ids) / 1000), 1],
-            markersize=1,
-            linewidth=(i + 1) * 3 - 2,  # thicker line/marker edge
-            zorder=-(len(F_candidates) + i),  # ensure later lines are drawn on top
-            label=rf"$\tilde{{\mathbf{{F}}}}_{i}$",
-            # use default colors
-        )
-        # First tolerance: equality of IDs
         diff = np.abs(candidate_ids - solution_id)
-        # Print closest approach
         min_diff_idx = np.argmin(np.sum(diff, axis=-1))
         print(
-            f"Candidate {i} closest approach at angle {theta[min_diff_idx] * 180 / np.pi:.5f} deg\nwith diff {diff[min_diff_idx]}"
+            f"{route_name} closest approach at angle "
+            f"{theta[min_diff_idx] * 180 / np.pi:.5f} deg\n"
+            f"with diff {diff[min_diff_idx]}"
         )
         mask = np.all(diff <= first_tolerance, axis=-1)
 
         if not np.any(mask):
-            continue
+            return candidate_ids, []
 
-        candidate_indices = np.nonzero(mask)[0]
-        # print(candidate_indices)
+        candidate_indices = np.flatnonzero(mask)
+        contiguous_groups = np.split(
+            candidate_indices,
+            np.flatnonzero(np.diff(candidate_indices) > 1) + 1,
+        )
+        # A tolerance crossing generally covers several adjacent samples.
+        # Represent each crossing by the sample with the smallest total error
+        # instead of reporting arbitrary points at both ends of the window.
+        best_indices = [
+            group[np.argmin(np.sum(diff[group], axis=-1))]
+            for group in contiguous_groups
+            if group.size
+        ]
 
-        for idx in candidate_indices:
+        route_matches = []
+        for idx in best_indices:
             angle = float(theta[idx])
 
-            # Second tolerance: avoid duplicate angles across all candidates
+            # Second tolerance: avoid duplicate angles for this candidate.
             if match_angles and np.any(
-                np.isclose(angle, match_angles, atol=second_tolerance)
+                np.isclose(angle, match_angles, atol=second_tolerance, rtol=0)
             ):
                 continue
             match_angles.append(angle)
@@ -1275,16 +1303,33 @@ def tryAllRotations(
             cand_id = candidate_ids[idx]
 
             print(
-                # "Match found!\n"
-                # f"Candidate F:\n{F_cand}\n"
                 f"Rotation angle: {angle * 180 / np.pi:.5f} deg\n"
-                # f"Resulting F:\n{F_rot}\n"
                 f"IDs: {cand_id}"
             )
+            route_matches.append((angle, cand_id))
+        return candidate_ids, route_matches
 
+    # Compare the two elastic-domain candidates to the solution.
+    matches = []
+    for i, F_cand in enumerate(F_candidates):
+        candidate_ids, route_matches = find_rotation_matches(
+            F_cand,
+            f"Candidate {i}",
+        )
+        sample_step = int(1 + len(candidate_ids) / 1000)
+        right_ax.plot(
+            candidate_ids[::sample_step, 0],
+            candidate_ids[::sample_step, 1],
+            color=candidate_colors[i],
+            linestyle=candidate_linestyles[i],
+            linewidth=1.5,
+            zorder=2,
+            label=rf"$\tilde{{\mathbf{{F}}}}_{i}$",
+        )
+        for angle, cand_id in route_matches:
             matches.append((F_cand, angle, cand_id, i))
 
-    # Plot original C in blue
+    # Plot the original metric.
     drawC(
         ax,
         np.array([C]),
@@ -1292,61 +1337,186 @@ def tryAllRotations(
         scatter=True,
         s=50,
         label="Original F",
+        label_x=4,
+        label_y=3,
+        label_fontsize=12,
+        zorder=5,
     )
 
-    # Plot arrows from original C to matched candidate Cs
-    for F_cand, angle, candidate_id, cand_nr in matches:
-        C_cand = F_cand.T @ F_cand
-        if np.linalg.det(F_cand) < 0:
-            c = "red"
-        else:
-            c = "green"
+    matches_by_candidate = {}
+    for _, angle, _, candidate_number in matches:
+        matches_by_candidate.setdefault(candidate_number, []).append(angle)
+
+    move_matrices = {
+        "U+": np.array([[1.0, 1.0], [0.0, 1.0]]),
+        "U-": np.array([[1.0, -1.0], [0.0, 1.0]]),
+        "L+": np.array([[1.0, 0.0], [1.0, 1.0]]),
+        "L-": np.array([[1.0, 0.0], [-1.0, 1.0]]),
+    }
+
+    # Draw one shortest BFS path to each endpoint.  Their shared prefix is
+    # drawn once in gray, keeping the small central region readable.
+    path_segments = []
+    for candidate_number, representative in enumerate(representative_paths):
+        current_C = C.copy()
+        for move_label in representative["path"]:
+            next_C = congruence(current_C, move_matrices[move_label])
+            existing = next(
+                (
+                    segment
+                    for segment in path_segments
+                    if np.allclose(segment["start"], current_C)
+                    and np.allclose(segment["end"], next_C)
+                ),
+                None,
+            )
+            if existing is None:
+                path_segments.append(
+                    {
+                        "start": current_C.copy(),
+                        "end": next_C.copy(),
+                        "candidates": [candidate_number],
+                    }
+                )
+            else:
+                existing["candidates"].append(candidate_number)
+            current_C = next_C
+
+    for segment in path_segments:
+        users = segment["candidates"]
+        shared = len(users) > 1
+        candidate_number = users[0]
         drawC(
             ax,
-            np.array([C_cand]),
-            grid_size=grid_size,
-            scatter=True,
-            s=100 if np.isclose(0, angle) else 30,
-            label=rf"$\tilde{{\mathbf{{F}}}}_{cand_nr}$"
-            + f": {angle * 180 / np.pi:.2f}",
-            label_va="top",
-            c=c,
-        )
-        drawC(
-            ax,
-            np.array([C, C_cand]),
+            np.array([segment["start"], segment["end"]]),
             grid_size=grid_size,
             arrow=True,
+            c="0.45" if shared else candidate_colors[candidate_number],
+            linestyle="-" if shared else candidate_linestyles[candidate_number],
+            linewidth=1.2,
+            alpha=0.8,
+            zorder=3,
         )
-    right_ax.legend()
+
+    for candidate_number, F_cand in enumerate(F_candidates):
+        match_angles = matches_by_candidate.get(candidate_number, [])
+        rotation_label = ", ".join(
+            rf"${angle * 180 / np.pi:.2f}^\circ$" for angle in match_angles
+        )
+        candidate_label = rf"$\tilde{{\mathbf{{F}}}}_{candidate_number}$"
+        if rotation_label:
+            candidate_label += "\n" + rotation_label
+
+        drawF(
+            ax,
+            F_cand,
+            grid_size=grid_size,
+            scatter=True,
+            s=55 if match_angles else 35,
+            c="green" if np.linalg.det(F_cand) > 0 else "red",
+            edgecolors=candidate_colors[candidate_number],
+            linewidths=1.5,
+            label=candidate_label,
+            label_x=-6 if candidate_number == 0 else 6,
+            label_y=8,
+            label_ha="center",
+            label_va="bottom",
+            label_fontsize=11,
+            zorder=5,
+        )
+
+    ax.set_title("Configuration space")
+    right_ax.set_title("Rotated Cauchy-stress IDs")
+    right_ax.legend(frameon=False, loc="center")
     # equal aspect
     right_ax.set_aspect("equal")
-    right_ax.set_xlabel(r"$\sigma_{12}$")
-    right_ax.set_ylabel(r"$N1=(\sigma_{11} - \sigma_{22})/2$")
+    right_ax.set_xlabel(r"Cauchy shear stress $\sigma_{12}$")
+    right_ax.set_ylabel(r"Cauchy $N_1=(\sigma_{11} - \sigma_{22})/2$")
     plt.tight_layout()
 
     # Theta space diagnostics
     print(f"Theta range: {theta[0]} to {theta[-1]}")
     print(f"Total matches found: {len(matches)}")
     print("match candidates:", [m[3] for m in matches])
+    print("Plastic-reduction BFS candidate rotations:")
+    for candidate_number in range(len(F_candidates)):
+        quadrant = int(elastic_domain_quadrant(candidate_Cs[candidate_number]))
+        route_matches = matches_by_candidate.get(candidate_number, [])
+        if not route_matches:
+            print(
+                f"  Candidate {candidate_number}, quadrant {quadrant}: "
+                "no stress-ID match"
+            )
+            continue
+        for angle in route_matches:
+            matched_id = getIdOfF(F_candidates[candidate_number], angle)
+            id_error = np.abs(matched_id - solution_id)
+            print(
+                f"  Candidate {candidate_number}, quadrant {quadrant}: "
+                f"rotation={angle * 180 / np.pi:.5f} deg, "
+                f"ID error={id_error}"
+            )
+
+    print("Plastic-reduction BFS path rotations:")
+    for path_result in candidate_paths:
+        candidate_number = path_result["candidate_index"]
+        path_F = F @ path_result["M"]
+        path_id = getIdOfF(path_F)
+        representative_id = getIdOfF(F_candidates[candidate_number])
+        if np.allclose(path_id, representative_id, atol=1e-12, rtol=1e-12):
+            path_matches = [
+                (angle, getIdOfF(path_F, angle))
+                for angle in matches_by_candidate.get(candidate_number, [])
+            ]
+        else:
+            _, path_matches = find_rotation_matches(
+                path_F,
+                " -> ".join(path_result["path"]),
+            )
+        path_result["F"] = path_F
+        path_result["matches"] = path_matches
+        path_label = " -> ".join(path_result["path"]) or "start"
+        for angle, matched_id in path_matches:
+            id_error = np.abs(matched_id - solution_id)
+            print(
+                f"  {path_label} -> candidate {candidate_number}: "
+                f"rotation={angle * 180 / np.pi:.5f} deg, "
+                f"ID error={id_error}"
+            )
 
     F_str = "_".join(f"{x:.2f}" for x in F.ravel())
     path = f"Plots/tryAllRotationsF_{F_str}.pdf"
-    plt.savefig(path)
-    print(f"Fig saved to {path}")
-    plt.show()
+    if save:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        fig.savefig(path, bbox_inches="tight")
+        print(f"Fig saved to {path}")
+    if show:
+        plt.show()
+    return fig, axs, matches, candidate_paths
 
 
-def elasticReductionBFS(
+def plasticReductionBFS(
     C0: np.ndarray | None = None,
     *,
     max_depth: int = 5,
     grid_size: int = 250,
     eFunc: type[EnergyFunction] = ContiEnergy,
+    stress_measure: str = "cauchy",
+    plot: bool = True,
+    return_paths: bool = False,
     show: bool = False,
     show_dead_ends=False,
     name="",
 ):
+    """Explore unit-shear paths until they first enter the elastic center.
+
+    The returned array contains distinct terminal metrics, even when several
+    BFS paths reach the same metric.  With ``return_paths=True``, a second
+    return value records every terminal path and its accumulated right-side
+    transformation.  Path signatures use Cauchy stress by default; pass
+    ``stress_measure="pk2"`` for the previous second Piola--Kirchhoff behavior.
+    ``plot=False`` skips the legacy BFS path figure.
+    """
     # -------------------------
     # Input / defaults
     # -------------------------
@@ -1357,6 +1527,10 @@ def elasticReductionBFS(
     C0 = np.asarray(C0, dtype=float)
     if C0.shape != (2, 2):
         raise ValueError("C0 must be a (2,2) array")
+    if max_depth < 1:
+        raise ValueError("max_depth must be positive")
+    if stress_measure not in {"cauchy", "pk2"}:
+        raise ValueError("stress_measure must be 'cauchy' or 'pk2'")
 
     def M_upper(k: int) -> np.ndarray:
         return np.array([[1.0, float(k)], [0.0, 1.0]], dtype=float)
@@ -1384,7 +1558,7 @@ def elasticReductionBFS(
             case _:
                 raise ValueError(f"Invalid move label {move_label}")
 
-    def is_fundamentail_domain(C: np.ndarray) -> bool:
+    def is_fundamental_domain(C: np.ndarray) -> bool:
         if C[0, 1] < 0:
             return False
         if C[1, 1] < C[0, 0]:
@@ -1398,14 +1572,18 @@ def elasticReductionBFS(
         m2 = np.array([[0, 1], [1, 0]])
         trans = [np.eye(2), m1, m2, m1 @ m2]
         for t in trans:
-            if is_fundamentail_domain(t.T @ C @ t):
+            if is_fundamental_domain(t.T @ C @ t):
                 return True
         return False
 
     def stress_signature(C: np.ndarray) -> tuple[int, int]:
-        S = eFunc.S_from_C(np.asarray(C, dtype=float))
-        shear = float(S[0, 1])
-        n1 = float((S[0, 0] - S[1, 1]) / 2.0)
+        C = np.asarray(C, dtype=float)
+        if stress_measure == "cauchy":
+            stress = eFunc.cauchy_from_C(C)
+        else:
+            stress = eFunc.S_from_C(C)
+        shear = float(stress[0, 1])
+        n1 = float((stress[0, 0] - stress[1, 1]) / 2.0)
         # Map near-zero to 0 to avoid noisy sign flips.
         sgn = lambda x: 0 if abs(x) <= 1e-14 else (1 if x > 0 else -1)
         return (sgn(shear), sgn(n1))
@@ -1413,14 +1591,15 @@ def elasticReductionBFS(
     ref_sig = stress_signature(C0)
 
     std_color, e_color, eMatch_color = "gray", "red", "green"
-    # Each node stores: C, parent_index, move_label_from_parent, first_move
+    # Each node stores its metric, accumulated transformation, and path.
     nodes: list[dict] = []
     nodes.append(
         {
             "C": C0,
+            "M": np.eye(2, dtype=int),
+            "path": (),
             "parent": None,
             "move": None,
-            "first": None,
             "depth": 0,
             "color": std_color,
         }
@@ -1437,18 +1616,14 @@ def elasticReductionBFS(
         if node["parent"] is not None:
             backPropogateColor(nodes[node["parent"]], color)
 
-    def sqrtm_2x2(C):
-        a, b = C[0, 0], C[0, 1]
-        d = C[1, 1]
-        tr = a + d
-        det = a * d - b * b
-        s = np.sqrt(det)
-        t = np.sqrt(tr + 2 * s)
-        return (C + s * np.eye(2)) / t
-
     from collections import deque
 
-    q = deque([0])
+    terminal_indices = []
+    if is_elastic(C0):
+        terminal_indices.append(0)
+        q = deque()
+    else:
+        q = deque([0])
 
     while q:
         idx = q.popleft()
@@ -1463,19 +1638,18 @@ def elasticReductionBFS(
                 # we don't move directly back from where we came
                 continue
             Cn = congruence(C, M)
-            # Cn = sqrtm_2x2(C)@ M.T@M@sqrtm_2x2(C)
-
-            first = nodes[idx]["first"]
-            first = move_label if first is None else first
+            M_total = nodes[idx]["M"] @ M
+            path = nodes[idx]["path"] + (move_label,)
 
             nidx = len(nodes)
             inEDomain = is_elastic(Cn)
             nodes.append(
                 {
                     "C": Cn,
+                    "M": M_total,
+                    "path": path,
                     "parent": idx,
                     "move": move_label,
-                    "first": first,
                     "depth": depth + 1,
                     "inEDomain": inEDomain,
                     "color": std_color,
@@ -1484,10 +1658,47 @@ def elasticReductionBFS(
             if not inEDomain:
                 q.append(nidx)
             else:
+                terminal_indices.append(nidx)
                 if stress_signature(Cn) == ref_sig:
                     backPropogateColor(nodes[-1], "green")
                 else:
                     backPropogateColor(nodes[-1], "red")
+
+    unique_candidates = []
+    terminal_paths = []
+    for terminal_index in terminal_indices:
+        terminal_node = nodes[terminal_index]
+        terminal_C = terminal_node["C"]
+        candidate_index = next(
+            (
+                i
+                for i, candidate in enumerate(unique_candidates)
+                if np.allclose(terminal_C, candidate, atol=1e-12, rtol=1e-12)
+            ),
+            None,
+        )
+        if candidate_index is None:
+            candidate_index = len(unique_candidates)
+            unique_candidates.append(terminal_C.copy())
+        terminal_paths.append(
+            {
+                "candidate_index": candidate_index,
+                "C": terminal_C.copy(),
+                "M": terminal_node["M"].copy(),
+                "path": terminal_node["path"],
+                "depth": terminal_node["depth"],
+            }
+        )
+
+    if not unique_candidates:
+        raise RuntimeError(
+            f"Plastic-reduction BFS did not reach the center within depth {max_depth}"
+        )
+    candidate_Cs = np.stack(unique_candidates)
+
+    result = (candidate_Cs, terminal_paths) if return_paths else candidate_Cs
+    if not plot:
+        return result
 
     # -------------------------
     # Plot
@@ -1553,7 +1764,7 @@ def elasticReductionBFS(
 
     plt.tight_layout()
     with_ends = "_with_deads" if show_dead_ends else ""
-    out_path = f"Plots/{name}ElasticReduction_d{max_depth}{with_ends}.pdf"
+    out_path = f"Plots/{name}PlasticReduction_d{max_depth}{with_ends}.pdf"
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
@@ -1563,9 +1774,10 @@ def elasticReductionBFS(
         plt.show()
     else:
         plt.close()
+    return result
 
 
-def elasticReductionPlots():
+def plasticReductionPlots():
     F0 = SShear(1.3) @ SShear(0.9, s_conponent=(1, 0))
     C0 = F0.T @ F0
 
@@ -1575,6 +1787,6 @@ def elasticReductionPlots():
     for C, name in zip([C0, C1], ["far", "close"]):
         for depth in range(1, 6):
             showDeadEnds = depth < 3
-            elasticReductionBFS(
+            plasticReductionBFS(
                 C, max_depth=depth, show_dead_ends=showDeadEnds, name=name
             )
