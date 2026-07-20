@@ -556,7 +556,7 @@ def _energy_panel(analysis):
         drop_strain[drop_mask],
         drop_values[drop_mask],
         energy_label=r"$E$",
-        drop_label=r"$\Delta E_S$",
+        drop_label=r"$\Delta E_{SP}$",
         color_drop=ENERGY_DROP_COLOR,
         min_drop=MIN_DROP,
         log_drop_axis=ENERGY_DROP_LOG_SCALE,
@@ -594,8 +594,8 @@ def _raw_pdf_panel(analysis):
     )
     ax.lines[0].set_label("Empirical PDF")
     ax.lines[0].set_markersize(EMPIRICAL_PDF_MARKER_SIZE)
-    ax.set_xlabel(r"$\Delta E_S$")
-    ax.set_ylabel(r"$p(\Delta E_S)$")
+    ax.set_xlabel(r"$\Delta E_{SP}$")
+    ax.set_ylabel(r"$p(\Delta E_{SP})$")
     ax.legend(loc="best")
     _save_panel(fig, "raw_pdf")
 
@@ -618,8 +618,8 @@ def _ccdf_ks_panel(analysis):
         inset_grid=SHOW_GRID,
         legend_usetex=EQUATION_USE_LATEX,
     )
-    ax.set_xlabel(r"$\Delta E_S$")
-    ax.set_ylabel(r"$P(\Delta E_S>x)$")
+    ax.set_xlabel(r"$\Delta E_{SP}$")
+    ax.set_ylabel(r"$P(\Delta E_{SP}>x)$")
     _save_panel(fig, "ccdf_ks")
 
 
@@ -686,8 +686,8 @@ def _mle_fit_panel(analysis):
         linewidth=0.8,
         label=r"$\Delta E_{\min}$",
     )
-    ax.set_xlabel(r"$\Delta E_S$")
-    ax.set_ylabel(r"$p(\Delta E_S)$")
+    ax.set_xlabel(r"$\Delta E_{SP}$")
+    ax.set_ylabel(r"$p(\Delta E_{SP})$")
     ax.legend(loc="best")
     _save_panel(fig, "mle_fit")
 
@@ -903,10 +903,10 @@ def _add_equations(fig):
 
     equations = {
         "energy_equation": (
-            r"$\Delta E_{S,i}^{(2)}=E_{i+1}^{\rm pred}-E_{i+1}$"
+            r"$\Delta E_{SP,i}^{(2)}=E_{i+1}^{\rm pred}-E_{i+1}$"
             "\n"
-            r"$E_{i+1}^{\rm pred}=E_i+V\sigma_i\Delta\gamma"
-            r"+\frac{V}{2}A_{1212}(\gamma_i)(\Delta\gamma)^2$"
+            r"$E_{i+1}^{\rm pred}=E_i+V_0P_{12,i}\Delta\gamma"
+            r"+\frac{V_0}{2}A_{1212}(\gamma_i)(\Delta\gamma)^2$"
         ),
         "ks_equation": (
             r"$D(\Delta E_{\min})="
@@ -914,21 +914,21 @@ def _add_equations(fig):
             r"\left|\widehat P_{>}(x)-P_{>}^{\rm TPL}(x)\right|$"
             "\n"
             r"$\widehat P_{>}(x)=\frac{1}{|I_{\min}|}"
-            r"\sum_{i\in I_{\min}}\mathbf{1}(\Delta E_{S,i}>x)$"
+            r"\sum_{i\in I_{\min}}\mathbf{1}(\Delta E_{SP,i}>x)$"
             "\n"
             r"$P_{>}^{\rm TPL}(x)=\int_x^\infty\!"
             r"p(u\mid\hat\alpha,\hat\lambda,\Delta E_{\min})\,du$"
             "\n"
-            r"$I_{\min}\equiv\{i:\Delta E_{S,i}\geq\Delta E_{\min}\}$"
+            r"$I_{\min}\equiv\{i:\Delta E_{SP,i}\geq\Delta E_{\min}\}$"
         ),
         "fit_equation": (
-            r"$p(\Delta E_S\mid\alpha,\lambda,\Delta E_{\min})"
-            r"=\frac{\Delta E_S^{-\alpha}e^{-\lambda\Delta E_S}}"
+            r"$p(\Delta E_{SP}\mid\alpha,\lambda,\Delta E_{\min})"
+            r"=\frac{\Delta E_{SP}^{-\alpha}e^{-\lambda\Delta E_{SP}}}"
             r"{Z(\alpha,\lambda,\Delta E_{\min})}$"
             "\n"
             r"$(\hat\alpha,\hat\lambda)=\arg\max_{\alpha,\lambda}"
             r"\sum_{i\in I_{\min}}"
-            r"\ln p(\Delta E_{S,i}\mid\alpha,\lambda,\Delta E_{\min})$"
+            r"\ln p(\Delta E_{SP,i}\mid\alpha,\lambda,\Delta E_{\min})$"
         ),
     }
 

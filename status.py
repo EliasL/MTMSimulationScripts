@@ -129,12 +129,12 @@ if __name__ == "__main__":
         #     batch_configs, batch_labels = sylvainBatches(batch)
         #     configs.extend(batch_configs)
         #     labels.extend(f"batch={batch}, {label}" for label in batch_labels)
-        configs, labels = size_scaling_job()
-        checkStatus(
-            configs,
-            labels=labels,
-        )
+        # configs, labels = size_scaling_job()
+        # checkStatus(
+        #     configs,
+        #     labels=labels,
+        # )
 
 
         # This is where you create a terminal with all three displayed
-        #run_script()
+        run_script()

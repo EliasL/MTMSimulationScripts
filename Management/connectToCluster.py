@@ -170,6 +170,7 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
     exclude_list = [
         ".git",
         "build",
+        "build-benchmark",
         "build-release",
         "libs/**-build",
         "libs/**-subbuild",

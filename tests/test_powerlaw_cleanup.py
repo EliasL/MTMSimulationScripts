@@ -19,6 +19,7 @@ from MTMath.evaluatePowerlawFit import (
     evaluate_xmin_distances,
 )
 from Plotting.energyDropCalculations import calculate_energy_step_data
+from Plotting import energyDropCalculations
 from Plotting.findXmin import (
     DEFAULT_XMIN_COMPARISON_STRATEGIES,
     XMIN_STRATEGIES,
@@ -38,12 +39,28 @@ from Plotting.plotPowerLaw import (
 
 
 class EnergyDropTests(unittest.TestCase):
+    def test_simple_shear_tangent_uses_material_configuration(self):
+        material_tensor = np.zeros((1, 2, 2, 2, 2), dtype=float)
+        material_tensor[..., 0, 1, 0, 1] = 3.5
+        with mock.patch.object(
+            energyDropCalculations.ContiEnergy,
+            "elasticity_tensor",
+            return_value=material_tensor,
+        ) as elasticity_tensor:
+            tangent = energyDropCalculations._simple_shear_tangent(
+                np.array([0.1])
+            )
+
+        np.testing.assert_allclose(tangent, [3.5])
+        self.assertFalse(elasticity_tensor.call_args.kwargs["eulerian"])
+
     def test_second_order_drop_and_average_scaling(self):
         total_df = pd.DataFrame(
             {
                 "load": [0.0, 0.1],
                 "total_energy": [10.0, 10.5],
-                "avg_sigma12": [2.0, 2.0],
+                "avg_sigma12": [99.0, 99.0],
+                "avg_P12": [2.0, 2.0],
             }
         )
         average_df = total_df.rename(columns={"total_energy": "avg_energy"}).copy()
@@ -56,7 +73,7 @@ class EnergyDropTests(unittest.TestCase):
             "Plotting.energyDropCalculations._simple_shear_tangent_gamma0",
             return_value=np.array([4.0]),
         ):
-            total, _ = calculate_energy_step_data(
+            total, total_info = calculate_energy_step_data(
                 df=total_df, metadata={"L": 2}, average_energy=False
             )
             average, _ = calculate_energy_step_data(
@@ -64,6 +81,8 @@ class EnergyDropTests(unittest.TestCase):
             )
 
         self.assertAlmostEqual(total["E_ip1_pred_second_order"].iloc[0], 10.88)
+        self.assertEqual(total_info["piola_col"], "avg_P12")
+        self.assertTrue(total_info["used_piola_stress"])
         self.assertAlmostEqual(total["stress_corrected_drop_second_order"].iloc[0], 0.38)
         self.assertAlmostEqual(
             average["stress_corrected_drop_second_order"].iloc[0], 0.38 / 8.0
@@ -75,6 +94,7 @@ class EnergyDropTests(unittest.TestCase):
                 "load": [0.0, 0.1],
                 "total_energy": [0.0, 0.1],
                 "avg_sigma12": [0.0, 0.1],
+                "avg_P12": [0.0, 0.1],
             }
         )
         with tempfile.TemporaryDirectory() as tmp:

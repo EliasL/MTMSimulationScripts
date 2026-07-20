@@ -927,8 +927,19 @@ def plotReferenceTest():
     )
 
 
-def plotPristineCrystalPredictionError():
-    configs, labels = smallPristineCrystal(group_by_variant=True)
+def _plotPristineCrystalPredictionError(
+    *,
+    size,
+    use_color_matrix_legend,
+    output_stem,
+    normalize_by_reference_volume=False,
+    figsize=None,
+    show_title=True,
+):
+    configs, labels = smallPristineCrystal(
+        size=size,
+        group_by_variant=True,
+    )
     paths, labels = get_csv_files(
         configs, labels=labels, useOldFiles=False, forceUpdate=False
     )
@@ -953,22 +964,60 @@ def plotPristineCrystalPredictionError():
     output_path = (
         Path.cwd()
         / "Plots"
-        / f"pristine_crystal_energy_prediction_error{output_suffix}.pdf"
+        / f"{output_stem}{output_suffix}.pdf"
     )
-    plot_predicted_energy_error(
+    return plot_predicted_energy_error(
         flat_paths,
         labels=flat_labels,
         name=str(output_path),
         show=False,
         error_metric="abs_second_order_prediction_error",
-        property_keys=("L", "loadIncrement"),
-        use_color_matrix_legend=True,
+        property_keys=("L", "loadIncrement") if use_color_matrix_legend else None,
+        use_color_matrix_legend=use_color_matrix_legend,
         reference_prediction=reference_prediction,
         reference_alpha=0.2,
         show_reference_line=True,
-        strain_lim=(0,0.14), #Loss of strong elipticity
+        strain_lim=(0, 0.14),  # Loss of strong ellipticity
         x_column="load_i",
         y_log=True,
+        legend_title=(
+            None
+            if use_color_matrix_legend or normalize_by_reference_volume
+            else rf"$L={size}$"
+        ),
+        normalize_by_reference_volume=normalize_by_reference_volume,
+        figsize=figsize,
+        show_title=show_title,
+    )
+
+
+def plotPristineCrystalPredictionError():
+    """Plot prediction errors for all system sizes and load increments."""
+    return _plotPristineCrystalPredictionError(
+        size=[10, 20, 30],
+        use_color_matrix_legend=True,
+        output_stem="pristine_crystal_energy_prediction_error",
+    )
+
+
+def plotPristineCrystalPredictionErrorFixedSize(size=30):
+    """Plot prediction errors at one fixed size with a load-increment legend."""
+    return _plotPristineCrystalPredictionError(
+        size=size,
+        use_color_matrix_legend=False,
+        output_stem=f"pristine_crystal_energy_prediction_error_L{size}",
+    )
+
+
+def plotPristineCrystalPredictionErrorNormalized(size=30):
+    """Plot size-independent prediction error per reference area."""
+    return _plotPristineCrystalPredictionError(
+        size=size,
+        use_color_matrix_legend=False,
+        output_stem="pristine_crystal_energy_prediction_error_per_reference_volume",
+        normalize_by_reference_volume=True,
+        figsize=(5.2, 3.9),
+        show_title=False,
     )
 
 
@@ -1022,11 +1071,11 @@ if __name__ == "__main__":
     # syntheticDataPlotting()
     # testDist()
     # testRealData()
-    plotTruncatedPowerLawFlowchart()
+    #plotTruncatedPowerLawFlowchart()
     # investigateJobs()
     # print_remote_runtimes()
     #plotSylvainBatches()
-    # plotPristineCrystalPredictionError()
+    plotPristineCrystalPredictionErrorNormalized()
     # compare_center_node_forces()
     # compare_energy_three_sims()
     pass

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib-cache"))
 
 import matplotlib
@@ -14,7 +16,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-from matplotlib.patches import Polygon
+
+from Plotting.mesh_plotting import MeshFigure, MeshStyle
+
+
+TRIANGLE_CONNECTIVITY = np.array([[0, 1, 2]], dtype=int)
 
 
 def shear_matrix(gamma: float) -> np.ndarray:
@@ -28,29 +34,6 @@ def shear(points: np.ndarray, gamma: float) -> np.ndarray:
 def centered_unit_triangle() -> np.ndarray:
     points = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=float)
     return points - points.mean(axis=0)
-
-
-def draw_element(ax, points: np.ndarray, *, color: str, label: str, linestyle: str) -> None:
-    patch = Polygon(
-        points,
-        closed=True,
-        facecolor=color,
-        edgecolor=color,
-        linewidth=2.0,
-        linestyle=linestyle,
-        alpha=0.14,
-        label=label,
-    )
-    ax.add_patch(patch)
-    closed = np.vstack([points, points[0]])
-    ax.plot(
-        closed[:, 0],
-        closed[:, 1],
-        color=color,
-        linewidth=2.0,
-        linestyle=linestyle,
-    )
-    ax.scatter(points[:, 0], points[:, 1], s=18, color=color, zorder=4)
 
 
 def configure_axis(ax, *, title: str, xlim: tuple[float, float]) -> None:
@@ -145,6 +128,20 @@ def plot_schematic(axes, *, integer_shear: int, local_shear: float) -> None:
 
     reference_color = "#1f77b4"
     current_color = "#d95f02"
+    reference_style = MeshStyle(
+        color=reference_color,
+        linewidth=2.0,
+        linestyle="--",
+        node_size=18,
+        node_linewidth=0.0,
+    )
+    current_style = MeshStyle(
+        color=current_color,
+        linewidth=2.0,
+        linestyle="-",
+        node_size=18,
+        node_linewidth=0.0,
+    )
 
     base = centered_unit_triangle()
     current_distorted_reference = base
@@ -154,19 +151,16 @@ def plot_schematic(axes, *, integer_shear: int, local_shear: float) -> None:
     reference_distorted_current = shear(base, local_shear)
 
     ax = axes[0]
-    draw_element(
-        ax,
+    mesh = MeshFigure(ax)
+    mesh.draw_mesh(
         current_distorted_reference,
-        color=reference_color,
-        label=r"reference $X$",
-        linestyle="--",
+        TRIANGLE_CONNECTIVITY,
+        style=reference_style,
     )
-    draw_element(
-        ax,
+    mesh.draw_mesh(
         current_distorted_current,
-        color=current_color,
-        label=r"current $x$",
-        linestyle="-",
+        TRIANGLE_CONNECTIVITY,
+        style=current_style,
     )
     add_panel_text(
         ax,
@@ -178,19 +172,16 @@ def plot_schematic(axes, *, integer_shear: int, local_shear: float) -> None:
     )
     configure_axis(ax, title="distorted current geometry", xlim=(-1.35, 2.45))
     ax = axes[1]
-    draw_element(
-        ax,
+    mesh = MeshFigure(ax)
+    mesh.draw_mesh(
         reference_distorted_reference,
-        color=reference_color,
-        label=r"reference $X$",
-        linestyle="--",
+        TRIANGLE_CONNECTIVITY,
+        style=reference_style,
     )
-    draw_element(
-        ax,
+    mesh.draw_mesh(
         reference_distorted_current,
-        color=current_color,
-        label=r"current $x$",
-        linestyle="-",
+        TRIANGLE_CONNECTIVITY,
+        style=current_style,
     )
     add_panel_text(
         ax,

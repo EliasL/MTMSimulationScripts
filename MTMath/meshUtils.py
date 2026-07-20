@@ -1,4 +1,9 @@
+from typing import Literal
+
 import numpy as np
+
+
+TriangleDiagonal = Literal["major", "minor"]
 
 
 def arrsToMat(A11, A12, A21, A22):
@@ -56,38 +61,151 @@ def shape_grads_and_area_from_F(dN_dX, area_ref, F):
     return dN_dx, area_cur
 
 
-def _build_triangular_elements(shape):
+def structured_triangle_connectivity(
+    shape: tuple[int, int],
+    *,
+    diagonal: TriangleDiagonal = "minor",
+) -> np.ndarray:
+    """Build counter-clockwise triangle connectivity for a structured node grid.
+
+    ``shape`` is ``(nx, ny)`` in nodes. ``major`` uses the diagonal from the
+    upper-left to the lower-right corner of each cell; ``minor`` uses the
+    diagonal from the lower-left to the upper-right corner.
+    """
     nx, ny = shape
+    if nx < 2 or ny < 2:
+        raise ValueError(f"shape must contain at least 2 nodes per axis, got {shape}.")
+    if diagonal not in ("major", "minor"):
+        raise ValueError(
+            f"diagonal must be 'major' or 'minor', got {diagonal!r}."
+        )
+
     element_indices: list[list[int]] = []
-    for i in range(ny - 1):
-        for j in range(nx - 1):
-            bl = i * nx + j
-            br = i * nx + (j + 1)
-            tl = (i + 1) * nx + j
-            tr = (i + 1) * nx + (j + 1)
-            element_indices.append([bl, br, tr])
-            element_indices.append([bl, tr, tl])
+    for row in range(ny - 1):
+        for column in range(nx - 1):
+            bl = row * nx + column
+            br = bl + 1
+            tl = (row + 1) * nx + column
+            tr = tl + 1
+            if diagonal == "major":
+                element_indices.append([bl, br, tl])
+                element_indices.append([br, tr, tl])
+            else:
+                element_indices.append([bl, br, tr])
+                element_indices.append([bl, tr, tl])
     return np.asarray(element_indices, dtype=int)
 
 
-def _compute_dN_dX(ref_positions: np.ndarray, element_indices: np.ndarray) -> np.ndarray:
-    dN_dxi = np.array(
+def structured_triangular_mesh(
+    shape: tuple[int, int],
+    *,
+    diagonal: TriangleDiagonal = "minor",
+    dx: float = 1.0,
+    dy: float = 1.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return nodes and connectivity for a structured triangular mesh."""
+    nodes = perfect_grid_nodes(shape, dx=dx, dy=dy)
+    connectivity = structured_triangle_connectivity(shape, diagonal=diagonal)
+    return nodes, connectivity
+
+
+def unique_mesh_edges(connectivity: np.ndarray) -> np.ndarray:
+    """Return the sorted unique node pairs used by a triangular mesh."""
+    connectivity = np.asarray(connectivity, dtype=int)
+    if connectivity.ndim != 2 or connectivity.shape[1] != 3:
+        raise ValueError(
+            "connectivity must have shape (n_elements, 3), "
+            f"got {connectivity.shape}."
+        )
+    if connectivity.size == 0:
+        return np.empty((0, 2), dtype=int)
+
+    edges = np.concatenate(
         [
-            [-1.0, -1.0],
-            [1.0, 0.0],
-            [0.0, 1.0],
+            connectivity[:, [0, 1]],
+            connectivity[:, [1, 2]],
+            connectivity[:, [2, 0]],
         ],
-        dtype=float,
+        axis=0,
     )
-    elem_X = ref_positions[element_indices]
-    X1 = elem_X[:, 0, :]
-    X2 = elem_X[:, 1, :]
-    X3 = elem_X[:, 2, :]
-    v1 = X2 - X1
-    v2 = X3 - X1
-    J = np.stack([v1, v2], axis=-1)
-    J_inv = np.linalg.inv(J)
-    return np.einsum("ai,eij->eaj", dN_dxi, J_inv)
+    edges.sort(axis=1)
+    return np.unique(edges, axis=0)
+
+
+def mesh_edge_segments(nodes: np.ndarray, edges: np.ndarray) -> np.ndarray:
+    """Convert node-index pairs into line segments with shape ``(n, 2, 2)``."""
+    nodes = np.asarray(nodes, dtype=float)
+    edges = np.asarray(edges, dtype=int)
+    if nodes.ndim != 2 or nodes.shape[1] != 2:
+        raise ValueError(f"nodes must have shape (n_nodes, 2), got {nodes.shape}.")
+    if edges.ndim != 2 or edges.shape[1] != 2:
+        raise ValueError(f"edges must have shape (n_edges, 2), got {edges.shape}.")
+    if edges.size and (edges.min() < 0 or edges.max() >= len(nodes)):
+        raise ValueError("edges contain a node index outside the nodes array.")
+    return nodes[edges]
+
+
+def element_deformation_gradients(
+    reference_nodes: np.ndarray,
+    current_nodes: np.ndarray,
+    connectivity: np.ndarray,
+) -> np.ndarray:
+    """Calculate one deformation gradient per linear triangular element.
+
+    ``current_nodes`` may include leading batch dimensions, for example a load
+    history with shape ``(n_steps, n_nodes, 2)``.
+    """
+    reference_nodes = np.asarray(reference_nodes, dtype=float)
+    current_nodes = np.asarray(current_nodes, dtype=float)
+    connectivity = np.asarray(connectivity, dtype=int)
+    if reference_nodes.ndim != 2 or reference_nodes.shape[1] != 2:
+        raise ValueError(
+            "reference_nodes must have shape (n_nodes, 2), "
+            f"got {reference_nodes.shape}."
+        )
+    if current_nodes.shape[-2:] != reference_nodes.shape:
+        raise ValueError(
+            "current_nodes must end with the reference node shape "
+            f"{reference_nodes.shape}, got {current_nodes.shape}."
+        )
+    if connectivity.ndim != 2 or connectivity.shape[1] != 3:
+        raise ValueError(
+            "connectivity must have shape (n_elements, 3), "
+            f"got {connectivity.shape}."
+        )
+    if connectivity.size and (
+        connectivity.min() < 0 or connectivity.max() >= len(reference_nodes)
+    ):
+        raise ValueError("connectivity contains a node index outside the nodes array.")
+
+    reference_elements = reference_nodes[connectivity]
+    current_elements = current_nodes[..., connectivity, :]
+    dX = np.stack(
+        [
+            reference_elements[:, 1] - reference_elements[:, 0],
+            reference_elements[:, 2] - reference_elements[:, 0],
+        ],
+        axis=-1,
+    )
+    dx = np.stack(
+        [
+            current_elements[..., 1, :] - current_elements[..., 0, :],
+            current_elements[..., 2, :] - current_elements[..., 0, :],
+        ],
+        axis=-1,
+    )
+    return dx @ np.linalg.inv(dX)
+
+
+def _build_triangular_elements(shape):
+    """Backward-compatible alias for the historical minor-diagonal mesh."""
+    return structured_triangle_connectivity(shape, diagonal="minor")
+
+
+def _compute_dN_dX(ref_positions: np.ndarray, element_indices: np.ndarray) -> np.ndarray:
+    """Backward-compatible indexed wrapper around the public triangle helper."""
+    dN_dX, _ = triangle_shape_grads_and_area(ref_positions[element_indices])
+    return dN_dX
 
 
 def _compute_F(
@@ -100,8 +218,7 @@ def _compute_F(
     u_shear = np.zeros_like(ref_positions)
     u_shear[:, 0] = shear * ref_positions[:, 1]
     x_nodes = ref_positions + u_shear + u
-    x_elem = x_nodes[element_indices]
-    return np.einsum("eai,eaj->eij", x_elem, dN_dX_values)
+    return element_deformation_gradients(ref_positions, x_nodes, element_indices)
 
 
 def _element_subset_indices(n_elements, element_subset):

@@ -4,9 +4,19 @@ try:
     # Package context (e.g. python -m MTMath.miniMTM)
     from .SymbolicFEM import FEM
     from .energyFunction import ContiEnergy
+    from .meshUtils import (
+        element_deformation_gradients,
+        structured_triangular_mesh,
+        triangle_shape_grads_and_area,
+    )
 except ImportError:  # Direct script execution (e.g. python MTMath/miniMTM.py)
     from SymbolicFEM import FEM
     from energyFunction import ContiEnergy
+    from meshUtils import (
+        element_deformation_gradients,
+        structured_triangular_mesh,
+        triangle_shape_grads_and_area,
+    )
 from matplotlib import pyplot as plt
 import sympy as sp
 
@@ -59,65 +69,43 @@ def simpleShearSystem(L=2, shearValues=np.linspace(0, 3, 100)):
     return pos, elements, F_values, dN_dX_values
 
 
-# New function using the updated FEM.Element abstraction
-def simpleShearSystem2(L=2, shearValues=np.linspace(0, 3, 100), periodic=False):
+def simpleShearSystem2(L=2, shearValues=None, periodic=False):
     """
     Make a LxL system of nodes connected in a triangular mesh.
-    Apply shear and calculate F using new FEM.Element abstraction.
+    Apply shear and calculate F numerically while retaining FEM.Element outputs.
     Note: L is the number of nodes per side; this yields (L-1)^2 * 2 triangular elements.
     """
     if periodic:
         raise NotImplementedError(
             "Periodic boundary conditions are not implemented yet for simpleShearSystem2."
         )
-    N = L**2
-    FEM.make_N_nodes(N)
+    if shearValues is None:
+        shearValues = np.linspace(0.0, 3.0, 100)
+    shearValues = np.asarray(shearValues, dtype=float)
+    if shearValues.ndim != 1:
+        raise ValueError(
+            f"shearValues must be one-dimensional, got {shearValues.shape}."
+        )
 
-    # Explicit triangular elements using node indices
-    element_indices = []
-    for j in range(L - 1):
-        for i in range(L - 1):
-            n0 = j * L + i
-            n1 = n0 + 1
-            n2 = n0 + L
-            n3 = n2 + 1
-            # Two triangles per cell (n0, n1, n2) and (n1, n3, n2)
-            element_indices.append([n0, n1, n2])
-            element_indices.append([n1, n3, n2])
-    elements = [FEM.Element(ids) for ids in element_indices]
-
-    # Use .tolist() so Sympy keeps the (elements, 2, 2) / (elements, 3, 2) shapes
-    F = sp.Array([FEM.F(e).tolist() for e in elements])
-    dN_dX = sp.Array([FEM.dN_dX(e).tolist() for e in elements])
-
-    shear = sp.symbols("shear")
-
-    # Apply shear to deformation gradient and interpolated x field
-    sheared_F = FEM.apply_shear(F, shear)
-
-    # Apply shear to interpolated x field for each node, gather into matrix
-    sheared_positions = sp.Matrix(
-        [FEM.apply_shear(node["x"], shear) for node in FEM.nodes]
+    ref_positions, element_indices = structured_triangular_mesh(
+        (L, L), diagonal="major"
     )
+    FEM.make_N_nodes(len(ref_positions))
+    elements = [FEM.Element(ids.tolist()) for ids in element_indices]
 
-    # Lambdify evaluation functions
-    ref_positions = np.array([[i % L, i // L] for i in range(N)])
-    F_func = sp.lambdify([FEM.X, FEM.u, shear], sheared_F, "numpy")
-    zero_u = np.zeros_like(ref_positions)
-    dN_dX_func = sp.lambdify(FEM.X, dN_dX, "numpy")
-    pos_func = sp.lambdify([FEM.X, FEM.u, shear], sheared_positions, "numpy")
-
-    dN_dX_values = dN_dX_func(ref_positions)
-    raw_pos = np.array([pos_func(ref_positions, zero_u, s) for s in shearValues])
-    # Ensure pos shape is (n_shear, n_nodes, 2)
-    pos = raw_pos.reshape(len(shearValues), -1, 2)
-    F_values = np.array([F_func(ref_positions, zero_u, s) for s in shearValues])
-
-    # Reshape
-    n_shear = shearValues.shape[0]
-    n_elements = len(elements)
-    F_values = F_values.reshape(n_shear, n_elements, 2, 2)
-    dN_dX_values = dN_dX_values.reshape(n_elements, 3, 2)
+    pos = np.broadcast_to(
+        ref_positions,
+        (len(shearValues), *ref_positions.shape),
+    ).copy()
+    pos[:, :, 0] += shearValues[:, None] * ref_positions[None, :, 1]
+    F_values = element_deformation_gradients(
+        ref_positions,
+        pos,
+        element_indices,
+    )
+    dN_dX_values, _ = triangle_shape_grads_and_area(
+        ref_positions[element_indices]
+    )
 
     return pos, elements, F_values, dN_dX_values
 
