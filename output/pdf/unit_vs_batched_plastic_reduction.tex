@@ -13,7 +13,7 @@
 \newcommand{\GLZ}{\mathrm{GL}(2,\mathbb{Z})}
 \newcommand{\trans}{\mathsf{T}}
 
-\title{Unit-Step versus Batched Elastic Reduction\\
+\title{Unit-Step versus Batched Plastic Reduction\\
 \large Exact Non-Equivalence and Lattice Equivalence}
 \author{Technical note}
 \date{14 July 2026}
@@ -23,7 +23,7 @@
 
 \begin{abstract}
 The unit-step and nearest-integer-shear versions of the two-dimensional
-elastic-reduction algorithm are \emph{not} identical algorithms: even in exact
+plastic-reduction algorithm are \emph{not} identical algorithms: even in exact
 rational arithmetic, they can terminate at different matrices in the elastic
 domain.  The difference is therefore not caused by floating-point error.
 What is true is an exact lattice-equivalence statement.  Every output of either
@@ -195,7 +195,7 @@ disk, not only near its numerically ill-conditioned boundary.
 
 \begin{figure}[htbp]
  \centering
- \includegraphics[width=0.68\textwidth]{../../Plots/elastic_reduction_near_center_counterexample.png}
+ \includegraphics[width=0.68\textwidth]{../../Plots/plastic_reduction_near_center_counterexample.png}
  \caption{The exact rational counterexample.  The green unit-step path and the
  purple batched path start at the same interior point and terminate at
  different representatives of the elastic domain.}

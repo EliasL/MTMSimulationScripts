@@ -36,7 +36,7 @@ from Plotting.plotPowerLaw import (
 from Plotting.reversibilityPlot import plot_reversibility_histograms
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
-    elasticReductionPlots,
+    plasticReductionPlots,
     tryAllRotations,
     bug_hunting,
     poincareTiling,
@@ -1059,7 +1059,7 @@ if __name__ == "__main__":
     #tryAllRotations()
     # plotsLotsOfRealFStress("stability", reduced=True)
     # bug_hunting()
-    # elasticReductionPlots()
+    # plasticReductionPlots()
     # showDecomposition()
     # compareStop()
     # compareStep()

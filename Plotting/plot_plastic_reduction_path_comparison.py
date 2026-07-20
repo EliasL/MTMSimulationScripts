@@ -1,4 +1,4 @@
-"""Plot unit-step and batched-integer elastic-reduction paths."""
+"""Plot unit-step and batched-integer plastic-reduction paths."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from matplotlib import pyplot as plt
 
 from MTMath.energyFunction import F_from_C
 from MTMath.poincareEnergy import C2PoincareDisk, plot_reduction_history
-from MTMath.reduction import elastic_reduction_history, in_elastic_domain
+from MTMath.reduction import in_elastic_domain, plastic_reduction_history
 
 
 EXAMPLE_C = np.array(
@@ -32,7 +32,7 @@ NEAR_CENTER_C = np.array(
 )
 
 
-def multistep_elastic_reduction_history(C, loops=1000):
+def multistep_plastic_reduction_history(C, loops=1000):
     """Return the nearest-integer-shear path for one SPD metric."""
     current = np.asarray(C, dtype=float).copy()
     history = [current.copy()]
@@ -48,7 +48,7 @@ def multistep_elastic_reduction_history(C, loops=1000):
         ratio = -c / denominator
         m = int(np.sign(ratio) * np.floor(abs(ratio) + 0.5))
         if m == 0:
-            raise RuntimeError("Multi-step elastic reduction made no progress")
+            raise RuntimeError("Multi-step plastic reduction made no progress")
 
         if a <= b:
             current[0, 1] = c + m * a
@@ -60,16 +60,16 @@ def multistep_elastic_reduction_history(C, loops=1000):
             current[0, 0] = a + 2.0 * m * c + m * m * b
         history.append(current.copy())
 
-    raise RuntimeError(f"Multi-step elastic reduction did not converge in {loops} steps")
+    raise RuntimeError(f"Multi-step plastic reduction did not converge in {loops} steps")
 
 
 def make_plot(
     C=EXAMPLE_C,
-    output_stem=Path("Plots/elastic_reduction_unit_vs_multistep_paths"),
+    output_stem=Path("Plots/plastic_reduction_unit_vs_multistep_paths"),
 ):
     C = np.asarray(C, dtype=float)
-    unit_history = elastic_reduction_history(C)
-    multi_history = multistep_elastic_reduction_history(C)
+    unit_history = plastic_reduction_history(C)
+    multi_history = multistep_plastic_reduction_history(C)
     unit_color = "#008E70"
     multi_color = "#8E44AD"
 
@@ -87,7 +87,7 @@ def make_plot(
         show_legend=True,
         show_axes=True,
         lagrange_color="#111111",
-        elastic_color="#111111",
+        plastic_color="#111111",
         grid_color="#4A4A4A",
         linewidth=2.2,
         white_background=True,
@@ -140,7 +140,7 @@ def make_plot(
 def make_near_center_plot():
     return make_plot(
         C=NEAR_CENTER_C,
-        output_stem=Path("Plots/elastic_reduction_near_center_counterexample"),
+        output_stem=Path("Plots/plastic_reduction_near_center_counterexample"),
     )
 
 

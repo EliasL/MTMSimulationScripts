@@ -5,7 +5,7 @@ from collections import deque
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 from MTMath.energyFunction import EnergyFunction, rotation, F_from_C
-from MTMath.reduction import elastic_reduction_history
+from MTMath.reduction import plastic_reduction_history
 
 # Suppress scientific notation in NumPy arrays
 np.set_printoptions(suppress=True)
@@ -224,7 +224,7 @@ def rotation_free_active_shear_reduction(v1, v2, max_iters=20):
     Returns reduced (v1r, v2r), the accumulated unimodular Z, and a history.
     """
     F, C = generate_matrix(v1, v2)
-    history, Z = elastic_reduction_history(
+    history, Z = plastic_reduction_history(
         C,
         loops=max_iters,
         return_M=True,

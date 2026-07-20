@@ -122,7 +122,7 @@ def in_quadrant_geom(C: np.ndarray, label: int, tol: float = 1e-12) -> bool:
     if label == 3:
         return (C22 > tol) and (C22 <= C11 + tol) and (C12 <=  tol) and (C12 >= -0.5*C22 - tol)
     return False
-def elasticReduction(C: np.ndarray) -> Tuple[np.ndarray, int, int]:
+def plasticReduction(C: np.ndarray) -> Tuple[np.ndarray, int, int]:
     """
     Minimal reduction: scan words in BFS order; the first hit gives the quadrant label
     and minimal word length (depth).

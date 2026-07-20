@@ -1,4 +1,4 @@
-"""Minimal scalar experiments for batching elastic-reduction shears.
+"""Minimal scalar experiments for batching plastic-reduction shears.
 
 These implementations are intentionally independent of the production
 vectorized routine.  They are for checking the mathematics and operation

@@ -15,10 +15,10 @@ class TryAllRotationsTests(unittest.TestCase):
     def tearDown(self):
         plt.close("all")
 
-    def test_elastic_bfs_returns_two_distinct_center_candidates(self):
+    def test_plastic_reduction_bfs_returns_two_distinct_center_candidates(self):
         F = SShear(1.6, s_conponent=(0, 1))
 
-        candidates = poincare_tiling.elasticReductionBFS(
+        candidates = poincare_tiling.plasticReductionBFS(
             F.T @ F,
             max_depth=5,
             plot=False,
@@ -37,14 +37,14 @@ class TryAllRotationsTests(unittest.TestCase):
         def return_existing_axis(ax=None, **_kwargs):
             return ax
 
-        bfs_implementation = poincare_tiling.elasticReductionBFS
+        bfs_implementation = poincare_tiling.plasticReductionBFS
         with mock.patch.object(
             poincare_tiling,
             "lagrange_reduction",
             side_effect=AssertionError("Lagrange reduction must not be used"),
         ), mock.patch.object(
             poincare_tiling,
-            "elasticReductionBFS",
+            "plasticReductionBFS",
             wraps=bfs_implementation,
         ) as bfs_mock, mock.patch.object(
             poincare_tiling,
@@ -98,7 +98,7 @@ class TryAllRotationsTests(unittest.TestCase):
             r"Cauchy $N_1=(\sigma_{11} - \sigma_{22})/2$",
         )
 
-    def test_elastic_bfs_uses_cauchy_signature_by_default(self):
+    def test_plastic_reduction_bfs_uses_cauchy_signature_by_default(self):
         class CauchyOnlyEnergy:
             calls = 0
 
@@ -112,7 +112,7 @@ class TryAllRotationsTests(unittest.TestCase):
                 raise AssertionError("PK2 stress should not be used")
 
         F = SShear(1.6, s_conponent=(0, 1))
-        candidates = poincare_tiling.elasticReductionBFS(
+        candidates = poincare_tiling.plasticReductionBFS(
             F.T @ F,
             max_depth=5,
             eFunc=CauchyOnlyEnergy,
@@ -124,7 +124,7 @@ class TryAllRotationsTests(unittest.TestCase):
 
     def test_every_bfs_path_lift_preserves_the_unrotated_stress_id(self):
         F = SShear(1.6, s_conponent=(0, 1))
-        candidates, paths = poincare_tiling.elasticReductionBFS(
+        candidates, paths = poincare_tiling.plasticReductionBFS(
             F.T @ F,
             max_depth=5,
             plot=False,

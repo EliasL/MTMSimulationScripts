@@ -23,8 +23,8 @@ from matplotlib.colors import LogNorm, PowerNorm
 
 from .reduction import (
     elastic_domain_quadrant,
-    elastic_reduction,
-    elastic_reduction_history,
+    plastic_reduction,
+    plastic_reduction_history,
     lagrange_reduction_history,
 )
 
@@ -391,7 +391,7 @@ def generate_elastic_quadrant_grid(
 ):
     """Return well-quadrant identifiers over the Poincare disk.
 
-    Values inside the disk are the integer labels 0--3 returned after elastic
+    Values inside the disk are the integer labels 0--3 returned after plastic
     reduction.  Points outside the disk, and any unclassified points, are NaN
     so plotting code can leave the surrounding canvas transparent or white.
     """
@@ -401,7 +401,7 @@ def generate_elastic_quadrant_grid(
         returnMask=True,
         transformation=transformation,
     )
-    C_reduced, _ = elastic_reduction(C, loops=loops)
+    C_reduced, _ = plastic_reduction(C, loops=loops)
     quadrants = elastic_domain_quadrant(C_reduced).astype(float)
     quadrants[outside | (quadrants < 0)] = np.nan
     return quadrants
@@ -1900,7 +1900,7 @@ def plot_reduction_history(
     show_axes=True,
     colorbar_label=None,
     lagrange_color="#00940F",
-    elastic_color="#9DFA9B",
+    plastic_color="#9DFA9B",
     grid_color="#555555",
     linewidth=2.0,
     white_background=True,
@@ -1910,8 +1910,8 @@ def plot_reduction_history(
     Parameters are deliberately Matplotlib-oriented so this function is useful
     both for static figures and for callers such as the interactive reduction
     visualizer.  ``F`` is a single 2x2 deformation gradient.  By default the
-    Lagrange and unit-step elastic histories are shown.  Pass ``histories`` as
-    ``(history, color, label)`` triples to compare other reduction paths.
+    Lagrange and unit-step plastic-reduction histories are shown.  Pass
+    ``histories`` as ``(history, color, label)`` triples to compare other paths.
     """
     F = np.asarray(F, dtype=float)
     if F.shape != (2, 2):
@@ -1969,7 +1969,7 @@ def plot_reduction_history(
     if histories is None:
         histories = (
             (lagrange_reduction_history(C), lagrange_color, "Lagrange reduction"),
-            (elastic_reduction_history(C), elastic_color, "Elastic reduction"),
+            (plastic_reduction_history(C), plastic_color, "Plastic reduction"),
         )
     else:
         histories = tuple(histories)
@@ -2004,7 +2004,7 @@ def plot_reduction_history(
         start_x * resolution / 2 + resolution / 2,
         start_y * resolution / 2 + resolution / 2,
         s=50,
-        c=elastic_color,
+        c=plastic_color,
         edgecolors=lagrange_color,
         linewidths=1.5,
         zorder=6,

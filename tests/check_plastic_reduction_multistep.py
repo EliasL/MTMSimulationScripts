@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare unit-step and batched-integer elastic reduction on dense grids.
+"""Compare unit-step and batched-integer plastic reduction on dense grids.
 
 The current implementation in :mod:`MTMath.reduction` is the reference.  The
 candidate implementation uses the nearest nonzero integer shear, which is the
@@ -21,7 +21,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from MTMath.reduction import elastic_reduction_components, in_elastic_domain
+from MTMath.reduction import in_elastic_domain, plastic_reduction_components
 
 
 @dataclass
@@ -48,7 +48,7 @@ class Comparison:
         )
 
 
-def multistep_elastic_reduction_components(
+def multistep_plastic_reduction_components(
     C11: np.ndarray,
     C22: np.ndarray,
     C12: np.ndarray,
@@ -161,10 +161,10 @@ def compare(
     C11, C22, C12 = samples
     start = time.perf_counter()
 
-    unit_a, unit_b, unit_c, unit_M = elastic_reduction_components(
+    unit_a, unit_b, unit_c, unit_M = plastic_reduction_components(
         C11, C22, C12, loops=1000, compute_M=True
     )
-    multi_a, multi_b, multi_c, multi_M = multistep_elastic_reduction_components(
+    multi_a, multi_b, multi_c, multi_M = multistep_plastic_reduction_components(
         C11, C22, C12, loops=1000
     )
 

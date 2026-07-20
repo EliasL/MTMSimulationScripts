@@ -1,5 +1,5 @@
 
-from .reduction import elastic_reduction
+from .reduction import plastic_reduction
 from .energyFunction import SShear
 import matplotlib.pyplot as plt
 from .poincareEnergy import (
@@ -24,7 +24,7 @@ def showDecomposition():
         label=r"$\mathbf{C}$"
     )
 
-    CE, M = elastic_reduction(C0, compute_M=True)
+    CE, M = plastic_reduction(C0, compute_M=True)
     M_inv = np.linalg.inv(M)
     F_P = M_inv
     F_E = F0@M

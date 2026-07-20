@@ -15,8 +15,8 @@ from .pyplotFunctions import (
     plot_and_save_plot,
     plot_and_save_in_poincare_disk,
     plot_and_save_g_in_poincare_disk,
-    plot_and_save_in_e_reduced_poincare_disk,
-    plot_and_save_velocity_field_in_e_reduced_poincare_disk,
+    plot_and_save_in_plastic_reduced_poincare_disk,
+    plot_and_save_velocity_field_in_plastic_reduced_poincare_disk,
     plot_and_save_mesh_with_force,
 )
 from .dataFunctions import resolve_vtu_files, get_data_from_name
@@ -268,10 +268,14 @@ def makeAnimations(
         "mesh_with_forces",
         "disk",
         "disk_G",
-        "erDisk",
-        "erDisk_velocity",
+        "plasticReductionDisk",
+        "plasticReductionDisk_velocity",
     }
-    poincare_names = {"disk", "erDisk", "erDisk_velocity"}
+    poincare_names = {
+        "disk",
+        "plasticReductionDisk",
+        "plasticReductionDisk_velocity",
+    }
 
     def _is_matrix_component_grid(base_name):
         return base_name.endswith("_component_grid")
@@ -307,8 +311,11 @@ def makeAnimations(
         (plot_and_save_g_in_poincare_disk, "disk_G"),
         (plot_and_save_mesh, "mesh"),
         *matrix_jobs,
-        (plot_and_save_velocity_field_in_e_reduced_poincare_disk, "erDisk_velocity"),
-        (plot_and_save_in_e_reduced_poincare_disk, "erDisk"),
+        (
+            plot_and_save_velocity_field_in_plastic_reduced_poincare_disk,
+            "plasticReductionDisk_velocity",
+        ),
+        (plot_and_save_in_plastic_reduced_poincare_disk, "plasticReductionDisk"),
         (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_plot, "energy_plot"),
         (plot_and_save_plot, "e_drop_plot"),
@@ -398,7 +405,9 @@ def makeAnimations(
                 path, _with_suffixes("m_mesh"), _with_suffixes("disk")
             )
             combine_videoes(
-                path, _with_suffixes("mesh"), _with_suffixes("erDisk")
+                path,
+                _with_suffixes("mesh"),
+                _with_suffixes("plasticReductionDisk"),
             )
         except Exception as e:
             print(e)

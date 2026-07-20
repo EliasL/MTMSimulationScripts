@@ -1,4 +1,4 @@
-"""Compact figures for the two elastic-reduction decompositions.
+"""Compact figures for the two plastic-reduction decompositions.
 
 The visual language follows the Lagrange-reduction visualizer: the two
 columns of a matrix are shown as a solid and a dashed teal basis vector.
@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
 
 from MTMath.energyFunction import SShear, rotation
 from MTMath.poincareEnergy import C2PoincareDisk, plot_reduction_history
-from MTMath.poincareTiling import elasticReductionBFS
+from MTMath.poincareTiling import plasticReductionBFS
 
 
 OUT = ROOT / "output" / "pdf" / "figures"
@@ -99,7 +99,7 @@ def _draw_columns(ax, matrix, *, limits, title):
 
 def decomposition_data():
     total_F = SShear(1.3, s_conponent=(0, 1))
-    candidate_Cs, paths = elasticReductionBFS(
+    candidate_Cs, paths = plasticReductionBFS(
         total_F.T @ total_F,
         max_depth=5,
         plot=False,
@@ -160,7 +160,7 @@ def _draw_reduction_paths(ax, total_F, short, long):
         show_legend=False,
         show_axes=False,
         lagrange_color=TEXT,
-        elastic_color=NEUTRAL,
+        plastic_color=NEUTRAL,
         grid_color="#7C8792",
         linewidth=1.4,
         white_background=True,

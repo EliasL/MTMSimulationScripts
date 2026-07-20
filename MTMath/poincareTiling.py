@@ -1198,7 +1198,7 @@ def tryAllRotations(
     print("Original F:\n", F)
     printRot(F, "Original F")
 
-    candidate_Cs, candidate_paths = elasticReductionBFS(
+    candidate_Cs, candidate_paths = plasticReductionBFS(
         C,
         max_depth=reduction_max_depth,
         eFunc=ContiEnergy,
@@ -1233,7 +1233,7 @@ def tryAllRotations(
     )
     candidate_linestyles = tuple(("-", "--", ":", "-.")[: len(F_candidates)])
 
-    print(f"Elastic BFS found {len(F_candidates)} distinct endpoints")
+    print(f"Plastic-reduction BFS found {len(F_candidates)} distinct endpoints")
     for i, (candidate_C, candidate_F) in enumerate(
         zip(candidate_Cs, F_candidates)
     ):
@@ -1438,7 +1438,7 @@ def tryAllRotations(
     print(f"Theta range: {theta[0]} to {theta[-1]}")
     print(f"Total matches found: {len(matches)}")
     print("match candidates:", [m[3] for m in matches])
-    print("Elastic BFS candidate rotations:")
+    print("Plastic-reduction BFS candidate rotations:")
     for candidate_number in range(len(F_candidates)):
         quadrant = int(elastic_domain_quadrant(candidate_Cs[candidate_number]))
         route_matches = matches_by_candidate.get(candidate_number, [])
@@ -1457,7 +1457,7 @@ def tryAllRotations(
                 f"ID error={id_error}"
             )
 
-    print("Elastic BFS path rotations:")
+    print("Plastic-reduction BFS path rotations:")
     for path_result in candidate_paths:
         candidate_number = path_result["candidate_index"]
         path_F = F @ path_result["M"]
@@ -1495,7 +1495,7 @@ def tryAllRotations(
     return fig, axs, matches, candidate_paths
 
 
-def elasticReductionBFS(
+def plasticReductionBFS(
     C0: np.ndarray | None = None,
     *,
     max_depth: int = 5,
@@ -1692,7 +1692,7 @@ def elasticReductionBFS(
 
     if not unique_candidates:
         raise RuntimeError(
-            f"Elastic BFS did not reach the center within depth {max_depth}"
+            f"Plastic-reduction BFS did not reach the center within depth {max_depth}"
         )
     candidate_Cs = np.stack(unique_candidates)
 
@@ -1764,7 +1764,7 @@ def elasticReductionBFS(
 
     plt.tight_layout()
     with_ends = "_with_deads" if show_dead_ends else ""
-    out_path = f"Plots/{name}ElasticReduction_d{max_depth}{with_ends}.pdf"
+    out_path = f"Plots/{name}PlasticReduction_d{max_depth}{with_ends}.pdf"
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
@@ -1777,7 +1777,7 @@ def elasticReductionBFS(
     return result
 
 
-def elasticReductionPlots():
+def plasticReductionPlots():
     F0 = SShear(1.3) @ SShear(0.9, s_conponent=(1, 0))
     C0 = F0.T @ F0
 
@@ -1787,6 +1787,6 @@ def elasticReductionPlots():
     for C, name in zip([C0, C1], ["far", "close"]):
         for depth in range(1, 6):
             showDeadEnds = depth < 3
-            elasticReductionBFS(
+            plasticReductionBFS(
                 C, max_depth=depth, show_dead_ends=showDeadEnds, name=name
             )

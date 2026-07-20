@@ -12,8 +12,8 @@ from MTMath.poincareEnergy import (
     plot_reduction_history,
 )
 from MTMath.reduction import (
-    elastic_reduction,
-    elastic_reduction_history,
+    plastic_reduction,
+    plastic_reduction_history,
     lagrange_reduction,
     lagrange_reduction_history,
 )
@@ -29,17 +29,17 @@ class ReductionHistoryPlotTests(unittest.TestCase):
 
     def test_histories_match_reduction_endpoints_and_reference_path(self):
         lagrange_history = lagrange_reduction_history(self.C)
-        elastic_history = elastic_reduction_history(self.C)
+        plastic_history = plastic_reduction_history(self.C)
 
         np.testing.assert_allclose(
             lagrange_history[-1], lagrange_reduction(self.C)[0]
         )
         np.testing.assert_allclose(
-            elastic_history[-1], elastic_reduction(self.C)[0]
+            plastic_history[-1], plastic_reduction(self.C)[0]
         )
 
         lagrange_xy = np.column_stack(C2PoincareDisk(lagrange_history))
-        elastic_xy = np.column_stack(C2PoincareDisk(elastic_history))
+        plastic_xy = np.column_stack(C2PoincareDisk(plastic_history))
         np.testing.assert_allclose(
             lagrange_xy,
             [
@@ -51,7 +51,7 @@ class ReductionHistoryPlotTests(unittest.TestCase):
             atol=1e-8,
         )
         np.testing.assert_allclose(
-            elastic_xy,
+            plastic_xy,
             [
                 [-0.14791834, -0.56780341],
                 [0.22723950, -0.06276970],
@@ -67,9 +67,9 @@ class ReductionHistoryPlotTests(unittest.TestCase):
             set(np.unique(quadrants[np.isfinite(quadrants)])), {0, 1, 2, 3}
         )
 
-    def test_elastic_history_uses_rotation_free_unit_shears(self):
+    def test_plastic_history_uses_rotation_free_unit_shears(self):
         F = np.array([[1.0, 5.0], [0.0, 1.0]])
-        history = elastic_reduction_history(F.T @ F)
+        history = plastic_reduction_history(F.T @ F)
         np.testing.assert_allclose(history[:, 0, 1], [5, 4, 3, 2, 1, 0])
 
     def test_plot_uses_white_background_and_draws_both_histories(self):
