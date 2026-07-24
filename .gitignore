@@ -7,3 +7,4 @@ _*
 Plots/powerLaw/**/cache/
 Plots/powerLaw/*_cache/
 /tmp/
+*.log
