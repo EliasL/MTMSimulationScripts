@@ -12,6 +12,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 os.environ.setdefault("MPLCONFIGDIR", str(ROOT / ".matplotlib-cache"))
 
+DEFAULT_OUTPUT_ROOT = ROOT / "_no_minimization_ss_jobs/output_size3_step0p1_direct_fields"
+DEFAULT_CURRENT_PDF = ROOT / "Plots/no_minimization_current_condition_decomposition.pdf"
+DEFAULT_CURRENT_CSV = ROOT / "Plots/no_minimization_current_condition_decomposition.csv"
+DEFAULT_REFERENCE_PDF = ROOT / "Plots/no_minimization_reference_condition_decomposition.pdf"
+DEFAULT_REFERENCE_CSV = ROOT / "Plots/no_minimization_reference_condition_decomposition.csv"
+DEFAULT_SUMMARY_PDF = ROOT / "Plots/no_minimization_conditioning_summary.pdf"
+DEFAULT_SUMMARY_PNG = ROOT / "Plots/no_minimization_conditioning_summary.png"
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -309,22 +317,16 @@ def read_csv_records(csv_path: Path) -> list[dict]:
 
 def condition_quantities(mode: str) -> list[tuple[str, str, str, tuple[float, float]]]:
     if mode == "current":
-        geometry = ("kappa_x", r"$\kappa_x$", "current geometry", (1e0, 2e2))
+        geometry = ("kappa_x", r"$\kappa_{\mathbf{x}}$", "current geometry", (1e0, 2e2))
     elif mode == "reference":
-        geometry = ("kappa_X", r"$\kappa_X$", "reference geometry", (1e0, 2e2))
+        geometry = ("kappa_X", r"$\kappa_{\mathbf{X}}$", "reference geometry", (1e0, 2e2))
     else:
         raise ValueError(f"Unknown mode {mode!r}.")
     return [
         geometry,
         (
-            "kappa_F",
-            r"$\kappa_F$",
-            "deformation gradient",
-            (1e0, 2e2),
-        ),
-        (
             "kappa_C",
-            r"$\kappa_C$",
+            r"$\kappa_{\mathbf{C}}$",
             "right Cauchy-Green tensor",
             (1e0, 5e4),
         ),
@@ -456,6 +458,32 @@ def plot_records(records: list[dict], out_path: Path, *, mode: str) -> None:
     plt.close(fig)
 
 
+def records_for_mode(
+    output_root: Path,
+    *,
+    csv_path: Path,
+    shears: list[int],
+    local_loads: list[float],
+    loops: int,
+    mode: str,
+) -> list[dict]:
+    if output_root.is_dir():
+        records = collect_records(
+            output_root,
+            shears=shears,
+            local_loads=local_loads,
+            loops=loops,
+            mode=mode,
+        )
+        write_csv(records, csv_path)
+        return records
+    if csv_path.is_file():
+        return read_csv_records(csv_path)
+    raise FileNotFoundError(
+        f"Neither simulation output directory {output_root} nor cached records {csv_path} exist."
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
@@ -467,43 +495,91 @@ def main() -> None:
         "output_root",
         type=Path,
         nargs="?",
-        default=Path("_no_minimization_ss_jobs/output_size3_step0p1_direct_fields"),
+        default=DEFAULT_OUTPUT_ROOT,
     )
     parser.add_argument("--shears", default="0,2,5,10")
     parser.add_argument("--loops", type=int, default=30)
     parser.add_argument(
         "--mode",
-        choices=("current", "reference"),
-        default="current",
+        choices=("current", "reference", "both"),
+        default="both",
         help=(
             "current samples loads n+s from long simple-shear runs; reference "
-            "samples loads s from runs whose reference shear is GP1=-n."
+            "samples loads s from runs whose reference shear is GP1=-n; both "
+            "generates the current, reference, and combined summary figures."
         ),
     )
     parser.add_argument(
         "--out",
         type=Path,
-        default=Path("Plots/no_minimization_current_condition_decomposition.pdf"),
+        default=None,
+        help="Output PDF for a single current/reference mode (defaults by mode).",
     )
     parser.add_argument(
         "--csv",
         type=Path,
-        default=Path("Plots/no_minimization_current_condition_decomposition.csv"),
+        default=None,
+        help="Output CSV for a single current/reference mode (defaults by mode).",
     )
     args = parser.parse_args()
 
     local_loads = [round(0.1 * i, 1) for i in range(1, 10)]
-    records = collect_records(
+    shears = parse_shears(args.shears)
+
+    if args.mode == "both":
+        current_records = records_for_mode(
+            args.output_root,
+            csv_path=DEFAULT_CURRENT_CSV,
+            shears=shears,
+            local_loads=local_loads,
+            loops=args.loops,
+            mode="current",
+        )
+        reference_records = records_for_mode(
+            args.output_root,
+            csv_path=DEFAULT_REFERENCE_CSV,
+            shears=shears,
+            local_loads=local_loads,
+            loops=args.loops,
+            mode="reference",
+        )
+        plot_records(current_records, DEFAULT_CURRENT_PDF, mode="current")
+        plot_records(reference_records, DEFAULT_REFERENCE_PDF, mode="reference")
+
+        from Plotting.plot_conditioning_summary import make_figure
+
+        make_figure(
+            current_csv=DEFAULT_CURRENT_CSV,
+            reference_csv=DEFAULT_REFERENCE_CSV,
+            integer_shear=2,
+            local_shear=0.5,
+            out_pdf=DEFAULT_SUMMARY_PDF,
+            out_png=DEFAULT_SUMMARY_PNG,
+        )
+        for path in (
+            DEFAULT_CURRENT_PDF,
+            DEFAULT_REFERENCE_PDF,
+            DEFAULT_SUMMARY_PDF,
+            DEFAULT_SUMMARY_PNG,
+        ):
+            print(path)
+        return
+
+    default_out = DEFAULT_CURRENT_PDF if args.mode == "current" else DEFAULT_REFERENCE_PDF
+    default_csv = DEFAULT_CURRENT_CSV if args.mode == "current" else DEFAULT_REFERENCE_CSV
+    records = records_for_mode(
         args.output_root,
-        shears=parse_shears(args.shears),
+        csv_path=args.csv or default_csv,
+        shears=shears,
         local_loads=local_loads,
         loops=args.loops,
         mode=args.mode,
     )
-    write_csv(records, args.csv)
-    plot_records(records, args.out, mode=args.mode)
-    print(args.out)
-    print(args.csv)
+    out_path = args.out or default_out
+    csv_path = args.csv or default_csv
+    plot_records(records, out_path, mode=args.mode)
+    print(out_path)
+    print(csv_path)
 
 
 if __name__ == "__main__":

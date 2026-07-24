@@ -2,6 +2,7 @@ import os
 import subprocess
 import cv2
 import imageio.v2 as imageio  # Adjusted import here
+from pathlib import Path
 
 
 from .settings import settings
@@ -194,8 +195,12 @@ def makeAnimations(
     cartesian_viewport=None,
     output_path=None,
 ):
-    output_path = path if output_path is None else os.fspath(output_path)
-    os.makedirs(output_path, exist_ok=True)
+    output_path = (
+        Path(__file__).resolve().parents[1] / "Plots" / Path(path).name
+        if output_path is None
+        else Path(output_path)
+    )
+    output_path.mkdir(parents=True, exist_ok=True)
     frame_path = os.path.join(output_path, settings["FRAMEFOLDERPATH"])
     if macroData is None:
         macroData = os.path.join(path, settings["MACRODATANAME"] + ".csv")

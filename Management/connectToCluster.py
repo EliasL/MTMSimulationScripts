@@ -183,7 +183,6 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         "profiling",
         "MTMath",
         "tmp/",
-        "output/",
     ]
 
     # Step 1: Create directories on the cluster

@@ -40,7 +40,7 @@ For the simple shear
 \), the unit-shear breadth-first search reaches two points in the elastic
 domain.  The shortest and longer routes produce visibly different matrices
 \(\mathbf M\), and hence apparently different multiplicative decompositions
-\(\mathbf F=\mathbf F_E\mathbf F_P\).  The main observation of this note is
+\(\mathbf F=\mathbf F_e\mathbf F_p\).  The main observation of this note is
 that the two decompositions differ only by a $90^\circ$ rotation of the
 intermediate basis.  They have the same spatial elastic metric
 \(\mathbf B_E\), the same reference plastic metric \(\mathbf C_P\), the same
@@ -62,14 +62,14 @@ The accumulated integer matrix from plastic reduction acts on the right,
 \begin{equation}
  \mathbf C_E=\mathbf M^\trans\mathbf C\mathbf M,
  \qquad
- \mathbf F_E=\mathbf F\mathbf M.
+ \mathbf F_e=\mathbf F\mathbf M.
 \end{equation}
 Using the convention in the decomposition code,
 \begin{equation}
  \boxed{
- \mathbf F=\mathbf F_E\mathbf F_P,
+ \mathbf F=\mathbf F_e\mathbf F_p,
  \qquad
- \mathbf F_P=\mathbf M^{-1}.}
+ \mathbf F_p=\mathbf M^{-1}.}
  \label{eq:decomposition}
 \end{equation}
 For the present \(\mathbf F\), the shortest route has two unit shears,
@@ -86,21 +86,21 @@ whereas the first route to the other elastic quadrant has three:
 Both factorizations reproduce the total deformation exactly.  Their elastic
 and plastic factors are
 \begin{align}
- \mathbf F_E^{(\shortp)}&=
+ \mathbf F_e^{(\shortp)}&=
  \begin{pmatrix}1&-0.4\\0&1\end{pmatrix},
  &
- \mathbf F_P^{(\shortp)}&=
+ \mathbf F_p^{(\shortp)}&=
  \begin{pmatrix}1&2\\0&1\end{pmatrix},
  \\
- \mathbf F_E^{(\longp)}&=
+ \mathbf F_e^{(\longp)}&=
  \begin{pmatrix}0.4&1\\-1&0\end{pmatrix},
  &
- \mathbf F_P^{(\longp)}&=
+ \mathbf F_p^{(\longp)}&=
  \begin{pmatrix}0&-1\\1&2\end{pmatrix}.
 \end{align}
 Figure~\ref{fig:factors} puts these factors beside the matrices to which they
-should naturally be compared: \(\mathbf F_P\) beside the original
-\(\mathbf F\), and \(\mathbf F_E\) beside the undeformed benchmark
+should naturally be compared: \(\mathbf F_p\) beside the original
+\(\mathbf F\), and \(\mathbf F_e\) beside the undeformed benchmark
 \(\mathbf I\).  To distinguish direct componentwise comparison from comparison
 after an admissible change of intermediate basis, define
 \begin{equation}
@@ -113,15 +113,15 @@ Table~\ref{tab:decompositions}.
 
 \begin{figure}[htbp]
  \centering
- \includegraphics[width=0.98\textwidth]{figures/elastic_plastic_factors.pdf}
+ \includegraphics[width=0.98\textwidth]{elastic_plastic_factors.pdf}
  \caption{The original deformation and its two decompositions, together with
  the corresponding unit-shear BFS paths in the Poincar\'e disk.  In every
  matrix panel the solid vector is the first column \(\mathbf A_{:1}\), and the
  dashed vector is the second column \(\mathbf A_{:2}\).  The original
- \(\mathbf F\) and the short-path \(\mathbf F_P\) are both positive horizontal
- shears, whereas the long-path \(\mathbf F_P\) appears vertically oriented.
+ \(\mathbf F\) and the short-path \(\mathbf F_p\) are both positive horizontal
+ shears, whereas the long-path \(\mathbf F_p\) appears vertically oriented.
  The differently oriented elastic factors compensate exactly, so both
- products \(\mathbf F_E\mathbf F_P\) recover the same \(\mathbf F\).  Rotating
+ products \(\mathbf F_e\mathbf F_p\) recover the same \(\mathbf F\).  Rotating
  the long-path intermediate basis back by \(90^\circ\) makes its plastic
  factor coincide with the short-path factor.}
  \label{fig:factors}
@@ -146,10 +146,10 @@ $\mathbf F=\left(\begin{smallmatrix}1&1.6\\0&1\end{smallmatrix}\right)$ &
 $\left(\begin{smallmatrix}1&2\\0&1\end{smallmatrix}\right)$ &
 $\left(\begin{smallmatrix}0&-1\\1&2\end{smallmatrix}\right)$ &
 Only the short factor retains the displayed upper-shear form \\
-Fixed \(\lVert\mathbf F_P-\mathbf F\rVert_{\Frob}\) & $0$ & $0.400$ & $3.124$ &
+Fixed \(\lVert\mathbf F_p-\mathbf F\rVert_{\Frob}\) & $0$ & $0.400$ & $3.124$ &
 Strongly favors the short route \\
 Aligned \(\min_{\mathbf R\in\mathcal G}
-\lVert\mathbf R\mathbf F_P-\mathbf F\rVert_{\Frob}\) & $0$ & $0.400$ & $0.400$ &
+\lVert\mathbf R\mathbf F_p-\mathbf F\rVert_{\Frob}\) & $0$ & $0.400$ & $0.400$ &
 Tie after intermediate-frame alignment \\
 Reference-metric \(\lVert\mathbf C_P-\mathbf C\rVert_{\Frob}\) & $0$ & $1.547$ & $1.547$ &
 Objective comparison with the original \(\mathbf C\) is tied \\
@@ -157,7 +157,7 @@ Elastic matrix & $\mathbf I$ &
 $\left(\begin{smallmatrix}1&-0.4\\0&1\end{smallmatrix}\right)$ &
 $\left(\begin{smallmatrix}0.4&1\\-1&0\end{smallmatrix}\right)$ &
 Only the short factor remains near the displayed axes \\
-Fixed \(\lVert\mathbf F_E-\mathbf I\rVert_{\Frob}\) & $0$ & $0.400$ & $1.833$ &
+Fixed \(\lVert\mathbf F_e-\mathbf I\rVert_{\Frob}\) & $0$ & $0.400$ & $1.833$ &
 Favors the short route \\
 Objective \(\lVert\mathbf B_E-\mathbf I\rVert_{\Frob}\) & $0$ & $0.588$ & $0.588$ &
 Spatial elastic comparison is tied \\
@@ -193,38 +193,38 @@ spaces.  The two integer matrices satisfy
 \end{equation}
 Consequently,
 \begin{equation}
- \mathbf F_E^{(\longp)}=\mathbf F_E^{(\shortp)}\mathbf Q,
+ \mathbf F_e^{(\longp)}=\mathbf F_e^{(\shortp)}\mathbf Q,
  \qquad
- \mathbf F_P^{(\longp)}=\mathbf Q^\trans\mathbf F_P^{(\shortp)}.
+ \mathbf F_p^{(\longp)}=\mathbf Q^\trans\mathbf F_p^{(\shortp)}.
  \label{eq:gaugepair}
 \end{equation}
 The factors therefore change, but the rotation cancels from their product:
 \begin{equation}
- (\mathbf F_E^{(\shortp)}\mathbf Q)
- (\mathbf Q^\trans\mathbf F_P^{(\shortp)})
- =\mathbf F_E^{(\shortp)}\mathbf F_P^{(\shortp)}=\mathbf F.
+ (\mathbf F_e^{(\shortp)}\mathbf Q)
+ (\mathbf Q^\trans\mathbf F_p^{(\shortp)})
+ =\mathbf F_e^{(\shortp)}\mathbf F_p^{(\shortp)}=\mathbf F.
 \end{equation}
 The apparently vertical long-path plastic shear is therefore exactly the
 short-path horizontal shear written in a rotated intermediate frame:
 \begin{equation}
- \mathbf Q\mathbf F_P^{(\longp)}
- =\mathbf F_P^{(\shortp)}.
+ \mathbf Q\mathbf F_p^{(\longp)}
+ =\mathbf F_p^{(\shortp)}.
  \label{eq:alignplastic}
 \end{equation}
 Accordingly, the fixed-frame plastic discrepancy selects the short path, but
 the discrepancy after lattice-compatible alignment does not:
 \begin{align}
- \lVert\mathbf F_P^{(\shortp)}-\mathbf F\rVert_{\Frob}
+ \lVert\mathbf F_p^{(\shortp)}-\mathbf F\rVert_{\Frob}
  &=0.400,
  &
- \lVert\mathbf F_P^{(\longp)}-\mathbf F\rVert_{\Frob}
+ \lVert\mathbf F_p^{(\longp)}-\mathbf F\rVert_{\Frob}
  &=3.124,
  \\
  \min_{\mathbf R\in\mathcal G}
- \lVert\mathbf R\mathbf F_P^{(\shortp)}-\mathbf F\rVert_{\Frob}
+ \lVert\mathbf R\mathbf F_p^{(\shortp)}-\mathbf F\rVert_{\Frob}
  &=
  \min_{\mathbf R\in\mathcal G}
- \lVert\mathbf R\mathbf F_P^{(\longp)}-\mathbf F\rVert_{\Frob}
+ \lVert\mathbf R\mathbf F_p^{(\longp)}-\mathbf F\rVert_{\Frob}
  =0.400.
  \label{eq:alignedplasticdistance}
 \end{align}
@@ -242,8 +242,8 @@ have the same \(\mathbf C_P\),
 This is the standard rotational freedom of the intermediate configuration:
 for any \(\mathbf Q\in\SO\),
 \(
- \mathbf F_E\mathbf F_P
- =(\mathbf F_E\mathbf Q)(\mathbf Q^\trans\mathbf F_P)
+ \mathbf F_e\mathbf F_p
+ =(\mathbf F_e\mathbf Q)(\mathbf Q^\trans\mathbf F_p)
 \).
 Here the admissible rotation is additionally lattice-compatible,
 \(\mathbf Q\in\SO\cap\SLZ\).
@@ -251,18 +251,18 @@ Here the admissible rotation is additionally lattice-compatible,
 The quantities insensitive to this intermediate rotation are identical:
 \begin{align}
  \mathbf B_E^{(\shortp)}
- &=\mathbf F_E^{(\shortp)}\mathbf F_E^{(\shortp)\trans}
+ &=\mathbf F_e^{(\shortp)}\mathbf F_e^{(\shortp)\trans}
  =\mathbf B_E^{(\longp)}
  =\begin{pmatrix}1.16&-0.4\\-0.4&1\end{pmatrix},
  \\
  \mathbf C_P^{(\shortp)}
- &=\mathbf F_P^{(\shortp)\trans}\mathbf F_P^{(\shortp)}
+ &=\mathbf F_p^{(\shortp)\trans}\mathbf F_p^{(\shortp)}
  =\mathbf C_P^{(\longp)}
  =\begin{pmatrix}1&2\\2&5\end{pmatrix}.
  \label{eq:equalmetrics}
 \end{align}
-The two \(\mathbf F_E\) have the same singular values,
-\(1.219804\) and \(0.819804\); the two \(\mathbf F_P\) have singular values
+The two \(\mathbf F_e\) have the same singular values,
+\(1.219804\) and \(0.819804\); the two \(\mathbf F_p\) have singular values
 \(2.414214\) and \(0.414214\).  They also give the same energy,
 \(0.0864665\), and the same Cauchy stress,
 \begin{equation}
@@ -311,8 +311,8 @@ Quadrant & Unit-shear word & Depth & Accumulated matrix class \\
 
 Thus the longer paths do not create new plastic or elastic stretch states in
 this case.  Replacing \(\mathbf M\) by \(-\mathbf M\) gives
-\(\mathbf F_E\mapsto-\mathbf F_E\) and
-\(\mathbf F_P\mapsto-\mathbf F_P\).  Their product, \(\mathbf C_E\),
+\(\mathbf F_e\mapsto-\mathbf F_e\) and
+\(\mathbf F_p\mapsto-\mathbf F_p\).  Their product, \(\mathbf C_E\),
 \(\mathbf B_E\), and \(\mathbf C_P\) are unchanged.  It is a $180^\circ$
 rotation of the oriented intermediate basis.  Moving between the two elastic
 quadrants adds the $90^\circ$ rotation in Equation~\eqref{eq:Qrelation}.
@@ -325,8 +325,8 @@ consistently applied orthogonal change of intermediate basis.
 
 If the intermediate frame is anchored to the original axes, the four matrix
 classes are no longer equally convenient.  Write
-\(d_P=\lVert\mathbf F_P-\mathbf F\rVert_{\Frob}\) and
-\(d_E=\lVert\mathbf F_E-\mathbf I\rVert_{\Frob}\).  Their scores are
+\(d_P=\lVert\mathbf F_p-\mathbf F\rVert_{\Frob}\) and
+\(d_E=\lVert\mathbf F_e-\mathbf I\rVert_{\Frob}\).  Their scores are
 \begin{equation}
  \begin{array}{c|cccc}
  \mathbf M & \mathbf M_{\shortp} & -\mathbf M_{\shortp}
@@ -386,7 +386,7 @@ reversed, but the metric has returned to its initial value.
 
 \begin{figure}[H]
  \centering
- \includegraphics[width=0.82\textwidth]{figures/reference_basis_rotation.pdf}
+ \includegraphics[width=0.82\textwidth]{reference_basis_rotation.pdf}
  \caption{A passive rotation of the reference basis.  The top row shows the
  columns of \(\mathbf F(\theta)\).  The bottom panel shows that
  \(\mathbf C(\theta)\) completes a closed component-space orbit while the
@@ -410,8 +410,8 @@ compatible in these fixed components.  Equations~\eqref{eq:alignedplasticdistanc
 and~\eqref{eq:fourclassscores} make this preference quantitative.
 
 This suggests a useful selection rule: among admissible reductions, choose the
-one that minimizes \(\lVert\mathbf F_E-\mathbf I\rVert_{\Frob}\), or,
-equivalently for the present example, the one whose \(\mathbf F_P\) remains
+one that minimizes \(\lVert\mathbf F_e-\mathbf I\rVert_{\Frob}\), or,
+equivalently for the present example, the one whose \(\mathbf F_p\) remains
 closest to the total \(\mathbf F\) in the anchored frame.  In an incremental
 calculation, the more robust version is to choose the representative closest
 to the previously selected intermediate orientation.  This suppresses
@@ -420,8 +420,8 @@ natural continuity choice.
 
 If the intermediate axes are not anchored, the horizontal-versus-vertical
 distinction is only a change of components.  Applying the admissible rotation
-\(\mathbf Q\) turns the long-path \(\mathbf F_P\) exactly into the short-path
-\(\mathbf F_P\).  Their objective elastic and plastic metrics, singular
+\(\mathbf Q\) turns the long-path \(\mathbf F_p\) exactly into the short-path
+\(\mathbf F_p\).  Their objective elastic and plastic metrics, singular
 values, energy, and Cauchy stress remain identical.  Consequently the original
 \(\mathbf F\) alone cannot create an objective preference between the two
 quadrants; it can select a preferred \emph{representative} only after an

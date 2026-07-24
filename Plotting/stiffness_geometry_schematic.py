@@ -75,7 +75,7 @@ def schematic_handles(reference_color: str, current_color: str) -> list[Line2D]:
             color=reference_color,
             linestyle="--",
             linewidth=2.0,
-            label=r"reference $X$",
+            label=r"reference $\mathbf{X}$",
         ),
         Line2D(
             [0],
@@ -83,7 +83,7 @@ def schematic_handles(reference_color: str, current_color: str) -> list[Line2D]:
             color=current_color,
             linestyle="-",
             linewidth=2.0,
-            label=r"current $x$",
+            label=r"current $\mathbf{x}$",
         ),
     ]
 

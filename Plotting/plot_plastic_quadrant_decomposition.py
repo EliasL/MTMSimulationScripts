@@ -13,7 +13,6 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import PathCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch
-from matplotlib.ticker import FuncFormatter
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,9 +22,10 @@ if str(ROOT) not in sys.path:
 from MTMath.energyFunction import SShear, rotation
 from MTMath.poincareEnergy import C2PoincareDisk, plot_reduction_history
 from MTMath.poincareTiling import plasticReductionBFS
+from Plotting.matrix_visualization import draw_matrix_columns
 
 
-OUT = ROOT / "output" / "pdf" / "figures"
+OUT = ROOT / "Plots" / "plastic_reduction"
 
 TEAL = "#008C95"
 BLUE = "#2171B5"
@@ -52,51 +52,6 @@ def _style():
     )
 
 
-def _draw_columns(ax, matrix, *, limits, title):
-    matrix = np.asarray(matrix, dtype=float)
-    vectors = (matrix[:, 0], matrix[:, 1])
-
-    for vector, linestyle in zip(vectors, ("-", "--")):
-        arrow = FancyArrowPatch(
-            (0.0, 0.0),
-            tuple(vector),
-            arrowstyle="-|>",
-            mutation_scale=12,
-            linewidth=2.1,
-            linestyle=linestyle,
-            color=TEAL,
-            zorder=3,
-        )
-        ax.add_patch(arrow)
-
-    ax.scatter([0.0], [0.0], s=10, color=TEXT, zorder=4)
-    if limits is None:
-        ax.margins(0.10)
-        ax.autoscale_view()
-    else:
-        ax.set_xlim(*limits)
-        ax.set_ylim(*limits)
-
-    def half_step_ticks(bounds):
-        lower, upper = sorted(bounds)
-        first = np.ceil((lower - 1e-12) * 2.0) / 2.0
-        last = np.floor((upper + 1e-12) * 2.0) / 2.0
-        return np.arange(first, last + 0.25, 0.5)
-
-    def half_step_label(value, _position):
-        return f"{0.0 if abs(value) < 1e-12 else value:g}"
-
-    ax.set_xticks(half_step_ticks(ax.get_xlim()))
-    ax.set_yticks(half_step_ticks(ax.get_ylim()))
-    ax.xaxis.set_major_formatter(FuncFormatter(half_step_label))
-    ax.yaxis.set_major_formatter(FuncFormatter(half_step_label))
-    ax.set_aspect("equal", adjustable="box")
-    ax.tick_params(length=2.5, width=0.7, pad=1.5)
-    ax.set_title(title, pad=7, fontweight="semibold")
-    for spine in ax.spines.values():
-        spine.set_color(GRID)
-
-
 def decomposition_data():
     total_F = SShear(1.3, s_conponent=(0, 1))
     candidate_Cs, paths = plasticReductionBFS(
@@ -117,8 +72,8 @@ def decomposition_data():
             {
                 "path": path["path"],
                 "M": M,
-                "F_E": total_F @ M,
-                "F_P": np.linalg.inv(M),
+                "F_e": total_F @ M,
+                "F_p": np.linalg.inv(M),
             }
         )
     return total_F, representatives, paths
@@ -268,35 +223,35 @@ def plot_decompositions(total_F, representatives):
     )
 
     _draw_reduction_paths(axes[0, 0], total_F, short, long)
-    _draw_columns(
+    draw_matrix_columns(
         axes[0, 1],
-        short["F_P"],
+        short["F_p"],
         limits=None,
-        title=r"Short: $\mathbf{F}_{\!P}^{(s)}$",
+        title=r"Short: $\mathbf{F}_{\!p}^{(s)}$",
     )
-    _draw_columns(
+    draw_matrix_columns(
         axes[0, 2],
-        long["F_P"],
+        long["F_p"],
         limits=None,
-        title=r"Long: $\mathbf{F}_{\!P}^{(\ell)}$",
+        title=r"Long: $\mathbf{F}_{\!p}^{(\ell)}$",
     )
-    _draw_columns(
+    draw_matrix_columns(
         axes[1, 0],
         total_F,
         limits=None,
         title=r"Original $\mathbf{F}$",
     )
-    _draw_columns(
+    draw_matrix_columns(
         axes[1, 1],
-        short["F_E"],
+        short["F_e"],
         limits=None,
-        title=r"Short: $\mathbf{F}_{\!E}^{(s)}$",
+        title=r"Short: $\mathbf{F}_{\!e}^{(s)}$",
     )
-    _draw_columns(
+    draw_matrix_columns(
         axes[1, 2],
-        long["F_E"],
+        long["F_e"],
         limits=None,
-        title=r"Long: $\mathbf{F}_{\!E}^{(\ell)}$",
+        title=r"Long: $\mathbf{F}_{\!e}^{(\ell)}$",
     )
 
     legend = [
@@ -332,7 +287,7 @@ def plot_decompositions(total_F, representatives):
 
 def _rotation_snapshots(ax, matrix, theta, label):
     transformed = matrix @ rotation(theta)
-    _draw_columns(
+    draw_matrix_columns(
         ax,
         transformed,
         limits=(-1.25, 1.25),

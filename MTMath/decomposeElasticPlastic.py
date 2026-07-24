@@ -26,12 +26,12 @@ def showDecomposition():
 
     CE, M = plastic_reduction(C0, compute_M=True)
     M_inv = np.linalg.inv(M)
-    F_P = M_inv
-    F_E = F0@M
-    F_test = F_E@F_P
+    F_p = M_inv
+    F_e = F0@M
+    F_test = F_e@F_p
 
-    drawC(ax, [np.eye(2), F_P.T@F_P],arrow=True, label=r"$\mathbf{F}_P^T\mathbf{F}_P$",label_va="top")
-    drawC(ax, [np.eye(2), F_E.T@F_E],arrow=True, label=r"$\mathbf{F}_E^T\mathbf{F}_E$",label_va="top")
+    drawC(ax, [np.eye(2), F_p.T@F_p],arrow=True, label=r"$\mathbf{F}_p^T\mathbf{F}_p$",label_va="top")
+    drawC(ax, [np.eye(2), F_e.T@F_e],arrow=True, label=r"$\mathbf{F}_e^T\mathbf{F}_e$",label_va="top")
     #drawC(ax, [np.eye(2), F_test.T@F_test],arrow=True, label=r"$F^TF$")
 
     drawC(

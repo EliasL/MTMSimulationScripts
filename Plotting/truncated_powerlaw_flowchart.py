@@ -253,7 +253,7 @@ PANEL_CACHE_DIR = OUTPUT_DIR / "panels"
 DOWNLOAD_CACHE_DIR = OUTPUT_DIR / "data"
 ANALYSIS_SUMMARY_PATH = OUTPUT_DIR / "analysis_summary.json"
 FINAL_PNG = OUTPUT_DIR / "truncated_powerlaw_exponent_flowchart.png"
-FINAL_PDF = REPO_ROOT / "output" / "pdf" / "truncated_powerlaw_exponent_flowchart.pdf"
+FINAL_PDF = OUTPUT_DIR / "truncated_powerlaw_exponent_flowchart.pdf"
 
 PANEL_FILES = {
     name: PANEL_CACHE_DIR / f"{name}.png" for name in PANEL_LAYOUT

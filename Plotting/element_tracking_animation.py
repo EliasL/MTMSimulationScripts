@@ -618,7 +618,7 @@ def render_poincare_animation(
                 [0],
                 color="#2166ac",
                 linewidth=2.2,
-                label=r"$F_E T$",
+                label=r"$F_e T$",
             )
         )
     ax.legend(handles=handles, loc="lower left", frameon=False)

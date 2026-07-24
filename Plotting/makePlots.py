@@ -2544,7 +2544,7 @@ def makePowerLawPlot(csv_file_paths, name, **kwargs):
 
 if __name__ == "__main__":
     pass
-    # The path should be the path from work directory to the folder inside the output folder.
+    # The path should be the path from work directory to the folder inside the Plots folder.
     makePlot(
         [
             "/Volumes/data/MTS2D_output/simpleShear,s60x60l0.15,0.0002,1.0PBCt1minimizerFIRELBFGSEpsg0.0001eps0.01s0/macroData.csv",
