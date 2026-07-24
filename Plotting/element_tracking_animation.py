@@ -18,6 +18,7 @@ from matplotlib.patches import Circle, Rectangle
 
 from MTMath.poincareEnergy import drawPoincareGrid, prepPoincareFig
 from Plotting.element_tracking import ElementMatrixHistory, read_matrix_component
+from Plotting.pyplotFunctions import wrap_periodic_mesh
 from Plotting.vtuDataForSylvain import VTUData
 
 
@@ -391,19 +392,15 @@ def extract_periodic_mesh(
     if "refIndex" not in data.mesh.point_data:
         raise KeyError(f"refIndex is required to locate the periodic origin in {vtu_path}")
     reference_indices = np.asarray(data.mesh.point_data["refIndex"]).reshape(-1)
-    origin_candidates = points[reference_indices == 0]
-    if len(origin_candidates) == 0:
-        raise ValueError(f"No refIndex=0 periodic origin found in {vtu_path}")
-    origin = origin_candidates[0]
-    box = np.array([[box_size, load * box_size], [0.0, box_size]])
-    fractional = (points - origin) @ np.linalg.inv(box).T
-    wrapped = fractional - np.floor(fractional)
-
-    polygons = wrapped[triangles]
-    delta = polygons - polygons[:, :1]
-    polygons = polygons[:, :1] + delta - np.round(delta)
-    polygons -= np.floor(polygons.mean(axis=1))[:, None, :]
-    plotted_polygons, plotted_energies = _tile_triangles(polygons, energies)
+    plotted_polygons, plotted_energies, wrapped = wrap_periodic_mesh(
+        points,
+        triangles,
+        energies,
+        reference_indices,
+        load,
+        box_size,
+        source_path=vtu_path,
+    )
 
     second_ring, first_ring = _neighborhood_rings(triangles, element_index)
     region_cells = sorted(second_ring | first_ring | {element_index})
@@ -446,26 +443,6 @@ def _cell_energy_values(
     if np.any(~np.isfinite(energies)) or np.any(energies < 0):
         raise ValueError(f"{energy_field} must contain finite non-negative values.")
     return energies
-
-
-def _tile_triangles(
-    polygons: np.ndarray,
-    values: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray]:
-    plotted: list[np.ndarray] = []
-    plotted_values: list[np.ndarray] = []
-    for dx in (-1, 0, 1):
-        for dy in (-1, 0, 1):
-            shifted = polygons + np.array([dx, dy])
-            lower = shifted.min(axis=1)
-            upper = shifted.max(axis=1)
-            inside = np.all(upper >= 0, axis=1) & np.all(lower <= 1, axis=1)
-            if np.any(inside):
-                plotted.append(shifted[inside])
-                plotted_values.append(values[inside])
-    if not plotted:
-        raise RuntimeError("Periodic wrapping produced no visible triangles.")
-    return np.concatenate(plotted), np.concatenate(plotted_values)
 
 
 def _periodic_curve_copies(curve: np.ndarray) -> tuple[np.ndarray, ...]:
@@ -769,6 +746,8 @@ def render_periodic_mesh_animation(
     energy_sample_count: int = 64,
 ) -> Path:
     """Stream the full energy-coloured mesh inside a square periodic box."""
+    # NOTE: When generating another video, experiment with the Cartesian
+    # viewport-culling method in pyplotFunctions instead of this square box.
     if len(vtu_paths) != len(loads):
         raise ValueError("One load is required for every periodic mesh state.")
     if len(vtu_paths) <= int(np.max(timeline.mesh_history_indices)):

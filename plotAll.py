@@ -261,6 +261,34 @@ def handle_args_and_plot():
         action="store_true",
         help="Render videos for C",
     )
+    parser.add_argument(
+        "--squarePeriodicMesh",
+        dest="square_periodic_mesh",
+        action="store_true",
+        help="Map periodic mesh videos into a unit square before rendering.",
+    )
+    parser.add_argument(
+        "--periodicBoxSize",
+        dest="periodic_box_size",
+        type=float,
+        default=None,
+        help="Periodic box size for square mesh rendering (default: inferred from VTU metadata).",
+    )
+    parser.add_argument(
+        "--cartesianViewportCulling",
+        dest="cartesian_viewport_culling",
+        action="store_true",
+        help="Cull old Cartesian mesh rendering to the current viewport.",
+    )
+    parser.add_argument(
+        "--cartesianViewport",
+        dest="cartesian_viewport",
+        nargs=4,
+        type=float,
+        metavar=("XMIN", "XMAX", "YMIN", "YMAX"),
+        default=None,
+        help="Physical mesh viewport used with Cartesian viewport culling.",
+    )
 
     args = parser.parse_args()
 

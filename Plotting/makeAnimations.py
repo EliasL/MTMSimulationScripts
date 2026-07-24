@@ -188,8 +188,15 @@ def makeAnimations(
     videoNames=None,
     xlim=None,
     num_processes=-2,
+    square_periodic_mesh=False,
+    periodic_box_size=None,
+    cartesian_viewport_culling=False,
+    cartesian_viewport=None,
+    output_path=None,
 ):
-    frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
+    output_path = path if output_path is None else os.fspath(output_path)
+    os.makedirs(output_path, exist_ok=True)
+    frame_path = os.path.join(output_path, settings["FRAMEFOLDERPATH"])
     if macroData is None:
         macroData = os.path.join(path, settings["MACRODATANAME"] + ".csv")
         # Check if file exsists
@@ -285,6 +292,8 @@ def makeAnimations(
         if base_name in poincare_names:
             tag = "C"
             name = f"{name}_{tag}"
+        if square_periodic_mesh and base_name in mesh_disk_names:
+            name = f"{name}_square_periodic"
         if subset in ("odd", "even") and (
             base_name in mesh_disk_names or _is_matrix_component_grid(base_name)
         ):
@@ -359,11 +368,15 @@ def makeAnimations(
             reuse_images=reuseImages,
             fileName=fileName,
             element_subset=subset_arg,
+            square_periodic_mesh=square_periodic_mesh,
+            periodic_box_size=periodic_box_size,
+            cartesian_viewport_culling=cartesian_viewport_culling,
+            cartesian_viewport=cartesian_viewport,
             **extra_kwargs,
         )
 
         # Path to the output video file
-        outPath = os.path.join(path, f"{fileName}_video.mp4")
+        outPath = os.path.join(output_path, f"{fileName}_video.mp4")
         # Check if the last image is newer than the video
         if not os.path.exists(outPath) or os.path.getmtime(outPath) < os.path.getmtime(
             images[-1]
@@ -375,7 +388,7 @@ def makeAnimations(
                     "--quality",
                     "100",  # Set to maximum quality
                     "-o",
-                    os.path.join(path, f"{fileName}_video.gif"),
+                    os.path.join(output_path, f"{fileName}_video.gif"),
                 ] + images  # Append the list of image paths to the command
                 subprocess.run(GIFCommand)
         else:
@@ -385,7 +398,7 @@ def makeAnimations(
     if combineVideos:
         try:
             combine_videoes(
-                path,
+                output_path,
                 _with_suffixes("m_diff_mesh"),
                 _with_suffixes("mesh"),
                 "e_drop_plot",
@@ -393,19 +406,19 @@ def makeAnimations(
             )
             # combine_videoes(path, "m_diff_mesh", "m_mesh", "e_drop_plot", "energy_plot")
             combine_videoes(
-                path, _with_suffixes("mesh"), "energy_plot", vertical=True
+                output_path, _with_suffixes("mesh"), "energy_plot", vertical=True
             )
             combine_videoes(
-                path, _with_suffixes("m_mesh"), _with_suffixes("mesh")
+                output_path, _with_suffixes("m_mesh"), _with_suffixes("mesh")
             )
             combine_videoes(
-                path, _with_suffixes("mesh"), _with_suffixes("disk")
+                output_path, _with_suffixes("mesh"), _with_suffixes("disk")
             )
             combine_videoes(
-                path, _with_suffixes("m_mesh"), _with_suffixes("disk")
+                output_path, _with_suffixes("m_mesh"), _with_suffixes("disk")
             )
             combine_videoes(
-                path,
+                output_path,
                 _with_suffixes("mesh"),
                 _with_suffixes("plasticReductionDisk"),
             )

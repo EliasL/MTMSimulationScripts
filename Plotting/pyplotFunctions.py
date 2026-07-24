@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
+from matplotlib.collections import PolyCollection
 from matplotlib.cm import ScalarMappable
 from tqdm import tqdm
 import os
@@ -619,6 +620,102 @@ def calculate_shifts(ax, vtuData):
     return shifts
 
 
+def wrap_periodic_mesh(
+    points,
+    triangles,
+    values,
+    reference_indices,
+    load,
+    box_size,
+    *,
+    source_path="periodic mesh",
+):
+    """Map a sheared periodic mesh to a unit square and tile only its edges."""
+    points = np.asarray(points, dtype=float)
+    triangles = np.asarray(triangles, dtype=int)
+    values = np.asarray(values)
+    reference_indices = np.asarray(reference_indices).reshape(-1)
+    if points.ndim != 2 or points.shape[1] < 2:
+        raise ValueError("points must have shape (number of points, at least 2).")
+    if triangles.ndim != 2 or triangles.shape[1] != 3:
+        raise ValueError("triangles must have shape (number of triangles, 3).")
+    if values.shape != (len(triangles),):
+        raise ValueError("One value is required for every triangle.")
+    if reference_indices.shape != (len(points),):
+        raise ValueError("One reference index is required for every point.")
+    if not np.isfinite(load) or box_size <= 0:
+        raise ValueError("load must be finite and box_size must be positive.")
+    if np.any(triangles < 0) or np.any(triangles >= len(points)):
+        raise IndexError("triangles contains an invalid point index.")
+
+    origin_candidates = points[reference_indices == 0]
+    if len(origin_candidates) == 0:
+        raise ValueError(f"No refIndex=0 periodic origin found in {source_path}")
+    box = np.array([[box_size, load * box_size], [0.0, box_size]])
+    fractional = (points[:, :2] - origin_candidates[0, :2]) @ np.linalg.inv(box).T
+    if not np.all(np.isfinite(fractional)):
+        raise ValueError(f"Non-finite square-periodic coordinates in {source_path}")
+    wrapped = fractional - np.floor(fractional)
+
+    polygons = wrapped[triangles]
+    delta = polygons - polygons[:, :1]
+    polygons = polygons[:, :1] + delta - np.round(delta)
+    polygons -= np.floor(polygons.mean(axis=1))[:, None, :]
+    plotted, plotted_values = _tile_periodic_triangles(polygons, values)
+    return plotted, plotted_values, wrapped
+
+
+def _tile_periodic_triangles(polygons, values):
+    plotted = []
+    plotted_values = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            shifted = polygons + np.array([dx, dy])
+            lower = shifted.min(axis=1)
+            upper = shifted.max(axis=1)
+            inside = np.all(upper >= 0, axis=1) & np.all(lower <= 1, axis=1)
+            if np.any(inside):
+                plotted.append(shifted[inside])
+                plotted_values.append(values[inside])
+    if not plotted:
+        raise RuntimeError("Periodic wrapping produced no visible triangles.")
+    return np.concatenate(plotted), np.concatenate(plotted_values)
+
+
+def tile_periodic_mesh(polygons, values, xlim, ylim):
+    """Repeat a unit-cell polygon set only over the requested view window."""
+    polygons = np.asarray(polygons, dtype=float)
+    values = np.asarray(values)
+    if polygons.ndim != 3 or polygons.shape[1:] != (3, 2):
+        raise ValueError("polygons must have shape (number of triangles, 3, 2).")
+    if values.shape != (len(polygons),):
+        raise ValueError("One value is required for every polygon.")
+    if len(xlim) != 2 or len(ylim) != 2 or xlim[1] <= xlim[0] or ylim[1] <= ylim[0]:
+        raise ValueError("xlim and ylim must be increasing two-item intervals.")
+
+    plotted = []
+    plotted_values = []
+    x_shifts = range(int(np.floor(xlim[0])) - 1, int(np.ceil(xlim[1])) + 1)
+    y_shifts = range(int(np.floor(ylim[0])) - 1, int(np.ceil(ylim[1])) + 1)
+    for dx in x_shifts:
+        for dy in y_shifts:
+            shifted = polygons + np.array([dx, dy])
+            lower = shifted.min(axis=1)
+            upper = shifted.max(axis=1)
+            inside = (
+                (upper[:, 0] >= xlim[0])
+                & (lower[:, 0] <= xlim[1])
+                & (upper[:, 1] >= ylim[0])
+                & (lower[:, 1] <= ylim[1])
+            )
+            if np.any(inside):
+                plotted.append(shifted[inside])
+                plotted_values.append(values[inside])
+    if not plotted:
+        raise RuntimeError("Periodic tiling produced no visible polygons.")
+    return np.concatenate(plotted), np.concatenate(plotted_values)
+
+
 def draw_rhombus(ax, vtuData):
     N = vtuData.size[0]
     if vtuData.BC == "PBC":
@@ -780,6 +877,18 @@ def pretty_matrix_component(matrix_name, i, j):
     return f"${_pretty_matrix_symbol(matrix_name)}_{{{i}{j}}}$"
 
 
+def _validate_cartesian_viewport(viewport):
+    values = np.asarray(viewport, dtype=float)
+    if values.shape != (4,) or not np.all(np.isfinite(values)):
+        raise ValueError(
+            "cartesian_viewport must contain finite (xmin, xmax, ymin, ymax) values."
+        )
+    xmin, xmax, ymin, ymax = values
+    if xmax <= xmin or ymax <= ymin:
+        raise ValueError("cartesian_viewport bounds must be strictly increasing.")
+    return tuple(float(value) for value in values)
+
+
 def plot_mesh(
     vtu_file,
     e_lims=None,
@@ -793,10 +902,31 @@ def plot_mesh(
     max_plastic_change=4,
     min_plastic_change=-2,
     show_force=False,
+    square_periodic_mesh=False,
+    periodic_box_size=None,
+    cartesian_viewport_culling=False,
+    cartesian_viewport=None,
     **kwargs,
 ):
+    if square_periodic_mesh and (
+        cartesian_viewport_culling or cartesian_viewport is not None
+    ):
+        raise ValueError(
+            "square_periodic_mesh and cartesian viewport rendering are mutually exclusive."
+        )
+    if cartesian_viewport is not None:
+        cartesian_viewport = _validate_cartesian_viewport(cartesian_viewport)
     # Initialize plot and get data
-    ax, data = _initialize_plot(vtu_file, ax, **kwargs)
+    ax, data = _initialize_plot(
+        vtu_file,
+        ax,
+        square_periodic_mesh=square_periodic_mesh,
+        cartesian_viewport=cartesian_viewport,
+        **kwargs,
+    )
+    if cartesian_viewport is not None:
+        ax.set_xlim(*cartesian_viewport[:2])
+        ax.set_ylim(*cartesian_viewport[2:])
     nodes = data.get_nodes()
     connectivity = data.get_connectivity()
     x, y = nodes[:, 0], nodes[:, 1]
@@ -833,22 +963,62 @@ def plot_mesh(
     else:
         force_contributions = data.get_force_contributions() if show_force else None
     # Main plotting
-    mappable = _plot_mesh_elements(
-        ax,
-        x,
-        y,
-        connectivity,
-        field,
-        norm,
-        cmap,
-        data,
-        mesh_property,
-        backgroundColor,
-        add_m12_marks,
-        state_indices,
-        show_force,
-        force_contributions,
-    )
+    if square_periodic_mesh:
+        if getattr(data, "BC", None) != "PBC":
+            raise ValueError("square_periodic_mesh requires periodic boundary conditions.")
+        if show_force or add_m12_marks:
+            raise NotImplementedError(
+                "square_periodic_mesh does not support force vectors or m12 markers."
+            )
+        if "refIndex" not in data.mesh.point_data:
+            raise KeyError("square_periodic_mesh requires the VTU refIndex point field.")
+        box_size = data.size[0] if periodic_box_size is None else periodic_box_size
+        polygons, field, _ = wrap_periodic_mesh(
+            nodes[:, :2],
+            connectivity,
+            field,
+            data.mesh.point_data["refIndex"],
+            data.load,
+            box_size,
+            source_path=vtu_file,
+        )
+        view_aspect = ax.figure.get_figwidth() / ax.figure.get_figheight()
+        polygons, field = tile_periodic_mesh(
+            polygons,
+            field,
+            (0, view_aspect),
+            (0, 1),
+        )
+        mappable = PolyCollection(
+            polygons,
+            array=field,
+            cmap=cmap,
+            norm=norm,
+            edgecolors=backgroundColor,
+            linewidths=0.1,
+            antialiaseds=False,
+        )
+        ax.add_collection(mappable)
+        ax.set_xlim(0, view_aspect)
+        ax.set_ylim(0, 1)
+    else:
+        mappable = _plot_mesh_elements(
+            ax,
+            x,
+            y,
+            connectivity,
+            field,
+            norm,
+            cmap,
+            data,
+            mesh_property,
+            backgroundColor,
+            add_m12_marks,
+            state_indices,
+            show_force,
+            force_contributions,
+            cull_to_view=cartesian_viewport_culling,
+        )
 
     # Add additional elements
     _add_additional_elements(
@@ -859,7 +1029,7 @@ def plot_mesh(
         boundaries,
         tick_positions,
         tick_labels,
-        add_rombus,
+        add_rombus and not square_periodic_mesh,
         nodes,
         data,
         show_force,
@@ -999,6 +1169,12 @@ def plot_matrix_component_grid(
 def _initialize_plot(vtu_file, ax, **kwargs):
     """Initialize the plot and load VTU data."""
     if ax is None:
+        if kwargs.pop("square_periodic_mesh", False):
+            kwargs["axis_limits"] = (0, 1, 0, 1)
+        else:
+            viewport = kwargs.pop("cartesian_viewport", None)
+            if viewport is not None:
+                kwargs["axis_limits"] = viewport
         ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
     data = VTUData(vtu_file)
     return ax, data
@@ -1124,6 +1300,7 @@ def _plot_mesh_elements(
     force_contributions,
     shifts=None,
     apply_shear_to_shift=True,
+    cull_to_view=False,
 ):
     """Optimized version of original approach"""
     edgecolors = "none" if len(x) > 2000 else "black"
@@ -1132,16 +1309,46 @@ def _plot_mesh_elements(
     if shifts is None:
         shifts = calculate_shifts(ax, data)
 
-    # Precompute connectivity if used repeatedly
-    tri_args = {"triangles": connectivity} if connectivity is not None else {}
-
     for dx, dy in shifts:
         shift_x = dx + data.load * dy if apply_shear_to_shift else dx
         sheared_x = x + shift_x
         sheared_y = y + dy
 
+        if cull_to_view:
+            xlim = ax.get_xlim()
+            ylim = ax.get_ylim()
+            triangle_x = sheared_x[connectivity]
+            triangle_y = sheared_y[connectivity]
+            visible = (
+                (triangle_x.max(axis=1) >= xlim[0])
+                & (triangle_x.min(axis=1) <= xlim[1])
+                & (triangle_y.max(axis=1) >= ylim[0])
+                & (triangle_y.min(axis=1) <= ylim[1])
+            )
+            if not np.any(visible):
+                continue
+            plotted_connectivity = connectivity[visible]
+            plotted_field = field[visible]
+            plotted_state_indices = (
+                state_indices[visible] if state_indices is not None else None
+            )
+            plotted_force_contributions = (
+                force_contributions[visible]
+                if force_contributions is not None
+                else None
+            )
+        else:
+            plotted_connectivity = connectivity
+            plotted_field = field
+            plotted_state_indices = state_indices
+            plotted_force_contributions = force_contributions
+
         # Create triangulation once per shift
-        triang = mtri.Triangulation(sheared_x, sheared_y, **tri_args)
+        triang = mtri.Triangulation(
+            sheared_x,
+            sheared_y,
+            triangles=plotted_connectivity,
+        )
 
         # Plot base mesh
         ax.triplot(triang, color=backgroundColor, lw=0.1)
@@ -1149,7 +1356,7 @@ def _plot_mesh_elements(
         # Plot colored elements and keep last mappable
         mappable = ax.tripcolor(
             triang,
-            facecolors=field,
+            facecolors=plotted_field,
             norm=norm,
             cmap=cmap,
             edgecolors=edgecolors,
@@ -1157,15 +1364,21 @@ def _plot_mesh_elements(
 
         # Conditional plotting
         if mesh_property == "m" and add_m12_marks:
-            _add_markers(ax, connectivity, sheared_x, sheared_y, state_indices)
+            _add_markers(
+                ax,
+                plotted_connectivity,
+                sheared_x,
+                sheared_y,
+                plotted_state_indices,
+            )
         if show_force:
             _plot_force_vectors(
                 ax,
                 data,
-                connectivity,
+                plotted_connectivity,
                 sheared_x,
                 sheared_y,
-                force_contributions=force_contributions,
+                force_contributions=plotted_force_contributions,
             )
 
     return mappable
