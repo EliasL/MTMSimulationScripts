@@ -13,6 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib as mpl
+
+mpl.use("Agg")
+
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
@@ -281,14 +284,12 @@ def create_figure() -> plt.Figure:
 
 def main() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    pdf_dir = repo_root / "output" / "pdf"
-    output_dir = repo_root / "output"
-    pdf_dir.mkdir(parents=True, exist_ok=True)
+    output_dir = repo_root / "Plots" / "periodic_loading_protocol"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     stem = "periodic_boundary_loading_protocol"
     fig = create_figure()
-    fig.savefig(pdf_dir / f"{stem}.pdf", bbox_inches="tight", pad_inches=0.04)
+    fig.savefig(output_dir / f"{stem}.pdf", bbox_inches="tight", pad_inches=0.04)
     fig.savefig(output_dir / f"{stem}.png", dpi=260, bbox_inches="tight", pad_inches=0.04)
     fig.savefig(output_dir / f"{stem}.svg", bbox_inches="tight", pad_inches=0.04)
     plt.close(fig)
