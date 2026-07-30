@@ -268,7 +268,10 @@ def fit_xmins(size_drops, strategy, accuracy, parallel, cache_dir: Path):
             )
         else:
             strategy_kwargs = {}
-            if strategy in {"plateau", "dks", "slope"}:
+            if strategy == "simpleDrop":
+                strategy_kwargs["tail_decades"] = 1.0
+                strategy_kwargs["nr_initial"] = 100
+            elif strategy in {"dks", "slope"}:
                 strategy_kwargs["tail_decades"] = 1.0
                 if accuracy is not None:
                     strategy_kwargs["samples_per_decade"] = 1.0 / accuracy
@@ -973,7 +976,7 @@ def parse_args():
     parser.add_argument("--seeds-per-size", type=int, default=6)
     parser.add_argument("--pre", type=float, nargs=2, default=REGIMES["pre"])
     parser.add_argument("--post", type=float, nargs=2, default=REGIMES["post"])
-    parser.add_argument("--xmin-strategy", default="plateau")
+    parser.add_argument("--xmin-strategy", default="simpleDrop")
     parser.add_argument("--xmin-accuracy", type=float, default=0.1)
     parser.add_argument("--parallel-xmin", action="store_true")
     parser.add_argument("--uncertainty-accuracy", type=float, default=0.05)

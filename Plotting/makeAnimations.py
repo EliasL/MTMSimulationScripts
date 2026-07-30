@@ -8,9 +8,11 @@ from pathlib import Path
 from .settings import settings
 from .pyplotFunctions import (
     make_images,
+    get_plastic_shear_ranges,
     plot_and_save_nodes,
     plot_and_save_mesh,
     plot_and_save_matrix_component_grid,
+    plot_and_save_plastic_shear_counts,
     plot_and_save_m_mesh,
     plot_and_save_m_diff_mesh,
     plot_and_save_plot,
@@ -52,15 +54,13 @@ def select_vtu_files(vtu_files, nrSteps, all_images=False):
 
 def framesToMp4(frames, outFile, fps):
     print(f"Creating {outFile}")
-
+    writer = imageio.get_writer(outFile, fps=fps, codec="libx264", quality=7)
     try:
-        writer = imageio.get_writer(outFile, fps=fps, codec="libx264", quality=7)
         for frame_path in frames:
             frame = imageio.imread(frame_path)
             writer.append_data(frame)
+    finally:
         writer.close()
-    except Exception as e:
-        print(f"Video writing failed: {e}")
 
 
 def oldFramesToMp4(frames, outFile, fps):
@@ -169,6 +169,59 @@ def combine_videoes(path, n1, n2, n3=None, n4=None, vertical=False):
         subprocess.run(command)
 
 
+def prepare_animation_inputs(path, macroData=None, pvdFile=None, useMetadata=True):
+    """Resolve standard animation inputs; metadata-free rendering is opt-in."""
+    path = Path(path).expanduser().resolve()
+
+    def simulation_file(value, default):
+        candidate = Path(value).expanduser() if value else path / default
+        return candidate.resolve() if candidate.is_absolute() or candidate.exists() else path / candidate
+
+    if useMetadata:
+        macro = simulation_file(
+            macroData, settings["MACRODATANAME"] + ".csv"
+        )
+        if not macro.is_file():
+            raise FileNotFoundError(
+                f"Animation metadata not found at {macro}. "
+                "Set useMetadata=False only for a deliberately basic render."
+            )
+        macroData = str(macro)
+    else:
+        macroData = None
+
+    pvd = simulation_file(
+        pvdFile, settings["COLLECTIONNAME"] + ".pvd"
+    )
+    if not pvd.is_file():
+        data_path = path / settings["DATAFOLDERPATH"]
+        if not data_path.is_dir() or next(data_path.glob("*.vtu"), None) is None:
+            data_path = path
+        create_collection(data_path, pvd.parent, pvd.stem)
+    if not pvd.is_file():
+        raise FileNotFoundError(f"No PVD or VTU files found below {path}.")
+    vtu_files = resolve_vtu_files(pvd)
+    if not vtu_files:
+        raise FileNotFoundError(f"No VTU files listed in {pvd}.")
+    return str(path), macroData, str(pvd), vtu_files
+
+
+def simulation_uses_reconnection(path):
+    """Return True/False when simulation metadata identifies reconnection."""
+    path = Path(path)
+    config = path / settings["CONFIGNAME"]
+    if config.is_file():
+        for line in config.read_text().splitlines():
+            if line.strip().startswith("reconnectionMethod"):
+                return line.split("=", 1)[1].strip() != "none"
+    name = path.name.lower()
+    if "edgeflip" in name or "delaunay" in name:
+        return True
+    if "no_reconnection" in name:
+        return False
+    return None
+
+
 # Use ffmpeg to convert a folder of .png frames into a mp4 file
 def makeAnimations(
     path,
@@ -183,40 +236,29 @@ def makeAnimations(
     allImages=False,
     minTime=7,
     reuseImages=False,
-    X="load",
+    X=None,
     element_subset=None,
     matrix_name="T",
     videoNames=None,
     xlim=None,
     num_processes=-2,
-    square_periodic_mesh=False,
-    periodic_box_size=None,
-    cartesian_viewport_culling=False,
-    cartesian_viewport=None,
-    output_path=None,
+    useMetadata=True,
+    reconnecting=None,
 ):
-    output_path = (
-        Path(__file__).resolve().parents[1] / "Plots" / Path(path).name
-        if output_path is None
-        else Path(output_path)
+    """Render animations with the same metadata setup used by ``plotAll``.
+
+    Metadata discovery is automatic. Set ``useMetadata=False`` only when a
+    stripped-down render without global limits and macro-data overlays is wanted.
+    """
+    path, macroData, pvdFile, vtu_files = prepare_animation_inputs(
+        path, macroData, pvdFile, useMetadata
     )
-    output_path.mkdir(parents=True, exist_ok=True)
-    frame_path = os.path.join(output_path, settings["FRAMEFOLDERPATH"])
-    if macroData is None:
-        macroData = os.path.join(path, settings["MACRODATANAME"] + ".csv")
-        # Check if file exsists
-        if not os.path.isfile(macroData):
-            macroData = None
-    if pvdFile is None:
-        pvdFile = os.path.join(path, settings["COLLECTIONNAME"] + ".pvd")
-
-    if not os.path.exists(pvdFile):
-        print(f"No file found at: {pvdFile}")
-        print("Creating pvd file...")
-        create_collection(os.path.join(path, settings["DATAFOLDERPATH"]))
-
-    vtu_source = pvdFile if os.path.exists(pvdFile) else path
-    vtu_files = resolve_vtu_files(vtu_source)
+    if reconnecting is None:
+        reconnecting = simulation_uses_reconnection(path)
+    frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
+    first = get_data_from_name(vtu_files[0])
+    if X is None:
+        X = "nr_func_evals" if "minStep" in first else "load"
     if xlim is not None:
         xmin, xmax = xlim
         filtered_vtu_files = []
@@ -233,6 +275,8 @@ def makeAnimations(
         vtu_files = filtered_vtu_files
         if not vtu_files:
             raise ValueError(f"No VTU files found inside {xlim=}")
+
+    range_vtu_files = list(vtu_files)
 
     # we don't want every frame to be created, so in order to find out what
     # frames should be drawn, we first check how much load change there is
@@ -282,6 +326,7 @@ def makeAnimations(
         "disk_G",
         "plasticReductionDisk",
         "plasticReductionDisk_velocity",
+        "plastic_shear_counts",
     }
     poincare_names = {
         "disk",
@@ -324,6 +369,7 @@ def makeAnimations(
         (plot_and_save_in_poincare_disk, "disk"),
         (plot_and_save_g_in_poincare_disk, "disk_G"),
         (plot_and_save_mesh, "mesh"),
+        (plot_and_save_plastic_shear_counts, "plastic_shear_counts"),
         *matrix_jobs,
         (
             plot_and_save_velocity_field_in_plastic_reduced_poincare_disk,
@@ -361,6 +407,11 @@ def makeAnimations(
         subset_arg = _subset_arg(base_name)
         if matrix_name_for_job is not None:
             extra_kwargs["matrix_name"] = matrix_name_for_job
+        if base_name == "plastic_shear_counts":
+            extra_kwargs["reconnecting"] = reconnecting
+            extra_kwargs["plastic_shear_lims"] = get_plastic_shear_ranges(
+                range_vtu_files, reconnecting
+            )
         images = make_images(
             vtu_files,
             num_processes=num_processes,

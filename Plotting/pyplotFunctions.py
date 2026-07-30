@@ -88,6 +88,112 @@ def get_matrix_range(vtu_files, matrix_name):
     return (-max_abs, max_abs)
 
 
+def canonical_plastic_shear_counts(matrix, loops=1000):
+    """Return signed horizontal/vertical counts in a canonical U/V decomposition."""
+    matrix = np.asarray(matrix, dtype=float)
+    if matrix.shape[-2:] != (2, 2):
+        raise ValueError("matrix must have shape (..., 2, 2)")
+    C = matrix.swapaxes(-1, -2) @ matrix
+    a, b, c = C[..., 0, 0].copy(), C[..., 0, 1].copy(), C[..., 1, 1].copy()
+    horizontal = np.zeros(a.shape, dtype=int)
+    vertical = np.zeros(a.shape, dtype=int)
+
+    for _ in range(loops):
+        denominator = np.minimum(a, c)
+        active = np.isfinite(a + b + c) & (
+            (denominator <= 0) | (np.abs(b) > 0.5 * denominator)
+        )
+        if not np.any(active):
+            return horizontal, vertical
+
+        use_horizontal = active & (a < c)  # Match the current MTS2D tie-break.
+        use_vertical = active & ~use_horizontal
+        denom = np.where(use_horizontal, a, c)
+        x = np.divide(-b, denom, out=np.zeros_like(b), where=active & (denom != 0))
+        n = np.where(x >= 0, np.floor(x + 0.5), np.ceil(x - 0.5)).astype(int)
+        if np.any(active & (n == 0)):
+            raise RuntimeError("Canonical plastic-shear decomposition made no progress")
+
+        old_b = b.copy()
+        if np.any(use_horizontal):
+            horizontal[use_horizontal] -= n[use_horizontal]
+            b[use_horizontal] = old_b[use_horizontal] + n[use_horizontal] * a[use_horizontal]
+            c[use_horizontal] += (
+                2 * n[use_horizontal] * old_b[use_horizontal]
+                + n[use_horizontal] ** 2 * a[use_horizontal]
+            )
+        if np.any(use_vertical):
+            vertical[use_vertical] -= n[use_vertical]
+            b[use_vertical] = old_b[use_vertical] + n[use_vertical] * c[use_vertical]
+            a[use_vertical] += (
+                2 * n[use_vertical] * old_b[use_vertical]
+                + n[use_vertical] ** 2 * c[use_vertical]
+            )
+
+    raise RuntimeError(f"Canonical plastic-shear decomposition exceeded {loops} loops")
+
+
+def get_plastic_shear_counts(vtu_file, reconnecting=None):
+    """Read the appropriate plastic branch and return its signed U/V counts."""
+    data = VTUData(vtu_file)
+    if reconnecting is not False:
+        try:
+            branch = np.stack(
+                [
+                    np.stack([data.get_cell_data("T11"), data.get_cell_data("T12")], axis=-1),
+                    np.stack([data.get_cell_data("T21"), data.get_cell_data("T22")], axis=-1),
+                ],
+                axis=-2,
+            )
+            return (*canonical_plastic_shear_counts(branch), data, "T")
+        except KeyError:
+            if reconnecting:
+                raise KeyError(
+                    "Reconnecting plastic-shear plots require T11, T12, T21 and T22"
+                )
+
+    try:
+        branch = np.stack(
+            [
+                np.stack(
+                    [data.get_cell_data("F_P11"), data.get_cell_data("F_P12")],
+                    axis=-1,
+                ),
+                np.stack(
+                    [data.get_cell_data("F_P21"), data.get_cell_data("F_P22")],
+                    axis=-1,
+                ),
+            ],
+            axis=-2,
+        )
+        source = "F_P"
+    except KeyError:
+        branch = data.get_F()
+        source = "F"
+    return (*canonical_plastic_shear_counts(branch), data, source)
+
+
+def get_plastic_shear_ranges(vtu_files, reconnecting=None):
+    """Return direction-specific symmetric count limits over one simulation."""
+    maxima = [0, 0]
+    source = None
+    for vtu_file in vtu_files:
+        horizontal, vertical, _, frame_source = get_plastic_shear_counts(
+            vtu_file, reconnecting
+        )
+        if source is None:
+            source = frame_source
+        elif source != frame_source:
+            raise ValueError(f"Plastic branch source changed from {source} to {frame_source}")
+        maxima[0] = max(maxima[0], int(np.max(np.abs(horizontal), initial=0)))
+        maxima[1] = max(maxima[1], int(np.max(np.abs(vertical), initial=0)))
+    print(
+        f"Plastic shear source={source}, "
+        f"horizontal range=±{maxima[0]}, vertical range=±{maxima[1]}"
+    )
+    return tuple(max(1, value) for value in maxima)
+
+
 def _infer_ref_grid_dims(dims, n_nodes):
     nx, ny = dims
     if nx * ny == n_nodes:
@@ -477,6 +583,64 @@ def _discrete_ticks_and_labels(boundaries):
     return centers, labels
 
 
+def _add_frame_table(
+    ax,
+    vtu_file=None,
+    previous_frame_vtu_file=None,
+    delta_title=False,
+    frame_index=None,
+    totalEnergy=None,
+    avgRSS=None,
+    energyDrop=None,
+    delAvgRSS=None,
+    delx=None,
+    stress_label=None,
+    energy_drop_label=None,
+    **kwargs,
+):
+    metaData = get_data_from_name(vtu_file)
+    load = infer_strain_from_vtu(vtu_file)
+    if load is None or not np.isfinite(load):
+        load = metaData["load"]
+    load_step = metaData["loadIncrement"]
+    nrPlasticEvents = metaData["nrM"]
+    nr_func_evals = metaData.get("nr_func_evals")
+    if previous_frame_vtu_file:
+        previous_load = infer_strain_from_vtu(previous_frame_vtu_file)
+        if previous_load is None or not np.isfinite(previous_load):
+            previous_load = get_data_from_name(previous_frame_vtu_file)["load"]
+        steps_since_last_frame = (
+            int((load - previous_load) / load_step)
+            if np.isfinite(load_step) and not np.isclose(load_step, 0.0)
+            else 0
+        )
+    else:
+        steps_since_last_frame = 0
+
+    stress_label = stress_label or r"\sigma"
+    energy_drop_label = energy_drop_label or "E"
+    if delta_title:
+        data_row = [
+            rf"$\Delta\gamma$: {delx:.1e}",
+            rf"$\Delta {energy_drop_label}$: {energyDrop:.2e}",
+            rf"$\Delta\langle {stress_label} \rangle$: {delAvgRSS:.2e}",
+        ]
+    else:
+        data_row = [
+            rf"$\gamma$: {load:.5f}",
+            rf"$E$: {totalEnergy:.0f}",
+            rf"$\langle {stress_label} \rangle$: {avgRSS:.3f}",
+        ]
+    data_row.append(rf"$N_p$: {nrPlasticEvents}")
+    if nr_func_evals is not None:
+        data_row.append(rf"$N_f$: {nr_func_evals}")
+    data_row.append(f"f: {frame_index}")
+    table = ax.table(cellText=[data_row], cellLoc="center", loc="top", edges="open")
+    table.set_fontsize(10)
+    for cell in table.get_celld().values():
+        cell.set_linewidth(0)
+
+
 def base_plot(
     vtu_file=None,
     previous_frame_vtu_file=None,
@@ -520,59 +684,20 @@ def base_plot(
             ax.set_ylim(y_min, y_max)
 
     if add_title:
-        metaData = get_data_from_name(vtu_file)
-        load = infer_strain_from_vtu(vtu_file)
-        if load is None or not np.isfinite(load):
-            load = metaData["load"]
-        load_step = metaData["loadIncrement"]
-        nrPlasticEvents = metaData["nrM"]
-        if "nr_func_evals" in metaData:
-            nr_func_evals = metaData["nr_func_evals"]
-        else:
-            nr_func_evals = None
-        if previous_frame_vtu_file:
-            previous_load = infer_strain_from_vtu(previous_frame_vtu_file)
-            if previous_load is None or not np.isfinite(previous_load):
-                previous_load = get_data_from_name(previous_frame_vtu_file)["load"]
-            if np.isfinite(load_step) and not np.isclose(load_step, 0.0):
-                steps_since_last_frame = int((load - previous_load) / load_step)
-            else:
-                steps_since_last_frame = 0
-        else:
-            steps_since_last_frame = 0
-
-        if stress_label is None:
-            stress_label = r"\sigma"
-        if energy_drop_label is None:
-            energy_drop_label = "E"
-
-        if delta_title:
-            data_row = [
-                rf"$\Delta\gamma$: {delx:.1e}",
-                rf"$\Delta {energy_drop_label}$: {energyDrop:.2e}",
-                rf"$\Delta\langle {stress_label} \rangle$: {delAvgRSS:.2e}",
-            ]
-        else:
-            data_row = [
-                rf"$\gamma$: {load:.5f}",
-                rf"$E$: {totalEnergy:.0f}",
-                rf"$\langle {stress_label} \rangle$: {avgRSS:.3f}",
-            ]
-
-        data_row.append(rf"$N_p$: {nrPlasticEvents}")
-        if nr_func_evals is not None:
-            data_row.append(rf"$N_f$: {nr_func_evals}")
-        data_row.append(f"f: {frame_index}")
-
-        data = [data_row]
-        # Create the table with invisible borders and gridlines
-        table = ax.table(cellText=data, cellLoc="center", loc="top", edges="open")
-
-        table.set_fontsize(10)
-
-        # Remove the cell edges to keep it invisible
-        for cell in table.get_celld().values():
-            cell.set_linewidth(0)
+        _add_frame_table(
+            ax,
+            vtu_file=vtu_file,
+            previous_frame_vtu_file=previous_frame_vtu_file,
+            delta_title=delta_title,
+            frame_index=frame_index,
+            totalEnergy=totalEnergy,
+            avgRSS=avgRSS,
+            energyDrop=energyDrop,
+            delAvgRSS=delAvgRSS,
+            delx=delx,
+            stress_label=stress_label,
+            energy_drop_label=energy_drop_label,
+        )
     if remove_ticks:
         ax.set_xticks([])
         ax.set_yticks([])
@@ -1164,6 +1289,84 @@ def plot_matrix_component_grid(
     )
 
     return ax, cmap, norm
+
+
+def plot_plastic_shear_counts(
+    vtu_file,
+    plastic_shear_lims,
+    reconnecting=None,
+    axis_limits=None,
+    add_colorbar=True,
+    **kwargs,
+):
+    """Plot tiled signed horizontal and vertical plastic-shear counts."""
+    horizontal, vertical, data, _ = get_plastic_shear_counts(
+        vtu_file, reconnecting
+    )
+    nodes = data.get_nodes()
+    connectivity = data.get_connectivity()
+    fields = (horizontal, vertical)
+    labels = (
+        (r"Horizontal integer shear", r"Horizontal shear count $n_h$"),
+        (r"Vertical integer shear", r"Vertical shear count $n_v$"),
+    )
+
+    dpi = 250
+    fig, axes = plt.subplots(2, 1, figsize=(1920 / dpi, 1080 / dpi), dpi=dpi)
+    if axis_limits is None:
+        x, y = nodes[:, 0], nodes[:, 1]
+        axis_limits = (np.min(x), np.max(x), np.min(y), np.max(y))
+    x_min, x_max, y_min, y_max = add_padding(axis_limits, 0.03)
+    target_x_span = 3.2 * (y_max - y_min)
+    if x_max - x_min < target_x_span:
+        x_center = 0.5 * (x_min + x_max)
+        x_min, x_max = x_center - 0.5 * target_x_span, x_center + 0.5 * target_x_span
+
+    for ax, field, limit, (panel_label, colorbar_label) in zip(
+        axes, fields, plastic_shear_lims, labels
+    ):
+        ax.set_aspect("equal")
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_min, y_max)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        boundaries = _make_discrete_boundaries(-limit, limit)
+        cmap = plt.get_cmap("coolwarm", len(boundaries) - 1)
+        norm = mcolors.BoundaryNorm(boundaries, cmap.N)
+        mappable = _plot_mesh_elements(
+            ax,
+            nodes[:, 0],
+            nodes[:, 1],
+            connectivity,
+            field,
+            norm,
+            cmap,
+            data,
+            "plastic_shear_count",
+            cmap(norm(0)),
+            False,
+            None,
+            False,
+            None,
+        )
+        draw_rhombus(ax, data)
+        ax.text(
+            0.01,
+            0.97,
+            panel_label,
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
+        )
+        if add_colorbar:
+            colorbar = fig.colorbar(mappable, ax=ax, pad=0.01, label=colorbar_label)
+            ticks, tick_labels = _discrete_ticks_and_labels(boundaries)
+            colorbar.set_ticks(ticks)
+            colorbar.set_ticklabels(tick_labels)
+
+    _add_frame_table(axes[0], vtu_file=vtu_file, **kwargs)
+    return axes[0]
 
 
 def _initialize_plot(vtu_file, ax, **kwargs):
@@ -2106,6 +2309,13 @@ def plot_and_save_matrix_component_grid(**kwargs):
     )
 
 
+def plot_and_save_plastic_shear_counts(**kwargs):
+    return plot_and_save(
+        plot_func=plot_plastic_shear_counts,
+        **kwargs,
+    )
+
+
 def plot_and_save_mesh_with_force(**kwargs):
     systemSize = get_data_from_name(kwargs["vtu_file"])["L"]
     if systemSize > 50:
@@ -2195,7 +2405,8 @@ def process_frame(kwargs, attemps=0):
     except SyntaxError:
         if attemps < 5:
             kwargs["frameFunction"] = frameFunction
-            process_frame(kwargs, attemps=attemps + 1)
+            return process_frame(kwargs, attemps=attemps + 1)
+        raise
 
 
 def _resolve_stress_column(df, macro_data):

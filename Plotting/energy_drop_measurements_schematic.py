@@ -20,6 +20,8 @@ PURPLE = "#7656A7"
 RED = "#D1495B"
 GREEN = "#009E73"
 NODE_SIZE = 820
+TEXT_SIZE = 19
+CM = 1 / 2.54
 
 
 def _configure_matplotlib() -> None:
@@ -94,11 +96,11 @@ def _measurement_arrow(
         )
     )
     ax.text(
-        x + 0.14,
+        x + 0.06,
         0.5 * (y_bottom + y_top),
         label,
         color=color,
-        fontsize=21,
+        fontsize=TEXT_SIZE,
         ha="left",
         va="center",
     )
@@ -107,9 +109,16 @@ def _measurement_arrow(
 def make_figure() -> tuple[plt.Figure, plt.Axes]:
     _configure_matplotlib()
 
-    fig, ax = plt.subplots(figsize=(11.5, 7.3), constrained_layout=False)
-    ax.set_xlim(0.14, 7.48)
-    ax.set_ylim(-0.02, 5.85)
+    # Specify the canvas in centimetres; Matplotlib converts to its required
+    # internal unit at this single API boundary.
+    fig, ax = plt.subplots(
+        figsize=(25.0 * CM, 16.0 * CM),
+        constrained_layout=False,
+    )
+    # Autoscaling does not reliably include text extents.  These compact data
+    # limits keep every label visible while avoiding unused interior space.
+    ax.set_xlim(0.18, 6.10)
+    ax.set_ylim(0.36, 5.80)
     ax.set_aspect("auto")
     ax.axis("off")
 
@@ -135,8 +144,8 @@ def make_figure() -> tuple[plt.Figure, plt.Axes]:
     stress_y_at_true = inter[1] + stress_slope * (true_x - second_strain)
     true_top = (true_x, stress_y_at_true)
 
-    measurement_start = third_strain + 0.66
-    measurement_spacing = 0.72
+    measurement_start = third_strain + 0.35
+    measurement_spacing = 0.52
     measurement_x = {
         "inter": measurement_start,
         "true": measurement_start + measurement_spacing,
@@ -188,22 +197,15 @@ def make_figure() -> tuple[plt.Figure, plt.Axes]:
         zorder=1,
     )
 
-    # One straight stress-corrected extrapolation through both previous
-    # equilibrium states, rather than two segments with different slopes.
-    ax.add_patch(
-        FancyArrowPatch(
-            first,
-            stress_top,
-            arrowstyle="-|>",
-            mutation_scale=18,
-            shrinkA=4,
-            shrinkB=8,
-            color=PURPLE,
-            linewidth=3.4,
-            linestyle=(0, (7, 6)),
-            capstyle="butt",
-            zorder=3,
-        )
+    # Purple stress-correction construction, using the same line styling as
+    # the affine-loading path.
+    ax.plot(
+        [first[0], stress_top[0]],
+        [first[1], stress_top[1]],
+        color=PURPLE,
+        linewidth=1.15,
+        linestyle=(0, (5.5, 5.5)),
+        zorder=1,
     )
 
     # Measured and corrected energy paths.
@@ -317,8 +319,8 @@ def make_figure() -> tuple[plt.Figure, plt.Axes]:
     ax.text(
         affine_label[0],
         affine_label[1],
-        r"\textbf{Affine loading}",
-        fontsize=19,
+        r"Affine loading",
+        fontsize=TEXT_SIZE,
         rotation=affine_angle,
         transform_rotates_text=True,
         rotation_mode="anchor",
@@ -328,16 +330,16 @@ def make_figure() -> tuple[plt.Figure, plt.Axes]:
     ax.text(
         relax_top[0] + 0.72,
         relax_top[1] + 0.12,
-        r"\textbf{Relaxation}",
-        fontsize=20,
+        r"Relaxation",
+        fontsize=TEXT_SIZE,
         ha="center",
         va="center",
     )
     ax.text(
         equilibrium[0] + 0.22,
         equilibrium[1] - 0.27,
-        r"\textbf{Equilibrium state}",
-        fontsize=22,
+        r"Equilibrium state",
+        fontsize=TEXT_SIZE,
         ha="left",
         va="center",
     )
@@ -346,7 +348,7 @@ def make_figure() -> tuple[plt.Figure, plt.Axes]:
     arrow_kw = dict(
         arrowstyle="-|>",
         color="black",
-        linewidth=5.0,
+        linewidth=4.0,
         mutation_scale=28,
         shrinkA=0,
         shrinkB=0,
@@ -355,52 +357,90 @@ def make_figure() -> tuple[plt.Figure, plt.Axes]:
         zorder=10,
     )
     ax.add_patch(FancyArrowPatch((0.66, 1.56), (0.66, 4.78), **arrow_kw))
-    ax.add_patch(FancyArrowPatch((1.12, 0.72), (6.90, 0.72), **arrow_kw))
+    strain_axis_y = 0.78
+    strain_label_y = strain_axis_y - 0.36
+    ax.add_patch(
+        FancyArrowPatch((0.94, strain_axis_y), (5.35, strain_axis_y), **arrow_kw)
+    )
     ax.text(
         0.31,
         3.15,
-        r"\textbf{Energy}",
-        fontsize=24,
+        r"Energy",
+        fontsize=TEXT_SIZE,
         rotation=90,
         ha="center",
         va="center",
     )
-    ax.text(4.01, 0.22, r"\textbf{Strain}", fontsize=24, ha="center", va="bottom")
+    ax.text(
+        5.02,
+        strain_label_y,
+        r"Strain",
+        fontsize=TEXT_SIZE,
+        ha="center",
+        va="bottom",
+    )
+
+    # Strain-step ticks and labels.  The final mark is the critical strain
+    # used for the true-drop construction, directly below the ΔE_T arrow.
+    strain_marks = (
+        (first[0], r"$\gamma_{n-2}$"),
+        (inter[0], r"$\gamma_{n-1}$"),
+        (equilibrium[0], r"$\gamma_n$"),
+        (true_top[0], r"$\gamma_c$"),
+    )
+    for x_mark, label in strain_marks:
+        ax.plot(
+            [x_mark, x_mark],
+            [strain_axis_y - 0.13, strain_axis_y + 0.13],
+            color="black",
+            linewidth=1.35,
+            solid_capstyle="butt",
+            zorder=11,
+        )
+        ax.text(
+            x_mark,
+            strain_label_y,
+            label,
+            fontsize=TEXT_SIZE,
+            ha="center",
+            va="bottom",
+            zorder=11,
+        )
 
     # Two aligned heading rows replace the staggered title arrangement.
     ax.text(
-        0.46,
+        first_strain,
         5.62,
-        r"\textbf{Inter-strain energy drop: }$\Delta E_I$",
+        r"Inter-strain energy drop: $\Delta E_I$",
         color=BLUE,
-        fontsize=16.5,
+        fontsize=TEXT_SIZE,
         ha="left",
         va="center",
     )
     ax.text(
-        3.77,
+        3.25,
         5.62,
-        r"\textbf{Stress-corrected energy drop: }$\Delta E_S$",
+        r"Stress-corrected energy drop: $\Delta E_S$",
         color=PURPLE,
-        fontsize=16.5,
+        fontsize=TEXT_SIZE,
         ha="left",
         va="center",
     )
     ax.text(
-        0.46,
+        first_strain,
         5.27,
-        r"\textbf{True energy drop: }$\Delta E_T$",
+        r"True energy drop: $\Delta E_T$",
         color=RED,
-        fontsize=16.5,
+        fontsize=TEXT_SIZE,
         ha="left",
         va="center",
     )
     ax.text(
-        3.77,
+        3.25,
         5.27,
-        r"\textbf{Relaxation energy drop: }$\Delta E_R$",
+        r"Relaxation energy drop: $\Delta E_R$",
         color=GREEN,
-        fontsize=16.5,
+        fontsize=TEXT_SIZE,
         ha="left",
         va="center",
     )
@@ -414,7 +454,7 @@ def main() -> None:
     output_dir = Path(__file__).resolve().parents[1] / "Plots"
     output_dir.mkdir(parents=True, exist_ok=True)
     output_stem = output_dir / "energy_drop_measurements_schematic"
-    save_options = {"bbox_inches": "tight", "pad_inches": 0.04}
+    save_options = {"bbox_inches": "tight", "pad_inches": 0}
     fig.savefig(output_stem.with_suffix(".png"), dpi=160, **save_options)
     fig.savefig(output_stem.with_suffix(".pdf"), **save_options)
     plt.close(fig)

@@ -98,13 +98,15 @@ def lagrange_reduction(C, loops=1000):
     return C_out, M
 
 
-def lagrange_reduction_history(C, loops=1000):
+def lagrange_reduction_history(C, loops=1000, return_transforms=False):
     """Return every metric visited by the scalar 2D Lagrange reduction.
 
     The first entry is the input metric and the last entry is the same reduced
     metric returned by :func:`lagrange_reduction`.  Keeping this small,
     non-vectorized trace here avoids coupling static plots to the Qt reduction
-    visualizer.
+    visualizer.  With ``return_transforms=True``, return a second tuple
+    containing the right-multiplication matrix used for each successive
+    history entry.
     """
     C_current = np.asarray(C, dtype=float).copy()
     if C_current.shape != (2, 2):
@@ -115,6 +117,18 @@ def lagrange_reduction_history(C, loops=1000):
         raise ValueError("C must be a finite positive-definite metric")
 
     history = [C_current.copy()]
+    transforms = []
+
+    m1 = np.array([[1, 0], [0, -1]], dtype=float)
+    m2 = np.array([[0, 1], [1, 0]], dtype=float)
+    m3 = np.array([[1, -1], [0, 1]], dtype=float)
+
+    def result():
+        history_array = np.stack(history)
+        if return_transforms:
+            return history_array, tuple(transforms)
+        return history_array
+
     for _ in range(loops):
         changed = False
 
@@ -124,12 +138,14 @@ def lagrange_reduction_history(C, loops=1000):
                 C_current[0, 0],
             )
             history.append(C_current.copy())
+            transforms.append(m2.copy())
             changed = True
 
         if C_current[0, 1] < 0:
             C_current[0, 1] *= -1
             C_current[1, 0] = C_current[0, 1]
             history.append(C_current.copy())
+            transforms.append(m1.copy())
             changed = True
 
         if 2 * C_current[0, 1] > C_current[0, 0]:
@@ -139,10 +155,11 @@ def lagrange_reduction_history(C, loops=1000):
             C_current[0, 1] -= C_current[0, 0]
             C_current[1, 0] = C_current[0, 1]
             history.append(C_current.copy())
+            transforms.append(m3.copy())
             changed = True
 
         if not changed:
-            return np.stack(history)
+            return result()
 
     raise RuntimeError(f"Lagrange reduction did not converge in {loops} iterations")
 
