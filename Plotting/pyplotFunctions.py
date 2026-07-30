@@ -1,3 +1,5 @@
+import gc
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -2402,7 +2404,9 @@ def process_frame(kwargs, attemps=0):
     # This is a bit random, so we just try again
     try:
         # Call frameFunction with remaining keyword arguments
-        return frameFunction(**kwargs)
+        result = frameFunction(**kwargs)
+        gc.collect()
+        return result
     except SyntaxError:
         if attemps < 5:
             kwargs["frameFunction"] = frameFunction
@@ -2636,7 +2640,7 @@ def make_images(vtu_files, num_processes=-2, use_tqdm=True, X="load", **kwargs):
         import multiprocessing
 
         num_processes = multiprocessing.cpu_count() + num_processes
-    max_processes = 1 if L > 300 else 2 if L > 150 else 3
+    max_processes = 1 if L > 300 else 2 if L > 200 else num_processes
     num_processes = max(1, min(num_processes, max_processes))
     print(f"Using {num_processes} rendering process(es) for L={L}.")
 
