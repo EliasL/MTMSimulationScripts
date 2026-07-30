@@ -33,6 +33,7 @@ mpl.use("Agg")
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+from matplotlib.transforms import Bbox
 import numpy as np
 from pypdf import PageObject, PdfReader, PdfWriter, Transformation
 
@@ -45,6 +46,11 @@ from MTMath.evaluatePowerlawFit import (
 )
 from Plotting.dataFunctions import get_metadata
 from Plotting.energyDropCalculations import calculate_energy_step_data
+from Plotting.findXmin import (
+    find_xmin_refined_global_min_from_results,
+    find_xmin_simple_drop_from_results,
+    select_global_min_from_search_details,
+)
 from Plotting.plotPowerLaw import (
     _resolve_strain_lim,
     dist_from_fit,
@@ -102,13 +108,15 @@ DROP_COLUMN = "stress_corrected_drop_second_order"
 # Keep every positive drop in the displayed empirical distribution.  xmin is
 # selected later and limits the likelihood fit, not the raw data shown.
 MIN_DROP = 0.0
-XMIN_CANDIDATE_COUNT = 36
-# Scan across the full positive-drop range while stopping before fewer than a
-# useful number of tail events remain. Invalid low-scale candidates are kept
-# out of the selection but the corresponding drops remain visible in the PDFs.
-XMIN_CANDIDATE_QUANTILES = (0.0, 0.995)
+XMIN_CANDIDATE_COUNT = 100
+# Scan the complete admissible positive-drop range. The upper endpoint is the
+# largest cutoff that still retains the requested number of tail events.
 MIN_TAIL_COUNT = 25
 PARALLEL_XMIN_FITS = False
+SIMPLE_DROP_LOCAL_REFINEMENTS = 10
+SIMPLE_DROP_LOCAL_MAX_ITERATIONS = 64
+GLOBAL_MIN_LOCAL_REFINEMENTS = 10
+GLOBAL_MIN_LOCAL_MAX_ITERATIONS = 64
 
 # Raw energy panel and inset.
 ZOOM_CENTER = 0.805
@@ -131,23 +139,37 @@ SHOW_GRID = False
 
 # Landscape A4 layout. Set only (left, bottom, width) for each panel. Heights
 # are derived below, so resizing a panel cannot change its physical aspect ratio.
+# Entries in PANEL_TOP_EDGES keep their top fixed while their derived height
+# changes; their configured bottom value is ignored.
 A4_LANDSCAPE_INCHES = (11.69, 8.27)
 width = 0.4
 h1 = 0.0
 h2=0.55
 PANEL_LAYOUT = {
-    "energy": (0.0,h1, width),
-    "raw_pdf": (0.08, h2, width-0.08),
-    "ccdf_ks": (0.36,h2-0.01, width-0.1),
+    "energy": (-0.02,h1, width),
+    "raw_pdf": (0.01, h2, width-0.08),
+    "ccdf_ks": (0.34,h2-0.01, width-0.1),
     "xmin_scan": (0.65, h2, width-0.06),
     "mle_fit": (0.63,h1, width),
+}
+PANEL_TOP_EDGES = {
+    "energy": 0.5122,
+    "mle_fit": 0.5122,
+}
+# Higher values are drawn later and therefore appear above overlapping panels.
+PANEL_ZORDERS = {
+    "energy": 2.2,
+    "raw_pdf": 2.5,
+    "ccdf_ks": 2.4,
+    "xmin_scan": 2.3,
+    "mle_fit": 2.2,
 }
 # Equation nodes are positioned by their centers. Their width and height are
 # measured from the rendered text, then expanded by EQUATION_AUTO_BOX_PADDING.
 EQUATION_CENTERS = {
-    "energy_equation": (0.51, 0.3),
-    "ks_equation": (0.51, 0.43),
-    "fit_equation": (0.51, 0.2),
+    "energy_equation": (0.50, 0.31),
+    "ks_equation": (0.50, 0.44),
+    "fit_equation": (0.50, 0.21),
 }
 EQUATION_FONT_SIZE = 8.0
 # Automatic mode measures the equations with LaTeX when it is available.
@@ -184,11 +206,11 @@ EQUATION_BOX_ARROW_LINEWIDTH = 1.6
 EQUATION_BOX_ARROW_MUTATION_SCALE = 10
 EQUATION_BOX_ARROW_ALPHA = 0.9
 PANEL_LABELS = {
-    "energy": r"(1) Energy drops",
-    "raw_pdf": r"(2) Raw PDF",
-    "ccdf_ks": r"(3) KS at $\Delta E_{\min}$",
-    "xmin_scan": r"(4) Select $\Delta E_{\min}$",
-    "mle_fit": r"(5) Fitting",
+    "energy": r"(a) Energy drops",
+    "raw_pdf": r"(b) Raw PDF",
+    "ccdf_ks": r"(c) KS at $\Delta E_{\min}$",
+    "xmin_scan": r"(d) Select $\Delta E_{\min}$",
+    "mle_fit": r"(e) Fitting",
 }
 PANEL_TITLE_GAP = 0.008
 SHOW_SOURCE_NOTE = False
@@ -230,17 +252,26 @@ FLOWCHART_TEXT_ZORDER = 5.0
 # Original physical width-to-height ratio of each independent subplot. These
 # keep regeneration from collapsing all five panels onto one shared ratio.
 PANEL_SOURCE_ASPECT_RATIOS = {
-    "energy": 1.1037253,
+    "energy": 1.22,
     "raw_pdf": 1.3223466,
     "ccdf_ks": 1.1079120,
     "xmin_scan": 1.3891715,
-    "mle_fit": 1.1848816,
+    "mle_fit": 1.31,
 }
 PANEL_RENDER_SCALE = 1.0
 PANEL_DPI = 350
 FINAL_DPI = 300
 PANEL_FONT_SIZE = 7.5
 LEGEND_FONT_SIZE = 6.0
+KS_LEGEND_FONT_SIZE = 6.5
+FLOWCHART_CROP_PAD_INCHES = 0.02
+PANEL_CROP_PAD_INCHES = 0.02
+PANEL_SUBPLOT_MARGINS = {
+    "left": 0.13,
+    "right": 0.90,
+    "bottom": 0.18,
+    "top": 0.96,
+}
 
 
 # =============================================================================
@@ -295,6 +326,7 @@ def _l250_configs_and_labels():
 
 def _candidate_paths(root: Path, config_name: str):
     return (
+        root / f"{config_name}_fixed.csv",
         root / f"{config_name}.csv",
         root / config_name / "macroData.csv",
         root / "MTS2D_output" / config_name / "macroData.csv",
@@ -315,8 +347,8 @@ def _find_requested_csvs(configs):
     return found
 
 
-def _download_requested_csvs(configs, labels):
-    """Use the repository downloader, but cache into this figure's directory."""
+def _download_requested_csvs(configs, labels, *, force_update=False):
+    """Use the repository downloader, caching refreshed files for this figure."""
 
     from Plotting import remotePlotting
 
@@ -327,8 +359,8 @@ def _download_requested_csvs(configs, labels):
         paths, _ = remotePlotting.get_csv_files(
             configs,
             labels=labels,
-            useOldFiles=True,
-            forceUpdate=False,
+            useOldFiles=not force_update,
+            forceUpdate=force_update,
             debug_download=True,
             fix_files=True,
         )
@@ -347,12 +379,13 @@ def resolve_csv_paths(*, download_if_missing=False, allow_fallback=True):
 
     configs, labels = _l250_configs_and_labels()
     paths = _find_requested_csvs(configs)
-    if download_if_missing and len(paths) < len(configs):
-        downloaded = _download_requested_csvs(configs, labels)
+    if download_if_missing:
+        _download_requested_csvs(
+            configs,
+            labels,
+            force_update=True,
+        )
         paths = _find_requested_csvs(configs)
-        for path in downloaded:
-            if path not in paths:
-                paths.append(path)
 
     if paths and (not REQUIRE_ALL_REQUESTED_SEEDS or len(paths) == len(configs)):
         return paths, False
@@ -440,35 +473,57 @@ def _collect_analysis(csv_paths: list[Path], used_fallback: bool):
             "or provide more simulation CSVs."
         )
 
-    q_lo, q_hi = XMIN_CANDIDATE_QUANTILES
-    candidate_lo, candidate_hi = np.quantile(drops, [q_lo, q_hi])
-    candidate_lo = max(float(candidate_lo), float(np.min(drops)))
-    candidate_hi = min(float(candidate_hi), float(np.max(drops)))
+    sorted_drops = np.sort(drops)
+    candidate_lo = float(sorted_drops[0])
+    candidate_hi = float(sorted_drops[-MIN_TAIL_COUNT])
     if not (candidate_hi > candidate_lo > 0.0):
         raise RuntimeError("Could not form a positive xmin candidate interval.")
 
     xmins = np.geomspace(candidate_lo, candidate_hi, XMIN_CANDIDATE_COUNT)
-    distances, param_vals, valid = evaluate_xmin_distances(
+    distances, param_vals, _ = evaluate_xmin_distances(
         drops,
         xmins,
         distType=Truncated_Power_Law,
         parallel=PARALLEL_XMIN_FITS,
     )
     distances = np.asarray(distances, dtype=float)
-    valid = np.asarray(valid, dtype=bool)
     tail_counts = np.asarray([np.count_nonzero(drops >= xmin) for xmin in xmins])
-    selectable = (
-        valid
-        & np.isfinite(distances)
-        & (tail_counts >= MIN_TAIL_COUNT)
-    )
+    selectable = np.isfinite(distances) & (tail_counts >= MIN_TAIL_COUNT)
     if not np.any(selectable):
-        raise RuntimeError("No valid xmin candidate retains the requested tail count.")
-    selectable_indices = np.flatnonzero(selectable)
-    selected_index = int(
-        selectable_indices[np.argmin(distances[selectable_indices])]
+        raise RuntimeError("No finite xmin candidate retains the requested tail count.")
+    selected_xmin, simple_drop_details = find_xmin_simple_drop_from_results(
+        drops,
+        xmins,
+        distances,
+        min_tail_count=MIN_TAIL_COUNT,
+        local_refinements=SIMPLE_DROP_LOCAL_REFINEMENTS,
+        local_max_iterations=SIMPLE_DROP_LOCAL_MAX_ITERATIONS,
+        distType=Truncated_Power_Law,
+        parallel=PARALLEL_XMIN_FITS,
     )
-    selected_xmin = float(xmins[selected_index])
+    selected_distance = float(simple_drop_details["selected_distance"])
+    _, global_search_details = find_xmin_refined_global_min_from_results(
+        drops,
+        xmins,
+        distances,
+        min_tail_count=MIN_TAIL_COUNT,
+        local_refinements=GLOBAL_MIN_LOCAL_REFINEMENTS,
+        local_max_iterations=GLOBAL_MIN_LOCAL_MAX_ITERATIONS,
+        distType=Truncated_Power_Law,
+        parallel=PARALLEL_XMIN_FITS,
+    )
+
+    # Select the global minimum only after both independent refinement
+    # strategies have completed. This ensures that a lower simpleDrop
+    # evaluation cannot sit below a prematurely chosen "global" minimum.
+    (
+        global_min_xmin,
+        global_min_distance,
+        all_evaluations,
+    ) = select_global_min_from_search_details(
+        simple_drop_details,
+        global_search_details,
+    )
 
     fit = Fit(
         drops,
@@ -499,9 +554,13 @@ def _collect_analysis(csv_paths: list[Path], used_fallback: bool):
         "xmins": xmins,
         "distances": distances,
         "param_vals": param_vals,
-        "valid": valid,
         "tail_counts": tail_counts,
-        "selected_index": selected_index,
+        "global_min_xmin": float(global_min_xmin),
+        "global_min_distance": float(global_min_distance),
+        "global_search_details": global_search_details,
+        "all_xmin_evaluations": all_evaluations,
+        "simple_drop_details": simple_drop_details,
+        "simple_drop_distance": selected_distance,
         "selected_xmin": selected_xmin,
         "fit": fit,
         "alpha": float(dist.alpha),
@@ -518,7 +577,7 @@ def _new_panel(name):
         physical_width / PANEL_SOURCE_ASPECT_RATIOS[name],
     )
     fig, ax = plt.subplots(figsize=figsize)
-    fig.subplots_adjust(left=0.15, right=0.85, bottom=0.18, top=0.96)
+    fig.subplots_adjust(**PANEL_SUBPLOT_MARGINS)
     ax.grid(SHOW_GRID, which="both")
     ax.set_title("")
     return fig, ax
@@ -529,8 +588,15 @@ def _save_panel(fig, name):
         PANEL_FILES[name],
         dpi=PANEL_DPI,
         facecolor="white",
+        bbox_inches="tight",
+        pad_inches=PANEL_CROP_PAD_INCHES,
     )
-    fig.savefig(PANEL_PDF_FILES[name], facecolor="white")
+    fig.savefig(
+        PANEL_PDF_FILES[name],
+        facecolor="white",
+        bbox_inches="tight",
+        pad_inches=PANEL_CROP_PAD_INCHES,
+    )
     plt.close(fig)
 
 
@@ -556,7 +622,7 @@ def _energy_panel(analysis):
         drop_strain[drop_mask],
         drop_values[drop_mask],
         energy_label=r"$E$",
-        drop_label=r"$\Delta E_{SP}$",
+        drop_label=r"$\Delta E_S$",
         color_drop=ENERGY_DROP_COLOR,
         min_drop=MIN_DROP,
         log_drop_axis=ENERGY_DROP_LOG_SCALE,
@@ -594,8 +660,8 @@ def _raw_pdf_panel(analysis):
     )
     ax.lines[0].set_label("Empirical PDF")
     ax.lines[0].set_markersize(EMPIRICAL_PDF_MARKER_SIZE)
-    ax.set_xlabel(r"$\Delta E_{SP}$")
-    ax.set_ylabel(r"$p(\Delta E_{SP})$")
+    ax.set_xlabel(r"$\Delta E_S$")
+    ax.set_ylabel(r"$p(\Delta E_S)$")
     ax.legend(loc="best")
     _save_panel(fig, "raw_pdf")
 
@@ -616,10 +682,12 @@ def _ccdf_ks_panel(analysis):
         inset_bounds=KS_INSET_BOUNDS,
         inset_x_factor=KS_INSET_X_FACTOR,
         inset_grid=SHOW_GRID,
-        legend_usetex=EQUATION_USE_LATEX,
+        legend_usetex=False,
+        tight_layout=False,
     )
-    ax.set_xlabel(r"$\Delta E_{SP}$")
-    ax.set_ylabel(r"$P(\Delta E_{SP}>x)$")
+    ax.set_xlabel(r"$\Delta E_S$")
+    ax.set_ylabel(r"$P(\Delta E_S>x)$")
+    ax.legend(loc="best", fontsize=KS_LEGEND_FONT_SIZE)
     _save_panel(fig, "ccdf_ks")
 
 
@@ -627,7 +695,16 @@ def _xmin_scan_panel(analysis):
     fig, ax = _new_panel("xmin_scan")
     xmins = analysis["xmins"]
     distances = analysis["distances"]
-    idx = analysis["selected_index"]
+    global_xmin = analysis["global_min_xmin"]
+    global_distance = analysis["global_min_distance"]
+    selected_xmin = analysis["selected_xmin"]
+    selected_distance = analysis["simple_drop_distance"]
+    global_differs_from_simple_drop = not np.isclose(
+        global_xmin,
+        selected_xmin,
+        rtol=1e-6,
+        atol=0.0,
+    )
     ax.plot(
         xmins,
         distances,
@@ -636,16 +713,54 @@ def _xmin_scan_panel(analysis):
         color=XMIN_SCAN_COLOR,
         label=r"$D(\Delta E_{\min})$",
     )
+    rough_local_minima = analysis["global_search_details"]["rough_local_minima"]
+    if global_differs_from_simple_drop and rough_local_minima:
+        ax.scatter(
+            [item["xmin"] for item in rough_local_minima],
+            [item["distance"] for item in rough_local_minima],
+            marker="s",
+            s=12,
+            facecolor="none",
+            edgecolor="0.35",
+            linewidth=0.6,
+            zorder=4,
+            label="Coarse local minima",
+        )
     ax.scatter(
-        [xmins[idx]],
-        [distances[idx]],
-        marker="D",
-        s=20,
-        color=XMIN_SCAN_COLOR,
-        zorder=4,
-        label=rf"$\Delta E_{{\min}}={xmins[idx]:.1e}$",
+        [global_xmin],
+        [global_distance],
+        marker="X",
+        s=25,
+        facecolor="white",
+        edgecolor="0.25",
+        linewidth=0.8,
+        zorder=5,
+        label=rf"Global min.: $\Delta E_{{\min}}={global_xmin:.1e}$",
     )
-    ax.axvline(xmins[idx], color="0.35", linestyle="--", linewidth=0.8)
+    if global_differs_from_simple_drop:
+        ax.scatter(
+            [selected_xmin],
+            [selected_distance],
+            marker="D",
+            s=22,
+            color=XMIN_SCAN_COLOR,
+            edgecolor="white",
+            linewidth=0.5,
+            zorder=6,
+            label=rf"simpleDrop: $\Delta E_{{\min}}={selected_xmin:.1e}$",
+        )
+        ax.axvline(
+            global_xmin,
+            color="0.45",
+            linestyle="--",
+            linewidth=0.8,
+        )
+    ax.axvline(
+        selected_xmin,
+        color=XMIN_SCAN_COLOR,
+        linestyle="--",
+        linewidth=1.0,
+    )
     ax.set_xscale("log")
     ax.set_xlabel(r"$\Delta E_{\min}$")
     ax.set_ylabel(r"$D$")
@@ -676,9 +791,12 @@ def _mle_fit_panel(analysis):
     )
     ax.lines[0].set_label("Empirical PDF")
     ax.lines[0].set_markersize(EMPIRICAL_PDF_MARKER_SIZE)
-    ax.lines[1].set_label(rf"MLE: $\alpha={alpha:.2f}$, $\lambda={lambda_value:.1e}$")
+    ax.lines[1].set_label(
+        rf"MLE: $\hat{{\alpha}}={alpha:.2f}$, "
+        rf"$\hat{{\lambda}}={lambda_value:.1e}$"
+    )
     if ax.patches:
-        ax.patches[-1].set_label("Fit region")
+        ax.patches[-1].set_label(r"$\mathcal{X}_{\min}$ (fit region)")
     ax.axvline(
         analysis["selected_xmin"],
         color="0.35",
@@ -686,8 +804,8 @@ def _mle_fit_panel(analysis):
         linewidth=0.8,
         label=r"$\Delta E_{\min}$",
     )
-    ax.set_xlabel(r"$\Delta E_{SP}$")
-    ax.set_ylabel(r"$p(\Delta E_{SP})$")
+    ax.set_xlabel(r"$\Delta E_S$")
+    ax.set_ylabel(r"$p(\Delta E_S)$")
     ax.legend(loc="best")
     _save_panel(fig, "mle_fit")
 
@@ -702,7 +820,30 @@ def _write_analysis_summary(analysis):
         "first_run_post_yield_limit": list(analysis["first_strain_limit"]),
         "minimum_drop": MIN_DROP,
         "number_of_drops": int(analysis["drops"].size),
+        "xmin_method": "simpleDrop",
+        "global_min_xmin": analysis["global_min_xmin"],
+        "global_min_distance": analysis["global_min_distance"],
+        "global_min_differs_from_simple_drop": not np.isclose(
+            analysis["global_min_xmin"],
+            analysis["selected_xmin"],
+            rtol=1e-6,
+            atol=0.0,
+        ),
+        "global_search_rough_local_minima": analysis["global_search_details"][
+            "rough_local_minima"
+        ],
+        "global_search_refined_local_minima": analysis["global_search_details"][
+            "local_minima"
+        ],
+        "global_search_evaluation_count": len(
+            analysis["global_search_details"]["evaluated_xmins"]
+        ),
         "selected_xmin": analysis["selected_xmin"],
+        "simple_drop_distance": analysis["simple_drop_distance"],
+        "simple_drop_largest_interval": list(
+            analysis["simple_drop_details"]["largest_drop_interval"]
+        ),
+        "simple_drop_local_minima": analysis["simple_drop_details"]["local_minima"],
         "alpha": analysis["alpha"],
         "lambda": analysis["lambda"],
         "inverse_lambda": (
@@ -760,6 +901,8 @@ def _calculate_panel_positions():
         pixel_height, pixel_width = image.shape[:2]
         native_aspect_ratio = pixel_width / pixel_height
         height = width * page_width / (native_aspect_ratio * page_height)
+        if name in PANEL_TOP_EDGES:
+            bottom = PANEL_TOP_EDGES[name] - height
         positions[name] = (left, bottom, width, height)
     return positions
 
@@ -856,7 +999,7 @@ def _source_note(summary):
     return rf"Post-yield size scaling: $L={size}$; {runs} runs; $n={n}$"
 
 
-def _write_vector_pdf(fig, panel_axes, panel_positions):
+def _write_vector_pdf(fig, panel_axes, panel_positions, crop_bbox_inches):
     """Compose cached vector panel PDFs over the vector flowchart layout."""
 
     layout_pdf = OUTPUT_DIR / "_flowchart_layout.pdf"
@@ -871,23 +1014,38 @@ def _write_vector_pdf(fig, panel_axes, panel_positions):
         overlay_page = layout_reader.pages[0]
         page_width = float(overlay_page.mediabox.width)
         page_height = float(overlay_page.mediabox.height)
+        figure_width, figure_height = fig.get_size_inches()
+        crop_left = crop_bbox_inches.x0 / figure_width * page_width
+        crop_bottom = crop_bbox_inches.y0 / figure_height * page_height
+        crop_width = crop_bbox_inches.width / figure_width * page_width
+        crop_height = crop_bbox_inches.height / figure_height * page_height
         output_page = PageObject.create_blank_page(
-            width=page_width,
-            height=page_height,
+            width=crop_width,
+            height=crop_height,
         )
 
-        for name, (left, bottom, width, _height) in panel_positions.items():
+        panel_items = sorted(
+            panel_positions.items(),
+            key=lambda item: PANEL_ZORDERS[item[0]],
+        )
+        for name, (left, bottom, width, _height) in panel_items:
             panel_page = PdfReader(str(PANEL_PDF_FILES[name])).pages[0]
             panel_width = float(panel_page.mediabox.width)
             scale = (width * page_width) / panel_width
             transform = (
                 Transformation()
                 .scale(scale)
-                .translate(left * page_width, bottom * page_height)
+                .translate(
+                    left * page_width - crop_left,
+                    bottom * page_height - crop_bottom,
+                )
             )
             output_page.merge_transformed_page(panel_page, transform)
 
-        output_page.merge_page(overlay_page)
+        output_page.merge_transformed_page(
+            overlay_page,
+            Transformation().translate(-crop_left, -crop_bottom),
+        )
         writer = PdfWriter()
         writer.add_page(output_page)
         with FINAL_PDF.open("wb") as stream:
@@ -903,32 +1061,37 @@ def _add_equations(fig):
 
     equations = {
         "energy_equation": (
-            r"$\Delta E_{SP,i}^{(2)}=E_{i+1}^{\rm pred}-E_{i+1}$"
+            r"$\Delta E_S=\widehat E_{n+1}-E_{n+1}$"
             "\n"
-            r"$E_{i+1}^{\rm pred}=E_i+V_0P_{12,i}\Delta\gamma"
-            r"+\frac{V_0}{2}A_{1212}(\gamma_i)(\Delta\gamma)^2$"
+            r"$\widehat E_{n+1}=E_n"
+            r"+V_0\langle\sigma_{12}\rangle_n\Delta\gamma_n"
+            r"+\frac{V_0}{2}\mathfrak{a}_{1212,n}(\Delta\gamma_n)^2$"
         ),
         "ks_equation": (
             r"$D(\Delta E_{\min})="
             r"\sup_{x\geq\Delta E_{\min}}"
             r"\left|\widehat P_{>}(x)-P_{>}^{\rm TPL}(x)\right|$"
             "\n"
-            r"$\widehat P_{>}(x)=\frac{1}{|I_{\min}|}"
-            r"\sum_{i\in I_{\min}}\mathbf{1}(\Delta E_{SP,i}>x)$"
+            r"$\widehat P_{>}(x)=\frac{1}{|\mathcal{X}_{\min}|}"
+            r"\sum_{\Delta E_S\in\mathcal{X}_{\min}}\mathbf{1}(\Delta E_S>x)$"
             "\n"
             r"$P_{>}^{\rm TPL}(x)=\int_x^\infty\!"
             r"p(u\mid\hat\alpha,\hat\lambda,\Delta E_{\min})\,du$"
             "\n"
-            r"$I_{\min}\equiv\{i:\Delta E_{SP,i}\geq\Delta E_{\min}\}$"
+            r"$\mathcal{X}_{\min}\equiv"
+            r"\{\Delta E_S:\Delta E_S\geq\Delta E_{\min}\}$"
         ),
         "fit_equation": (
-            r"$p(\Delta E_{SP}\mid\alpha,\lambda,\Delta E_{\min})"
-            r"=\frac{\Delta E_{SP}^{-\alpha}e^{-\lambda\Delta E_{SP}}}"
+            r"$p(\Delta E_S\mid\alpha,\lambda,\Delta E_{\min})"
+            r"=\frac{\Delta E_S^{-\alpha}e^{-\lambda\Delta E_S}}"
             r"{Z(\alpha,\lambda,\Delta E_{\min})}$"
             "\n"
-            r"$(\hat\alpha,\hat\lambda)=\arg\max_{\alpha,\lambda}"
-            r"\sum_{i\in I_{\min}}"
-            r"\ln p(\Delta E_{SP,i}\mid\alpha,\lambda,\Delta E_{\min})$"
+            r"$\ell(\alpha,\lambda)="
+            r"\sum_{\Delta E_S\in\mathcal{X}_{\min}}"
+            r"\ln p(\Delta E_S\mid\alpha,\lambda,\Delta E_{\min})$"
+            "\n"
+            r"$(\hat\alpha,\hat\lambda)="
+            r"\arg\max_{\alpha,\lambda}\ell(\alpha,\lambda)$"
         ),
     }
 
@@ -1003,6 +1166,19 @@ def _add_equations(fig):
     return positions
 
 
+def _flowchart_crop_bbox(fig):
+    """Measure a padded bounding box around all visible flowchart artists."""
+
+    fig.canvas.draw()
+    tight_bbox = fig.get_tightbbox(fig.canvas.get_renderer())
+    return Bbox.from_extents(
+        tight_bbox.x0 - FLOWCHART_CROP_PAD_INCHES,
+        tight_bbox.y0 - FLOWCHART_CROP_PAD_INCHES,
+        tight_bbox.x1 + FLOWCHART_CROP_PAD_INCHES,
+        tight_bbox.y1 + FLOWCHART_CROP_PAD_INCHES,
+    )
+
+
 def compose_flowchart(summary):
     FINAL_PDF.parent.mkdir(parents=True, exist_ok=True)
     fig = plt.figure(figsize=A4_LANDSCAPE_INCHES, facecolor="white")
@@ -1032,7 +1208,7 @@ def compose_flowchart(summary):
 
     panel_axes = []
     for name, position in panel_positions.items():
-        ax = fig.add_axes(position, zorder=2.2)
+        ax = fig.add_axes(position, zorder=PANEL_ZORDERS[name])
         ax.imshow(mpimg.imread(PANEL_FILES[name]), aspect="equal")
         ax.set_axis_off()
         panel_axes.append(ax)
@@ -1059,8 +1235,15 @@ def compose_flowchart(summary):
             color="0.35",
         )
 
-    fig.savefig(FINAL_PNG, dpi=FINAL_DPI, facecolor="white")
-    _write_vector_pdf(fig, panel_axes, panel_positions)
+    crop_bbox_inches = _flowchart_crop_bbox(fig)
+    fig.savefig(
+        FINAL_PNG,
+        dpi=FINAL_DPI,
+        facecolor="white",
+        bbox_inches=crop_bbox_inches,
+        pad_inches=0.0,
+    )
+    _write_vector_pdf(fig, panel_axes, panel_positions, crop_bbox_inches)
     return fig
 
 
@@ -1080,7 +1263,7 @@ def _parse_args():
     parser.add_argument(
         "--download-l250",
         action="store_true",
-        help="Search the configured servers for missing L=250 CSV files.",
+        help="Force-refresh the configured L=250 CSV files from the servers.",
     )
     parser.add_argument(
         "--no-fallback",

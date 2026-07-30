@@ -27,6 +27,10 @@ from Plotting.findXmin import (
     compare_xmin_strategies,
     find_xmin_dks_from_results,
     find_xmin_global_min,
+    find_xmin_refined_global_min_from_results,
+    find_xmin_simple_drop,
+    find_xmin_simple_drop_from_results,
+    select_global_min_from_search_details,
 )
 from Plotting.plotPowerLaw import (
     get_energy_drops,
@@ -39,7 +43,7 @@ from Plotting.plotPowerLaw import (
 
 
 class EnergyDropTests(unittest.TestCase):
-    def test_simple_shear_tangent_uses_material_configuration(self):
+    def test_simple_shear_tangent_uses_spatial_configuration(self):
         material_tensor = np.zeros((1, 2, 2, 2, 2), dtype=float)
         material_tensor[..., 0, 1, 0, 1] = 3.5
         with mock.patch.object(
@@ -52,15 +56,15 @@ class EnergyDropTests(unittest.TestCase):
             )
 
         np.testing.assert_allclose(tangent, [3.5])
-        self.assertFalse(elasticity_tensor.call_args.kwargs["eulerian"])
+        self.assertTrue(elasticity_tensor.call_args.kwargs["eulerian"])
 
     def test_second_order_drop_and_average_scaling(self):
         total_df = pd.DataFrame(
             {
                 "load": [0.0, 0.1],
                 "total_energy": [10.0, 10.5],
-                "avg_sigma12": [99.0, 99.0],
-                "avg_P12": [2.0, 2.0],
+                "avg_sigma12": [2.0, 2.0],
+                "avg_P12": [99.0, 99.0],
             }
         )
         average_df = total_df.rename(columns={"total_energy": "avg_energy"}).copy()
@@ -81,12 +85,26 @@ class EnergyDropTests(unittest.TestCase):
             )
 
         self.assertAlmostEqual(total["E_ip1_pred_second_order"].iloc[0], 10.88)
-        self.assertEqual(total_info["piola_col"], "avg_P12")
-        self.assertTrue(total_info["used_piola_stress"])
+        self.assertEqual(total_info["cauchy_col"], "avg_sigma12")
+        self.assertFalse(total_info["used_piola_stress"])
         self.assertAlmostEqual(total["stress_corrected_drop_second_order"].iloc[0], 0.38)
         self.assertAlmostEqual(
             average["stress_corrected_drop_second_order"].iloc[0], 0.38 / 8.0
         )
+
+    def test_energy_prediction_does_not_fall_back_to_average_piola(self):
+        df = pd.DataFrame(
+            {
+                "load": [0.0, 0.1],
+                "total_energy": [0.0, 0.1],
+                "avg_P12": [1.0, 1.0],
+            }
+        )
+
+        with self.assertRaisesRegex(KeyError, "Do not substitute 'avg_P12'"):
+            calculate_energy_step_data(
+                df=df, metadata={"L": 2}, average_energy=False
+            )
 
     def test_unsupported_energy_function_raises(self):
         df = pd.DataFrame(
@@ -160,7 +178,7 @@ class XminCleanupTests(unittest.TestCase):
                 "global_min",
                 "dip",
                 "max_p",
-                "plateau",
+                "simpleDrop",
                 "derivative",
                 "dks",
                 "slope",
@@ -169,12 +187,154 @@ class XminCleanupTests(unittest.TestCase):
             }
             <= set(XMIN_STRATEGIES)
         )
+        self.assertNotIn("plateau", XMIN_STRATEGIES)
 
     def test_default_comparison_runs_global_min_last(self):
         self.assertEqual(
             DEFAULT_XMIN_COMPARISON_STRATEGIES,
-            ("plateau", "slope", "global_min"),
+            ("simpleDrop", "slope", "global_min"),
         )
+
+    def test_simple_drop_starts_from_exactly_100_initial_measurements(self):
+        calls = []
+
+        def fake_evaluate_xmin(_drops, candidates, **_kwargs):
+            candidates = np.asarray(candidates, dtype=float)
+            calls.append(candidates.copy())
+            log_candidates = np.log10(candidates)
+            distances = (
+                0.5
+                + 0.02 * (log_candidates - 1.0) ** 2
+                - 0.25 * (candidates >= 5.0)
+            )
+            return (
+                distances,
+                [[] for _ in candidates],
+                np.ones(candidates.size, dtype=bool),
+            )
+
+        with mock.patch(
+            "Plotting.findXmin.evaluate_xmin_distances",
+            side_effect=fake_evaluate_xmin,
+        ):
+            xmin, details = find_xmin_simple_drop(
+                np.geomspace(1.0, 1000.0, 500),
+            )
+
+        self.assertEqual(calls[0].size, 100)
+        self.assertEqual(details["initial_measurement_count"], 100)
+        self.assertEqual(len(details["local_minima"]), 3)
+        self.assertAlmostEqual(xmin, 10.0, delta=0.2)
+
+    def test_simple_drop_does_not_hide_finite_ks_jump_with_noise_flag(self):
+        def fake_evaluate_xmin(_drops, candidates, **_kwargs):
+            candidates = np.asarray(candidates, dtype=float)
+            distances = (np.log10(candidates) - np.log10(5.0)) ** 2
+            return (
+                distances,
+                [[] for _ in candidates],
+                np.ones(candidates.size, dtype=bool),
+            )
+
+        with mock.patch(
+            "Plotting.findXmin.evaluate_xmin_distances",
+            side_effect=fake_evaluate_xmin,
+        ):
+            _, details = find_xmin_simple_drop_from_results(
+                np.geomspace(1.0, 100.0, 100),
+                [1.0, 2.0, 4.0, 8.0, 16.0],
+                [0.5, 0.6, 0.2, 0.21, 0.22],
+                [True, False, False, True, True],
+            )
+
+        self.assertEqual(details["largest_drop_interval"], (2.0, 4.0))
+
+    def test_refined_global_min_searches_every_rough_local_minimum(self):
+        def distance_function(candidates):
+            log_candidates = np.log10(np.asarray(candidates, dtype=float))
+            return np.minimum(
+                0.10 + (log_candidates - np.log10(2.5)) ** 2,
+                0.02 + (log_candidates - 1.0) ** 2,
+            )
+
+        xmins = np.asarray([1.0, 2.0, 4.0, 8.0, 16.0, 32.0])
+        distances = distance_function(xmins)
+
+        def fake_evaluate_xmin(_drops, candidates, **_kwargs):
+            candidates = np.asarray(candidates, dtype=float)
+            return (
+                distance_function(candidates),
+                [[] for _ in candidates],
+                np.ones(candidates.size, dtype=bool),
+            )
+
+        with mock.patch(
+            "Plotting.findXmin.evaluate_xmin_distances",
+            side_effect=fake_evaluate_xmin,
+        ):
+            xmin, details = find_xmin_refined_global_min_from_results(
+                np.geomspace(1.0, 100.0, 500),
+                xmins,
+                distances,
+                np.ones(xmins.size, dtype=bool),
+            )
+
+        self.assertEqual(
+            [item["index"] for item in details["rough_local_minima"]],
+            [1, 3],
+        )
+        self.assertEqual(len(details["local_minima"]), 2)
+        self.assertAlmostEqual(xmin, 10.0, delta=0.2)
+        self.assertLess(details["selected_distance"], float(np.min(distances)))
+
+    def test_refined_global_min_keeps_finite_noise_flagged_minimum(self):
+        xmins = np.asarray([1.0, 2.0, 4.0])
+        distances = np.asarray([0.5, 0.1, 0.3])
+
+        def fake_evaluate_xmin(_drops, candidates, **_kwargs):
+            candidates = np.asarray(candidates, dtype=float)
+            values = 0.1 + (np.log10(candidates) - np.log10(2.0)) ** 2
+            return (
+                values,
+                [[] for _ in candidates],
+                np.zeros(candidates.size, dtype=bool),
+            )
+
+        with mock.patch(
+            "Plotting.findXmin.evaluate_xmin_distances",
+            side_effect=fake_evaluate_xmin,
+        ):
+            _, details = find_xmin_refined_global_min_from_results(
+                np.geomspace(1.0, 10.0, 100),
+                xmins,
+                distances,
+                [True, False, True],
+            )
+
+        self.assertEqual(
+            [item["index"] for item in details["rough_local_minima"]],
+            [1],
+        )
+        self.assertTrue(np.isfinite(details["selected_distance"]))
+
+    def test_global_min_is_selected_after_all_searches_finish(self):
+        simple_drop = {
+            "evaluated_xmins": [2.0, 2.5],
+            "evaluated_distances": [0.20, 0.08],
+        }
+        refined_global = {
+            "evaluated_xmins": [1.0, 4.0, 5.0],
+            "evaluated_distances": [0.30, 0.10, 0.05],
+        }
+
+        xmin, distance, evaluations = select_global_min_from_search_details(
+            simple_drop,
+            refined_global,
+        )
+
+        self.assertEqual(xmin, 5.0)
+        self.assertEqual(distance, 0.05)
+        self.assertEqual(len(evaluations), 5)
 
     def test_log_candidate_ceiling_leaves_one_decade_of_tail(self):
         _, candidates = _log_xmin_candidates(

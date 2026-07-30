@@ -283,8 +283,10 @@ def _resolve_drop_label(info=None, *, energy_type=None, stress_corrected=False, 
 
 
 def _stress_corrected_drop_label(use_piola=False, use_avg=None):
-    symbol = "E_{SP}" if use_piola else "E_S"
-    return maybe_avg(symbol, use_avg)
+    # The numerical correction uses averaged Cauchy shear stress for MTS2D's
+    # left-multiplicative affine loading. Keep ``use_piola`` only for API
+    # compatibility with older callers.
+    return maybe_avg("E_S", use_avg)
 
 
 def get_elastic_mu(report=False):
@@ -338,7 +340,7 @@ def get_energy_drops(
     When ``onlyStrainedEnergyDrops`` is true, retain only steps with a recorded
     element-level plastic event.
     Stress-corrected drops use the shared Taylor expansion helper; by default
-    this is second order with A1212 evaluated at the current strain gamma_i.
+    this is second order with a1212 evaluated at the current strain gamma_i.
     If debug=True, plot intermediate energy and drop traces.
 
     For stored energy-change columns, ``drop_sign`` explicitly specifies
@@ -1163,7 +1165,7 @@ def plot_ks_distance_marker(
         empirical_at_D,
         color=color,
         linestyle="--",
-        label=f"{tag} Distance D = {D_val:.3f}",
+        label=rf"{tag} Distance $D={D_val:.3f}$",
     )
     ax.scatter([x_D], [empirical_at_D], color=empirical_color)
     ax.scatter([x_D], [model_ccdf[max_index]], color=model_color)
@@ -1178,7 +1180,7 @@ def annotate_ks_distance_pdf(ax, xmin, D_val, color="red", fast_xmin=None, fit=N
         color=color,
         linestyle="--",
         linewidth=1.2,
-        label=f"{tag} Distance D = {D_val:.3f}",
+        label=rf"{tag} Distance $D={D_val:.3f}$",
         zorder=-1,
         alpha=0.5,
     )
@@ -1329,13 +1331,13 @@ def pretty_text(text, addEquation=True):
 
 def findPrePostSplit(csvPath="", df=None):
     # Return strain value where the stress is the largest
-    # Uses P12 (off diagonal of first piola kirchhoff stress)
+    # Prefer Cauchy shear stress, matching the spatial affine loading path.
     if df is None:
         df = read_macrodata_csv(csvPath, L=get_system_size([csvPath]))
-    if "avg_P12" in df:
-        i = df["avg_P12"].argmax()
-    elif "avg_sigma12" in df:
+    if "avg_sigma12" in df:
         i = df["avg_sigma12"].argmax()
+    elif "avg_P12" in df:
+        i = df["avg_P12"].argmax()
     else:
         raise KeyError("No stress key found!")
     return df["load"].iloc[i]
@@ -1543,7 +1545,10 @@ def plot_data_and_fit(
                 xmax,
                 color="gray",
                 alpha=0.2,
-                label=rf"Fit region. $\alpha={dist.alpha:.2f}, \lambda=$ {dist.Lambda:.2e}",
+                label=(
+                    rf"Fit region. $\hat{{\alpha}}={dist.alpha:.2f}, "
+                    rf"\hat{{\lambda}}={dist.Lambda:.2e}$"
+                ),
             )
 
         # Mark x = 1/lambda with a dashed vertical line through the full plot height.
@@ -1667,6 +1672,7 @@ def plot_ks_distance(
     inset_background_alpha=0.92,
     inset_grid=False,
     legend_usetex=False,
+    tight_layout=True,
 ):
     """
     Plot the empirical CCDF vs the fitted CCDF and visually show the KS distance (D).
@@ -1818,7 +1824,8 @@ def plot_ks_distance(
             inset_ax.grid(True, color="0.9", linewidth=0.4)
         else:
             inset_ax.grid(False, which="both")
-    fig.tight_layout()
+    if tight_layout:
+        fig.tight_layout()
     # Save the plot
     safe_title = safePath(title)
     safe_title = _append_sample_suffix(safe_title, len(drops))

@@ -34,6 +34,7 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
 
     X = "load"
     ylog = False
+    conf, csvPath, pvdFile = None, None, None
 
     if isinstance(unkownFile, list):
         csvPath, labels = get_csv_files(
@@ -45,7 +46,6 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
         path = Path(csvPath[0]).parent
     else:
         # unkownFile can be either a .conf, .pvd or .csv file
-        conf, csvPath, pvdFile = None, None, None
         subfolderName = "unkown_"
 
         if unkownFile != "":
@@ -187,6 +187,8 @@ def plotAll(unkownFile="", plots=True, videoes=True, **kwargs):
 
     # makeItterationsPlot(path+macroData, name+"_itterations.pdf")
     if videoes and pvdFile is not None:
+        kwargs.setdefault("macroData", csvPath)
+        kwargs.setdefault("pvdFile", pvdFile)
         if video_variants and False:
             variant_settings = [
                 {"element_subset": None},

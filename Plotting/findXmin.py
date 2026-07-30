@@ -2419,66 +2419,433 @@ def find_xmin_max_p(
     return float(xmins[int(np.nanargmax(p_values))])
 
 
-# def find_xmin(drops, **kwargs):
-# pass
-
-
-def find_xmin(
-    drops, debug=False, samples_per_decade=30, tail_decades=1.0, **kwargs
+def _simple_drop_local_search(
+    drops,
+    start_log_xmin,
+    initial_log_step,
+    log_bounds,
+    distance_cache,
+    *,
+    min_tail_count=3,
+    max_iterations=64,
+    refinements=10,
+    **fit_kwargs,
 ):
-    drops, coarse_xmin_values = _log_xmin_candidates(
-        drops, samples_per_decade, tail_decades=tail_decades
-    )
-    fits = evaluate_xmin(drops, coarse_xmin_values, **kwargs)
-    distances = np.asarray([f.D for f in fits], dtype=float)
+    """Locally minimize KS distance in log-xmin space with a pattern search."""
+    drops = np.asarray(drops, dtype=float)
+    log_lo, log_hi = (float(value) for value in log_bounds)
+    current = float(np.clip(start_log_xmin, log_lo, log_hi))
+    step = float(initial_log_step)
+    min_step = step / 2.0 ** int(refinements)
 
-    x = coarse_xmin_values
-    D = distances
-    mask = np.isfinite(x) & np.isfinite(D) & (x > 0)
-    if mask.sum() < 3:
-        warnings.warn("Not enough finite KS distances to find a local minimum.")
-        return np.nan
-    x = x[mask]
-    D = D[mask]
-    logx = np.log10(x)
-    dip_d1 = np.gradient(D, logx)
-    # We now find the steapest part on the right side of the curve
-    xmin_search_start = x[np.argmin(dip_d1)]
+    def evaluate(log_xmin):
+        log_xmin = float(np.clip(log_xmin, log_lo, log_hi))
+        xmin = float(10.0**log_xmin)
+        key = float(np.float64(xmin))
+        if key not in distance_cache:
+            if np.count_nonzero(drops >= xmin) < min_tail_count:
+                distance_cache[key] = np.inf
+            else:
+                distances, _, _ = evaluate_xmin_distances(
+                    drops,
+                    [xmin],
+                    **fit_kwargs,
+                )
+                distance = float(distances[0])
+                distance_cache[key] = distance if np.isfinite(distance) else np.inf
+        return float(distance_cache[key])
 
-    # Then we try xmins from there until we find a local minimum (coarse grid)
-    start_idx = int(np.searchsorted(x, xmin_search_start, side="left"))
-    xmin_local_min = np.nan
-    for i in range(max(start_idx, 1), len(D) - 1):
-        if D[i] <= D[i - 1] and D[i] <= D[i + 1]:
-            xmin_local_min = float(x[i])
-            break
-    if not np.isfinite(xmin_local_min):
-        # Fallback: smallest D after start
-        if start_idx < len(D):
-            xmin_local_min = float(x[start_idx + int(np.nanargmin(D[start_idx:]))])
+    current_distance = evaluate(current)
+    iterations = 0
+    while iterations < int(max_iterations) and step >= min_step:
+        iterations += 1
+        trials = np.unique(
+            np.clip([current - step, current, current + step], log_lo, log_hi)
+        )
+        trial_distances = np.asarray([evaluate(value) for value in trials])
+        best = int(np.argmin(trial_distances))
+        best_log_xmin = float(trials[best])
+        best_distance = float(trial_distances[best])
+        if best_distance < current_distance:
+            current = best_log_xmin
+            current_distance = best_distance
         else:
-            return np.nan
-    xmin_fitting_results = _xmin_fit_results(fits, coarse_xmin_values)
-    xmin_fitting_results["distances"] = D
-    xmin_fitting_results["xmins"] = x
+            step *= 0.5
 
-    # We now inspect the ks distance of the fits:
+    return {
+        "xmin": float(10.0**current),
+        "distance": current_distance,
+        "start_xmin": float(10.0**start_log_xmin),
+        "iterations": iterations,
+    }
+
+
+def find_xmin_simple_drop_from_results(
+    drops,
+    xmins,
+    distances,
+    valid_fits=None,
+    *,
+    min_tail_count=3,
+    local_refinements=10,
+    local_max_iterations=64,
+    **fit_kwargs,
+):
+    """Refine xmin around the largest adjacent drop in a coarse KS scan.
+
+    Three independent local searches begin at the left edge, logarithmic
+    midpoint, and right edge of the interval with the largest decrease in
+    KS distance. The local minimum with the smallest KS distance is returned.
+    """
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    xmins = np.asarray(xmins, dtype=float)
+    distances = np.asarray(distances, dtype=float)
+    if xmins.shape != distances.shape:
+        raise ValueError("xmins and distances must have the same shape.")
+
+    finite_mask = np.isfinite(xmins) & np.isfinite(distances) & (xmins > 0)
+    fit_validity = (
+        np.ones(xmins.size, dtype=bool)
+        if valid_fits is None
+        else np.asarray(valid_fits, dtype=bool)
+    )
+    if fit_validity.shape != xmins.shape:
+        raise ValueError("valid_fits must have the same shape as xmins.")
+    tail_counts = np.asarray(
+        [np.count_nonzero(drops >= xmin) for xmin in xmins],
+        dtype=int,
+    )
+    search_mask = finite_mask & (tail_counts >= int(min_tail_count))
+    if search_mask.sum() < 2:
+        raise RuntimeError("Need at least two finite initial KS measurements.")
+
+    order = np.argsort(xmins)
+    xmins = xmins[order]
+    distances = distances[order]
+    search_mask = search_mask[order]
+    fit_validity = fit_validity[order]
+    tail_counts = tail_counts[order]
+
+    valid_pairs = search_mask[:-1] & search_mask[1:]
+    if not np.any(valid_pairs):
+        raise RuntimeError("No adjacent valid KS measurements are available.")
+    changes = np.diff(distances)
+    changes[~valid_pairs] = np.inf
+    largest_drop_index = int(np.argmin(changes))
+    if not np.isfinite(changes[largest_drop_index]):
+        raise RuntimeError("Could not identify a finite decrease in KS distance.")
+    if changes[largest_drop_index] >= 0:
+        warnings.warn(
+            "The initial KS scan contains no decrease; simpleDrop will refine "
+            "around the smallest initial KS measurement."
+        )
+        valid_indices = np.flatnonzero(search_mask)
+        global_index = int(
+            valid_indices[np.argmin(distances[valid_indices])]
+        )
+        largest_drop_index = min(max(global_index - 1, 0), xmins.size - 2)
+
+    left = float(xmins[largest_drop_index])
+    right = float(xmins[largest_drop_index + 1])
+    log_left, log_right = np.log10([left, right])
+    starts = (log_left, 0.5 * (log_left + log_right), log_right)
+    initial_log_step = float(log_right - log_left)
+    finite_xmins = xmins[search_mask]
+    log_bounds = (
+        float(np.log10(np.min(finite_xmins))),
+        float(np.log10(np.max(finite_xmins))),
+    )
+    distance_cache = {
+        float(np.float64(xmin)): float(distance)
+        for xmin, distance, keep in zip(xmins, distances, search_mask)
+        if keep
+    }
+
+    local_minima = [
+        _simple_drop_local_search(
+            drops,
+            start,
+            initial_log_step,
+            log_bounds,
+            distance_cache,
+            min_tail_count=min_tail_count,
+            max_iterations=local_max_iterations,
+            refinements=local_refinements,
+            **fit_kwargs,
+        )
+        for start in starts
+    ]
+    finite_minima = [
+        result for result in local_minima if np.isfinite(result["distance"])
+    ]
+    if not finite_minima:
+        raise RuntimeError("All three simpleDrop local searches failed.")
+    selected = min(
+        finite_minima,
+        key=lambda result: (result["distance"], result["xmin"]),
+    )
+    evaluated = sorted(
+        (
+            float(xmin),
+            float(distance),
+        )
+        for xmin, distance in distance_cache.items()
+        if np.isfinite(distance)
+    )
+    details = {
+        "distances": distances,
+        "xmins": xmins,
+        "valid_fits": fit_validity,
+        "search_mask": search_mask,
+        "tail_counts": tail_counts,
+        "largest_drop_interval": (left, right),
+        "largest_distance_drop": float(changes[largest_drop_index]),
+        "local_minima": local_minima,
+        "selected_distance": float(selected["distance"]),
+        "initial_measurement_count": int(xmins.size),
+        "evaluated_xmins": [xmin for xmin, _ in evaluated],
+        "evaluated_distances": [distance for _, distance in evaluated],
+    }
+    return float(selected["xmin"]), details
+
+
+def find_xmin_refined_global_min_from_results(
+    drops,
+    xmins,
+    distances,
+    valid_fits=None,
+    *,
+    min_tail_count=3,
+    local_refinements=10,
+    local_max_iterations=64,
+    **fit_kwargs,
+):
+    """Refine every rough local minimum in a coarse KS scan.
+
+    The supplied coarse scan is first searched over its full valid range for
+    rough local minima, including minima at either boundary. A local
+    log-space pattern search starts from each rough minimum. Only after all
+    local searches have finished is the smallest evaluated KS distance chosen.
+    """
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    xmins = np.asarray(xmins, dtype=float)
+    distances = np.asarray(distances, dtype=float)
+    if xmins.shape != distances.shape:
+        raise ValueError("xmins and distances must have the same shape.")
+
+    fit_validity = (
+        np.ones(xmins.size, dtype=bool)
+        if valid_fits is None
+        else np.asarray(valid_fits, dtype=bool)
+    )
+    if fit_validity.shape != xmins.shape:
+        raise ValueError("valid_fits must have the same shape as xmins.")
+
+    order = np.argsort(xmins)
+    xmins = xmins[order]
+    distances = distances[order]
+    fit_validity = fit_validity[order]
+    tail_counts = np.asarray(
+        [np.count_nonzero(drops >= xmin) for xmin in xmins],
+        dtype=int,
+    )
+    search_mask = (
+        np.isfinite(xmins)
+        & (xmins > 0)
+        & np.isfinite(distances)
+        & (tail_counts >= int(min_tail_count))
+    )
+    valid_indices = np.flatnonzero(search_mask)
+    if valid_indices.size < 2:
+        raise RuntimeError("Need at least two valid initial KS measurements.")
+
+    rough_indices = []
+    for position, index in enumerate(valid_indices):
+        distance = float(distances[index])
+        left_distance = (
+            float(distances[valid_indices[position - 1]])
+            if position > 0
+            else np.inf
+        )
+        right_distance = (
+            float(distances[valid_indices[position + 1]])
+            if position + 1 < valid_indices.size
+            else np.inf
+        )
+        if (
+            distance <= left_distance
+            and distance <= right_distance
+            and (distance < left_distance or distance < right_distance)
+        ):
+            rough_indices.append(int(index))
+
+    if not rough_indices:
+        rough_indices = [
+            int(valid_indices[np.argmin(distances[valid_indices])])
+        ]
+
+    finite_xmins = xmins[search_mask]
+    log_bounds = (
+        float(np.log10(np.min(finite_xmins))),
+        float(np.log10(np.max(finite_xmins))),
+    )
+    log_xmins = np.log10(xmins)
+    distance_cache = {
+        float(np.float64(xmin)): float(distance)
+        for xmin, distance, keep in zip(xmins, distances, search_mask)
+        if keep
+    }
+
+    local_minima = []
+    for index in rough_indices:
+        position = int(np.flatnonzero(valid_indices == index)[0])
+        neighbor_steps = []
+        if position > 0:
+            neighbor_steps.append(
+                float(log_xmins[index] - log_xmins[valid_indices[position - 1]])
+            )
+        if position + 1 < valid_indices.size:
+            neighbor_steps.append(
+                float(log_xmins[valid_indices[position + 1]] - log_xmins[index])
+            )
+        initial_log_step = max(neighbor_steps)
+        local_minima.append(
+            _simple_drop_local_search(
+                drops,
+                float(log_xmins[index]),
+                initial_log_step,
+                log_bounds,
+                distance_cache,
+                min_tail_count=min_tail_count,
+                max_iterations=local_max_iterations,
+                refinements=local_refinements,
+                **fit_kwargs,
+            )
+        )
+
+    evaluated = sorted(
+        (
+            float(xmin),
+            float(distance),
+        )
+        for xmin, distance in distance_cache.items()
+        if np.isfinite(distance)
+    )
+    if not evaluated:
+        raise RuntimeError("No finite KS distances were evaluated.")
+    selected_xmin, selected_distance = min(
+        evaluated,
+        key=lambda item: (item[1], item[0]),
+    )
+    rough_local_minima = [
+        {
+            "index": int(index),
+            "xmin": float(xmins[index]),
+            "distance": float(distances[index]),
+        }
+        for index in rough_indices
+    ]
+    details = {
+        "distances": distances,
+        "xmins": xmins,
+        "valid_fits": fit_validity,
+        "search_mask": search_mask,
+        "tail_counts": tail_counts,
+        "rough_local_minima": rough_local_minima,
+        "local_minima": local_minima,
+        "selected_distance": float(selected_distance),
+        "initial_measurement_count": int(xmins.size),
+        "evaluated_xmins": [xmin for xmin, _ in evaluated],
+        "evaluated_distances": [distance for _, distance in evaluated],
+    }
+    return float(selected_xmin), details
+
+
+def select_global_min_from_search_details(*search_details):
+    """Choose the smallest KS result after all supplied searches have run."""
+    all_evaluations = {}
+    for details in search_details:
+        evaluated_xmins = details.get("evaluated_xmins", ())
+        evaluated_distances = details.get("evaluated_distances", ())
+        if len(evaluated_xmins) != len(evaluated_distances):
+            raise ValueError(
+                "Each search must provide equally sized evaluated_xmins and "
+                "evaluated_distances."
+            )
+        for xmin, distance in zip(evaluated_xmins, evaluated_distances):
+            xmin = float(xmin)
+            distance = float(distance)
+            if np.isfinite(xmin) and xmin > 0 and np.isfinite(distance):
+                all_evaluations[xmin] = min(
+                    distance,
+                    all_evaluations.get(xmin, np.inf),
+                )
+    if not all_evaluations:
+        raise RuntimeError("No finite KS evaluations are available.")
+    selected_xmin, selected_distance = min(
+        all_evaluations.items(),
+        key=lambda item: (item[1], item[0]),
+    )
+    return float(selected_xmin), float(selected_distance), all_evaluations
+
+
+def find_xmin_simple_drop(
+    drops,
+    debug=False,
+    nr_initial=100,
+    tail_decades=1.0,
+    min_tail_count=3,
+    **kwargs,
+):
+    """Select xmin with the three-start simpleDrop method."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    if drops.size < 3:
+        raise ValueError("Need at least three finite positive drops.")
+    if int(nr_initial) != nr_initial or nr_initial < 2:
+        raise ValueError("nr_initial must be an integer of at least two.")
+    if tail_decades <= 0:
+        raise ValueError("tail_decades must be positive.")
+
+    candidate_max = float(drops.max() / 10.0**tail_decades)
+    if candidate_max <= drops.min():
+        raise ValueError(
+            f"Data span fewer than {tail_decades:g} decade(s); no xmin candidates."
+        )
+    xmins = np.geomspace(drops.min(), candidate_max, int(nr_initial))
+    distances, param_vals, valid = evaluate_xmin_distances(
+        drops,
+        xmins,
+        **kwargs,
+    )
+    xmin, details = find_xmin_simple_drop_from_results(
+        drops,
+        xmins,
+        distances,
+        valid,
+        min_tail_count=min_tail_count,
+        **kwargs,
+    )
+    details["param_vals"] = param_vals
+
     if debug:
-        _plot_xmin_debug(
-            coarse_xmin_values,
-            distances,
-            dip_x=x,
-            dip_d1=dip_d1,
-        )
-        _plot_dip_derivative_extrema_debug(
-            x,
-            D,
-            dip_d1,
-            coarse_x=coarse_xmin_values,
-            coarse_D=distances,
-            selected_xmin=xmin_local_min,
-        )
-    return xmin_local_min, xmin_fitting_results
+        fig, ax = plt.subplots()
+        ax.plot(xmins, distances, marker="o", label="Initial KS scan")
+        left, right = details["largest_drop_interval"]
+        ax.axvspan(left, right, color="0.85", label="Largest drop interval")
+        for result in details["local_minima"]:
+            ax.scatter(result["xmin"], result["distance"], marker="x")
+        ax.axvline(xmin, linestyle="--", label="simpleDrop")
+        ax.set_xscale("log")
+        ax.legend()
+        plt.show()
+    return xmin, details
+
+
+# Backward-compatible Python alias. The public strategy name is ``simpleDrop``.
+find_xmin = find_xmin_simple_drop
 
 
 def find_xmin_rising_level(drops, debug=False, **kwargs):
@@ -2543,7 +2910,8 @@ XMIN_STRATEGIES = {
     "global_min": find_xmin_global_min,
     "dip": find_xmin_dip,
     "max_p": find_xmin_max_p,
-    "plateau": find_xmin,
+    "simpleDrop": find_xmin_simple_drop,
+    "simple_drop": find_xmin_simple_drop,
     "derivative": find_xmin_derivative,
     "dks": find_xmin_dks,
     "slope": find_xmin_dks,
@@ -2552,13 +2920,13 @@ XMIN_STRATEGIES = {
     "sylvain": find_xmin_sylvain,
 }
 DEFAULT_XMIN_COMPARISON_STRATEGIES = (
-    "plateau",
+    "simpleDrop",
     "slope",
     "global_min",
 )
 
 
-def select_xmin_with_details(drops, strategy="plateau", **kwargs):
+def select_xmin_with_details(drops, strategy="simpleDrop", **kwargs):
     """Run one named xmin strategy and retain any diagnostic search results."""
     try:
         selector = XMIN_STRATEGIES[strategy]
@@ -2573,7 +2941,7 @@ def select_xmin_with_details(drops, strategy="plateau", **kwargs):
     return float(result), None
 
 
-def select_xmin(drops, strategy="plateau", **kwargs):
+def select_xmin(drops, strategy="simpleDrop", **kwargs):
     """Run one named xmin strategy while preserving its public API."""
     return select_xmin_with_details(drops, strategy=strategy, **kwargs)[0]
 

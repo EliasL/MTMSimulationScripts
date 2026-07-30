@@ -97,6 +97,9 @@ def decomposition_table_data():
         reduction_M = base_M @ symmetry
         F_e = TOTAL_F @ reduction_M
         F_p = np.linalg.inv(reduction_M)
+        determinant = int(round(np.linalg.det(reduction_M)))
+        if determinant not in (-1, 1):
+            raise RuntimeError(f"Expected a unimodular M, got det(M)={determinant}")
         decompositions.append(
             {
                 "word": word,
@@ -105,6 +108,7 @@ def decomposition_table_data():
                 "M": reduction_M,
                 "F_e": F_e,
                 "F_p": F_p,
+                "determinant": determinant,
                 "quadrant": int(elastic_domain_quadrant(F_e.T @ F_e)),
             }
         )

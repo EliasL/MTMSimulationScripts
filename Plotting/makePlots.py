@@ -15,6 +15,7 @@ from simplification.cutil import simplify_coords_vwp
 from tqdm import tqdm
 from pathlib import Path
 from .dataFunctions import (
+    VTUData,
     get_data_from_name,
     extract_force_contribution_magnitude_series,
     extract_true_force_contribution_magnitude_series,
@@ -1196,18 +1197,27 @@ def plot_force_contribution_magnitudes(
 
 
 def compute_predicted_next_energy(csv_file_path):
-    """
+    r"""
     Compute predicted next-step total energy using first- and second-order
     simple-shear Taylor approximations:
 
-        E_{i+1}^{pred,1} = E_i + V_0 * P_{12,i} * delta_gamma_i
-        E_{i+1}^{pred,2} = E_{i+1}^{pred,1}
-            + 0.5 * V_0 * A_{1212,i} * delta_gamma_i^2
-        E_{i+1}^{pred,2}(A_{1212}(0)) = E_{i+1}^{pred,1}
-            + 0.5 * V_0 * A_{1212}(0) * delta_gamma_i^2
+        \widehat E_{n+1}
+            = E_n
+            + V_0 * <sigma_{12}>_n * delta_gamma_n
+        \widehat E_{n+1}
+            = E_n
+            + V_0 * <sigma_{12}>_n * delta_gamma_n
+            + 0.5 * V_0 * \mathfrak{a}_{1212,n}
+              * delta_gamma_n^2
+        \widehat E_{n+1}(\mathfrak{a}_{1212}(0))
+            = E_n
+            + V_0 * <sigma_{12}>_n * delta_gamma_n
+            + 0.5 * V_0 * \mathfrak{a}_{1212}(0)
+              * delta_gamma_n^2
 
-    where A is dP/dF evaluated along F = [[1, gamma], [0, 1]], and compare
-    to measured E_{i+1}.
+    The Cauchy term approximates the generalized stress conjugate to MTS2D's
+    left-multiplicative affine shear. A is dP/dF evaluated along
+    F = [[1, gamma], [0, 1]], and the result is compared to measured E.
     """
     return calculate_energy_step_data(csv_file_path, average_energy=None)
 
@@ -1297,8 +1307,8 @@ def plot_predicted_energy_error(
         reference_alpha = first_order_alpha
 
     x_label_map = {
-        "load_i": r"Strain $\gamma_i$",
-        "load_ip1": r"Strain $\gamma_{i+1}$",
+        "load_i": r"Strain $\gamma$",
+        "load_ip1": r"Strain $\gamma$",
     }
     if x_column not in x_label_map:
         raise ValueError(f"x_column must be one of {sorted(x_label_map)}.")
@@ -1315,15 +1325,15 @@ def plot_predicted_energy_error(
     piola_ax = ax.twinx() if show_piola else None
 
     metric_label_map = {
-        "prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},1}$",
-        "abs_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},1}|$",
-        "relative_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},1}| / |E_{i+1}^{\mathrm{real}}|$",
-        "second_order_prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}$",
-        "abs_second_order_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}|$",
-        "relative_second_order_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}| / |E_{i+1}^{\mathrm{real}}|$",
-        "second_order_gamma0_prediction_error": r"$E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(A_{1212}(0))$",
-        "abs_second_order_gamma0_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(A_{1212}(0))|$",
-        "relative_second_order_gamma0_prediction_error": r"$|E_{i+1}^{\mathrm{real}} - E_{i+1}^{\mathrm{pred},2}(A_{1212}(0))| / |E_{i+1}^{\mathrm{real}}|$",
+        "prediction_error": r"$-\Delta E_S$",
+        "abs_prediction_error": r"$|\Delta E_S|$",
+        "relative_prediction_error": r"$|\Delta E_S|/|E|$",
+        "second_order_prediction_error": r"$-\Delta E_S$",
+        "abs_second_order_prediction_error": r"$|\Delta E_S|$",
+        "relative_second_order_prediction_error": r"$|\Delta E_S|/|E|$",
+        "second_order_gamma0_prediction_error": r"$-\Delta E_S(\mathfrak{a}_{1212}(0))$",
+        "abs_second_order_gamma0_prediction_error": r"$|\Delta E_S(\mathfrak{a}_{1212}(0))|$",
+        "relative_second_order_gamma0_prediction_error": r"$|\Delta E_S(\mathfrak{a}_{1212}(0))|/|E|$",
     }
 
     reference_metric_maps = {
@@ -1342,8 +1352,8 @@ def plot_predicted_energy_error(
         },
     }
     reference_text_map = {
-        "first_order": "Transparent markers: first-order approximation",
-        "second_order_gamma0": r"Transparent markers: second order with $A_{1212}(0)$",
+        "first_order": "Transparent markers:\nfirst-order approximation",
+        "second_order_gamma0": r"Transparent markers: second order with $\mathfrak{a}_{1212}(0)$",
     }
     signed_error_metrics = {
         "prediction_error",
@@ -1431,7 +1441,7 @@ def plot_predicted_energy_error(
             )
         x = np.asarray(prediction_df[x_column], dtype=float)
         y = _plot_values(prediction_df, error_metric) / error_scale
-        piola = np.asarray(prediction_df["P12_i"], dtype=float)
+        cauchy_stress = np.asarray(prediction_df["sigma12_i"], dtype=float)
 
         finite = np.isfinite(x) & np.isfinite(y)
         if strain_min is not None:
@@ -1472,15 +1482,17 @@ def plot_predicted_energy_error(
                 )
 
         if show_piola:
-            piola_finite = np.isfinite(x) & np.isfinite(piola)
+            # ``show_piola`` is retained for API compatibility; the predictor
+            # and this auxiliary curve now use averaged Cauchy shear stress.
+            stress_finite = np.isfinite(x) & np.isfinite(cauchy_stress)
             if strain_min is not None:
-                piola_finite &= x >= strain_min
+                stress_finite &= x >= strain_min
             if strain_max is not None:
-                piola_finite &= x <= strain_max
-            if np.any(piola_finite):
+                stress_finite &= x <= strain_max
+            if np.any(stress_finite):
                 piola_ax.plot(
-                    x[piola_finite],
-                    piola[piola_finite],
+                    x[stress_finite],
+                    cauchy_stress[stress_finite],
                     color="0.45",
                     linestyle="--",
                     linewidth=0.8,
@@ -1556,27 +1568,29 @@ def plot_predicted_energy_error(
     else:
         y_label = metric_label_map[error_metric]
     if normalize_by_reference_volume:
-        y_label = rf"$\left({y_label[1:-1]}\right)/V_0$"
+        y_label = rf"${y_label[1:-1]}/V_0$"
     ax.set_ylabel(y_label)
     if y_log:
         ax.set_yscale("log")
     if show_piola:
-        piola_ax.set_ylabel(r"$P_{12}$", color="0.35")
+        piola_ax.set_ylabel(r"$\langle\sigma_{12}\rangle$", color="0.35")
         piola_ax.tick_params(axis="y", colors="0.35")
     if "second_order_gamma0" in error_metric:
         title_formula = (
-            r"$E_{i+1}^{\mathrm{pred},2}(A_{1212}(0))="
-            r"E_i+V_0 P_{12,i}\Delta\gamma_i"
-            r"+\frac{1}{2}V_0 A_{1212}(0)(\Delta\gamma_i)^2$"
+            r"$\widehat E_{n+1}(\mathfrak{a}_{1212}(0))="
+            r"E_n+V_0\langle\sigma_{12}\rangle_n\Delta\gamma_n"
+            r"+\frac{1}{2}V_0\mathfrak{a}_{1212}(0)(\Delta\gamma_n)^2$"
         )
     elif "second_order" in error_metric:
         title_formula = (
-            r"$E_{i+1}^{\mathrm{pred},2}=E_i+V_0 P_{12,i}\Delta\gamma_i"
-            r"+\frac{1}{2}V_0 A_{1212,i}(\Delta\gamma_i)^2$"
+            r"$\widehat E_{n+1}=E_n"
+            r"+V_0\langle\sigma_{12}\rangle_n\Delta\gamma_n"
+            r"+\frac{1}{2}V_0\mathfrak{a}_{1212,n}(\Delta\gamma_n)^2$"
         )
     else:
         title_formula = (
-            r"$E_{i+1}^{\mathrm{pred},1}=E_i+V_0 P_{12,i}\Delta\gamma_i$"
+            r"$\widehat E_{n+1}=E_n"
+            r"+V_0\langle\sigma_{12}\rangle_n\Delta\gamma_n$"
         )
     title = (
         "Energy Prediction Error per Reference Area"
@@ -1587,11 +1601,11 @@ def plot_predicted_energy_error(
         ax.set_title(title + "\n" + title_formula)
     if reference_prediction is not None:
         ax.text(
-            0.98,
-            0.98,
+            0.02,
+            0.90,
             reference_text_map[reference_prediction],
             transform=ax.transAxes,
-            ha="right",
+            ha="left",
             va="top",
             fontsize="small",
             color="0.35",
@@ -1610,7 +1624,7 @@ def plot_predicted_energy_error(
             marker_color="lower_left_white",
         )
     else:
-        ax.legend(loc="best", title=legend_title)
+        ax.legend(loc="upper right", title=legend_title)
     fig.tight_layout()
 
     if save:
@@ -1626,6 +1640,792 @@ def plot_predicted_energy_error(
     if show:
         plt.show()
     return fig, ax
+
+
+def plot_predicted_energy_error_distribution(
+    csv_file_paths,
+    *,
+    name="predicted_energy_error_distribution.pdf",
+    title=None,
+    bins=120,
+    drop_threshold=0.0,
+    distance_steps=1,
+    error_metric="second_order_prediction_error",
+    normalize_by_reference_volume=True,
+    pre_yield_min_gamma=None,
+    figsize=(7.0, 4.8),
+    show=False,
+    save=True,
+):
+    """Plot probabilities per logarithmic bin for the second-order residual.
+
+    The raw inter-load energy change is used to identify actual energy drops:
+    transitions with ``total_energy_change < -drop_threshold`` are excluded.
+    ``distance_steps=1`` retains the non-drop transition immediately before a
+    drop; ``distance_steps=None`` retains all non-drop transitions.  Pre/post
+    yield is classified from the strain at the maximum stored ``avg_sigma12``.
+
+    The plotted residual is ``abs(Delta E_S)`` and is divided by the
+    initial/reference volume of each run by default. If
+    ``pre_yield_min_gamma`` is provided, pre-yield samples with
+    ``load_i < pre_yield_min_gamma`` are excluded. The y values are normalized
+    counts per logarithmic bin, not probability densities. The plotted curve
+    connects the tops of adjacent bins.
+    """
+    if isinstance(csv_file_paths, (str, Path)):
+        csv_paths = [Path(csv_file_paths)]
+    else:
+        csv_paths = [Path(path) for path in csv_file_paths]
+    if not csv_paths:
+        raise ValueError("No CSV paths provided.")
+    if not isinstance(bins, (int, np.integer)) or bins < 1:
+        raise ValueError("bins must be a positive integer.")
+    if distance_steps is not None:
+        if not isinstance(distance_steps, (int, np.integer)) or distance_steps < 1:
+            raise ValueError("distance_steps must be None or a positive integer.")
+    if not np.isfinite(drop_threshold) or drop_threshold < 0:
+        raise ValueError("drop_threshold must be finite and nonnegative.")
+    if error_metric not in {
+        "second_order_prediction_error",
+        "abs_second_order_prediction_error",
+        "second_order_gamma0_prediction_error",
+        "abs_second_order_gamma0_prediction_error",
+    }:
+        raise ValueError(
+            "error_metric must be a second-order prediction residual, got "
+            f"{error_metric!r}."
+        )
+    if pre_yield_min_gamma is not None:
+        if not np.isfinite(pre_yield_min_gamma) or pre_yield_min_gamma < 0:
+            raise ValueError(
+                "pre_yield_min_gamma must be None or finite and nonnegative."
+            )
+
+    regions = ("pre", "post")
+    distances = (None,) if distance_steps is None else (None, distance_steps)
+    values = {(region, distance): [] for region in regions for distance in distances}
+    counts = {(region, distance): 0 for region in regions for distance in distances}
+
+    for csv_path in csv_paths:
+        prediction_df, prediction_info = compute_predicted_next_energy(csv_path)
+        raw_df = read_macrodata_csv(csv_path)
+        load = np.asarray(raw_df["load"], dtype=float)
+        load_i = np.asarray(prediction_df["load_i"], dtype=float)
+        if len(load) != len(prediction_df) + 1:
+            raise ValueError(
+                f"Unexpected row alignment in {csv_path}: raw data has {len(load)} "
+                f"rows, prediction data has {len(prediction_df)} steps."
+            )
+
+        if "total_energy_change" in raw_df:
+            step_energy_change = np.asarray(
+                raw_df["total_energy_change"], dtype=float
+            )[1:]
+        elif "total_energy" in raw_df:
+            step_energy_change = np.diff(
+                np.asarray(raw_df["total_energy"], dtype=float)
+            )
+        else:
+            raise KeyError(
+                f"{csv_path} has neither 'total_energy_change' nor 'total_energy'."
+            )
+        drop_mask = np.isfinite(step_energy_change) & (
+            step_energy_change < -float(drop_threshold)
+        )
+
+        stress_col = "avg_sigma12" if "avg_sigma12" in raw_df else "avg_P12"
+        if stress_col not in raw_df:
+            raise KeyError(f"{csv_path} has no yield-stress column.")
+        stress = np.asarray(raw_df[stress_col], dtype=float)
+        finite_stress = np.isfinite(stress)
+        if not np.any(finite_stress):
+            raise ValueError(f"No finite yield-stress values found in {csv_path}.")
+        yield_load = float(load[int(np.nanargmax(stress))])
+
+        if distance_steps is None:
+            distance_masks = {None: np.ones(len(prediction_df), dtype=bool)}
+        else:
+            distance_masks = {
+                None: np.ones(len(prediction_df), dtype=bool),
+                int(distance_steps): np.zeros(len(prediction_df), dtype=bool),
+            }
+            drop_indices = np.flatnonzero(drop_mask)
+            targets = drop_indices - int(distance_steps)
+            valid_targets = (targets >= 0) & (targets < len(prediction_df))
+            distance_masks[int(distance_steps)][targets[valid_targets]] = True
+
+        residual = np.abs(np.asarray(prediction_df[error_metric], dtype=float))
+        if normalize_by_reference_volume:
+            reference_volume = float(prediction_info["reference_volume"])
+            if not np.isfinite(reference_volume) or reference_volume <= 0:
+                raise ValueError(
+                    f"Invalid initial volume {reference_volume!r} for {csv_path}."
+                )
+            residual /= reference_volume
+        base_mask = np.isfinite(residual) & (residual > 0) & (~drop_mask)
+        for region in regions:
+            region_mask = (
+                load_i < yield_load if region == "pre" else load_i >= yield_load
+            )
+            if region == "pre" and pre_yield_min_gamma is not None:
+                region_mask &= load_i >= float(pre_yield_min_gamma)
+            for distance in distances:
+                mask = base_mask & region_mask & distance_masks[distance]
+                values[(region, distance)].append(residual[mask])
+                counts[(region, distance)] += int(np.count_nonzero(mask))
+
+    for key in values:
+        if values[key]:
+            values[key] = np.concatenate(values[key])
+        else:
+            values[key] = np.empty(0, dtype=float)
+
+    all_values = np.concatenate(
+        [array for array in values.values() if array.size], dtype=float
+    ) if any(array.size for array in values.values()) else np.empty(0, dtype=float)
+    if all_values.size == 0:
+        raise ValueError("No positive non-drop prediction errors remain after filtering.")
+    lower = float(np.nanmin(all_values))
+    upper = float(np.nanmax(all_values))
+    if not np.isfinite(lower) or not np.isfinite(upper) or lower <= 0 or upper <= 0:
+        raise ValueError("Prediction residuals must contain finite positive values.")
+    if lower == upper:
+        lower /= 2.0
+        upper *= 2.0
+    edges = np.geomspace(lower, upper, int(bins) + 1)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    styles = [
+        ("pre", None, "Pre-yield, all non-drop", "C0"),
+        ("post", None, "Post-yield, all non-drop", "C1"),
+    ]
+    if distance_steps is not None:
+        styles.extend(
+            [
+                (
+                    "pre",
+                    distance_steps,
+                    f"Pre-yield, {distance_steps}-step pre-drop",
+                    "C2",
+                ),
+                (
+                    "post",
+                    distance_steps,
+                    f"Post-yield, {distance_steps}-step pre-drop",
+                    "C3",
+                ),
+            ]
+        )
+    positive_probabilities = []
+    for region, distance, label, color in styles:
+        sample = values[(region, distance)]
+        if sample.size == 0:
+            continue
+        histogram, _ = np.histogram(sample, bins=edges)
+        probability = histogram.astype(float) / float(sample.size)
+        positive_probabilities.extend(probability[probability > 0].tolist())
+        step_x = np.repeat(edges, 2)[1:-1]
+        step_y = np.repeat(probability, 2)
+        ax.plot(
+            step_x,
+            step_y,
+            color=color,
+            linewidth=1.8,
+            label=f"{label} (N={sample.size:,})",
+        )
+
+    if not positive_probabilities:
+        raise ValueError("All prediction-error histogram bins are empty.")
+    ax.set_xscale("log")
+    x_label = r"$|\Delta E_S|$"
+    if normalize_by_reference_volume:
+        x_label = r"$|\Delta E_S|/V_0$"
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("Probability per logarithmic bin")
+    if title is not None:
+        ax.set_title(title)
+    ax.legend(loc="best", fontsize="small")
+    fig.tight_layout()
+
+    if save:
+        output_path = Path(name)
+        if output_path.suffix == "":
+            output_path = output_path.with_suffix(".pdf")
+        if not output_path.is_absolute():
+            output_path = Path("Plots") / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path)
+        print(f'Plot saved at: "{output_path}"')
+    if show:
+        plt.show()
+
+    summary = {
+        "bins": edges,
+        "counts": counts,
+        "values": values,
+        "yield_filter": "load_i below/at the maximum stored avg_sigma12",
+        "drop_filter": "total_energy_change < -drop_threshold",
+        "distance_filter": distance_steps,
+        "error_metric": error_metric,
+        "normalize_by_reference_volume": normalize_by_reference_volume,
+        "pre_yield_min_gamma": pre_yield_min_gamma,
+    }
+    return fig, ax, summary
+
+
+def plot_combined_predicted_energy_error_distribution(
+    grouped_csv_file_paths,
+    *,
+    name="combined_predicted_energy_error_distribution.pdf",
+    bins=60,
+    drop_threshold=0.0,
+    error_metric="second_order_prediction_error",
+    normalize_by_reference_volume=True,
+    pre_yield_min_gamma=None,
+    main_xlim=None,
+    main_ylim=None,
+    full_loglog_inset=False,
+    inset_bounds=(0.56, 0.36, 0.39, 0.48),
+    figsize=(4.329, 2.808),
+    show=False,
+    save=True,
+):
+    """Compare pre/post-yield prediction errors for several simulation groups.
+
+    ``grouped_csv_file_paths`` maps a legend label (for example, ``"No
+    reconnection"``) to one or more macro-data CSV files.  Each group is
+    filtered with the same non-drop, pre/post-yield rules as
+    :func:`plot_predicted_energy_error_distribution`, with no special
+    pre-drop subset.  The groups share one set of logarithmic bin edges so the
+    four curves can be compared directly across the full data-derived x-range
+    on a linear-probability y-axis.
+    """
+    if not hasattr(grouped_csv_file_paths, "items"):
+        raise TypeError("grouped_csv_file_paths must be a mapping of labels to paths.")
+    groups = []
+    for label, csv_paths in grouped_csv_file_paths.items():
+        if isinstance(csv_paths, (str, Path)):
+            csv_paths = [csv_paths]
+        csv_paths = [Path(path) for path in csv_paths]
+        if not csv_paths:
+            raise ValueError(f"No CSV paths provided for group {label!r}.")
+        temporary_fig, _, summary = plot_predicted_energy_error_distribution(
+            csv_paths,
+            bins=bins,
+            drop_threshold=drop_threshold,
+            distance_steps=None,
+            error_metric=error_metric,
+            normalize_by_reference_volume=normalize_by_reference_volume,
+            pre_yield_min_gamma=pre_yield_min_gamma,
+            show=False,
+            save=False,
+        )
+        plt.close(temporary_fig)
+        groups.append((str(label), summary))
+
+    regions = ("pre", "post")
+    all_values = [
+        summary["values"][(region, None)]
+        for _, summary in groups
+        for region in regions
+        if summary["values"][(region, None)].size
+    ]
+    if not all_values:
+        raise ValueError("No positive prediction errors remain after filtering.")
+    all_values = np.concatenate(all_values)
+    lower = float(np.nanmin(all_values))
+    upper = float(np.nanmax(all_values))
+    if not np.isfinite(lower) or not np.isfinite(upper) or lower <= 0 or upper <= 0:
+        raise ValueError("Prediction residuals must contain finite positive values.")
+    if lower == upper:
+        lower /= 2.0
+        upper *= 2.0
+    edges = np.geomspace(lower, upper, int(bins) + 1)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    colors = ("#9ecae1", "#2171b5", "#fdae6b", "#e6550d")
+    counts = {}
+    plot_data = []
+
+    for group_index, (group_label, summary) in enumerate(groups):
+        for region_index, region in enumerate(regions):
+            sample = summary["values"][(region, None)]
+            counts[(group_label, region)] = int(sample.size)
+            if sample.size == 0:
+                continue
+            histogram, _ = np.histogram(sample, bins=edges)
+            probability = histogram.astype(float) / float(sample.size)
+            plot_data.append(
+                (
+                    group_label,
+                    region,
+                    sample,
+                    probability,
+                    colors[group_index * len(regions) + region_index],
+                )
+            )
+
+    for group_label, region, sample, probability, color in plot_data:
+        step_x = np.repeat(edges, 2)[1:-1]
+        step_y = np.repeat(probability, 2)
+        ax.plot(
+            step_x,
+            step_y,
+            color=color,
+            linewidth=1.2,
+            label=f"{group_label}, {region}-yield",
+        )
+
+    ax.set_xscale("log")
+    if main_xlim is not None:
+        ax.set_xlim(*main_xlim)
+    if main_ylim is not None:
+        ax.set_ylim(*main_ylim)
+    x_label = r"$|\Delta E_S|$"
+    if normalize_by_reference_volume:
+        x_label = r"$|\Delta E_S|/V_0$"
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("Probability per logarithmic bin")
+    ax.legend(loc="upper left", fontsize=4.8, handlelength=1.43, borderpad=0.26)
+
+    fig.tight_layout()
+    if full_loglog_inset:
+        inset_ax = ax.inset_axes(inset_bounds)
+        for _, _, _, probability, color in plot_data:
+            inset_ax.plot(
+                np.repeat(edges, 2)[1:-1],
+                np.repeat(probability, 2),
+                color=color,
+                linewidth=0.8,
+            )
+        inset_ax.set_xscale("log")
+        inset_ax.set_yscale("log")
+        positive_probability = np.concatenate(
+            [probability[probability > 0] for _, _, _, probability, _ in plot_data]
+        )
+        if positive_probability.size:
+            inset_ax.set_ylim(
+                max(float(np.min(positive_probability)) * 0.5, 1.0e-12),
+                min(float(np.max(positive_probability)) * 2.0, 1.0),
+            )
+        inset_ax.tick_params(axis="both", which="both", labelsize=4.2, pad=1.0)
+
+    if save:
+        output_path = Path(name)
+        if output_path.suffix == "":
+            output_path = output_path.with_suffix(".pdf")
+        if not output_path.is_absolute():
+            output_path = Path("Plots") / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path)
+        print(f'Plot saved at: "{output_path}"')
+    if show:
+        plt.show()
+
+    return fig, ax, {
+        "bins": edges,
+        "counts": counts,
+        "groups": groups,
+        "distance_filter": None,
+        "normalize_by_reference_volume": normalize_by_reference_volume,
+        "pre_yield_min_gamma": pre_yield_min_gamma,
+        "main_xlim": main_xlim,
+        "main_ylim": main_ylim,
+        "full_loglog_inset": bool(full_loglog_inset),
+    }
+
+
+def plot_predicted_energy_error_distribution_with_reconnection_events(
+    grouped_csv_file_paths,
+    *,
+    name="predicted_energy_error_with_reconnection_events.pdf",
+    bins=120,
+    drop_threshold=0.0,
+    error_metric="second_order_prediction_error",
+    normalize_by_reference_volume=True,
+    pre_yield_min_gamma=None,
+    reconnection_event_column="nr_total_edge_flips",
+    show_reconnection_subsets=False,
+    main_xlim=None,
+    main_ylim=None,
+    figsize=(4.329, 2.808),
+    show=False,
+    save=True,
+):
+    """Plot all non-drop errors plus reconnecting, increasing-energy steps.
+
+    The four ordinary curves contain all non-drop transitions. If
+    ``show_reconnection_subsets`` is enabled, reconnecting groups additionally
+    show two dashed curves for transitions with
+    ``reconnection_event_column > 0`` and ``total_energy_change > 0``, plus two
+    dotted curves for non-drop transitions with
+    ``reconnection_event_column == 0``.
+    """
+    if not hasattr(grouped_csv_file_paths, "items"):
+        raise TypeError("grouped_csv_file_paths must be a mapping of labels to paths.")
+    if not isinstance(bins, (int, np.integer)) or bins < 1:
+        raise ValueError("bins must be a positive integer.")
+    if pre_yield_min_gamma is not None and (
+        not np.isfinite(pre_yield_min_gamma) or pre_yield_min_gamma < 0
+    ):
+        raise ValueError("pre_yield_min_gamma must be None or finite and nonnegative.")
+
+    def collect(csv_paths, event_only=False, no_event_only=False):
+        if event_only and no_event_only:
+            raise ValueError("event_only and no_event_only are mutually exclusive.")
+        values = {"pre": [], "post": []}
+        for csv_path in csv_paths:
+            prediction_df, prediction_info = compute_predicted_next_energy(csv_path)
+            raw_df = read_macrodata_csv(csv_path)
+            load = np.asarray(raw_df["load"], dtype=float)
+            load_i = np.asarray(prediction_df["load_i"], dtype=float)
+            if len(load) != len(prediction_df) + 1:
+                raise ValueError(f"Unexpected row alignment in {csv_path}.")
+
+            if "total_energy_change" in raw_df:
+                step_energy_change = np.asarray(
+                    raw_df["total_energy_change"], dtype=float
+                )[1:]
+            elif "total_energy" in raw_df:
+                step_energy_change = np.diff(
+                    np.asarray(raw_df["total_energy"], dtype=float)
+                )
+            else:
+                raise KeyError(
+                    f"{csv_path} has neither 'total_energy_change' nor 'total_energy'."
+                )
+            drop_mask = np.isfinite(step_energy_change) & (
+                step_energy_change < -float(drop_threshold)
+            )
+
+            stress_col = "avg_sigma12" if "avg_sigma12" in raw_df else "avg_P12"
+            if stress_col not in raw_df:
+                raise KeyError(f"{csv_path} has no yield-stress column.")
+            stress = np.asarray(raw_df[stress_col], dtype=float)
+            finite_stress = np.isfinite(stress)
+            if not np.any(finite_stress):
+                raise ValueError(f"No finite yield-stress values found in {csv_path}.")
+            yield_load = float(load[int(np.nanargmax(stress))])
+
+            residual = np.abs(
+                np.asarray(prediction_df[error_metric], dtype=float)
+            )
+            if normalize_by_reference_volume:
+                reference_volume = float(prediction_info["reference_volume"])
+                if not np.isfinite(reference_volume) or reference_volume <= 0:
+                    raise ValueError(f"Invalid initial volume for {csv_path}.")
+                residual /= reference_volume
+
+            base_mask = np.isfinite(residual) & (residual > 0)
+            if event_only:
+                if reconnection_event_column not in raw_df:
+                    raise KeyError(
+                        f"{csv_path} has no {reconnection_event_column!r} column."
+                    )
+                event_mask = np.asarray(
+                    raw_df[reconnection_event_column], dtype=float
+                )[1:] > 0
+                base_mask &= event_mask & (step_energy_change > 0)
+            elif no_event_only:
+                if reconnection_event_column not in raw_df:
+                    raise KeyError(
+                        f"{csv_path} has no {reconnection_event_column!r} column."
+                    )
+                event_mask = np.asarray(
+                    raw_df[reconnection_event_column], dtype=float
+                )[1:] > 0
+                base_mask &= (~event_mask) & ~drop_mask
+            else:
+                base_mask &= ~drop_mask
+
+            for region in ("pre", "post"):
+                region_mask = (
+                    load_i < yield_load if region == "pre" else load_i >= yield_load
+                )
+                if region == "pre" and pre_yield_min_gamma is not None:
+                    region_mask &= load_i >= float(pre_yield_min_gamma)
+                values[region].append(residual[base_mask & region_mask])
+
+        for region in values:
+            values[region] = (
+                np.concatenate(values[region])
+                if values[region]
+                else np.empty(0, dtype=float)
+            )
+        return values
+
+    def display_group_label(label):
+        normalized = str(label).lower()
+        if "no" in normalized and "recon" in normalized:
+            return "No recon"
+        if "recon" in normalized:
+            return "Recon"
+        return str(label)
+
+    def is_reconnection_group(label):
+        normalized = str(label).lower()
+        return "recon" in normalized and "no" not in normalized
+
+    def format_count(count):
+        exponent = int(np.floor(np.log10(count)))
+        mantissa = float(count) / (10.0**exponent)
+        return rf"$n={mantissa:.1f}\times 10^{{{exponent}}}$"
+
+    color_families = {
+        "No recon": ("#9ecae1", "#2171b5"),
+        "Recon": ("#fdae6b", "#e6550d"),
+    }
+    entries = []
+    for label, csv_paths in grouped_csv_file_paths.items():
+        if isinstance(csv_paths, (str, Path)):
+            csv_paths = [csv_paths]
+        csv_paths = [Path(path) for path in csv_paths]
+        if not csv_paths:
+            raise ValueError(f"No CSV paths provided for group {label!r}.")
+        display_label = display_group_label(label)
+        colors = color_families.get(display_label, ("C0", "C1"))
+        values = collect(csv_paths, event_only=False)
+        for region_index, region in enumerate(("pre", "post")):
+            entries.append(
+                {
+                    "label": f"{display_label}, {region}-yield",
+                    "sample": values[region],
+                    "color": colors[region_index],
+                    "linestyle": "-",
+                    "linewidth": 1.2,
+                }
+            )
+        if show_reconnection_subsets and is_reconnection_group(label):
+            event_values = collect(csv_paths, event_only=True)
+            for region_index, region in enumerate(("pre", "post")):
+                entries.append(
+                    {
+                        "label": f"Flips + increase, {region}-yield",
+                        "sample": event_values[region],
+                        "color": colors[region_index],
+                        "linestyle": "--",
+                        "linewidth": 1.0,
+                    }
+                )
+            no_event_values = collect(csv_paths, no_event_only=True)
+            for region_index, region in enumerate(("pre", "post")):
+                entries.append(
+                    {
+                        "label": f"Recon, no flips, {region}-yield",
+                        "sample": no_event_values[region],
+                        "color": colors[region_index],
+                        "linestyle": ":",
+                        "linewidth": 1.0,
+                    }
+                )
+
+    nonempty_entries = [entry for entry in entries if entry["sample"].size]
+    if not nonempty_entries:
+        raise ValueError("No positive prediction errors remain after filtering.")
+    all_values = np.concatenate([entry["sample"] for entry in nonempty_entries])
+    lower = float(np.nanmin(all_values))
+    upper = float(np.nanmax(all_values))
+    if not np.isfinite(lower) or not np.isfinite(upper) or lower <= 0 or upper <= 0:
+        raise ValueError("Prediction residuals must contain finite positive values.")
+    if lower == upper:
+        lower /= 2.0
+        upper *= 2.0
+    edges = np.geomspace(lower, upper, int(bins) + 1)
+
+    plot_data = []
+    for entry in nonempty_entries:
+        histogram, _ = np.histogram(entry["sample"], bins=edges)
+        probability = histogram.astype(float) / float(entry["sample"].size)
+        plot_data.append((entry, probability))
+
+    fig, ax = plt.subplots(figsize=figsize)
+    for entry, probability in plot_data:
+        ax.plot(
+            np.repeat(edges, 2)[1:-1],
+            np.repeat(probability, 2),
+            color=entry["color"],
+            linestyle=entry["linestyle"],
+            linewidth=entry["linewidth"],
+            label=f"{entry['label']} ({format_count(entry['sample'].size)})",
+        )
+    ax.set_xscale("log")
+    if main_xlim is not None:
+        ax.set_xlim(*main_xlim)
+    if main_ylim is not None:
+        ax.set_ylim(*main_ylim)
+    x_label = r"$|\Delta E_S|$"
+    if normalize_by_reference_volume:
+        x_label = r"$|\Delta E_S|/V_0$"
+    ax.set_xlabel(x_label)
+    ax.set_ylabel("Probability per logarithmic bin")
+    ax.legend(loc="upper left", fontsize=8.0, handlelength=1.56, borderpad=0.26)
+
+    fig.tight_layout()
+
+    if save:
+        output_path = Path(name)
+        if output_path.suffix == "":
+            output_path = output_path.with_suffix(".pdf")
+        if not output_path.is_absolute():
+            output_path = Path("Plots") / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path)
+        print(f'Plot saved at: "{output_path}"')
+    if show:
+        plt.show()
+
+    return fig, ax, {
+        "bins": edges,
+        "entries": entries,
+        "event_column": reconnection_event_column,
+        "main_xlim": main_xlim,
+        "main_ylim": main_ylim,
+    }
+
+
+def plot_average_elastic_frobenius_norm_vs_gamma(
+    grouped_vtu_file_paths,
+    *,
+    name="average_elastic_frobenius_norm_vs_gamma.pdf",
+    energy_csv_file_paths=None,
+    figsize=(3.5, 2.4),
+    show=False,
+    save=True,
+):
+    """Plot the element-average Frobenius norm of ``F_e = F M_e`` vs gamma.
+
+    ``M_e`` is the elastic-domain reduction matrix returned by
+    ``VTUData.get_M(elastic_M=True)``.  The norm is evaluated per element and
+    then averaged, so each marker represents one VTU snapshot. The legend
+    labels identify the reconnection condition; the sample seed is kept in
+    the output filename rather than repeated in the legend.
+    """
+    if not hasattr(grouped_vtu_file_paths, "items"):
+        raise TypeError("grouped_vtu_file_paths must be a mapping of labels to paths.")
+
+    curves = []
+    for label, vtu_paths in grouped_vtu_file_paths.items():
+        if isinstance(vtu_paths, (str, Path)):
+            vtu_paths = [vtu_paths]
+        points = []
+        for vtu_path in vtu_paths:
+            vtu_path = Path(vtu_path)
+            metadata = get_data_from_name(vtu_path)
+            gamma = metadata.get("load")
+            if gamma is None:
+                raise ValueError(f"Could not infer gamma from VTU filename {vtu_path}.")
+            data = VTUData(str(vtu_path))
+            F = np.asarray(data.get_F(), dtype=float)
+            M_elastic = np.asarray(data.get_M(elastic_M=True), dtype=float)
+            if F.shape != M_elastic.shape or F.ndim != 3 or F.shape[-2:] != (2, 2):
+                raise ValueError(
+                    f"Unexpected F/M shape for {vtu_path}: {F.shape}, {M_elastic.shape}."
+                )
+            F_elastic = np.matmul(F, M_elastic)
+            element_norm = np.linalg.norm(F_elastic, axis=(-2, -1))
+            finite_norm = element_norm[np.isfinite(element_norm)]
+            if finite_norm.size == 0:
+                raise ValueError(f"No finite elastic norms found in {vtu_path}.")
+            points.append((float(gamma), float(np.mean(finite_norm)), str(vtu_path)))
+        if not points:
+            raise ValueError(f"No VTU paths provided for group {label!r}.")
+        points.sort(key=lambda point: point[0])
+        curves.append((str(label), points))
+
+    fig, ax = plt.subplots(figsize=figsize)
+    summaries = {}
+    curve_colors = {}
+    for curve_index, (label, points) in enumerate(curves):
+        gamma, mean_norm, paths = zip(*points)
+        color = f"C{curve_index}"
+        curve_colors[label] = color
+        ax.plot(
+            gamma,
+            mean_norm,
+            color=color,
+            marker="o",
+            linewidth=1.2,
+            markersize=3.0,
+            label=label,
+        )
+        summaries[label] = {
+            "gamma": np.asarray(gamma),
+            "mean_frobenius_norm": np.asarray(mean_norm),
+            "paths": paths,
+        }
+
+    energy_ax = None
+    if energy_csv_file_paths is not None:
+        if not hasattr(energy_csv_file_paths, "items"):
+            raise TypeError("energy_csv_file_paths must be a mapping of labels to CSV paths.")
+        energy_ax = ax.twinx()
+        energy_handles = []
+        for label, csv_path in energy_csv_file_paths.items():
+            csv_path = Path(csv_path)
+            energy_df = read_macrodata_csv(csv_path)
+            if "load" not in energy_df or "avg_energy" not in energy_df:
+                raise KeyError(
+                    f"{csv_path} must contain 'load' and 'avg_energy' columns."
+                )
+            load = np.asarray(energy_df["load"], dtype=float)
+            energy = np.asarray(energy_df["avg_energy"], dtype=float)
+            if load.shape != energy.shape:
+                raise ValueError(f"Energy/load shape mismatch in {csv_path}.")
+            stress_col = "avg_sigma12" if "avg_sigma12" in energy_df else "avg_P12"
+            if stress_col not in energy_df:
+                raise KeyError(f"{csv_path} has no yield-stress column.")
+            stress = np.asarray(energy_df[stress_col], dtype=float)
+            finite_stress = np.isfinite(stress)
+            if not np.any(finite_stress):
+                raise ValueError(f"No finite yield-stress values found in {csv_path}.")
+            yield_gamma = float(load[int(np.nanargmax(stress))])
+            color = curve_colors.get(label, f"C{len(curve_colors)}")
+            (energy_line,) = energy_ax.plot(
+                load,
+                energy,
+                color=color,
+                linestyle="--",
+                linewidth=0.9,
+                alpha=0.45,
+                label=f"{label} energy",
+            )
+            energy_handles.append(energy_line)
+            ax.axvline(
+                yield_gamma,
+                color=color,
+                linestyle=":",
+                linewidth=0.9,
+                alpha=0.45,
+            )
+        energy_ax.set_ylabel(r"$E$")
+        energy_ax.grid(False)
+        if energy_handles:
+            energy_ax.legend(
+                handles=energy_handles,
+                loc="lower right",
+                fontsize=5.5,
+                handlelength=1.5,
+                borderpad=0.3,
+            )
+
+    ax.set_xlabel(r"$\gamma$")
+    ax.set_ylabel(r"Mean elastic norm $\langle\|\mathbf{F}_e\|\rangle$")
+    ax.legend(loc="best", fontsize=6, handlelength=1.5, borderpad=0.3)
+    fig.tight_layout()
+
+    if save:
+        output_path = Path(name)
+        if output_path.suffix == "":
+            output_path = output_path.with_suffix(".pdf")
+        if not output_path.is_absolute():
+            output_path = Path("Plots") / output_path
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(output_path)
+        print(f'Plot saved at: "{output_path}"')
+    if show:
+        plt.show()
+
+    return fig, ax, summaries
 
 
 def addImagesToPlot(

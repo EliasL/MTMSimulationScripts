@@ -22,16 +22,22 @@ class _Fit:
 
 
 class SizeScalingCollapseTests(unittest.TestCase):
-    def test_plateau_accuracy_controls_candidate_spacing(self):
+    def test_simple_drop_always_uses_100_initial_measurements(self):
         fake_fit = _Fit(1.0)
         with mock.patch(
             "Plotting.sizeScalingCollapse.make_fit", return_value=fake_fit
         ) as make_fit:
-            fit_xmins({50: np.array([1.0, 2.0, 3.0])}, "plateau", 0.1, False, Path("cache"))
+            fit_xmins(
+                {50: np.array([1.0, 2.0, 3.0])},
+                "simpleDrop",
+                0.1,
+                False,
+                Path("cache"),
+            )
 
         self.assertEqual(
             make_fit.call_args.kwargs["xmin_strategy_kwargs"],
-            {"samples_per_decade": 10.0, "tail_decades": 1.0},
+            {"nr_initial": 100, "tail_decades": 1.0},
         )
 
     def test_global_min_accuracy_controls_observed_candidate_stride(self):
