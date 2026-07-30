@@ -204,6 +204,13 @@ class VTUData:
         G11, G12, G22 = [self.get_cell_data(G) for G in ["G11", "G12", "G22"]]
         return CArrsToMat(G11, G12, G22)
 
+    def get_T_total(self):
+        """Return the exported total branch matrix for every element."""
+        T11, T12, T21, T22 = [
+            self.get_cell_data(T) for T in ["T11", "T12", "T21", "T22"]
+        ]
+        return arrsToMat(T11, T12, T21, T22)
+
 
     def get_F(self):
         """

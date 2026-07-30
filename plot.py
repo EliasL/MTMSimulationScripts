@@ -90,6 +90,58 @@ from Plotting.doubleDislocationComparison import (
 )
 
 
+def plot_reconnection_data(
+    data_root="/Volumes/data/MTS2D_output/sizeScalingJobs",
+    job_type="size-scaling",
+    size=None,
+    reconnection_index="all",
+    matrix="C",
+    bins=180,
+    yield_load=None,
+    output_folder=None,
+    formats=("pdf",),
+    skip_invalid_topology=True,
+    forced_pre_yield_below=0.6,
+    show_top_row=False,
+):
+    """Generate the reconnection energy, jump, and Poincare plots."""
+    from Management.reconnectionJobSelection import discover_simulation_jobs
+    from Plotting.reconnectingEnergyJumpAndElementDistribution import (
+        run_analysis_many,
+    )
+
+    data_root = Path(data_root).expanduser().resolve()
+    jobs = discover_simulation_jobs(
+        data_root,
+        job_type=job_type,
+        size=size,
+        require_extraction=True,
+    )
+    if not jobs:
+        raise FileNotFoundError(
+            f"No extracted {job_type} jobs found in {data_root}"
+        )
+    size_tag = "all" if size is None else str(size)
+    output_folder = (
+        data_root / "plots"
+        if output_folder is None
+        else Path(output_folder).expanduser().resolve()
+    )
+    return run_analysis_many(
+        jobs,
+        selection=reconnection_index,
+        matrix_name=matrix,
+        bins=bins,
+        yield_load=yield_load,
+        output_folder=output_folder,
+        formats=list(formats),
+        output_prefix=f"{job_type.replace('-', '_')}_L{size_tag}",
+        skip_invalid_topology=skip_invalid_topology,
+        forced_pre_yield_below=forced_pre_yield_below,
+        show_top_row=show_top_row,
+    )
+
+
 def plotPropperJob():
     nrThreads = 3
     nrSeeds = 40
