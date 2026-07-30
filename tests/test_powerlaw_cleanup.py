@@ -24,6 +24,7 @@ from Plotting.findXmin import (
     DEFAULT_XMIN_COMPARISON_STRATEGIES,
     XMIN_STRATEGIES,
     _log_xmin_candidates,
+    annotate_xmin_choices,
     compare_xmin_strategies,
     find_xmin_dks_from_results,
     find_xmin_global_min,
@@ -222,8 +223,11 @@ class XminCleanupTests(unittest.TestCase):
             )
 
         self.assertEqual(calls[0].size, 100)
-        self.assertEqual(details["initial_measurement_count"], 100)
-        self.assertEqual(len(details["local_minima"]), 3)
+        self.assertEqual(details["nr_initial"], 100)
+        self.assertEqual(
+            len(details["simple_drop_details"]["local_minima"]),
+            3,
+        )
         self.assertAlmostEqual(xmin, 10.0, delta=0.2)
 
     def test_simple_drop_does_not_hide_finite_ks_jump_with_noise_flag(self):
@@ -386,24 +390,35 @@ class XminCleanupTests(unittest.TestCase):
         self.assertEqual(results["low"].n_tail, 3)
         self.assertEqual(results["high"].n_tail, 1)
 
-    def test_make_fit_uses_accuracy_and_parallel_controls(self):
+    def test_make_fit_uses_canonical_analysis_and_parallel_control(self):
         class FakeFit:
-            def __init__(self, data, **kwargs):
+            def __init__(self, data, xmin=None, **kwargs):
                 self.kwargs = kwargs
-                self.xmin = 1.0
-                self.xmin_fitting_results = {}
+                self.xmin = xmin
 
-        with mock.patch("Plotting.plotPowerLaw.Fit", FakeFit):
+        analysis = {
+            "simple_drop_xmin": 2.0,
+            "global_min_xmin": 3.0,
+        }
+        with mock.patch(
+            "Plotting.plotPowerLaw.analyze_xmin",
+            return_value=analysis,
+        ) as analyze, mock.patch("Plotting.plotPowerLaw.Fit", FakeFit):
             fit = make_fit(
                 [1.0, 2.0, 3.0],
                 distType=Truncated_Power_Law,
                 use_cache=False,
-                fast_xmin=True,
-                xmin_accuracy=0.1,
                 parallel_xmin=True,
+                xmin_search_kwargs={"nr_initial": 100},
             )
-        self.assertEqual(fit.kwargs["xmin_samples_per_decade"], 10.0)
-        self.assertTrue(fit.kwargs["parallel_xmin"])
+        self.assertEqual(fit.xmin, 2.0)
+        self.assertIs(fit.xmin_analysis, analysis)
+        analyze.assert_called_once_with(
+            [1.0, 2.0, 3.0],
+            distType=Truncated_Power_Law,
+            parallel=True,
+            nr_initial=100,
+        )
 
     def test_fixed_xmin_cache_does_not_require_search_diagnostics(self):
         class FakeFit:
@@ -424,7 +439,31 @@ class XminCleanupTests(unittest.TestCase):
                 payload = json.load(stream)
 
         self.assertEqual(payload["xmin"], 1.0)
-        self.assertIsNone(payload["xmin_fitting_results"])
+        self.assertIsNone(payload["xmin_analysis"])
+
+    def test_global_xmin_annotation_is_conditional(self):
+        fig, ax = plt.subplots()
+        annotate_xmin_choices(
+            ax,
+            {
+                "simple_drop_xmin": 2.0,
+                "global_min_xmin": 4.0,
+            },
+        )
+        self.assertEqual(len(ax.lines), 2)
+        self.assertIn("Global min.", ax.lines[1].get_label())
+        plt.close(fig)
+
+        fig, ax = plt.subplots()
+        annotate_xmin_choices(
+            ax,
+            {
+                "simple_drop_xmin": 2.0,
+                "global_min_xmin": 2.0,
+            },
+        )
+        self.assertEqual(len(ax.lines), 1)
+        plt.close(fig)
 
 
 class FlowchartPlotControlTests(unittest.TestCase):

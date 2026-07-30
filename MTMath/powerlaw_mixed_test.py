@@ -8,7 +8,6 @@ from Plotting.plotPowerLaw import (
     find_best_xmin,
     plot_ks_distance,
     dist_from_fit,
-    ks_tag,
 )
 from Plotting.makePlots import (
     create_color_matrix,
@@ -448,7 +447,6 @@ def _grid_compare_xmin_params(
     xlow,
     seed,
     xmin_range,
-    fast_xmin,
 ):
     return {
         "alphas": [float(a) for a in alphas],
@@ -458,8 +456,8 @@ def _grid_compare_xmin_params(
         "beta": float(beta),
         "xlow": None if xlow is None else float(xlow),
         "seed": int(seed),
-        "xmin_range": None if xmin_range is None else [float(v) for v in xmin_range],
-        "fast_xmin": bool(fast_xmin),
+        "fixed_xmin": None if xmin_range is None else float(xmin_range),
+        "xmin_method": "simpleDrop",
         "dks_method": "min_dks",
     }
 
@@ -493,7 +491,6 @@ def _ensure_placeholder_pdf(path, text="Missing"):
 
 
 def _save_fit_plot_paths(drops, ks_fit, p_fit, data_info, extra_path=""):
-    fast_xmin = bool(getattr(ks_fit, "fast_xmin", False))
     ax1 = plot_ks_distance(
         drops,
         ks_fit.xmin,
@@ -502,7 +499,6 @@ def _save_fit_plot_paths(drops, ks_fit, p_fit, data_info, extra_path=""):
         save=True,
         close=True,
         extraPath=extra_path,
-        fast_xmin=fast_xmin,
     )
     ks_min_path = getattr(ax1.figure, "path", None)
 
@@ -514,7 +510,6 @@ def _save_fit_plot_paths(drops, ks_fit, p_fit, data_info, extra_path=""):
         save=True,
         close=True,
         extraPath=extra_path,
-        fast_xmin=fast_xmin,
     )
     ks_max_path = getattr(ax2.figure, "path", None)
 
@@ -549,11 +544,8 @@ def grid_compare_xmin_plot(data=None, cache_path=None):
     xmins = np.array(data["xmins"], dtype=float)
     Lambda = float(data["Lambda"])
     n_samples = int(data["n_samples"])
-    fast_xmin = bool(
-        data.get("fast_xmin", data.get("params", {}).get("fast_xmin", False))
-    )
-    ks_label = ks_tag(fast_xmin=fast_xmin)
-    ks_tag_lower = ks_tag(fast_xmin=fast_xmin, lower=True)
+    ks_label = "simpleDrop"
+    ks_tag_lower = "simpledrop"
 
     xmin1_grid = np.array(data["xmin1_grid"], dtype=float)
     xmin2_grid = np.array(data["xmin2_grid"], dtype=float)
@@ -1241,7 +1233,6 @@ def grid_compare_xmin_generate(
     seed=0,
     rng=None,
     xmin_range=None,
-    fast_xmin=True,
     use_cache=True,
     cache_dir=None,
     force=False,
@@ -1258,7 +1249,7 @@ def grid_compare_xmin_generate(
         rng = np.random.default_rng(seed)
 
     params = _grid_compare_xmin_params(
-        alphas, xmins, n, Lambda, beta, xlow, seed, xmin_range, fast_xmin
+        alphas, xmins, n, Lambda, beta, xlow, seed, xmin_range
     )
     cache_dir = cache_dir or f"{PLOTPATH}grid_compare_xmin_cache/"
     cache_path = _grid_compare_xmin_cache_path(params, cache_dir)
@@ -1321,8 +1312,6 @@ def grid_compare_xmin_generate(
             KS_fit = make_fit(
                 drops,
                 xmin_range=xmin_range,
-                fast_xmin=fast_xmin,
-                xmin_accuracy=0.1,
                 parallel_xmin=True,
             )
             # Cheaky messy spaghetti, we sneak in our new xmin result
@@ -1341,7 +1330,6 @@ def grid_compare_xmin_generate(
                 xmin_results=KS_fit.xmin_fitting_results,
                 data_info=data_info,
                 extraPath=output_subdir,
-                fast_xmin=fast_xmin,
                 parallel=True,
             )
             ks_min_path, ks_max_path, fit_path = _save_fit_plot_paths(
@@ -1372,8 +1360,6 @@ def grid_compare_xmin_generate(
                 dks_fit = make_fit(
                     drops,
                     xmin_range=float(dks_xmin),
-                    fast_xmin=True,
-                    xmin_accuracy=0.1,
                     parallel_xmin=False,
                 )
                 dks_fit.evaluate_fit(drops, confidence=0.05, parallel=False)
@@ -1785,7 +1771,6 @@ def grid_compare_xmin(
     seed=0,
     rng=None,
     xmin_range=None,
-    fast_xmin=True,
     use_cache=True,
     cache_dir=None,
     force=False,
@@ -1802,7 +1787,6 @@ def grid_compare_xmin(
         seed=seed,
         rng=rng,
         xmin_range=xmin_range,
-        fast_xmin=fast_xmin,
         use_cache=use_cache,
         cache_dir=cache_dir,
         force=force,
@@ -1816,10 +1800,10 @@ def grid_compare_xmin(
 def testDist(alpha1=1.05):
     Lambda = 1e4
     drops = generate_powerlaw_avalanche_data(alpha1, xmin=1e-6, Lambda=Lambda)
-    fit = make_fit(drops, fast_xmin=True)
+    fit = make_fit(drops)
     fit.evaluate_fit()
     find_best_xmin(
-        drops, debug=True, xmin_results=fit.xmin_fitting_results, fast_xmin=True
+        drops, debug=True, xmin_results=fit.xmin_fitting_results
     )
     plot_xmin_fitting(fit, save=True)
 
@@ -1853,7 +1837,7 @@ def testSamplePiecewise(
         print("Not enough samples to fit.")
         return None
 
-    KS_fit = make_fit(drops, xmin_range=None, fast_xmin=True, xmin_accuracy=0.01)
+    KS_fit = make_fit(drops)
     # KS_fit.evaluate_fit()
     plateau_xmin = find_xmin(drops, debug=True)
 
@@ -1862,7 +1846,7 @@ def testSamplePiecewise(
     KS_fit.xmin_fitting_results["plateau_xmin"] = plateau_xmin
 
     p_fit = find_best_xmin(
-        drops, debug=True, xmin_results=KS_fit.xmin_fitting_results, fast_xmin=True
+        drops, debug=True, xmin_results=KS_fit.xmin_fitting_results
     )
     plot_xmin_fitting(KS_fit, save=True)
     plot_KS_fitting(KS_fit, save=True)

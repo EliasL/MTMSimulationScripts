@@ -1,4 +1,9 @@
-from .findXmin import select_xmin, select_xmin_with_details
+from .findXmin import (
+    analyze_xmin,
+    annotate_xmin_choices,
+    plot_xmin_analysis,
+    xmin_global_differs,
+)
 from MTMath.energyFunction import ContiEnergy
 import numpy as np
 import pandas as pd
@@ -1481,6 +1486,7 @@ def plot_data_and_fit(
     show_cutoff=True,
     show_title=True,
     show_legend=True,
+    xmin_analysis=None,
 ):
     if ax is None:
         fig, ax = plt.subplots()
@@ -1563,6 +1569,11 @@ def plot_data_and_fit(
                 alpha=0.9,
                 label=r"$1/\lambda$",
             )
+
+    if xmin_analysis is None:
+        xmin_analysis = getattr(fit, "xmin_analysis", None)
+    if xmin_analysis is not None:
+        annotate_xmin_choices(ax, xmin_analysis)
 
     if show_legend:
         ax.legend()
@@ -2637,38 +2648,32 @@ def make_fit(
     distType: type[Distribution] = Truncated_Power_Law,
     use_cache=True,
     cache_dir: str = ".xmin_values",
-    fast_xmin=False,
-    xmin_accuracy=None,
-    parallel_xmin=None,
-    xmin_strategy=None,
-    xmin_strategy_kwargs=None,
+    parallel_xmin=False,
+    xmin_search_kwargs=None,
     debug=False,
 ) -> Fit:
-    """
-    This is a wrapper for the Fit function. Finding xmin takes a long
-    time, so we save the results locally and use a precomputed xmin if available.
-
-    ``xmin_accuracy`` is the candidate spacing in log10 decades for the fast
-    selector. For example, 0.1 evaluates about ten candidates per decade.
-    """
-
-    if xmin_accuracy is not None and xmin_accuracy <= 0:
-        raise ValueError("xmin_accuracy must be positive or None.")
-    if xmin_range is not None and xmin_strategy is not None:
-        raise ValueError("Provide either xmin_range or xmin_strategy, not both.")
-    xmin_samples_per_decade = (
-        30.0 if xmin_accuracy is None else 1.0 / float(xmin_accuracy)
-    )
-    parallel_xmin = False if parallel_xmin is None else bool(parallel_xmin)
-    if xmin_strategy == "ks":
-        fast_xmin = False
-    elif xmin_strategy == "dip":
-        fast_xmin = True
+    """Fit at a fixed xmin or at the canonical simpleDrop-selected xmin."""
+    if xmin_range is not None:
+        if not np.isscalar(xmin_range):
+            raise ValueError(
+                "Automatic xmin ranges are no longer supported. Pass one fixed "
+                "xmin or leave xmin_range=None for the canonical simpleDrop search."
+            )
+        xmin_range = float(xmin_range)
+        if not np.isfinite(xmin_range) or xmin_range <= 0:
+            raise ValueError("A fixed xmin must be finite and positive.")
+    search_kwargs = dict(xmin_search_kwargs or {})
+    forbidden = {"distType", "parallel"} & search_kwargs.keys()
+    if forbidden:
+        raise ValueError(
+            f"xmin_search_kwargs must not override {sorted(forbidden)}."
+        )
+    parallel_xmin = bool(parallel_xmin)
 
     # --- try cache
     cache_path = None
     cache_loaded = False
-    xmin_fitting_results = None
+    xmin_analysis = None
     if use_cache:
         import os
         import json
@@ -2677,9 +2682,8 @@ def make_fit(
         cache_path = _get_cache_path(
             cache_dir,
             data,
-            distType.name
-            + f"{xmin_range}{fast_xmin}{xmin_samples_per_decade}"
-            + f"{parallel_xmin}{xmin_strategy}{xmin_strategy_kwargs}",
+            f"canonical-simpleDrop-v1:{distType.name}:{xmin_range}:"
+            f"{parallel_xmin}:{search_kwargs}",
         )
         cache_path_json = cache_path
         cache_path_gz = cache_path + ".gz"
@@ -2692,39 +2696,44 @@ def make_fit(
                     cache = json.load(f)
 
                 xmin_range = cache["xmin"]
-                xmin_fitting_results = cache.get("xmin_fitting_results")
+                xmin_analysis = cache.get("xmin_analysis")
+                if xmin_analysis is not None:
+                    for key, dtype in (
+                        ("xmins", float),
+                        ("distances", float),
+                        ("alphas", float),
+                        ("sigmas", float),
+                        ("valid_fits", bool),
+                        ("tail_counts", int),
+                    ):
+                        xmin_analysis[key] = np.asarray(
+                            xmin_analysis[key],
+                            dtype=dtype,
+                        )
                 cache_loaded = True
-                # xmin_range is no longer a tuple, but a single value
-                # That means that the fit will be much faster
 
             except Exception as e:
                 # fall through to recompute if loading fails
                 print(e)
 
-    if xmin_range is None and xmin_strategy not in {None, "ks", "dip"}:
-        strategy_kwargs = dict(xmin_strategy_kwargs or {})
-        strategy_kwargs.setdefault("distType", distType)
-        strategy_kwargs.setdefault("parallel", parallel_xmin)
-        xmin_range, xmin_fitting_results = select_xmin_with_details(
+    if xmin_range is None:
+        xmin_analysis = analyze_xmin(
             data,
-            strategy=xmin_strategy,
-            **strategy_kwargs,
+            distType=distType,
+            parallel=parallel_xmin,
+            **search_kwargs,
         )
-        if not np.isfinite(xmin_range):
-            raise RuntimeError(f"xmin strategy {xmin_strategy!r} returned no value.")
+        xmin_range = xmin_analysis["simple_drop_xmin"]
 
-    # If xmin_range is a tuple, Fit will search for a good xmin, but if we
-    # have loaded a precomputed xmin, it will be much faster
     fitObj = Fit(
         data,
         xmin=xmin_range,
         xmin_distribution=distType.name,
-        fast_xmin=fast_xmin,
-        xmin_samples_per_decade=xmin_samples_per_decade,
-        parallel_xmin=parallel_xmin,
+        verbose=0,
     )
-    if xmin_fitting_results:
-        fitObj.xmin_fitting_results = xmin_fitting_results
+    fitObj.xmin_analysis = xmin_analysis
+    if xmin_analysis is not None:
+        fitObj.xmin_fitting_results = xmin_analysis
 
     # Save new results and replace any unreadable cache.
     if use_cache and cache_path is not None and not cache_loaded:
@@ -2734,9 +2743,7 @@ def make_fit(
                     _make_json_serializable(
                         {
                             "xmin": fitObj.xmin,
-                            "xmin_fitting_results": getattr(
-                                fitObj, "xmin_fitting_results", None
-                            ),
+                            "xmin_analysis": xmin_analysis,
                         }
                     ),
                     f,
@@ -2745,10 +2752,9 @@ def make_fit(
             # don't fail the computation if saving fails
             print(e)
     if debug:
-        y = fitObj.xmin_fitting_results["distances"]
-        x = fitObj.xmin_fitting_results["xmins"]
-        plt.plot(x, y)
-        plt.xscale("log")
+        if xmin_analysis is None:
+            raise ValueError("Cannot plot xmin diagnostics for a fixed-xmin fit.")
+        plot_xmin_analysis(xmin_analysis)
         plt.show()
     return fitObj
 
@@ -3354,13 +3360,8 @@ def plot_powerlaw_compare(
     distType: type[Distribution] = Truncated_Power_Law,
     save=True,
     addFit=True,
-    fast_xmin=True,
-    min_xmin=1e-5,
-    xmin_accuracy=None,
     parallel_xmin=False,
-    xmin_strategy=None,
-    xmin_strategy_kwargs=None,
-    fit_selection="selected",
+    xmin_search_kwargs=None,
     csvPaths=None,
     useCDF=False,
     drop_type="energy",
@@ -3371,9 +3372,6 @@ def plot_powerlaw_compare(
         raise ValueError(
             f"Unsupported drop_type: {drop_type!r}. Use 'energy' or 'stress'."
         )
-    if fit_selection not in {"selected", "p_value"}:
-        raise ValueError("fit_selection must be 'selected' or 'p_value'.")
-
     grouped_paths, grouped_labels = get_group_structure(group_paths, group_labels)
     if len(grouped_paths) <= 1:
         return plot_powerlaw(
@@ -3388,13 +3386,8 @@ def plot_powerlaw_compare(
             distType=distType,
             save=save,
             addFit=addFit,
-            fast_xmin=fast_xmin,
-            min_xmin=min_xmin,
-            xmin_accuracy=xmin_accuracy,
             parallel_xmin=parallel_xmin,
-            xmin_strategy=xmin_strategy,
-            xmin_strategy_kwargs=xmin_strategy_kwargs,
-            fit_selection=fit_selection,
+            xmin_search_kwargs=xmin_search_kwargs,
             useCDF=useCDF,
             drop_type=drop_type,
         )
@@ -3404,9 +3397,7 @@ def plot_powerlaw_compare(
     if not colors:
         colors = list(MINIMIZER_COLORS.values())
 
-    selected_tag = "p_value" if fit_selection == "p_value" else (
-        xmin_strategy or ks_tag(fast_xmin=fast_xmin)
-    )
+    selected_tag = "simpleDrop"
     compare_infos = []
     compare_fits = []
     legend_handles = []
@@ -3432,32 +3423,15 @@ def plot_powerlaw_compare(
             print(f"No {drop_type} drops found for compare group {idx}; skipping.")
             continue
 
-        group_xmin_range = xmin_range
-        if group_xmin_range is None and not fast_xmin and xmin_strategy is None:
-            group_xmin_range = [min_xmin, None]
-
-        selected_fit = make_fit(
+        fit = make_fit(
             data=drops,
-            xmin_range=group_xmin_range,
+            xmin_range=xmin_range,
             distType=distType,
-            fast_xmin=fast_xmin,
-            xmin_accuracy=xmin_accuracy,
             parallel_xmin=parallel_xmin,
-            xmin_strategy=xmin_strategy,
-            xmin_strategy_kwargs=xmin_strategy_kwargs,
+            xmin_search_kwargs=xmin_search_kwargs,
         )
         if evaluate:
-            selected_fit.evaluate_fit()
-        fit = selected_fit
-        if fit_selection == "p_value":
-            fit = find_best_xmin(
-                drops,
-                debug=debug,
-                data_info=data_info,
-                xmin_results=getattr(selected_fit, "xmin_fitting_results", None),
-                fast_xmin=fast_xmin,
-                selected_fit=selected_fit,
-            )
+            fit.evaluate_fit()
 
         color = colors[idx % len(colors)]
         source_label = labels[0] if labels else ""
@@ -3529,6 +3503,19 @@ def plot_powerlaw_compare(
             alpha=0.45,
             label="_nolegend_",
         )
+        xmin_analysis = getattr(fit, "xmin_analysis", None)
+        if xmin_analysis is not None and xmin_global_differs(xmin_analysis):
+            ax.axvline(
+                xmin_analysis["global_min_xmin"],
+                color=color,
+                linestyle="--",
+                linewidth=1.0,
+                alpha=0.55,
+                label="_nolegend_",
+            )
+            legend_label += (
+                rf"; global $x_{{\min}}={xmin_analysis['global_min_xmin']:.1e}$"
+            )
 
         print(f"{selected_tag} xmin ({group_name}): {fit.xmin}")
         legend_handles.append(
@@ -3604,13 +3591,8 @@ def plot_powerlaw(
     distType: type[Distribution] = Truncated_Power_Law,
     save=True,
     addFit=True,
-    fast_xmin=True,
-    min_xmin=1e-5,
-    xmin_accuracy=None,
     parallel_xmin=False,
-    xmin_strategy=None,
-    xmin_strategy_kwargs=None,
-    fit_selection="selected",
+    xmin_search_kwargs=None,
     csvPaths=None,
     useCDF=False,
     drop_type="energy",
@@ -3636,13 +3618,8 @@ def plot_powerlaw(
             distType=distType,
             save=save,
             addFit=addFit,
-            fast_xmin=fast_xmin,
-            min_xmin=min_xmin,
-            xmin_accuracy=xmin_accuracy,
             parallel_xmin=parallel_xmin,
-            xmin_strategy=xmin_strategy,
-            xmin_strategy_kwargs=xmin_strategy_kwargs,
-            fit_selection=fit_selection,
+            xmin_search_kwargs=xmin_search_kwargs,
             useCDF=useCDF,
             drop_type=drop_type,
         )
@@ -3666,50 +3643,16 @@ def plot_powerlaw(
     if all_drops is None or len(all_drops) == 0:
         print(f"No {drop_type} drops found; skipping powerlaw fit.")
         return None
-    if fit_selection not in {"selected", "p_value"}:
-        raise ValueError("fit_selection must be 'selected' or 'p_value'.")
-    if xmin_range is None and not fast_xmin and xmin_strategy is None:
-        # Not using fast_xmin is brutally slow. We add a default range here
-        xmin_range = [min_xmin, None]
-    selected_fit = make_fit(
+    reported_fit = make_fit(
         data=all_drops,
         xmin_range=xmin_range,
         distType=distType,
-        fast_xmin=fast_xmin,
-        xmin_accuracy=xmin_accuracy,
         parallel_xmin=parallel_xmin,
-        xmin_strategy=xmin_strategy,
-        xmin_strategy_kwargs=xmin_strategy_kwargs,
+        xmin_search_kwargs=xmin_search_kwargs,
     )
-    selected_tag = xmin_strategy or ks_tag(fast_xmin=fast_xmin)
-    print(f"{selected_tag} xmin:", selected_fit.xmin)
+    print("simpleDrop xmin:", reported_fit.xmin)
     if evaluate:
-        selected_fit.evaluate_fit()
-
-    ks_fit = None
-    ks_xmin = None
-    if fast_xmin and xmin_strategy is None:
-        ks_xmin = get_lowest_distance_xmin(getattr(selected_fit, "xmin_fitting_results", None))
-        if ks_xmin is not None:
-            ks_fit = Fit(
-                all_drops,
-                xmin=ks_xmin,
-                xmin_distribution=distType.name,
-            )
-            if evaluate:
-                ks_fit.evaluate_fit()
-            print(f"KS xmin: {ks_fit.xmin}")
-
-    reported_fit = selected_fit
-    if fit_selection == "p_value":
-        reported_fit = find_best_xmin(
-            all_drops,
-            debug=debug,
-            data_info=data_info,
-            xmin_results=getattr(selected_fit, "xmin_fitting_results", None),
-            fast_xmin=fast_xmin,
-            selected_fit=selected_fit,
-        )
+        reported_fit.evaluate_fit()
 
     d = dist_from_fit(reported_fit)
 
@@ -3739,19 +3682,33 @@ def plot_powerlaw(
 
         print(f"Number of drops in fit: {_count_fit_drops(reported_fit)}")
         print(f"{attribute}: P value: {p:.2f} ({r}), exp: {d.alpha}, std: {exp_std}")
-    if ks_fit is not None:
-        plot_ks_distance(
-            all_drops,
-            ks_fit.xmin,
-            data_info=data_info,
-            name="KS-fit",
-            fast_xmin=False,
-            save=save,
-        )
-
     title = make_title(data_info=data_info, fit=reported_fit)
     if attribute and attribute not in title:
         title = attribute + " " + title
+    xmin_analysis = getattr(reported_fit, "xmin_analysis", None)
+    if xmin_analysis is not None:
+        global_differs = xmin_global_differs(xmin_analysis)
+        if global_differs:
+            print("Refined global-min xmin:", xmin_analysis["global_min_xmin"])
+        fig, ax = plot_xmin_analysis(xmin_analysis)
+        ax.set_title(f"{title} xmin search")
+        fig.tight_layout()
+        if save:
+            filename = f"{PLOTPATH}{safePath(title)}_xmin_search.pdf"
+            fig.savefig(filename, format="pdf", bbox_inches="tight")
+            print(f"Saved figure to {filename}")
+            plt.close(fig)
+        elif not show:
+            plt.close(fig)
+        if not global_differs:
+            print("Refined global minimum agrees with simpleDrop.")
+        plot_ks_distance(
+            all_drops,
+            reported_fit.xmin,
+            data_info=data_info,
+            name="simpleDrop-fit",
+            save=save,
+        )
     plot_data_and_fit(
         reported_fit,
         title=title,
@@ -3762,18 +3719,6 @@ def plot_powerlaw(
         show=show,
         useCDF=useCDF,
     )
-    if ks_fit is not None:
-        title = make_title(data_info=data_info, fit=ks_fit)
-        plot_data_and_fit(
-            ks_fit,
-            data_info=data_info,
-            title=title + "_KS_xmin",
-            color=color,
-            addFit=addFit,
-            save=save,
-            show=show,
-            useCDF=useCDF,
-        )
 
     return reported_fit
 

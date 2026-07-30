@@ -40,21 +40,18 @@ from pypdf import PageObject, PdfReader, PdfWriter, Transformation
 from Management.jobs import size_scaling_job
 from Management.updateCSV import read_macrodata_csv
 from MTMath.evaluatePowerlawFit import (
-    Fit,
     Truncated_Power_Law,
-    evaluate_xmin_distances,
 )
 from Plotting.dataFunctions import get_metadata
 from Plotting.energyDropCalculations import calculate_energy_step_data
 from Plotting.findXmin import (
-    find_xmin_refined_global_min_from_results,
-    find_xmin_simple_drop_from_results,
-    select_global_min_from_search_details,
+    plot_xmin_analysis,
 )
 from Plotting.plotPowerLaw import (
     _resolve_strain_lim,
     dist_from_fit,
     get_energy_drops,
+    make_fit,
     plot_data_and_fit,
     plot_energy_drop_trace,
     plot_ks_distance,
@@ -113,10 +110,8 @@ XMIN_CANDIDATE_COUNT = 100
 # largest cutoff that still retains the requested number of tail events.
 MIN_TAIL_COUNT = 25
 PARALLEL_XMIN_FITS = False
-SIMPLE_DROP_LOCAL_REFINEMENTS = 10
-SIMPLE_DROP_LOCAL_MAX_ITERATIONS = 64
-GLOBAL_MIN_LOCAL_REFINEMENTS = 10
-GLOBAL_MIN_LOCAL_MAX_ITERATIONS = 64
+XMIN_LOCAL_REFINEMENTS = 10
+XMIN_LOCAL_MAX_ITERATIONS = 64
 
 # Raw energy panel and inset.
 ZOOM_CENTER = 0.805
@@ -129,7 +124,6 @@ ENERGY_DROP_MARKER = None
 ENERGY_INSET_BACKGROUND_ALPHA = 0.9
 
 # Panel-specific colors.
-XMIN_SCAN_COLOR = "C3"
 DISTRIBUTION_COLOR = "C2"
 EMPIRICAL_PDF_MARKER_SIZE = 3.2
 KS_DISTANCE_COLOR = "red"
@@ -473,64 +467,21 @@ def _collect_analysis(csv_paths: list[Path], used_fallback: bool):
             "or provide more simulation CSVs."
         )
 
-    sorted_drops = np.sort(drops)
-    candidate_lo = float(sorted_drops[0])
-    candidate_hi = float(sorted_drops[-MIN_TAIL_COUNT])
-    if not (candidate_hi > candidate_lo > 0.0):
-        raise RuntimeError("Could not form a positive xmin candidate interval.")
-
-    xmins = np.geomspace(candidate_lo, candidate_hi, XMIN_CANDIDATE_COUNT)
-    distances, param_vals, _ = evaluate_xmin_distances(
+    fit = make_fit(
         drops,
-        xmins,
         distType=Truncated_Power_Law,
-        parallel=PARALLEL_XMIN_FITS,
+        parallel_xmin=PARALLEL_XMIN_FITS,
+        xmin_search_kwargs={
+            "nr_initial": XMIN_CANDIDATE_COUNT,
+            "min_tail_count": MIN_TAIL_COUNT,
+            "local_refinements": XMIN_LOCAL_REFINEMENTS,
+            "local_max_iterations": XMIN_LOCAL_MAX_ITERATIONS,
+        },
     )
-    distances = np.asarray(distances, dtype=float)
-    tail_counts = np.asarray([np.count_nonzero(drops >= xmin) for xmin in xmins])
-    selectable = np.isfinite(distances) & (tail_counts >= MIN_TAIL_COUNT)
-    if not np.any(selectable):
-        raise RuntimeError("No finite xmin candidate retains the requested tail count.")
-    selected_xmin, simple_drop_details = find_xmin_simple_drop_from_results(
-        drops,
-        xmins,
-        distances,
-        min_tail_count=MIN_TAIL_COUNT,
-        local_refinements=SIMPLE_DROP_LOCAL_REFINEMENTS,
-        local_max_iterations=SIMPLE_DROP_LOCAL_MAX_ITERATIONS,
-        distType=Truncated_Power_Law,
-        parallel=PARALLEL_XMIN_FITS,
-    )
-    selected_distance = float(simple_drop_details["selected_distance"])
-    _, global_search_details = find_xmin_refined_global_min_from_results(
-        drops,
-        xmins,
-        distances,
-        min_tail_count=MIN_TAIL_COUNT,
-        local_refinements=GLOBAL_MIN_LOCAL_REFINEMENTS,
-        local_max_iterations=GLOBAL_MIN_LOCAL_MAX_ITERATIONS,
-        distType=Truncated_Power_Law,
-        parallel=PARALLEL_XMIN_FITS,
-    )
-
-    # Select the global minimum only after both independent refinement
-    # strategies have completed. This ensures that a lower simpleDrop
-    # evaluation cannot sit below a prematurely chosen "global" minimum.
-    (
-        global_min_xmin,
-        global_min_distance,
-        all_evaluations,
-    ) = select_global_min_from_search_details(
-        simple_drop_details,
-        global_search_details,
-    )
-
-    fit = Fit(
-        drops,
-        xmin=selected_xmin,
-        xmin_distribution=Truncated_Power_Law.name,
-        verbose=0,
-    )
+    xmin_analysis = fit.xmin_analysis
+    if xmin_analysis is None:
+        raise RuntimeError("Canonical xmin analysis was not attached to the fit.")
+    selected_xmin = xmin_analysis["simple_drop_xmin"]
     dist = dist_from_fit(fit)
 
     source_meta = get_metadata(str(csv_paths[0]))
@@ -551,16 +502,17 @@ def _collect_analysis(csv_paths: list[Path], used_fallback: bool):
         "first_strain_limit": first_strain_limit,
         "data_info": data_info,
         "drops": drops,
-        "xmins": xmins,
-        "distances": distances,
-        "param_vals": param_vals,
-        "tail_counts": tail_counts,
-        "global_min_xmin": float(global_min_xmin),
-        "global_min_distance": float(global_min_distance),
-        "global_search_details": global_search_details,
-        "all_xmin_evaluations": all_evaluations,
-        "simple_drop_details": simple_drop_details,
-        "simple_drop_distance": selected_distance,
+        "xmin_analysis": xmin_analysis,
+        "xmins": xmin_analysis["xmins"],
+        "distances": xmin_analysis["distances"],
+        "param_vals": xmin_analysis["param_vals"],
+        "tail_counts": xmin_analysis["tail_counts"],
+        "global_min_xmin": xmin_analysis["global_min_xmin"],
+        "global_min_distance": xmin_analysis["global_min_distance"],
+        "global_search_details": xmin_analysis["global_search_details"],
+        "all_xmin_evaluations": xmin_analysis["all_evaluations"],
+        "simple_drop_details": xmin_analysis["simple_drop_details"],
+        "simple_drop_distance": xmin_analysis["simple_drop_distance"],
         "selected_xmin": selected_xmin,
         "fit": fit,
         "alpha": float(dist.alpha),
@@ -693,78 +645,9 @@ def _ccdf_ks_panel(analysis):
 
 def _xmin_scan_panel(analysis):
     fig, ax = _new_panel("xmin_scan")
-    xmins = analysis["xmins"]
-    distances = analysis["distances"]
-    global_xmin = analysis["global_min_xmin"]
-    global_distance = analysis["global_min_distance"]
-    selected_xmin = analysis["selected_xmin"]
-    selected_distance = analysis["simple_drop_distance"]
-    global_differs_from_simple_drop = not np.isclose(
-        global_xmin,
-        selected_xmin,
-        rtol=1e-6,
-        atol=0.0,
-    )
-    ax.plot(
-        xmins,
-        distances,
-        marker="o",
-        markersize=2.8,
-        color=XMIN_SCAN_COLOR,
-        label=r"$D(\Delta E_{\min})$",
-    )
-    rough_local_minima = analysis["global_search_details"]["rough_local_minima"]
-    if global_differs_from_simple_drop and rough_local_minima:
-        ax.scatter(
-            [item["xmin"] for item in rough_local_minima],
-            [item["distance"] for item in rough_local_minima],
-            marker="s",
-            s=12,
-            facecolor="none",
-            edgecolor="0.35",
-            linewidth=0.6,
-            zorder=4,
-            label="Coarse local minima",
-        )
-    ax.scatter(
-        [global_xmin],
-        [global_distance],
-        marker="X",
-        s=25,
-        facecolor="white",
-        edgecolor="0.25",
-        linewidth=0.8,
-        zorder=5,
-        label=rf"Global min.: $\Delta E_{{\min}}={global_xmin:.1e}$",
-    )
-    if global_differs_from_simple_drop:
-        ax.scatter(
-            [selected_xmin],
-            [selected_distance],
-            marker="D",
-            s=22,
-            color=XMIN_SCAN_COLOR,
-            edgecolor="white",
-            linewidth=0.5,
-            zorder=6,
-            label=rf"simpleDrop: $\Delta E_{{\min}}={selected_xmin:.1e}$",
-        )
-        ax.axvline(
-            global_xmin,
-            color="0.45",
-            linestyle="--",
-            linewidth=0.8,
-        )
-    ax.axvline(
-        selected_xmin,
-        color=XMIN_SCAN_COLOR,
-        linestyle="--",
-        linewidth=1.0,
-    )
-    ax.set_xscale("log")
+    plot_xmin_analysis(analysis["xmin_analysis"], ax=ax)
     ax.set_xlabel(r"$\Delta E_{\min}$")
     ax.set_ylabel(r"$D$")
-    ax.legend(loc="best")
     _save_panel(fig, "xmin_scan")
 
 
@@ -788,6 +671,7 @@ def _mle_fit_panel(analysis):
         show_cutoff=True,
         show_title=False,
         show_legend=False,
+        xmin_analysis=analysis["xmin_analysis"],
     )
     ax.lines[0].set_label("Empirical PDF")
     ax.lines[0].set_markersize(EMPIRICAL_PDF_MARKER_SIZE)
@@ -797,13 +681,6 @@ def _mle_fit_panel(analysis):
     )
     if ax.patches:
         ax.patches[-1].set_label(r"$\mathcal{X}_{\min}$ (fit region)")
-    ax.axvline(
-        analysis["selected_xmin"],
-        color="0.35",
-        linestyle="--",
-        linewidth=0.8,
-        label=r"$\Delta E_{\min}$",
-    )
     ax.set_xlabel(r"$\Delta E_S$")
     ax.set_ylabel(r"$p(\Delta E_S)$")
     ax.legend(loc="best")
