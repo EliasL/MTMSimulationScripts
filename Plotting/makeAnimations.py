@@ -12,7 +12,7 @@ from .pyplotFunctions import (
     plot_and_save_nodes,
     plot_and_save_mesh,
     plot_and_save_matrix_component_grid,
-    plot_and_save_plastic_shear_counts,
+    plot_and_save_integer_shear_mesh,
     plot_and_save_m_mesh,
     plot_and_save_m_diff_mesh,
     plot_and_save_plot,
@@ -244,6 +244,10 @@ def makeAnimations(
     num_processes=-2,
     useMetadata=True,
     reconnecting=None,
+    square_periodic_mesh=False,
+    periodic_box_size=None,
+    cartesian_viewport_culling=False,
+    cartesian_viewport=None,
 ):
     """Render animations with the same metadata setup used by ``plotAll``.
 
@@ -253,6 +257,7 @@ def makeAnimations(
     path, macroData, pvdFile, vtu_files = prepare_animation_inputs(
         path, macroData, pvdFile, useMetadata
     )
+    output_path = path
     if reconnecting is None:
         reconnecting = simulation_uses_reconnection(path)
     frame_path = os.path.join(path, settings["FRAMEFOLDERPATH"])
@@ -326,7 +331,7 @@ def makeAnimations(
         "disk_G",
         "plasticReductionDisk",
         "plasticReductionDisk_velocity",
-        "plastic_shear_counts",
+        "integerShearMesh",
     }
     poincare_names = {
         "disk",
@@ -366,15 +371,15 @@ def makeAnimations(
         # (plot_and_save_nodes, "nodes"),
         #(plot_and_save_mesh_with_force, "mesh_with_forces"),
         # Move this line to choose where the matrix videos are rendered.
-        (plot_and_save_in_poincare_disk, "disk"),
-        (plot_and_save_g_in_poincare_disk, "disk_G"),
         (plot_and_save_mesh, "mesh"),
-        (plot_and_save_plastic_shear_counts, "plastic_shear_counts"),
-        *matrix_jobs,
-        (
-            plot_and_save_velocity_field_in_plastic_reduced_poincare_disk,
-            "plasticReductionDisk_velocity",
-        ),
+        (plot_and_save_integer_shear_mesh, "integerShearMesh"),
+        (plot_and_save_in_poincare_disk, "disk"),
+        #(plot_and_save_g_in_poincare_disk, "disk_G"),
+        # *matrix_jobs,
+        # (
+        #     plot_and_save_velocity_field_in_plastic_reduced_poincare_disk,
+        #     "plasticReductionDisk_velocity",
+        # ),
         (plot_and_save_in_plastic_reduced_poincare_disk, "plasticReductionDisk"),
         (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_plot, "energy_plot"),
@@ -407,7 +412,7 @@ def makeAnimations(
         subset_arg = _subset_arg(base_name)
         if matrix_name_for_job is not None:
             extra_kwargs["matrix_name"] = matrix_name_for_job
-        if base_name == "plastic_shear_counts":
+        if base_name == "integerShearMesh":
             extra_kwargs["reconnecting"] = reconnecting
             extra_kwargs["plastic_shear_lims"] = get_plastic_shear_ranges(
                 range_vtu_files, reconnecting

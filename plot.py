@@ -8,14 +8,12 @@ from Management.jobs import *
 from Management.updateCSV import fix_csv_files, read_macrodata_csv
 from Management.configGenerator import ConfigGenerator
 from Management.simulationManager import findOutputPath
-from Plotting.dataFunctions import get_metadata
 from Plotting.makePlots import (
     makePlot,
     makeSettingComparison,
     makeAverageComparisonPlot,
     plot_force_contribution_magnitudes,
     plot_predicted_energy_error,
-    plot_predicted_energy_error_distribution,
 )
 from Plotting.pyplotFunctions import plot_center_node_forces
 from MTMath.powerlaw_mixed_test import (
@@ -1073,61 +1071,6 @@ def plotPristineCrystalPredictionErrorNormalized(size=30):
         figsize=(4.5, 3),
         show_title=False,
     )
-
-
-def plotNormalSimulationPredictionError(
-    non_reconnecting_csv,
-    reconnecting_csv,
-    *,
-    output_dir=Path("Plots"),
-    distance_steps=1,
-    drop_threshold=0.0,
-    bins=60,
-    normalize_by_reference_volume=True,
-    pre_yield_min_gamma=None,
-):
-    """Make four-way pre/post-yield residual distributions for two simulations."""
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    cases = (
-        ("without_reconnection", non_reconnecting_csv),
-        ("with_reconnection", reconnecting_csv),
-    )
-    results = {}
-    for stem, csv_path in cases:
-        csv_paths = (
-            [Path(csv_path)]
-            if isinstance(csv_path, (str, Path))
-            else [Path(path) for path in csv_path]
-        )
-        system_sizes = {
-            get_metadata(str(path)).get("L")
-            for path in csv_paths
-        }
-        if len(system_sizes) != 1 or None in system_sizes:
-            raise ValueError(
-                "Each normal-simulation plot must contain one identifiable "
-                "system size so its output filename can include L."
-            )
-        system_size = int(system_sizes.pop())
-        sample_count = len(csv_paths)
-        sample_word = "sample" if sample_count == 1 else "samples"
-        output_path = output_dir / (
-            f"normal_simulation_predicted_energy_error_{stem}"
-            f"_L{system_size}_{sample_count}{sample_word}.pdf"
-        )
-        fig, ax, summary = plot_predicted_energy_error_distribution(
-            csv_paths,
-            name=output_path,
-            bins=bins,
-            drop_threshold=drop_threshold,
-            distance_steps=distance_steps,
-            normalize_by_reference_volume=normalize_by_reference_volume,
-            pre_yield_min_gamma=pre_yield_min_gamma,
-            show=False,
-        )
-        results[stem] = {"figure": (fig, ax), "summary": summary}
-    return results
 
 
 if __name__ == "__main__":

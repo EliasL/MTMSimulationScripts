@@ -1291,7 +1291,7 @@ def plot_matrix_component_grid(
     return ax, cmap, norm
 
 
-def plot_plastic_shear_counts(
+def plot_integer_shear_mesh(
     vtu_file,
     plastic_shear_lims,
     reconnecting=None,
@@ -1299,7 +1299,7 @@ def plot_plastic_shear_counts(
     add_colorbar=True,
     **kwargs,
 ):
-    """Plot tiled signed horizontal and vertical plastic-shear counts."""
+    """Plot tiled signed horizontal and vertical integer-shear counts."""
     horizontal, vertical, data, _ = get_plastic_shear_counts(
         vtu_file, reconnecting
     )
@@ -2309,9 +2309,9 @@ def plot_and_save_matrix_component_grid(**kwargs):
     )
 
 
-def plot_and_save_plastic_shear_counts(**kwargs):
+def plot_and_save_integer_shear_mesh(**kwargs):
     return plot_and_save(
-        plot_func=plot_plastic_shear_counts,
+        plot_func=plot_integer_shear_mesh,
         **kwargs,
     )
 

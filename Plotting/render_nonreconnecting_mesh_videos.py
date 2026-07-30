@@ -20,7 +20,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2])
     parser.add_argument("--num-processes", type=int, default=2)
-    parser.add_argument("--video-name", default="mesh")
+    parser.add_argument("--video-name", default="integerShearMesh")
     parser.add_argument("--reuse-images", action="store_true")
     args = parser.parse_args()
 

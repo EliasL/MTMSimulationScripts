@@ -145,6 +145,25 @@ def _sample_id(csv_path):
     return match.group(1) if match else "unknown"
 
 
+def _system_size(csv_path):
+    match = re.search(r",s(\d+)x\1(?:l|,)", Path(csv_path).parent.name)
+    if match is None:
+        raise ValueError(f"Could not infer the system size from {csv_path}.")
+    return int(match.group(1))
+
+
+def _validate_system_size(csv_paths, requested_size=None):
+    sizes = {_system_size(path) for path in csv_paths}
+    if len(sizes) != 1:
+        raise ValueError(f"Expected one system size, found {sorted(sizes)}.")
+    size = sizes.pop()
+    if requested_size is not None and requested_size != size:
+        raise ValueError(
+            f"Requested L={requested_size}, but the CSV files contain L={size}."
+        )
+    return size
+
+
 def _print_error_summary(values, pre_yield_min_gamma=None):
     """Print mean absolute errors for the same samples shown in the plot."""
     if pre_yield_min_gamma is None:
@@ -183,6 +202,22 @@ def _print_error_summary(values, pre_yield_min_gamma=None):
         )
 
 
+def _print_sample_summaries(condition, paths, individual_values):
+    label = "No recon" if condition == "no" else "Recon"
+    print(f"{label} sample means (second order, per V0):")
+    for path in paths:
+        sample = _sample_id(path)
+        sample_values = individual_values[f"{condition}_s{sample}"]["second"]
+        pre = sample_values["pre"]
+        post = sample_values["post"]
+        pre_text = "empty" if not pre.size else f"{np.mean(pre):.6e}"
+        post_text = "empty" if not post.size else f"{np.mean(post):.6e}"
+        print(
+            f"  s{sample}: pre={pre_text} (n={pre.size}), "
+            f"post={post_text} (n={post.size})"
+        )
+
+
 def _plot(
     values,
     output_path,
@@ -194,6 +229,7 @@ def _plot(
     matplotlib.use("Agg")
     from matplotlib import pyplot as plt
 
+    approximation = "first" if approximation_order == 1 else "second"
     base_specs = [
         ("No recon, pre-yield", "no", "pre", "#9ecae1"),
         ("No recon, post-yield", "no", "post", "#2171b5"),
@@ -205,7 +241,7 @@ def _plot(
         entries.append(
             (
                 label,
-                values[condition]["second"][region],
+                values[condition][approximation][region],
                 color,
                 "-",
             )
@@ -215,25 +251,25 @@ def _plot(
             [
                 (
                     "Flips + increase, pre-yield",
-                    values["recon_events"]["second"]["pre"],
+                    values["recon_events"][approximation]["pre"],
                     "#fdae6b",
                     "--",
                 ),
                 (
                     "Flips + increase, post-yield",
-                    values["recon_events"]["second"]["post"],
+                    values["recon_events"][approximation]["post"],
                     "#e6550d",
                     "--",
                 ),
                 (
                     "Recon, no flips, pre-yield",
-                    values["recon_no_events"]["second"]["pre"],
+                    values["recon_no_events"][approximation]["pre"],
                     "#fdae6b",
                     ":",
                 ),
                 (
                     "Recon, no flips, post-yield",
-                    values["recon_no_events"]["second"]["post"],
+                    values["recon_no_events"][approximation]["post"],
                     "#e6550d",
                     ":",
                 ),
@@ -280,6 +316,23 @@ def main():
     parser.add_argument("--show-reconnection-subsets", action="store_true")
     parser.add_argument("--pre-yield-min-gamma", type=float, default=None)
     parser.add_argument(
+        "--no-reconnection-csv-files",
+        nargs="+",
+        type=Path,
+        help="Non-reconnecting runs to pool in the main plot.",
+    )
+    parser.add_argument(
+        "--reconnection-csv-files",
+        nargs="+",
+        type=Path,
+        help="Reconnecting runs to pool in the main plot.",
+    )
+    parser.add_argument(
+        "--system-size",
+        type=int,
+        help="Validate L and include it in the automatic output filename.",
+    )
+    parser.add_argument(
         "--generate-nonreconnecting-samples",
         action="store_true",
         help="Also generate one plot for each non-reconnecting sample.",
@@ -304,26 +357,51 @@ def main():
         if args.pre_yield_min_gamma is None
         else f"gamma_ge_{args.pre_yield_min_gamma:g}".replace(".", "p")
     )
-    output_path = Path(
-        f"Plots/energy_error_cauchy_a_L100_3samples_each_{gamma_tag}_"
-        "V0norm_120bins.pdf"
-    )
-    no_reconnection = sorted(
-        data_root.glob(
-            "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s*/"
-            "macroData.csv"
+    if args.no_reconnection_csv_files is None:
+        no_reconnection = sorted(
+            data_root.glob(
+                "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s*/"
+                "macroData.csv"
+            )
         )
-    )
-    reconnection = sorted(
-        data_root.glob(
-            "simpleShear,s100x100l0.15,1e-05,1.0PBCedgeFlipt3LBFGSEpsx1e-06s*/"
-            "macroData.csv"
+    else:
+        no_reconnection = sorted(args.no_reconnection_csv_files)
+    if args.reconnection_csv_files is None and args.no_reconnection_csv_files is None:
+        reconnection = sorted(
+            data_root.glob(
+                "simpleShear,s100x100l0.15,1e-05,1.0PBCedgeFlipt3LBFGSEpsx1e-06s*/"
+                "macroData.csv"
+            )
         )
-    )
-    if not no_reconnection or not reconnection:
+    else:
+        reconnection = sorted(args.reconnection_csv_files or [])
+    if not no_reconnection:
         raise FileNotFoundError(
-            "Expected completed L=100 macroData.csv files were not found."
+            "No non-reconnecting macroData.csv files were found."
         )
+    all_paths = [*no_reconnection, *reconnection]
+    missing_paths = [path for path in all_paths if not path.is_file()]
+    if missing_paths:
+        raise FileNotFoundError(
+            "Missing CSV files: " + ", ".join(str(path) for path in missing_paths)
+        )
+    system_size = _validate_system_size(all_paths, args.system_size)
+    if args.output is not None:
+        output_path = args.output
+    elif reconnection:
+        output_path = Path(
+            f"Plots/energy_error_cauchy_a_L{system_size}_"
+            f"{len(no_reconnection)}samples_no_recon_"
+            f"{len(reconnection)}samples_recon_{gamma_tag}_V0norm_120bins.pdf"
+        )
+    else:
+        sample_word = "sample" if len(no_reconnection) == 1 else "samples"
+        output_path = Path(
+            f"Plots/energy_error_cauchy_a_L{system_size}_"
+            f"{len(no_reconnection)}{sample_word}_no_recon_"
+            f"{gamma_tag}_V0norm_120bins.pdf"
+        )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     worker_env = os.environ.copy()
     worker_env["MPLBACKEND"] = "Agg"
@@ -331,11 +409,14 @@ def main():
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir = Path(temp_dir)
         worker_specs = {}
-        conditions = [
-            ("no", no_reconnection, False, False),
-            ("recon", reconnection, False, False),
-        ]
+        conditions = [("no", no_reconnection, False, False)]
+        if reconnection:
+            conditions.append(("recon", reconnection, False, False))
         if args.show_reconnection_subsets:
+            if not reconnection:
+                raise ValueError(
+                    "--show-reconnection-subsets requires reconnecting CSV files."
+                )
             conditions.extend(
                 [
                     ("recon_events", reconnection, True, False),
@@ -400,13 +481,20 @@ def main():
             "no": _merge_values(
                 [individual_values[f"no_s{_sample_id(path)}"] for path in no_reconnection]
             ),
-            "recon": _merge_values(
-                [
-                    individual_values[f"recon_s{_sample_id(path)}"]
-                    for path in reconnection
-                ]
+            "recon": (
+                _merge_values(
+                    [
+                        individual_values[f"recon_s{_sample_id(path)}"]
+                        for path in reconnection
+                    ]
+                )
+                if reconnection
+                else _empty_values()
             ),
         }
+        _print_sample_summaries("no", no_reconnection, individual_values)
+        if reconnection:
+            _print_sample_summaries("recon", reconnection, individual_values)
         if args.show_reconnection_subsets:
             values.update(
                 {
@@ -440,7 +528,7 @@ def main():
         for path in no_reconnection:
             sample = _sample_id(path)
             sample_output = Path(
-                f"Plots/energy_error_cauchy_a_L100_no_recon_s{sample}_"
+                f"Plots/energy_error_cauchy_a_L{system_size}_no_recon_s{sample}_"
                 f"{gamma_tag}_V0norm_120bins.pdf"
             )
             sample_values = {
