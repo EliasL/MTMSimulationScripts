@@ -446,7 +446,11 @@ def plotSylvainBatches():
         grouped_configs, grouped_labels, group_labels = (
             ConfigGenerator.group_by_settings(configs, labels=labels)
         )
-        #plotReversibilityEnergyDropCorrelation(grouped_configs, grouped_labels, xAxisCol="rev_energy_diff")
+        plotReversibilityEnergyDropCorrelation(
+            grouped_configs,
+            grouped_labels,
+            xAxisCol="rev_energy_diff",
+        )
 
         paths, _ = get_csv_files(
             grouped_configs,
@@ -475,38 +479,38 @@ def plotSylvainBatches():
             for i in range(len(aligned_group_labels), len(paths)):
                 aligned_group_labels.append(f"group_{i}")
 
-        # makeAverageComparisonPlot(
-        #     paths,
-        #     Y="avg_energy",
-        #     name=f"sylvain_batch_{batch}_avg_energy",
-        #     group_labels=aligned_group_labels,
-        #     use_title=True,
-        # )
+        makeAverageComparisonPlot(
+            paths,
+            Y="avg_energy",
+            name=f"sylvain_batch_{batch}_avg_energy",
+            group_labels=aligned_group_labels,
+            use_title=True,
+        )
 
-        # flat_paths = []
-        # flat_labels = []
-        # for group_paths, group_label in zip(paths, aligned_group_labels):
-        #     if not group_paths:
-        #         continue
-        #     flat_paths.extend(group_paths)
-        #     flat_labels.extend([group_label] * len(group_paths))
+        flat_paths = []
+        flat_labels = []
+        for group_paths, group_label in zip(paths, aligned_group_labels):
+            if not group_paths:
+                continue
+            flat_paths.extend(group_paths)
+            flat_labels.extend([group_label] * len(group_paths))
 
-        # for postRegime, suffix in [(True, "post"), (False, "pre")]:
-        #     plot_reversibility_histograms(
-        #         paths,
-        #         postRegime=postRegime,
-        #         show=False,
-        #         save_path=f"Plots/sylvain_batch_{batch}_reversibility_{suffix}.pdf",
-        #         group_labels=aligned_group_labels,
-        #     )
+        for postRegime, suffix in [(True, "post"), (False, "pre")]:
+            plot_reversibility_histograms(
+                paths,
+                postRegime=postRegime,
+                show=False,
+                save_path=f"Plots/sylvain_batch_{batch}_reversibility_{suffix}.pdf",
+                group_labels=aligned_group_labels,
+            )
 
-        #     plot_plastic_energy_scatter(
-        #         flat_paths,
-        #         labels=flat_labels,
-        #         postRegime=postRegime,
-        #         name=f"sylvain_batch_{batch}_plastic_energy_{suffix}",
-        #         color_by_label=True,
-        #     )
+            plot_plastic_energy_scatter(
+                flat_paths,
+                labels=flat_labels,
+                postRegime=postRegime,
+                name=f"sylvain_batch_{batch}_plastic_energy_{suffix}",
+                color_by_label=True,
+            )
 
         for group_idx, (group_paths, group_label) in enumerate(
             zip(paths, aligned_group_labels)
