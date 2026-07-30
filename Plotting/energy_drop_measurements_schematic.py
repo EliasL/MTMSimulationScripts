@@ -383,9 +383,9 @@ def make_figure() -> tuple[plt.Figure, plt.Axes]:
     # Strain-step ticks and labels.  The final mark is the critical strain
     # used for the true-drop construction, directly below the ΔE_T arrow.
     strain_marks = (
-        (first[0], r"$\gamma_{n-2}$"),
-        (inter[0], r"$\gamma_{n-1}$"),
-        (equilibrium[0], r"$\gamma_n$"),
+        (first[0], r"$\gamma_{n-1}$"),
+        (inter[0], r"$\gamma_{n}$"),
+        (equilibrium[0], r"$\gamma_{n+1}$"),
         (true_top[0], r"$\gamma_c$"),
     )
     for x_mark, label in strain_marks:
