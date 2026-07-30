@@ -1348,6 +1348,7 @@ def plot_integer_shear_mesh(
             None,
             False,
             None,
+            cull_to_view=kwargs.get("cartesian_viewport_culling", True),
         )
         draw_rhombus(ax, data)
         ax.text(
@@ -2630,21 +2631,18 @@ def make_images(vtu_files, num_processes=-2, use_tqdm=True, X="load", **kwargs):
     ]
 
     print(f"Processing {kwargs['fileName']} video frames...")
-    # Limited memory for large systems
     L = get_data_from_name(vtu_files[0])["L"]
-    if L > 300:
-        num_processes = 1
-    elif L > 200:
-        num_processes = 2
+    if num_processes < 0:
+        import multiprocessing
+
+        num_processes = multiprocessing.cpu_count() + num_processes
+    max_processes = 1 if L > 300 else 2 if L > 150 else 3
+    num_processes = max(1, min(num_processes, max_processes))
+    print(f"Using {num_processes} rendering process(es) for L={L}.")
 
     if "disk" in kwargs["fileName"]:
         reset_energy_grid_cache()
     if multithread and num_processes != 1:
-        if num_processes < 0:
-            import multiprocessing
-
-            # Negative means "max + num_processes"
-            num_processes = multiprocessing.cpu_count() + num_processes
         image_paths = []
 
         image_paths.append(process_frame(kwargs_list[0]))

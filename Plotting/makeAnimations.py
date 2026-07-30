@@ -246,7 +246,7 @@ def makeAnimations(
     reconnecting=None,
     square_periodic_mesh=False,
     periodic_box_size=None,
-    cartesian_viewport_culling=False,
+    cartesian_viewport_culling=True,
     cartesian_viewport=None,
 ):
     """Render animations with the same metadata setup used by ``plotAll``.
@@ -431,7 +431,9 @@ def makeAnimations(
             element_subset=subset_arg,
             square_periodic_mesh=square_periodic_mesh,
             periodic_box_size=periodic_box_size,
-            cartesian_viewport_culling=cartesian_viewport_culling,
+            cartesian_viewport_culling=(
+                cartesian_viewport_culling and not square_periodic_mesh
+            ),
             cartesian_viewport=cartesian_viewport,
             **extra_kwargs,
         )

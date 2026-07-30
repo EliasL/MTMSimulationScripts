@@ -279,8 +279,9 @@ def handle_args_and_plot():
     parser.add_argument(
         "--cartesianViewportCulling",
         dest="cartesian_viewport_culling",
-        action="store_true",
-        help="Cull old Cartesian mesh rendering to the current viewport.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Cull Cartesian mesh rendering to the current viewport (default: enabled).",
     )
     parser.add_argument(
         "--cartesianViewport",
