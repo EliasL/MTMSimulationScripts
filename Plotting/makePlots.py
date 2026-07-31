@@ -21,7 +21,10 @@ from .dataFunctions import (
     extract_true_force_contribution_magnitude_series,
     resolve_vtu_files,
 )
-from .energyDropCalculations import calculate_energy_step_data
+from .energyDropCalculations import (
+    calculate_energy_step_data,
+    infer_plastic_event_column,
+)
 from Management.updateCSV import update_df_header, read_macrodata_csv
 from collections import defaultdict
 
@@ -457,9 +460,10 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label="", use_avg=None
         }  # Dictionary to store data for each group
         for df in split_dfs:
             # Filter out zero and NaN values
-            df = df[df["nr_elements_with_m3_fix_change"] > 0]
+            plastic_col = infer_plastic_event_column(df)
+            df = df[df[plastic_col] > 0]
 
-            group_index = np.floor(np.log2(df["nr_elements_with_m3_fix_change"])).astype(int)
+            group_index = np.floor(np.log2(df[plastic_col])).astype(int)
             group_index = np.clip(
                 group_index, min_group_index, max_group_index
             )  # Clamp the group index
@@ -2735,9 +2739,11 @@ def makeEnergyAvalancheComparison(
         dfs = []  # panda dataframes
         # for each seed using this config
         for j, csv_file_path in enumerate(csv_file_paths):
+            header = pd.read_csv(csv_file_path, nrows=0)
+            plastic_col = infer_plastic_event_column(header)
             df = pd.read_csv(
-                csv_file_path, usecols=[X, Y, "nr_elements_with_m3_fix_change", "max_energy"]
-            )
+                csv_file_path, usecols=[X, Y, plastic_col, "max_energy"]
+            ).rename(columns={plastic_col: "nr_elements_with_m3_fix_change"})
             # Truncate data based on xlim
             df = df[(df[X] >= xlim[0]) & (df[X] <= xlim[1])]
             # Truncate data based on dislocations

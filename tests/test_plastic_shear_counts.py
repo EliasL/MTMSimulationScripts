@@ -3,7 +3,9 @@ from unittest.mock import patch
 
 import numpy as np
 
+from Plotting.dataFunctions import VTUData
 from Plotting.pyplotFunctions import (
+    _make_integer_shear_bins,
     canonical_plastic_shear_counts,
     get_plastic_shear_counts,
     process_frame,
@@ -76,6 +78,40 @@ class PlasticShearCountTests(unittest.TestCase):
         self.assertEqual(source_recon, "T")
         self.assertEqual(int(h_fixed[0]), 2)
         self.assertEqual(source_fixed, "F_P")
+
+    def test_integer_shear_bins_are_symmetric_and_grouped(self):
+        _, _, labels = _make_integer_shear_bins(50)
+        self.assertEqual(
+            labels,
+            [
+                "-41+",
+                "-40..-21",
+                "-20..-11",
+                "-10..-5",
+                "-4..-2",
+                "-1",
+                "0",
+                "1",
+                "2..4",
+                "5..10",
+                "11..20",
+                "21..40",
+                "41+",
+            ],
+        )
+
+    def test_total_branch_uses_exported_values_when_available(self):
+        data = VTUData.__new__(VTUData)
+        components = {
+            (1, 1): np.array([2.0]),
+            (1, 2): np.array([3.0]),
+            (2, 1): np.array([4.0]),
+            (2, 2): np.array([5.0]),
+        }
+        with patch.object(data, "get_matrix_components", return_value=components):
+            np.testing.assert_allclose(
+                data.get_T_total(), [[[2.0, 3.0], [4.0, 5.0]]]
+            )
 
 
 if __name__ == "__main__":

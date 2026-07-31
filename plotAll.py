@@ -258,6 +258,13 @@ def handle_args_and_plot():
         help="Sample video frames at uniform strain intervals (default: enabled).",
     )
     parser.add_argument(
+        "--secondsPerUnitShear",
+        dest="seconds_per_unit_shear",
+        type=float,
+        default=15.0,
+        help="Video seconds per unit strain (default: 15).",
+    )
+    parser.add_argument(
         "--elementSubset",
         dest="element_subset",
         choices=["odd", "even", "none"],
@@ -317,7 +324,6 @@ def handle_args_and_plot():
     plotAll(
         **kwargs,
         fps=30,
-        seconds_per_unit_shear=2,
     )
 
 
