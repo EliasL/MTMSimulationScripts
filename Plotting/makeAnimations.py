@@ -2,6 +2,8 @@ import os
 import subprocess
 import cv2
 import imageio.v2 as imageio  # Adjusted import here
+import math
+from bisect import bisect_left
 from pathlib import Path
 
 
@@ -22,7 +24,11 @@ from .pyplotFunctions import (
     plot_and_save_velocity_field_in_plastic_reduced_poincare_disk,
     plot_and_save_mesh_with_force,
 )
-from .dataFunctions import resolve_vtu_files, get_data_from_name
+from .dataFunctions import (
+    resolve_vtu_files,
+    get_data_from_name,
+    infer_strain_from_vtu,
+)
 from .makePvd import create_collection
 
 from datetime import datetime, timedelta
@@ -31,19 +37,74 @@ from datetime import datetime, timedelta
 # This function selects a subset of the vtu files to speed up the animation
 # process. (For example, if the video would be 2 hours long, or have a fps of
 # 2000, there is no need to use all the frames, so we skip a few)
-def select_vtu_files(vtu_files, nrSteps, all_images=False):
+def get_vtu_strains(vtu_files):
+    """Return the strain value associated with every VTU file."""
+    strains = []
+    for vtu_file in vtu_files:
+        strain = infer_strain_from_vtu(vtu_file)
+        if strain is None:
+            strain = get_data_from_name(vtu_file).get("load")
+        if strain is None or not math.isfinite(float(strain)):
+            raise ValueError(f"Could not infer a finite strain from {vtu_file}")
+        strains.append(float(strain))
+    return strains
+
+
+def _cumulative_strain_distance(strains):
+    distance = [0.0]
+    for strain, next_strain in zip(strains, strains[1:]):
+        distance.append(distance[-1] + abs(next_strain - strain))
+    return distance
+
+
+def select_vtu_files(
+    vtu_files,
+    nrSteps,
+    all_images=False,
+    constant_strain_rate=True,
+    strains=None,
+):
     # Always include the first and last frames
     if len(vtu_files) <= 2 or nrSteps <= 2:
         return vtu_files
 
-    # Calculate the step size
+    if all_images:
+        return list(vtu_files)
+
+    if constant_strain_rate:
+        if strains is None:
+            strains = get_vtu_strains(vtu_files)
+        if len(strains) != len(vtu_files):
+            raise ValueError("strains must have one value per VTU file")
+        distances = _cumulative_strain_distance(strains)
+        if distances[-1] == 0:
+            return list(vtu_files)
+        target_count = min(len(vtu_files), max(2, int(round(nrSteps))))
+        if target_count >= len(vtu_files):
+            return list(vtu_files)
+        targets = [
+            i * distances[-1] / (target_count - 1)
+            for i in range(target_count)
+        ]
+        selected = []
+        for target in targets:
+            index = bisect_left(distances, target)
+            if index == 0:
+                nearest = 0
+            elif index == len(distances):
+                nearest = len(distances) - 1
+            elif target - distances[index - 1] <= distances[index] - target:
+                nearest = index - 1
+            else:
+                nearest = index
+            if not selected or selected[-1] != vtu_files[nearest]:
+                selected.append(vtu_files[nearest])
+        return selected
+
+    # Legacy index-based sampling
     step_size = int(max(1, len(vtu_files) // (nrSteps - 1)))
 
-    # Select files at regular intervals
-    if all_images:
-        selected_files = vtu_files
-    else:
-        selected_files = vtu_files[::step_size]
+    selected_files = list(vtu_files[::step_size])
 
     # Ensure the last file is included, if it's not already
     if selected_files[-1] != vtu_files[-1]:
@@ -53,14 +114,22 @@ def select_vtu_files(vtu_files, nrSteps, all_images=False):
 
 
 def framesToMp4(frames, outFile, fps):
-    print(f"Creating {outFile}")
+    frame_count = len(frames)
+    print(f"Creating {outFile} from {frame_count} frames...", flush=True)
     writer = imageio.get_writer(outFile, fps=fps, codec="libx264", quality=7)
     try:
-        for frame_path in frames:
+        for frame_number, frame_path in enumerate(frames, start=1):
             frame = imageio.imread(frame_path)
             writer.append_data(frame)
+            if frame_number == 1 or frame_number % 500 == 0 or frame_number == frame_count:
+                print(
+                    f"Submitted {frame_number}/{frame_count} frames to the encoder.",
+                    flush=True,
+                )
     finally:
+        print(f"Finalizing {outFile}...", flush=True)
         writer.close()
+    print(f"Finished creating {outFile}.", flush=True)
 
 
 def oldFramesToMp4(frames, outFile, fps):
@@ -119,7 +188,13 @@ def combine_videoes(path, n1, n2, n3=None, n4=None, vertical=False):
             f"[v0][v1]{stack_type}=inputs=2",
             os.path.join(path, f"{n1}_and_{n2}.mp4"),
         ]
-        subprocess.run(command)
+        output_file = command[-1]
+        print(f"Creating combined video {output_file}...", flush=True)
+        result = subprocess.run(command)
+        print(
+            f"Finished combined video {output_file} (ffmpeg exit {result.returncode}).",
+            flush=True,
+        )
     elif n3 is not None and n4 is not None:
         v1 = os.path.join(path, f"{n1}_video.mp4")
         v2 = os.path.join(path, f"{n2}_video.mp4")
@@ -166,7 +241,12 @@ def combine_videoes(path, n1, n2, n3=None, n4=None, vertical=False):
             "yuv420p",
             output_file,
         ]
-        subprocess.run(command)
+        print(f"Creating combined video {output_file}...", flush=True)
+        result = subprocess.run(command)
+        print(
+            f"Finished combined video {output_file} (ffmpeg exit {result.returncode}).",
+            flush=True,
+        )
 
 
 def prepare_animation_inputs(path, macroData=None, pvdFile=None, useMetadata=True):
@@ -248,11 +328,13 @@ def makeAnimations(
     periodic_box_size=None,
     cartesian_viewport_culling=True,
     cartesian_viewport=None,
+    constant_strain_rate=True,
 ):
     """Render animations with the same metadata setup used by ``plotAll``.
 
     Metadata discovery is automatic. Set ``useMetadata=False`` only when a
     stripped-down render without global limits and macro-data overlays is wanted.
+    By default, frames are sampled at uniform cumulative strain intervals.
     """
     path, macroData, pvdFile, vtu_files = prepare_animation_inputs(
         path, macroData, pvdFile, useMetadata
@@ -283,11 +365,15 @@ def makeAnimations(
 
     range_vtu_files = list(vtu_files)
 
-    # we don't want every frame to be created, so in order to find out what
-    # frames should be drawn, we first check how much load change there is
+    strain_values = get_vtu_strains(vtu_files) if constant_strain_rate else None
+
+    # We do not want every frame to be created, so determine the video length
+    # from strain when using the constant-strain-rate sampler.
     first = get_data_from_name(vtu_files[0])
     last = get_data_from_name(vtu_files[-1])
-    if X in first and X in last:
+    if constant_strain_rate:
+        xChange = _cumulative_strain_distance(strain_values)[-1]
+    elif X in first and X in last:
         xChange = float(last[X]) - float(first[X])
     else:
         xChange = 0.3
@@ -297,7 +383,13 @@ def makeAnimations(
     nrSteps = videoLength * fps
 
     # we select a reduced number of frames
-    vtu_files = select_vtu_files(vtu_files, nrSteps, allImages)
+    vtu_files = select_vtu_files(
+        vtu_files,
+        nrSteps,
+        allImages,
+        constant_strain_rate=constant_strain_rate,
+        strains=strain_values,
+    )
 
     if len(vtu_files) < nrSteps:
         # If we don't have enough frames, we need to make each frame last longer
@@ -414,9 +506,16 @@ def makeAnimations(
             extra_kwargs["matrix_name"] = matrix_name_for_job
         if base_name == "integerShearMesh":
             extra_kwargs["reconnecting"] = reconnecting
+            # Use the final state as an inexpensive approximation of the
+            # simulation-wide color limits. Scanning every VTU is very costly
+            # for large meshes, and the counts are reconstructed from VTU data.
             extra_kwargs["plastic_shear_lims"] = get_plastic_shear_ranges(
-                range_vtu_files, reconnecting
+                [range_vtu_files[-1]], reconnecting
             )
+        print(
+            f"Starting render job {fileName} ({len(vtu_files)} frames)...",
+            flush=True,
+        )
         images = make_images(
             vtu_files,
             num_processes=num_processes,
@@ -437,6 +536,7 @@ def makeAnimations(
             cartesian_viewport=cartesian_viewport,
             **extra_kwargs,
         )
+        print(f"Finished rendering frames for {fileName}.", flush=True)
 
         # Path to the output video file
         outPath = os.path.join(output_path, f"{fileName}_video.mp4")
@@ -446,6 +546,7 @@ def makeAnimations(
         ):
             framesToMp4(images, outPath, fps)
             if makeGIF:
+                print(f"Creating GIF for {fileName}...", flush=True)
                 GIFCommand = [
                     "/opt/homebrew/bin/gifski",
                     "--quality",
@@ -453,12 +554,17 @@ def makeAnimations(
                     "-o",
                     os.path.join(output_path, f"{fileName}_video.gif"),
                 ] + images  # Append the list of image paths to the command
-                subprocess.run(GIFCommand)
+                result = subprocess.run(GIFCommand)
+                print(
+                    f"Finished GIF for {fileName} (gifski exit {result.returncode}).",
+                    flush=True,
+                )
         else:
             # The video and the last image were generated at about the same time,
             # so the video does not need to be re-rendered
-            pass
+            print(f"Reusing existing video {outPath}.", flush=True)
     if combineVideos:
+        print("Starting combined video generation...", flush=True)
         try:
             combine_videoes(
                 output_path,
@@ -487,6 +593,7 @@ def makeAnimations(
             )
         except Exception as e:
             print(e)
+    print(f"Finished all requested animations for {output_path}.", flush=True)
 
 
 if __name__ == "__main__":

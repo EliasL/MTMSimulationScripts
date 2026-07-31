@@ -176,7 +176,7 @@ def get_plastic_shear_counts(vtu_file, reconnecting=None):
 
 
 def get_plastic_shear_ranges(vtu_files, reconnecting=None):
-    """Return direction-specific symmetric count limits over one simulation."""
+    """Return direction-specific symmetric count limits over supplied states."""
     maxima = [0, 0]
     source = None
     for vtu_file in vtu_files:
@@ -191,7 +191,8 @@ def get_plastic_shear_ranges(vtu_files, reconnecting=None):
         maxima[1] = max(maxima[1], int(np.max(np.abs(vertical), initial=0)))
     print(
         f"Plastic shear source={source}, "
-        f"horizontal range=±{maxima[0]}, vertical range=±{maxima[1]}"
+        f"horizontal range=±{maxima[0]}, vertical range=±{maxima[1]}",
+        flush=True,
     )
     return tuple(max(1, value) for value in maxima)
 

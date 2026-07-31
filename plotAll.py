@@ -246,10 +246,16 @@ def handle_args_and_plot():
     )
     parser.add_argument(
         "--allImages",
-        type=bool,
-        choices=[True, False],
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Use all images for the process (default: disabled).",
+    )
+    parser.add_argument(
+        "--constantStrainRate",
+        dest="constant_strain_rate",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Use all images for the process (default: False)",
+        help="Sample video frames at uniform strain intervals (default: enabled).",
     )
     parser.add_argument(
         "--elementSubset",
