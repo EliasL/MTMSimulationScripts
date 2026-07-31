@@ -96,22 +96,41 @@ def volume_from_metadata(meta):
     return None
 
 
-def _simple_shear_tangent(load_i, *, bulk_modulus=4.0):
+_SIMPLE_SHEAR_TANGENT_CACHE = {}
+
+
+def _simple_shear_tangent(load_i, *, bulk_modulus=4.0, loops=10):
     """Return the spatial tangent a_1212 along upper simple shear."""
+    load_i = np.asarray(load_i, dtype=float)
     tangent = np.full_like(load_i, np.nan, dtype=float)
     finite = np.isfinite(load_i)
     if not np.any(finite):
         return tangent
+
+    cache_key = None
+    if load_i.size >= 128:
+        cache_key = (
+            float(bulk_modulus),
+            int(loops),
+            load_i.shape,
+            load_i.dtype.str,
+            load_i.tobytes(),
+        )
+        cached = _SIMPLE_SHEAR_TANGENT_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
 
     F_i = np.zeros((int(np.sum(finite)), 2, 2), dtype=float)
     F_i[..., 0, 0] = 1.0
     F_i[..., 0, 1] = load_i[finite]
     F_i[..., 1, 1] = 1.0
     tangent[finite] = ContiEnergy.elasticity_tensor(
-        F_i, K=bulk_modulus, eulerian=True
+        F_i, K=bulk_modulus, eulerian=True, loops=loops
     )[
         ..., 0, 1, 0, 1
     ]
+    if cache_key is not None:
+        _SIMPLE_SHEAR_TANGENT_CACHE[cache_key] = tangent
     return tangent
 
 
@@ -124,6 +143,82 @@ def _simple_shear_tangent_gamma0(shape, *, bulk_modulus=4.0):
         F0, K=bulk_modulus, eulerian=True
     )[..., 0, 1, 0, 1]
     return np.full(shape, float(tangent0[0]), dtype=float)
+
+
+def calculate_stress_step_data(
+    csv_file_path=None, *, df=None, calculate_tangent=True
+):
+    """Compute first-order stress-drop measures for each load increment.
+
+    The three returned drops are aligned with the step ending at ``load_ip1``:
+
+    ``stress_corrected_drop``
+        ``sigma_i + a_1212_i * delta_gamma - sigma_ip1``.
+    ``inter_strain_drop``
+        ``sigma_i - sigma_ip1``.
+    ``relaxation_drop``
+        ``-avg_sigma12_change_from_init`` at ``load_ip1``.
+
+    ``a_1212_i`` is evaluated in the current homogeneous simple-shear state,
+    matching the tangent used by the energy-prediction calculation.
+    """
+    csv_path = Path(csv_file_path) if csv_file_path is not None else None
+    if df is None:
+        if csv_path is None:
+            raise ValueError("Provide either csv_file_path or df.")
+        if not csv_path.exists():
+            raise FileNotFoundError(f"CSV file not found: {csv_path}")
+        df = read_macrodata_csv(csv_path)
+
+    required = {"load", "avg_sigma12", "avg_sigma12_change_from_init"}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise KeyError(f"Missing stress columns: {missing}")
+
+    load = np.asarray(df["load"], dtype=float)
+    sigma = np.asarray(df["avg_sigma12"], dtype=float)
+    relaxation_change = np.asarray(df["avg_sigma12_change_from_init"], dtype=float)
+    if load.ndim != 1 or load.size < 2:
+        raise ValueError("'load' must be 1D with at least 2 points.")
+    for name, values in {
+        "load": load,
+        "avg_sigma12": sigma,
+        "avg_sigma12_change_from_init": relaxation_change,
+    }.items():
+        if values.shape != load.shape:
+            raise ValueError(f"{name} shape mismatch: {values.shape} vs {load.shape}")
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"{name} contains non-finite values.")
+
+    config = _read_simulation_config(csv_path)
+    bulk_modulus = float(config.get("bulkModulus", 4.0))
+    load_i = load[:-1]
+    delta_gamma = np.diff(load)
+    if calculate_tangent:
+        a1212_i = _simple_shear_tangent(load_i, bulk_modulus=bulk_modulus)
+    else:
+        a1212_i = np.full_like(load_i, np.nan, dtype=float)
+    sigma_pred_ip1 = sigma[:-1] + a1212_i * delta_gamma
+
+    return pd.DataFrame(
+        {
+            "load_i": load_i,
+            "load_ip1": load[1:],
+            "delta_gamma": delta_gamma,
+            "sigma12_i": sigma[:-1],
+            "sigma12_ip1": sigma[1:],
+            "sigma12_pred_ip1": sigma_pred_ip1,
+            "a1212_i": a1212_i,
+            "stress_corrected_drop": sigma_pred_ip1 - sigma[1:],
+            "inter_strain_drop": sigma[:-1] - sigma[1:],
+            "relaxation_drop": -relaxation_change[1:],
+        }
+    ), {
+        "csv_path": str(csv_path) if csv_path is not None else None,
+        "stress_col": "avg_sigma12",
+        "relaxation_col": "avg_sigma12_change_from_init",
+        "bulk_modulus": bulk_modulus,
+    }
 
 
 def _read_simulation_config(csv_path):

@@ -1810,12 +1810,38 @@ def plotReversibilityEnergyDropCorrelation(
     ]
     stress_drop_specs = [
         {
-            "key": "stress_drop",
+            "key": "stress_corrected",
             "fn": get_stress_drops,
-            "marker": "v",
-            "kwargs": dict(strainLim=strainLim, postRegime=postRegime),
-            "fallback_label": "Stress drop",
-        }
+            "marker": "o",
+            "kwargs": dict(
+                strainLim=strainLim,
+                postRegime=postRegime,
+                stress_type="stress_corrected",
+            ),
+            "fallback_label": "Elasticity-corrected stress drop",
+        },
+        {
+            "key": "inter_strain_stress",
+            "fn": get_stress_drops,
+            "marker": "s",
+            "kwargs": dict(
+                strainLim=strainLim,
+                postRegime=postRegime,
+                stress_type="inter_strain",
+            ),
+            "fallback_label": "Inter-strain stress drop",
+        },
+        {
+            "key": "relaxation_stress",
+            "fn": get_stress_drops,
+            "marker": "^",
+            "kwargs": dict(
+                strainLim=strainLim,
+                postRegime=postRegime,
+                stress_type="relaxation",
+            ),
+            "fallback_label": "Relaxation stress drop",
+        },
     ]
 
     n_groups = len(paths)

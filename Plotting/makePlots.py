@@ -519,23 +519,22 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label="", use_avg=None
 
 
 def getPrettyLabel(string):
-    s = ""
-    if "minimizer=" in string:
-        s = string.split("minimizer=")[1].split(",")[0]
-    if "," not in string:
-        s = string
-    if "eps" in string.lower():
-        # Find the position of "eps" (case-insensitive)
-        idx = string.lower().index("eps")
-        # Extract the part after "eps" without changing its case
-        stopType = string[idx + 3 :]
-        if stopType == "g":
-            stopType = r"\sigma"
-        if stopType == "x":
-            stopType = r"$|\Delta \mathbf{u}|$"
-        s = rf"$\epsilon_{{{stopType}}}$"
+    if not isinstance(string, str):
+        return str(string)
+
+    s = string
+    eps_x = re.search(
+        r"(?:LBFGSEpsx|LGBFSEpsx)=([^,]+)", string, flags=re.IGNORECASE
+    )
+    if eps_x:
+        s = rf"$\epsilon_x$: {eps_x.group(1)}"
+    else:
+        load_increment = re.search(r"loadIncrement=([^,]+)", string)
+        if load_increment:
+            s = rf"$\Delta \gamma$: {load_increment.group(1)}"
+        elif "minimizer=" in string:
+            s = string.split("minimizer=", 1)[1].split(",", 1)[0]
     s = s.replace("LBFGS", "L-BFGS")
-    s = s.replace("loadIncrement", r"$\Delta \gamma$")
     return s
 
 
@@ -2613,7 +2612,7 @@ def makeAverageComparisonPlot(
 
         method_label = get_method(csv_file_paths)
         if group_labels and i < len(group_labels) and group_labels[i]:
-            label = group_labels[i]
+            label = getPrettyLabel(group_labels[i])
         else:
             label = method_label
 

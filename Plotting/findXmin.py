@@ -2419,64 +2419,234 @@ def find_xmin_max_p(
     return float(xmins[int(np.nanargmax(p_values))])
 
 
+def _fine_xmin_candidates(drops, min_tail_count):
+    """Return every observed xmin that retains the requested tail count."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    if drops.size < int(min_tail_count):
+        raise ValueError(
+            f"Need at least {int(min_tail_count)} positive drops for the fine "
+            f"xmin search; got {drops.size}."
+        )
+
+    sorted_drops = np.sort(drops)
+    candidate_hi = float(sorted_drops[-int(min_tail_count)])
+    candidates = np.unique(sorted_drops[sorted_drops <= candidate_hi])
+    if candidates.size < 2:
+        raise ValueError(
+            "Need at least two distinct observed xmin candidates for the fine "
+            "local-minimum search."
+        )
+    return candidates
+
+
+def _nearest_sorted_xmin_index(xmins, target):
+    """Find the observed xmin nearest to ``target`` in log-space."""
+    xmins = np.asarray(xmins, dtype=float)
+    if xmins.ndim != 1 or xmins.size == 0:
+        raise ValueError("xmins must be a non-empty one-dimensional array.")
+    if not np.all(np.isfinite(xmins) & (xmins > 0)):
+        raise ValueError("xmins must contain only finite positive values.")
+    if np.any(np.diff(xmins) <= 0):
+        raise ValueError("xmins must be strictly increasing.")
+    target = float(target)
+    if not np.isfinite(target) or target <= 0:
+        raise ValueError("target must be finite and positive.")
+
+    insertion = int(np.searchsorted(xmins, target, side="left"))
+    candidate_indices = np.unique(
+        np.clip([insertion - 1, insertion], 0, xmins.size - 1)
+    )
+    log_target = np.log10(target)
+    return min(
+        (int(index) for index in candidate_indices),
+        key=lambda index: (abs(np.log10(xmins[index]) - log_target), index),
+    )
+
+
 def _simple_drop_local_search(
     drops,
-    start_log_xmin,
-    initial_log_step,
-    log_bounds,
+    fine_xmins,
+    start_index,
     distance_cache,
     *,
     min_tail_count=3,
-    max_iterations=64,
-    refinements=10,
+    parameter_cache=None,
+    search_bounds=None,
     **fit_kwargs,
 ):
-    """Locally minimize KS distance in log-xmin space with a pattern search."""
-    drops = np.asarray(drops, dtype=float)
-    log_lo, log_hi = (float(value) for value in log_bounds)
-    current = float(np.clip(start_log_xmin, log_lo, log_hi))
-    step = float(initial_log_step)
-    min_step = step / 2.0 ** int(refinements)
+    """Minimize KS distance by moving to direct neighbors in ``fine_xmins``.
 
-    def evaluate(log_xmin):
-        log_xmin = float(np.clip(log_xmin, log_lo, log_hi))
-        xmin = float(10.0**log_xmin)
-        key = float(np.float64(xmin))
-        if key not in distance_cache:
-            if np.count_nonzero(drops >= xmin) < min_tail_count:
+    ``fine_xmins`` is the sorted unique set of observed drop values. Each
+    iteration evaluates only the current candidate and its direct array
+    neighbors. The old continuous log-space pattern search is deliberately
+    not used here: an xmin is refined at the full fidelity of the observed
+    data, one candidate index at a time.
+    """
+    drops = np.asarray(drops, dtype=float)
+    fine_xmins = np.asarray(fine_xmins, dtype=float)
+    if fine_xmins.ndim != 1 or fine_xmins.size < 2:
+        raise ValueError("fine_xmins must contain at least two candidates.")
+    if not np.all(np.isfinite(fine_xmins) & (fine_xmins > 0)):
+        raise ValueError("fine_xmins must contain only finite positive values.")
+    if np.any(np.diff(fine_xmins) <= 0):
+        raise ValueError("fine_xmins must be strictly increasing.")
+    start_index = int(start_index)
+    if start_index < 0 or start_index >= fine_xmins.size:
+        raise IndexError("start_index is outside fine_xmins.")
+    if search_bounds is None:
+        lower_index, upper_index = 0, fine_xmins.size - 1
+    else:
+        if len(search_bounds) != 2:
+            raise ValueError("search_bounds must contain two candidate indices.")
+        lower_index, upper_index = (int(value) for value in search_bounds)
+        if not 0 <= lower_index <= upper_index < fine_xmins.size:
+            raise ValueError("search_bounds must lie within fine_xmins.")
+        if not lower_index <= start_index <= upper_index:
+            raise ValueError("start_index must lie within search_bounds.")
+    if parameter_cache is None:
+        parameter_cache = {}
+
+    def evaluate_many(indices, initial_params=None):
+        indices = np.asarray(indices, dtype=int)
+        missing_indices = []
+        missing_xmins = []
+        for index in indices:
+            xmin = float(fine_xmins[index])
+            key = float(np.float64(xmin))
+            if key in distance_cache:
+                continue
+            if np.count_nonzero(drops >= xmin) < int(min_tail_count):
                 distance_cache[key] = np.inf
             else:
-                distances, _, _ = evaluate_xmin_distances(
-                    drops,
-                    [xmin],
-                    **fit_kwargs,
+                missing_indices.append(int(index))
+                missing_xmins.append(xmin)
+        if missing_xmins:
+            distances, _, params = evaluate_xmin_distances(
+                drops,
+                missing_xmins,
+                initial_params=initial_params,
+                **fit_kwargs,
+            )
+            for index, distance, params in zip(
+                missing_indices,
+                distances,
+                params,
+            ):
+                key = float(np.float64(fine_xmins[index]))
+                distance_cache[key] = (
+                    float(distance) if np.isfinite(distance) else np.inf
                 )
-                distance = float(distances[0])
-                distance_cache[key] = distance if np.isfinite(distance) else np.inf
-        return float(distance_cache[key])
-
-    current_distance = evaluate(current)
-    iterations = 0
-    while iterations < int(max_iterations) and step >= min_step:
-        iterations += 1
-        trials = np.unique(
-            np.clip([current - step, current, current + step], log_lo, log_hi)
+                parameter_cache[key] = params
+        return np.asarray(
+            [distance_cache[float(np.float64(fine_xmins[index]))] for index in indices],
+            dtype=float,
         )
-        trial_distances = np.asarray([evaluate(value) for value in trials])
-        best = int(np.argmin(trial_distances))
-        best_log_xmin = float(trials[best])
-        best_distance = float(trial_distances[best])
+
+    current_index = start_index
+    current_distance = float(evaluate_many([current_index])[0])
+    current_params = parameter_cache.get(
+        float(np.float64(fine_xmins[current_index]))
+    )
+    iterations = 0
+    while True:
+        neighbor_indices = np.arange(
+            max(lower_index, current_index - 1),
+            min(upper_index + 1, current_index + 2),
+            dtype=int,
+        )
+        trial_distances = evaluate_many(neighbor_indices, current_params)
+        best_position = int(np.argmin(trial_distances))
+        best_index = int(neighbor_indices[best_position])
+        best_distance = float(trial_distances[best_position])
         if best_distance < current_distance:
-            current = best_log_xmin
+            current_index = best_index
             current_distance = best_distance
-        else:
-            step *= 0.5
+            current_params = parameter_cache.get(
+                float(np.float64(fine_xmins[current_index]))
+            )
+            iterations += 1
+            continue
+        break
 
     return {
-        "xmin": float(10.0**current),
+        "xmin": float(fine_xmins[current_index]),
         "distance": current_distance,
-        "start_xmin": float(10.0**start_log_xmin),
+        "start_xmin": float(fine_xmins[start_index]),
+        "start_candidate_index": int(start_index),
+        "final_candidate_index": int(current_index),
+        "search_bounds": (int(lower_index), int(upper_index)),
         "iterations": iterations,
+    }
+
+
+SIMPLE_DROP_START_LABELS = ("left", "middle", "right")
+
+
+def summarize_simple_drop_starts(local_minima, *, rtol=1e-6):
+    """Summarize agreement between the three simpleDrop local searches."""
+    local_minima = list(local_minima)
+    if len(local_minima) != len(SIMPLE_DROP_START_LABELS):
+        raise ValueError(
+            "simpleDrop must provide exactly three local-search results."
+        )
+    if rtol < 0:
+        raise ValueError("rtol must be non-negative.")
+
+    for index, (label, result) in enumerate(
+        zip(SIMPLE_DROP_START_LABELS, local_minima)
+    ):
+        result["start_label"] = label
+        result["start_label_index"] = index
+
+    finite_results = [
+        result for result in local_minima if np.isfinite(result["distance"])
+    ]
+    if not finite_results:
+        raise RuntimeError("Cannot summarize three failed simpleDrop searches.")
+
+    unique_xmins = []
+    for result in finite_results:
+        if not any(
+            np.isclose(result["xmin"], other, rtol=rtol, atol=0.0)
+            for other in unique_xmins
+        ):
+            unique_xmins.append(float(result["xmin"]))
+
+    selected_index = min(
+        range(len(local_minima)),
+        key=lambda index: (local_minima[index]["distance"], local_minima[index]["xmin"]),
+    )
+    middle = local_minima[1]
+    lowest_distance = min(result["distance"] for result in finite_results)
+    middle_is_lowest = np.isfinite(middle["distance"]) and np.isclose(
+        middle["distance"],
+        lowest_distance,
+        rtol=rtol,
+        atol=0.0,
+    )
+
+    def starts_differ(first, second):
+        return not np.isclose(
+            local_minima[first]["xmin"],
+            local_minima[second]["xmin"],
+            rtol=rtol,
+            atol=0.0,
+        )
+
+    return {
+        "unique_local_minimum_count": len(unique_xmins),
+        "finds_different_local_minima": len(unique_xmins) > 1,
+        "middle_search_is_lowest": bool(middle_is_lowest),
+        "selected_start": SIMPLE_DROP_START_LABELS[selected_index],
+        "selected_start_index": int(selected_index),
+        "pairwise_different": {
+            "left_middle": starts_differ(0, 1),
+            "middle_right": starts_differ(1, 2),
+            "left_right": starts_differ(0, 2),
+        },
+        "unique_xmins": unique_xmins,
+        "comparison_rtol": float(rtol),
     }
 
 
@@ -2487,15 +2657,21 @@ def find_xmin_simple_drop_from_results(
     valid_fits=None,
     *,
     min_tail_count=3,
-    local_refinements=10,
-    local_max_iterations=64,
+    distance_cache=None,
+    parameter_cache=None,
     **fit_kwargs,
 ):
     """Refine xmin around the largest adjacent drop in a coarse KS scan.
 
     Three independent local searches begin at the left edge, logarithmic
     midpoint, and right edge of the interval with the largest decrease in
-    KS distance. The local minimum with the smallest KS distance is returned.
+    KS distance. The initial interval is found on the coarse scan. Each
+    subsequent search uses the sorted unique observed drops as its fine xmin
+    array and moves only to a direct neighbor in that array. The local
+    minimum with the smallest KS distance is returned.
+
+    Fine refinement is always one observed-candidate index at a time and
+    continues until neither direct neighbor improves the KS distance.
     """
     drops = np.asarray(drops, dtype=float)
     drops = drops[np.isfinite(drops) & (drops > 0)]
@@ -2548,34 +2724,56 @@ def find_xmin_simple_drop_from_results(
 
     left = float(xmins[largest_drop_index])
     right = float(xmins[largest_drop_index + 1])
-    log_left, log_right = np.log10([left, right])
-    starts = (log_left, 0.5 * (log_left + log_right), log_right)
-    initial_log_step = float(log_right - log_left)
-    finite_xmins = xmins[search_mask]
-    log_bounds = (
-        float(np.log10(np.min(finite_xmins))),
-        float(np.log10(np.max(finite_xmins))),
+    fine_xmins = _fine_xmin_candidates(drops, min_tail_count)
+    start_targets = (left, np.sqrt(left * right), right)
+    start_indices = tuple(
+        _nearest_sorted_xmin_index(fine_xmins, target)
+        for target in start_targets
     )
-    distance_cache = {
-        float(np.float64(xmin)): float(distance)
-        for xmin, distance, keep in zip(xmins, distances, search_mask)
-        if keep
-    }
+    valid_indices = np.flatnonzero(search_mask)
+    coarse_min_position = int(
+        np.argmin(distances[valid_indices])
+    )
+    coarse_min_lower = xmins[
+        valid_indices[max(0, coarse_min_position - 1)]
+    ]
+    coarse_min_upper = xmins[
+        valid_indices[min(valid_indices.size - 1, coarse_min_position + 1)]
+    ]
+    search_bounds = (
+        min(
+            min(start_indices),
+            _nearest_sorted_xmin_index(fine_xmins, coarse_min_lower),
+        ),
+        max(
+            max(start_indices),
+            _nearest_sorted_xmin_index(fine_xmins, coarse_min_upper),
+        ),
+    )
+    if distance_cache is None:
+        distance_cache = {}
+    distance_cache.update(
+        {
+            float(np.float64(xmin)): float(distance)
+            for xmin, distance, keep in zip(xmins, distances, search_mask)
+            if keep
+        }
+    )
 
     local_minima = [
         _simple_drop_local_search(
             drops,
-            start,
-            initial_log_step,
-            log_bounds,
+            fine_xmins,
+            start_index,
             distance_cache,
             min_tail_count=min_tail_count,
-            max_iterations=local_max_iterations,
-            refinements=local_refinements,
+            parameter_cache=parameter_cache,
+            search_bounds=search_bounds,
             **fit_kwargs,
         )
-        for start in starts
+        for start_index in start_indices
     ]
+    start_summary = summarize_simple_drop_starts(local_minima)
     finite_minima = [
         result for result in local_minima if np.isfinite(result["distance"])
     ]
@@ -2602,8 +2800,15 @@ def find_xmin_simple_drop_from_results(
         "largest_drop_interval": (left, right),
         "largest_distance_drop": float(changes[largest_drop_index]),
         "local_minima": local_minima,
+        "start_summary": start_summary,
         "selected_distance": float(selected["distance"]),
         "initial_measurement_count": int(xmins.size),
+        "fine_candidate_source": "sorted_unique_observed_drops",
+        "fine_candidate_count": int(fine_xmins.size),
+        "fine_step": "direct_neighbor_index",
+        "fine_candidate_min": float(fine_xmins[0]),
+        "fine_candidate_max": float(fine_xmins[-1]),
+        "fine_search_bounds": search_bounds,
         "evaluated_xmins": [xmin for xmin, _ in evaluated],
         "evaluated_distances": [distance for _, distance in evaluated],
     }
@@ -2617,16 +2822,21 @@ def find_xmin_refined_global_min_from_results(
     valid_fits=None,
     *,
     min_tail_count=3,
-    local_refinements=10,
-    local_max_iterations=64,
+    distance_cache=None,
+    parameter_cache=None,
     **fit_kwargs,
 ):
     """Refine every rough local minimum in a coarse KS scan.
 
     The supplied coarse scan is first searched over its full valid range for
-    rough local minima, including minima at either boundary. A local
-    log-space pattern search starts from each rough minimum. Only after all
-    local searches have finished is the smallest evaluated KS distance chosen.
+    rough local minima, including minima at either boundary. A fine neighbor
+    search starts from each rough minimum after mapping it to the nearest
+    observed xmin. The fine search uses sorted unique observed drops and moves
+    only to direct array neighbors. Only after all local searches have
+    finished is the smallest evaluated KS distance chosen.
+
+    Fine refinement continues until neither direct neighbor improves the KS
+    distance.
     """
     drops = np.asarray(drops, dtype=float)
     drops = drops[np.isfinite(drops) & (drops > 0)]
@@ -2686,41 +2896,44 @@ def find_xmin_refined_global_min_from_results(
             int(valid_indices[np.argmin(distances[valid_indices])])
         ]
 
-    finite_xmins = xmins[search_mask]
-    log_bounds = (
-        float(np.log10(np.min(finite_xmins))),
-        float(np.log10(np.max(finite_xmins))),
+    fine_xmins = _fine_xmin_candidates(drops, min_tail_count)
+    if distance_cache is None:
+        distance_cache = {}
+    distance_cache.update(
+        {
+            float(np.float64(xmin)): float(distance)
+            for xmin, distance, keep in zip(xmins, distances, search_mask)
+            if keep
+        }
     )
-    log_xmins = np.log10(xmins)
-    distance_cache = {
-        float(np.float64(xmin)): float(distance)
-        for xmin, distance, keep in zip(xmins, distances, search_mask)
-        if keep
-    }
 
     local_minima = []
     for index in rough_indices:
+        start_index = _nearest_sorted_xmin_index(fine_xmins, xmins[index])
         position = int(np.flatnonzero(valid_indices == index)[0])
-        neighbor_steps = []
-        if position > 0:
-            neighbor_steps.append(
-                float(log_xmins[index] - log_xmins[valid_indices[position - 1]])
-            )
-        if position + 1 < valid_indices.size:
-            neighbor_steps.append(
-                float(log_xmins[valid_indices[position + 1]] - log_xmins[index])
-            )
-        initial_log_step = max(neighbor_steps)
+        lower_target = (
+            xmins[valid_indices[position - 1]]
+            if position > 0
+            else fine_xmins[0]
+        )
+        upper_target = (
+            xmins[valid_indices[position + 1]]
+            if position + 1 < valid_indices.size
+            else fine_xmins[-1]
+        )
+        search_bounds = (
+            _nearest_sorted_xmin_index(fine_xmins, lower_target),
+            _nearest_sorted_xmin_index(fine_xmins, upper_target),
+        )
         local_minima.append(
             _simple_drop_local_search(
                 drops,
-                float(log_xmins[index]),
-                initial_log_step,
-                log_bounds,
+                fine_xmins,
+                start_index,
                 distance_cache,
                 min_tail_count=min_tail_count,
-                max_iterations=local_max_iterations,
-                refinements=local_refinements,
+                parameter_cache=parameter_cache,
+                search_bounds=search_bounds,
                 **fit_kwargs,
             )
         )
@@ -2757,6 +2970,14 @@ def find_xmin_refined_global_min_from_results(
         "local_minima": local_minima,
         "selected_distance": float(selected_distance),
         "initial_measurement_count": int(xmins.size),
+        "fine_candidate_source": "sorted_unique_observed_drops",
+        "fine_candidate_count": int(fine_xmins.size),
+        "fine_step": "direct_neighbor_index",
+        "fine_candidate_min": float(fine_xmins[0]),
+        "fine_candidate_max": float(fine_xmins[-1]),
+        "fine_search_bounds": [
+            result["search_bounds"] for result in local_minima
+        ],
         "evaluated_xmins": [xmin for xmin, _ in evaluated],
         "evaluated_distances": [distance for _, distance in evaluated],
     }
@@ -2796,8 +3017,6 @@ def analyze_xmin(
     *,
     nr_initial=100,
     min_tail_count=25,
-    local_refinements=10,
-    local_max_iterations=64,
     distType=Truncated_Power_Law,
     parallel=False,
 ):
@@ -2839,16 +3058,18 @@ def analyze_xmin(
     )
     search_kwargs = dict(
         min_tail_count=int(min_tail_count),
-        local_refinements=local_refinements,
-        local_max_iterations=local_max_iterations,
         distType=distType,
         parallel=parallel,
     )
+    distance_cache = {}
+    parameter_cache = {}
     simple_drop_xmin, simple_drop_details = find_xmin_simple_drop_from_results(
         drops,
         xmins,
         distances,
         valid_fits,
+        distance_cache=distance_cache,
+        parameter_cache=parameter_cache,
         **search_kwargs,
     )
     _, global_search_details = find_xmin_refined_global_min_from_results(
@@ -2856,6 +3077,8 @@ def analyze_xmin(
         xmins,
         distances,
         valid_fits,
+        distance_cache=distance_cache,
+        parameter_cache=parameter_cache,
         **search_kwargs,
     )
     global_xmin, global_distance, all_evaluations = (
@@ -2879,6 +3102,7 @@ def analyze_xmin(
         "simple_drop_xmin": float(simple_drop_xmin),
         "simple_drop_distance": float(simple_drop_details["selected_distance"]),
         "simple_drop_details": simple_drop_details,
+        "simple_drop_start_summary": simple_drop_details["start_summary"],
         "global_min_xmin": global_xmin,
         "global_min_distance": global_distance,
         "global_search_details": global_search_details,
@@ -2940,6 +3164,15 @@ def plot_xmin_analysis(analysis, ax=None):
         color="tab:blue",
         label=r"$D(x_{\min})$",
     )
+    ax.plot(
+        [],
+        [],
+        linestyle="none",
+        label=(
+            "Fine local search: sorted observed xmins, "
+            "direct-neighbor step=1"
+        ),
+    )
     global_details = analysis["global_search_details"]
     rough = global_details["rough_local_minima"]
     refined = global_details["local_minima"]
@@ -2961,6 +3194,22 @@ def plot_xmin_analysis(analysis, ax=None):
             s=25,
             color="0.35",
             label="Refined local minima",
+        )
+    start_summary = analysis["simple_drop_start_summary"]
+    start_markers = ("<", "o", ">")
+    for result, marker in zip(
+        analysis["simple_drop_details"]["local_minima"], start_markers
+    ):
+        ax.scatter(
+            [result["xmin"]],
+            [result["distance"]],
+            marker=marker,
+            s=30,
+            facecolor="white",
+            edgecolor="tab:orange",
+            linewidth=0.9,
+            zorder=7,
+            label=f"simpleDrop {result['start_label']} start",
         )
     simple_xmin = analysis["simple_drop_xmin"]
     simple_distance = analysis["simple_drop_distance"]
@@ -2988,6 +3237,17 @@ def plot_xmin_analysis(analysis, ax=None):
             zorder=6,
             label=rf"Global min.: $x_{{\min}}={global_xmin:.1e}$",
         )
+    ax.plot(
+        [],
+        [],
+        linestyle="none",
+        label=(
+            "simpleDrop starts: "
+            f"{start_summary['unique_local_minimum_count']} distinct; "
+            "middle lowest="
+            f"{start_summary['middle_search_is_lowest']}"
+        ),
+    )
     annotate_xmin_choices(ax, analysis, add_labels=False)
     ax.set_xscale("log")
     ax.set_xlabel(r"$x_{\min}$")
