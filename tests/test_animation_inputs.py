@@ -2,7 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from Plotting.makeAnimations import prepare_animation_inputs, simulation_uses_reconnection
+from Plotting.makeAnimations import (
+    get_vtu_strains,
+    prepare_animation_inputs,
+    select_vtu_files,
+    simulation_uses_reconnection,
+)
 
 
 class AnimationInputTests(unittest.TestCase):
@@ -33,6 +38,30 @@ class AnimationInputTests(unittest.TestCase):
             self.assertTrue(simulation_uses_reconnection(root))
             (root / "config.conf").write_text("reconnectionMethod = none\n")
             self.assertFalse(simulation_uses_reconnection(root))
+
+    def test_default_frame_selection_targets_uniform_strain_intervals(self):
+        files = [
+            f"sample_load={load}_.{index}.vtu"
+            for index, load in enumerate((0.0, 0.1, 0.4, 1.0))
+        ]
+        selected = select_vtu_files(files, 3)
+        self.assertEqual(get_vtu_strains(selected), [0.0, 0.4, 1.0])
+
+    def test_index_sampling_remains_available_as_an_opt_out(self):
+        files = [f"sample_{index}.vtu" for index in range(6)]
+        self.assertEqual(
+            select_vtu_files(files, 3, constant_strain_rate=False),
+            [files[0], files[3], files[5]],
+        )
+
+    def test_strain_rate_sampling_preserves_a_reversal(self):
+        strains = (0.0, 0.5, 1.0, 0.5, 0.0)
+        files = [
+            f"sample_load={strain}_.{index}.vtu"
+            for index, strain in enumerate(strains)
+        ]
+        selected = select_vtu_files(files, 5)
+        self.assertEqual(get_vtu_strains(selected), list(strains))
 
 
 if __name__ == "__main__":
