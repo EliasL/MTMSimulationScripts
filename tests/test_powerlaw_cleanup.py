@@ -18,7 +18,10 @@ from MTMath.evaluatePowerlawFit import (
     evaluate_xmin,
     evaluate_xmin_distances,
 )
-from Plotting.energyDropCalculations import calculate_energy_step_data
+from Plotting.energyDropCalculations import (
+    calculate_energy_step_data,
+    calculate_stress_step_data,
+)
 from Plotting import energyDropCalculations
 from Plotting.findXmin import (
     DEFAULT_XMIN_COMPARISON_STRATEGIES,
@@ -32,9 +35,11 @@ from Plotting.findXmin import (
     find_xmin_simple_drop,
     find_xmin_simple_drop_from_results,
     select_global_min_from_search_details,
+    summarize_simple_drop_starts,
 )
 from Plotting.plotPowerLaw import (
     get_energy_drops,
+    get_stress_drops,
     make_fit,
     plot_data_and_fit,
     plot_energy_drop_trace,
@@ -106,6 +111,37 @@ class EnergyDropTests(unittest.TestCase):
             calculate_energy_step_data(
                 df=df, metadata={"L": 2}, average_energy=False
             )
+
+    def test_first_order_stress_drop_measures(self):
+        df = pd.DataFrame(
+            {
+                "load": [0.0, 0.1, 0.2],
+                "avg_sigma12": [1.0, 1.1, 0.8],
+                "avg_sigma12_change_from_init": [0.0, -0.05, 0.2],
+            }
+        )
+        with mock.patch(
+            "Plotting.energyDropCalculations._simple_shear_tangent",
+            return_value=np.array([4.0, 4.0]),
+        ):
+            steps, info = calculate_stress_step_data(df=df)
+
+        np.testing.assert_allclose(steps["stress_corrected_drop"], [0.3, 0.7])
+        np.testing.assert_allclose(steps["inter_strain_drop"], [-0.1, 0.3])
+        np.testing.assert_allclose(steps["relaxation_drop"], [0.05, -0.2])
+        self.assertEqual(info["bulk_modulus"], 4.0)
+
+        with tempfile.TemporaryDirectory(prefix="simpleShear,s2x2") as tmp:
+            csv_path = Path(tmp) / "macroData.csv"
+            df.to_csv(csv_path, index=False)
+            drops, drop_info = get_stress_drops(
+                str(csv_path),
+                df=df,
+                strainLim="all",
+                stress_type="relaxation",
+            )
+        np.testing.assert_allclose(drops, [0.05])
+        self.assertEqual(drop_info["drop_label"], r"\sigma_R")
 
     def test_unsupported_energy_function_raises(self):
         df = pd.DataFrame(
@@ -228,7 +264,81 @@ class XminCleanupTests(unittest.TestCase):
             len(details["simple_drop_details"]["local_minima"]),
             3,
         )
+        self.assertIn("start_summary", details["simple_drop_details"])
+        self.assertIn("simple_drop_start_summary", details)
+        self.assertEqual(
+            details["simple_drop_details"]["fine_candidate_source"],
+            "sorted_unique_observed_drops",
+        )
+        self.assertEqual(
+            details["simple_drop_details"]["fine_step"],
+            "direct_neighbor_index",
+        )
         self.assertAlmostEqual(xmin, 10.0, delta=0.2)
+
+    def test_simple_drop_fine_search_only_evaluates_observed_xmins(self):
+        drops = np.arange(1.0, 7.0)
+        coarse_xmins = np.asarray([1.0, 2.5, 4.0])
+        coarse_distances = np.asarray([0.4, 0.3, 0.5])
+        evaluated = []
+
+        def fake_evaluate_xmin(_drops, candidates, **_kwargs):
+            candidates = np.asarray(candidates, dtype=float)
+            evaluated.extend(candidates.tolist())
+            distances = (candidates - 3.0) ** 2
+            return (
+                distances,
+                [[] for _ in candidates],
+                np.ones(candidates.size, dtype=bool),
+            )
+
+        with mock.patch(
+            "Plotting.findXmin.evaluate_xmin_distances",
+            side_effect=fake_evaluate_xmin,
+        ):
+            xmin, details = find_xmin_simple_drop_from_results(
+                drops,
+                coarse_xmins,
+                coarse_distances,
+                min_tail_count=3,
+            )
+
+        fine_xmins = np.asarray([1.0, 2.0, 3.0, 4.0])
+        self.assertTrue(evaluated)
+        self.assertTrue(
+            all(np.any(np.isclose(value, fine_xmins)) for value in evaluated)
+        )
+        self.assertEqual(
+            details["fine_candidate_count"],
+            fine_xmins.size,
+        )
+        self.assertAlmostEqual(xmin, 3.0)
+        self.assertEqual(
+            [result["start_candidate_index"] for result in details["local_minima"]],
+            [0, 1, 2],
+        )
+
+    def test_simple_drop_records_start_minimum_agreement(self):
+        results = [
+            {"xmin": 1.0, "distance": 0.4},
+            {"xmin": 2.0, "distance": 0.1},
+            {"xmin": 1.0, "distance": 0.4},
+        ]
+
+        summary = summarize_simple_drop_starts(results)
+
+        self.assertEqual(summary["unique_local_minimum_count"], 2)
+        self.assertTrue(summary["finds_different_local_minima"])
+        self.assertTrue(summary["middle_search_is_lowest"])
+        self.assertEqual(summary["selected_start"], "middle")
+        self.assertEqual(
+            summary["pairwise_different"],
+            {"left_middle": True, "middle_right": True, "left_right": False},
+        )
+        self.assertEqual(
+            [result["start_label"] for result in results],
+            ["left", "middle", "right"],
+        )
 
     def test_simple_drop_does_not_hide_finite_ks_jump_with_noise_flag(self):
         def fake_evaluate_xmin(_drops, candidates, **_kwargs):

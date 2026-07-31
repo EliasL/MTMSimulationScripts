@@ -2,6 +2,7 @@ from .findXmin import (
     analyze_xmin,
     annotate_xmin_choices,
     plot_xmin_analysis,
+    summarize_simple_drop_starts,
     xmin_global_differs,
 )
 from MTMath.energyFunction import ContiEnergy
@@ -17,6 +18,7 @@ from Management.updateCSV import update_df_header, read_macrodata_csv
 from .makePlots import safePath, maybe_avg, energy_drop_label
 from .dataFunctions import get_metadata
 from .energyDropCalculations import (
+    calculate_stress_step_data,
     extract_energy_drops_from_dataframe,
     infer_plastic_event_column,
     infer_stress_column,
@@ -119,12 +121,15 @@ def pretty_variant_label(label):
     for token in tokens:
         if token.startswith("seed=") or token.startswith("s="):
             continue
-        if token.startswith("loadIncrement="):
-            value = token.split("=", 1)[1]
-            pretty_tokens.append(rf"$\delta \gamma$: {value}")
+        key, separator, value = token.partition("=")
+        normalized_key = key.lower()
+        if normalized_key == "loadincrement" and separator:
+            pretty_tokens.append(rf"$\Delta \gamma$: {value}")
             continue
-        if token.startswith("reconnectionMethod="):
-            value = token.split("=", 1)[1]
+        if normalized_key in {"lbfgsepsx", "lgbfsepsx"} and separator:
+            pretty_tokens.append(rf"$\epsilon_x$: {value}")
+            continue
+        if normalized_key == "reconnectionmethod" and separator:
             pretty_tokens.append(f"re.met: {value}")
             continue
         pretty_tokens.append(token)
@@ -578,21 +583,45 @@ def get_stress_drops(
     strainLim: str | list[float] = "auto",
     label=None,
     postRegime=True,
+    stress_type="stress_corrected",
 ):
     """
-    Stress drops defined as
-        Δσ = σ_n − σ_{n+1} + μ δγ
-    keeping only positive drops inside the requested strain window.
+    Return positive stress drops inside the requested strain window.
+
+    ``stress_corrected`` uses the first-order elasticity prediction
+    ``sigma_n + a_1212,n * delta_gamma``. ``inter_strain`` compares adjacent
+    equilibrated stresses, and ``relaxation`` uses the stored within-step
+    ``avg_sigma12_change_from_init`` field.
     """
     if isinstance(csvPaths, str):
         csvPaths = [csvPaths]
+
+    stress_type_aliases = {
+        "stress_corrected": "stress_corrected_drop",
+        "stress_correction": "stress_corrected_drop",
+        "inter_strain": "inter_strain_drop",
+        "energy_change": "inter_strain_drop",
+        "relaxation": "relaxation_drop",
+        "e_change_from_init": "relaxation_drop",
+    }
+    try:
+        drop_column = stress_type_aliases[stress_type]
+    except KeyError as exc:
+        raise ValueError(
+            "stress_type must be one of 'stress_corrected', 'inter_strain', "
+            "or 'relaxation'."
+        ) from exc
 
     drops = []
     masks = []
     dfs = []
     L = get_system_size(csvPaths)
     read_from_paths = df is None
-    mu = get_elastic_mu(report=False)
+    drop_labels = {
+        "stress_corrected_drop": r"\sigma_S",
+        "inter_strain_drop": r"\sigma_I",
+        "relaxation_drop": r"\sigma_R",
+    }
 
     for singlePath in csvPaths:
         resolved_strain_lim = strainLim
@@ -607,20 +636,13 @@ def get_stress_drops(
                 strainLim, df=df_local, postRegime=postRegime
             )
 
-        sigma_col = infer_stress_column(df_local)
-        sigma_arr = np.asarray(df_local[sigma_col], dtype=float)
-        load_arr = np.asarray(df_local["load"], dtype=float)
-        delta_gamma_arr = np.diff(load_arr)
-        if delta_gamma_arr.ndim == 0:
-            delta_gamma_arr = np.full(len(df_local) - 1, float(delta_gamma_arr))
-        elif delta_gamma_arr.ndim != 1 or delta_gamma_arr.size != len(df_local) - 1:
-            raise ValueError(
-                f"loadIncrement for {singlePath} must be scalar or have "
-                f"length len(df)-1={len(df_local) - 1}, got shape {delta_gamma_arr.shape}."
-            )
-
-        stress_drop = sigma_arr[:-1] - sigma_arr[1:] + mu * delta_gamma_arr
-        strain = load_arr[1:]
+        step_data, step_info = calculate_stress_step_data(
+            singlePath,
+            df=df_local,
+            calculate_tangent=drop_column == "stress_corrected_drop",
+        )
+        stress_drop = np.asarray(step_data[drop_column], dtype=float)
+        strain = np.asarray(step_data["load_ip1"], dtype=float)
         mask = (
             (stress_drop > 0)
             & (strain > resolved_strain_lim[0])
@@ -637,14 +659,15 @@ def get_stress_drops(
     data_info = get_energy_drops_info(
         csvPaths=csvPaths,
         drops=drops,
-        energy_key="stress_drop",
+        energy_key=drop_column,
         df=concat_df,
         strainLim=resolved_strain_lim,
         label=label,
         masks=masks,
-        drop_label=r"\sigma",
+        drop_label=drop_labels[drop_column],
     )
-    data_info["mu"] = float(mu)
+    data_info["stress_type"] = stress_type
+    data_info["bulk_modulus"] = step_info["bulk_modulus"]
     return drops, data_info
 
 
@@ -2482,11 +2505,14 @@ def plot_plastic_energy_scatter(
 
     legend_label_for_base = {}
     for base, seeds in grouped_seeds.items():
+        display_base = pretty_variant_label(base) or base
         if seeds:
             seeds = sorted(seeds)
-            legend_label_for_base[base] = f"{base}, s={seeds[0]}-{seeds[-1]}"
+            legend_label_for_base[base] = (
+                f"{display_base}, s={seeds[0]}-{seeds[-1]}"
+            )
         else:
-            legend_label_for_base[base] = base
+            legend_label_for_base[base] = display_base
 
     used_legend_bases = set()
     used_model_labels_by_L = set()
@@ -2687,13 +2713,18 @@ def make_fit(
         cache_path = _get_cache_path(
             cache_dir,
             data,
-            f"canonical-simpleDrop-v1:{distType.name}:{xmin_range}:"
+            f"canonical-simpleDrop-v4-observed-neighbor-basin-search:{distType.name}:{xmin_range}:"
             f"{parallel_xmin}:{search_kwargs}",
         )
-        cache_path_json = cache_path
-        cache_path_gz = cache_path + ".gz"
-        # Prefer the compressed cache if present; fall back to legacy .json
-        if os.path.exists(cache_path_gz) or os.path.exists(cache_path_json):
+        # Do not load v1/v2 caches here: those caches contain the old
+        # continuous log-space refinement and would silently reintroduce the
+        # bug this cache version is meant to exclude.
+        cache_candidates = [cache_path]
+        for candidate in cache_candidates:
+            cache_path_json = candidate
+            cache_path_gz = candidate + ".gz"
+            if not (os.path.exists(cache_path_gz) or os.path.exists(cache_path_json)):
+                continue
             try:
                 opener = gzip.open if os.path.exists(cache_path_gz) else open
                 path = cache_path_gz if os.path.exists(cache_path_gz) else cache_path_json
@@ -2703,6 +2734,12 @@ def make_fit(
                 xmin_range = cache["xmin"]
                 xmin_analysis = cache.get("xmin_analysis")
                 if xmin_analysis is not None:
+                    start_summary = xmin_analysis.get("simple_drop_start_summary")
+                    if start_summary is None:
+                        start_summary = summarize_simple_drop_starts(
+                            xmin_analysis["simple_drop_details"]["local_minima"]
+                        )
+                        xmin_analysis["simple_drop_start_summary"] = start_summary
                     for key, dtype in (
                         ("xmins", float),
                         ("distances", float),
@@ -2716,6 +2753,9 @@ def make_fit(
                             dtype=dtype,
                         )
                 cache_loaded = True
+                if candidate != cache_path:
+                    cache_loaded = False
+                break
 
             except Exception as e:
                 # fall through to recompute if loading fails
@@ -3656,6 +3696,21 @@ def plot_powerlaw(
         xmin_search_kwargs=xmin_search_kwargs,
     )
     print("simpleDrop xmin:", reported_fit.xmin)
+    xmin_analysis = getattr(reported_fit, "xmin_analysis", None)
+    if xmin_analysis is not None:
+        start_summary = xmin_analysis["simple_drop_start_summary"]
+        start_xmins = xmin_analysis["simple_drop_details"]["local_minima"]
+        start_text = ", ".join(
+            f"{result['start_label']}={result['xmin']:.3e}"
+            for result in start_xmins
+        )
+        print(
+            "simpleDrop start minima: "
+            f"{start_text}; "
+            f"{start_summary['unique_local_minimum_count']} distinct; "
+            "middle lowest="
+            f"{start_summary['middle_search_is_lowest']}"
+        )
     if evaluate:
         reported_fit.evaluate_fit()
 
@@ -3690,7 +3745,6 @@ def plot_powerlaw(
     title = make_title(data_info=data_info, fit=reported_fit)
     if attribute and attribute not in title:
         title = attribute + " " + title
-    xmin_analysis = getattr(reported_fit, "xmin_analysis", None)
     if xmin_analysis is not None:
         global_differs = xmin_global_differs(xmin_analysis)
         if global_differs:

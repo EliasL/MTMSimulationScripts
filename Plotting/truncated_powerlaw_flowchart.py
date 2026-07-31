@@ -110,8 +110,6 @@ XMIN_CANDIDATE_COUNT = 100
 # largest cutoff that still retains the requested number of tail events.
 MIN_TAIL_COUNT = 25
 PARALLEL_XMIN_FITS = False
-XMIN_LOCAL_REFINEMENTS = 10
-XMIN_LOCAL_MAX_ITERATIONS = 64
 
 # Raw energy panel and inset.
 ZOOM_CENTER = 0.805
@@ -474,8 +472,6 @@ def _collect_analysis(csv_paths: list[Path], used_fallback: bool):
         xmin_search_kwargs={
             "nr_initial": XMIN_CANDIDATE_COUNT,
             "min_tail_count": MIN_TAIL_COUNT,
-            "local_refinements": XMIN_LOCAL_REFINEMENTS,
-            "local_max_iterations": XMIN_LOCAL_MAX_ITERATIONS,
         },
     )
     xmin_analysis = fit.xmin_analysis
@@ -721,6 +717,7 @@ def _write_analysis_summary(analysis):
             analysis["simple_drop_details"]["largest_drop_interval"]
         ),
         "simple_drop_local_minima": analysis["simple_drop_details"]["local_minima"],
+        "simple_drop_start_summary": analysis["simple_drop_start_summary"],
         "alpha": analysis["alpha"],
         "lambda": analysis["lambda"],
         "inverse_lambda": (

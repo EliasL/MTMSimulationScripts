@@ -680,6 +680,7 @@ def evaluate_xmin_distances(
     xmax=None,
     parallel=False,
     max_workers=None,
+    initial_params=None,
 ):
     """Fit a candidate grid in batches and return lightweight diagnostics."""
     drops = np.asarray(drops, dtype=float)
@@ -718,7 +719,7 @@ def evaluate_xmin_distances(
             None,
             None,
             parameter_names,
-            None,
+            initial_params,
         )
         for batch in batches
     ]

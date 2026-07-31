@@ -2,13 +2,17 @@ import os
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-import matplotlib as mpl
 
 from Management.configGenerator import SimulationConfig
 from Management.updateCSV import update_df_header, read_macrodata_csv
 from Plotting.remotePlotting import get_csv_files
 from Plotting.makePlots import maybe_avg
-from Plotting.plotPowerLaw import get_energy_drops, getHist, get_system_size
+from Plotting.plotPowerLaw import (
+    get_energy_drops,
+    getHist,
+    get_system_size,
+    pretty_variant_label,
+)
 
 
 def _resolve_csv_path(config_file, useOldFiles=False, forceUpdate=False):
@@ -74,6 +78,57 @@ def _collect_reversibility_data(csv_paths, strainLim="auto", postRegime=True):
     return drops, is_rev, rev_u
 
 
+def _smooth_histogram_curve(bin_centers, counts):
+    """Smooth positive histogram points in log-log coordinates."""
+    mask = (
+        np.isfinite(bin_centers)
+        & np.isfinite(counts)
+        & (bin_centers > 0)
+        & (counts > 0)
+    )
+    x = np.asarray(bin_centers)[mask]
+    y = np.asarray(counts)[mask]
+    if x.size < 3:
+        return x, y
+
+    log_x = np.log10(x)
+    log_y = np.log10(y)
+    smooth_log_x = np.linspace(log_x[0], log_x[-1], max(100, 4 * x.size))
+    smooth_log_y = np.interp(smooth_log_x, log_x, log_y)
+    window = min(31, smooth_log_y.size)
+    if window % 2 == 0:
+        window -= 1
+    if window >= 3:
+        half_window = window // 2
+        kernel = np.ones(window, dtype=float) / window
+        padded = np.pad(smooth_log_y, half_window, mode="edge")
+        smooth_log_y = np.convolve(padded, kernel, mode="valid")
+    return 10**smooth_log_x, 10**smooth_log_y
+
+
+def _plot_histogram_series(ax, centers, counts, *, color, marker, linestyle, label):
+    smooth_centers, smooth_counts = _smooth_histogram_curve(centers, counts)
+    ax.plot(
+        smooth_centers,
+        smooth_counts,
+        linestyle=linestyle,
+        linewidth=1.5,
+        color=color,
+        label=label,
+    )
+    mask = counts > 0
+    ax.plot(
+        centers[mask],
+        counts[mask],
+        marker=marker,
+        linestyle="None",
+        color=color,
+        alpha=0.2,
+        markerfacecolor="none",
+        label="_nolegend_",
+    )
+
+
 def plot_reversibility_histograms(
     config_file,
     bins=50,
@@ -104,23 +159,22 @@ def plot_reversibility_histograms(
     fig, ax1 = plt.subplots()
     ax2 = ax1.twinx()
 
-    n_groups = max(1, len(groups))
-    red_cmap = mpl.colormaps["Reds"]
-    blue_cmap = mpl.colormaps["Blues"]
-    shade_vals = np.linspace(0.35, 0.85, n_groups)
-    group_markers = ["o", "s", "^", "D", "v", "P", "X", "*", "h"]
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not default_colors:
+        raise RuntimeError("Matplotlib default color cycle is empty.")
 
     infos = []
     for idx, entries in enumerate(groups):
         csv_paths = [_resolve_csv_path(entry) for entry in entries]
         label = group_labels[idx] if idx < len(group_labels) else f"group_{idx}"
+        display_label = pretty_variant_label(label) or str(label)
 
         drops, is_rev, rev_u = _collect_reversibility_data(
             csv_paths, strainLim=strainLim, postRegime=postRegime
         )
 
         if drops.size == 0:
-            print(f"No drops found for {label}.")
+            print(f"No drops found for {display_label}.")
             continue
 
         rev_order = np.zeros(len(drops), dtype=int)
@@ -139,60 +193,62 @@ def plot_reversibility_histograms(
             rev_indices = np.where(is_rev)[0]
             idx_max = rev_indices[np.argmax(rev_u[is_rev])]
             print(
-                f"{label} highest rev_u_diff reversible drop #: "
+                f"{display_label} highest rev_u_diff reversible drop #: "
                 f"{rev_order[idx_max]} (rev_u_diff={rev_u[idx_max]:.6g}, "
                 f"drop={drops[idx_max]:.6g})"
             )
         else:
-            print(f"{label}: No reversible drops found (or 'rev_u_diff' missing).")
+            print(
+                f"{display_label}: No reversible drops found "
+                "(or 'rev_u_diff' missing)."
+            )
 
         if rev_u is not None and np.any(~is_rev):
             irrev_indices = np.where(~is_rev)[0]
             idx_max = irrev_indices[np.argmax(rev_u[~is_rev])]
             print(
-                f"{label} highest rev_u_diff irreversible drop #: "
+                f"{display_label} highest rev_u_diff irreversible drop #: "
                 f"{irrev_order[idx_max]} (rev_u_diff={rev_u[idx_max]:.6g}, "
                 f"drop={drops[idx_max]:.6g})"
             )
         else:
-            print(f"{label}: No irreversible drops found (or 'rev_u_diff' missing).")
+            print(
+                f"{display_label}: No irreversible drops found "
+                "(or 'rev_u_diff' missing)."
+            )
 
         rev_drops = drops[is_rev]
         irrev_drops = drops[~is_rev]
         rev_drops = rev_drops[rev_drops > 0]
         irrev_drops = irrev_drops[irrev_drops > 0]
 
-        rev_color = red_cmap(shade_vals[idx % n_groups])
-        irrev_color = blue_cmap(shade_vals[idx % n_groups])
-        marker = group_markers[idx % len(group_markers)]
+        color = default_colors[idx % len(default_colors)]
 
         if rev_drops.size:
             rev_centers, rev_counts = getHist(
                 rev_drops, density=False, bins_per_decade=bins
             )
-            rev_mask = rev_counts > 0
-            ax1.plot(
-                rev_centers[rev_mask],
-                rev_counts[rev_mask],
-                marker=marker,
-                linestyle="None",
-                color=rev_color,
-                label=f"{label} (rev)",
-                markerfacecolor="none",
+            _plot_histogram_series(
+                ax1,
+                rev_centers,
+                rev_counts,
+                color=color,
+                marker="x",
+                linestyle="--",
+                label=f"{display_label} (rev)",
             )
         if irrev_drops.size:
             irrev_centers, irrev_counts = getHist(
                 irrev_drops, density=False, bins_per_decade=bins
             )
-            irrev_mask = irrev_counts > 0
-            ax2.plot(
-                irrev_centers[irrev_mask],
-                irrev_counts[irrev_mask],
-                marker=marker,
-                linestyle="None",
-                color=irrev_color,
-                label=f"{label} (irrev)",
-                markerfacecolor="none",
+            _plot_histogram_series(
+                ax2,
+                irrev_centers,
+                irrev_counts,
+                color=color,
+                marker="o",
+                linestyle="-",
+                label=f"{display_label} (irrev)",
             )
 
         infos.append(
@@ -202,7 +258,7 @@ def plot_reversibility_histograms(
                 "irreversible_count": irrev_count,
                 "reversible_order": rev_order,
                 "irreversible_order": irrev_order,
-                "label": label,
+                "label": display_label,
             }
         )
 
@@ -212,10 +268,10 @@ def plot_reversibility_histograms(
     ax2.set_yscale("log")
 
     ax1.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
-    ax1.set_ylabel("Reversible count", color="tab:red")
-    ax2.set_ylabel("Irreversible count", color="tab:blue")
-    ax1.tick_params(axis="y", which="both", colors="tab:red")
-    ax2.tick_params(axis="y", which="both", colors="tab:blue")
+    ax1.set_ylabel("Reversible count")
+    ax2.set_ylabel("Irreversible count")
+    ax1.tick_params(axis="y", which="both")
+    ax2.tick_params(axis="y", which="both")
     ax1.set_title("Reversible vs. irreversible energy drops")
 
     handles1, labels1 = ax1.get_legend_handles_labels()
@@ -223,8 +279,8 @@ def plot_reversibility_histograms(
     ax2.legend(
         handles1 + handles2,
         labels1 + labels2,
-        loc="upper right",
-        ncol=2,
+        loc="upper left",
+        ncol=1,
         frameon=True,
     )
     fig.tight_layout()
