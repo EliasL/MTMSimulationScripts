@@ -1,28 +1,57 @@
 # Sylvain simpleDrop start comparison
 
-Regenerated on 2026-07-31 for the 18 Sylvain pre/post power-law fits in batches
-`-2` and `-1`. Two `xmin` values are considered the same local minimum when
-their relative difference is at most `1e-6`.
+This report describes the final 18 analyses regenerated on 2026-07-31. The
+fine search uses adjacent observed `xmin` values, with direct-neighbour steps
+of one. The three searches start at the left, middle, and right simpleDrop
+coarse-local-minimum locations. Two `xmin` values are considered the same local
+minimum when their relative difference is at most `1e-6`.
 
-- 7/18 fits found different local minima from the three starts.
-- 11/18 fits found the same local minimum from all three starts.
-- 14/18 fits had the middle start at the lowest KS distance (including ties).
-- 4/18 fits had the middle start at a higher KS distance than the left/right
-  result.
-- In all 7 disagreement cases, the left and right starts agreed and only the
-  middle start found a different minimum.
+## Where the data came from
 
-The disagreement cases were:
+All analyses use four-seed groups from the same experiment family:
 
-| batch | regime | parameter | left/right xmin | middle xmin | middle lowest |
-| --- | --- | --- | ---: | ---: | :---: |
-| -2 | pre | `LBFGSEpsx=1e-6` | `3.655e-3` | `5.382e-3` | yes |
-| -2 | post | `LBFGSEpsx=1e-7` | `5.394e-3` | `7.133e-3` | no |
-| -1 | post | `loadIncrement=1e-4` | `7.911e-2` | `4.772e-2` | no |
-| -1 | post | `loadIncrement=5e-5` | `2.119e-2` | `1.439e-2` | yes |
-| -1 | pre | `loadIncrement=1e-5` | `5.394e-3` | `7.133e-3` | no |
-| -1 | pre | `loadIncrement=5e-6` | `3.655e-3` | `5.382e-3` | yes |
-| -1 | post | `loadIncrement=1e-6` | `1.050e-3` | `5.651e-4` | no |
+`reversibilityProtocolTest`, size `100x100`, start load `0.14`, maximum load
+`1.0`, `PBCt3`, `LBFGS`, and `energyDropThreshold=1e-5`. The CSV data were
+loaded from the local `remoteData/macro` cache, normally located at
+`/Volumes/data/remoteData/macro`. Each parameter group contains seeds `s0` to
+`s3`; each is split into pre-peak and post-peak regimes by the power-law
+analysis.
 
-The detailed comparison is also retained in each `xmin_analysis` cache entry,
-under `simple_drop_start_summary`.
+The 9 parameter groups are:
+
+- batch `-2`: `LBFGSEpsx = 1e-4, 1e-5, 1e-6, 1e-7`, with `loadIncrement=1e-5`.
+- batch `-1`: `loadIncrement = 1e-4, 5e-5, 1e-5, 5e-6, 1e-6`, with
+  `LBFGSEpsx=1e-6`.
+
+The batch `-2`, `LBFGSEpsx=1e-6` data and batch `-1`, `loadIncrement=1e-5`
+data are identical, so the 18 output analyses contain 16 unique data/regime
+series.
+
+The accompanying overview plot is
+[`sylvain_simpleDrop_quality_overview.png`](sylvain_simpleDrop_quality_overview.png)
+and the exact values are in
+[`sylvain_simpleDrop_quality_overview.csv`](sylvain_simpleDrop_quality_overview.csv).
+
+## Results
+
+- All three starts agreed in 2/18 analyses.
+- Two distinct local minima were found in 10/18 analyses.
+- Three distinct local minima were found in 6/18 analyses.
+- Thus, at least two starts disagreed in 16/18 analyses.
+- The middle start found the lowest minimum, including ties, in 10/18
+  analyses; it was not lowest in 8/18.
+- The selected lowest start was left in 5 analyses, middle in 5, and right in
+  8.
+
+The overview uses color for the number of distinct minima, marker shape for
+pre/post peak, and a star outline when the middle start was not lowest. The
+horizontal panel labels each source group and shows the number of observations
+retained by simpleDrop together with the simpleDrop KS distance.
+
+The disagreement cases are not confined to obviously small datasets: the
+number of retained tail observations ranges from 3,236 to 1,489,039 across the
+18 analyses, and three-minimum cases occur at 94,618, 139,601, 689,040, and
+1,489,039 observations. In particular, the 94,618-observation three-minimum
+case has a relatively small KS distance (`D≈0.0137`). This does not support a
+simple explanation based only on too few tail observations or a poor KS fit;
+the source distributions themselves should be inspected next.
