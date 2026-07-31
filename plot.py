@@ -436,8 +436,6 @@ def plotThreadTest():
 
 
 def plotSylvainBatches():
-    fast_xmin = True
-    xmin_accuracy = 1.0
     for batch in [-2, -1]:
         configs, labels = sylvainBatches(batch)
         
@@ -524,8 +522,6 @@ def plotSylvainBatches():
                     group_paths,
                     group_labels=display_label,
                     postRegime=postRegime,
-                    fast_xmin=fast_xmin,
-                    xmin_accuracy=xmin_accuracy,
                 )
 
 
@@ -714,16 +710,10 @@ def compareStop():
 
 def compareStep():
     c, l = loadStepJob()
-    fast_xmin = True
-    xmin_accuracy = 0.1
     # plotPlasticCounts(c, l, postRegime=True)
     # plotPlasticCounts(c, l, postRegime=False)
-    # plotLog2(
-    #     c, labels=l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
-    # )
-    plotLogCompare(
-        c, l, postRegime=True, fast_xmin=fast_xmin, xmin_accuracy=xmin_accuracy
-    )
+    # plotLog2(c, labels=l, postRegime=True)
+    plotLogCompare(c, l, postRegime=True)
 
 
 def plotReversibility():
@@ -743,9 +733,8 @@ def plotReversibility():
         show=False,
         save_path="Plots/reversibility_pre.pdf",
     )
-    fast_xmin = True
-    plotLog2(configs, labels=labels, postRegime=True, fast_xmin=fast_xmin)
-    plotLog2(configs, labels=labels, postRegime=False, fast_xmin=fast_xmin)
+    plotLog2(configs, labels=labels, postRegime=True)
+    plotLog2(configs, labels=labels, postRegime=False)
 
 
 
@@ -770,14 +759,12 @@ def plotLogAnalasys():
     plotEnergy(configs, labels=labels)
 
     # # Find split
-    fast_xmin = True
-    min_xmin = 1e-2
     useCDF = False
     plotLog2(
-        configs, labels=labels, postRegime=True, fast_xmin=fast_xmin, min_xmin=min_xmin, useCDF=useCDF,drop_type=drop_type
+        configs, labels=labels, postRegime=True, useCDF=useCDF, drop_type=drop_type
     )
     plotLog2(
-        configs, labels=labels, postRegime=False, fast_xmin=fast_xmin, min_xmin=min_xmin,  useCDF=useCDF,drop_type=drop_type
+        configs, labels=labels, postRegime=False, useCDF=useCDF, drop_type=drop_type
     )
     # p = [["/Users/eliaslundheim/Downloads/s400x400_energy_stress_log.csv"]]
     # p = [
@@ -789,20 +776,17 @@ def plotLogAnalasys():
     # ]
 
     # lab = [our_labels,["umut", "umut"]]
-    # plotLogCompare(p, lab,postRegime=True, fast_xmin=fast_xmin,
-    # )
+    # plotLogCompare(p, lab, postRegime=True)
     # plot_powerlaw(
     #     p,
     #     group_labels=lab,
     #     postRegime=True,
-    #     fast_xmin=fast_xmin,
     #     useCDF=useCDF,
     # )
     # plot_powerlaw(
     #     p,
     #     group_labels=lab,
     #     postRegime=False,
-    #     fast_xmin=fast_xmin,
     #     useCDF=useCDF,
     # )
 
@@ -842,7 +826,6 @@ def plotLogAnalasys():
     #     p,
     #     group_labels=lab,
     #     postRegime=True,
-    #     fast_xmin=fast_xmin,
     #     useCDF=useCDF,
     #     drop_type=drop_type,
     # )
@@ -850,7 +833,6 @@ def plotLogAnalasys():
     #     p,
     #     group_labels=lab,
     #     postRegime=False,
-    #     fast_xmin=fast_xmin,
     #     useCDF=useCDF,
     #     drop_type=drop_type,
     # )
@@ -891,10 +873,10 @@ def testRealData():
         drops, _ = get_energy_drops(path, averageEnergy=True, strainLim=[split, np.inf])
         drops = np.asarray(drops, dtype=float)
         drops = drops[np.isfinite(drops)]
-        if drops.size < 10:
+        if drops.size < 25:
             print(f"Not enough drops for {path}")
             continue
-        fit = make_fit(drops, fast_xmin=True, xmin_accuracy=0.1, parallel_xmin=True)
+        fit = make_fit(drops, parallel_xmin=True)
         plot_KS_fitting(fit, save=True, show=False)
 
 

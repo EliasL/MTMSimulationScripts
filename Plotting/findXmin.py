@@ -2791,57 +2791,229 @@ def select_global_min_from_search_details(*search_details):
     return float(selected_xmin), float(selected_distance), all_evaluations
 
 
+def analyze_xmin(
+    drops,
+    *,
+    nr_initial=100,
+    min_tail_count=25,
+    local_refinements=10,
+    local_max_iterations=64,
+    distType=Truncated_Power_Law,
+    parallel=False,
+):
+    """Run the canonical simpleDrop and refined-global xmin analysis."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    if int(nr_initial) != nr_initial or nr_initial < 2:
+        raise ValueError("nr_initial must be an integer of at least two.")
+    if int(min_tail_count) != min_tail_count or min_tail_count < 3:
+        raise ValueError("min_tail_count must be an integer of at least three.")
+    if drops.size < min_tail_count:
+        raise ValueError(
+            f"Need at least {min_tail_count} finite positive drops; got {drops.size}."
+        )
+
+    sorted_drops = np.sort(drops)
+    candidate_lo = float(sorted_drops[0])
+    candidate_hi = float(sorted_drops[-int(min_tail_count)])
+    if not candidate_hi > candidate_lo:
+        raise ValueError(
+            "Could not form an xmin interval that retains the requested tail count."
+        )
+
+    xmins = np.geomspace(candidate_lo, candidate_hi, int(nr_initial))
+    distances, param_vals, valid_fits = evaluate_xmin_distances(
+        drops,
+        xmins,
+        distType=distType,
+        parallel=parallel,
+    )
+    distances = np.asarray(distances, dtype=float)
+    valid_fits = np.asarray(valid_fits, dtype=bool)
+    alphas = np.asarray(
+        [
+            values[0] if values is not None and len(values) else np.nan
+            for values in param_vals
+        ],
+        dtype=float,
+    )
+    search_kwargs = dict(
+        min_tail_count=int(min_tail_count),
+        local_refinements=local_refinements,
+        local_max_iterations=local_max_iterations,
+        distType=distType,
+        parallel=parallel,
+    )
+    simple_drop_xmin, simple_drop_details = find_xmin_simple_drop_from_results(
+        drops,
+        xmins,
+        distances,
+        valid_fits,
+        **search_kwargs,
+    )
+    _, global_search_details = find_xmin_refined_global_min_from_results(
+        drops,
+        xmins,
+        distances,
+        valid_fits,
+        **search_kwargs,
+    )
+    global_xmin, global_distance, all_evaluations = (
+        select_global_min_from_search_details(
+            simple_drop_details,
+            global_search_details,
+        )
+    )
+    return {
+        "method": "simpleDrop",
+        "xmins": xmins,
+        "distances": distances,
+        "param_vals": param_vals,
+        "alphas": alphas,
+        "sigmas": np.full(xmins.shape, np.nan),
+        "valid_fits": valid_fits,
+        "tail_counts": np.asarray(
+            [np.count_nonzero(drops >= xmin) for xmin in xmins],
+            dtype=int,
+        ),
+        "simple_drop_xmin": float(simple_drop_xmin),
+        "simple_drop_distance": float(simple_drop_details["selected_distance"]),
+        "simple_drop_details": simple_drop_details,
+        "global_min_xmin": global_xmin,
+        "global_min_distance": global_distance,
+        "global_search_details": global_search_details,
+        "all_evaluations": all_evaluations,
+        "nr_initial": int(nr_initial),
+        "min_tail_count": int(min_tail_count),
+    }
+
+
+def xmin_global_differs(analysis, *, rtol=1e-6):
+    return not np.isclose(
+        analysis["simple_drop_xmin"],
+        analysis["global_min_xmin"],
+        rtol=rtol,
+        atol=0.0,
+    )
+
+
+def annotate_xmin_choices(ax, analysis, *, add_labels=True):
+    """Mark simpleDrop and, only when different, the refined global minimum."""
+    simple_xmin = analysis["simple_drop_xmin"]
+    ax.axvline(
+        simple_xmin,
+        color="tab:blue",
+        linestyle="--",
+        linewidth=1.0,
+        label=(
+            rf"simpleDrop: $x_{{\min}}={simple_xmin:.1e}$"
+            if add_labels
+            else "_nolegend_"
+        ),
+    )
+    if xmin_global_differs(analysis):
+        global_xmin = analysis["global_min_xmin"]
+        ax.axvline(
+            global_xmin,
+            color="0.35",
+            linestyle=":",
+            linewidth=1.0,
+            label=(
+                rf"Global min.: $x_{{\min}}={global_xmin:.1e}$"
+                if add_labels
+                else "_nolegend_"
+            ),
+        )
+
+
+def plot_xmin_analysis(analysis, ax=None):
+    """Plot the canonical coarse scan and both local-refinement results."""
+    if ax is None:
+        fig, ax = plt.subplots()
+    else:
+        fig = ax.figure
+    ax.plot(
+        analysis["xmins"],
+        analysis["distances"],
+        marker="o",
+        markersize=2.8,
+        color="tab:blue",
+        label=r"$D(x_{\min})$",
+    )
+    global_details = analysis["global_search_details"]
+    rough = global_details["rough_local_minima"]
+    refined = global_details["local_minima"]
+    if rough:
+        ax.scatter(
+            [item["xmin"] for item in rough],
+            [item["distance"] for item in rough],
+            marker="s",
+            s=20,
+            facecolor="none",
+            edgecolor="0.35",
+            label="Coarse local minima",
+        )
+    if refined:
+        ax.scatter(
+            [item["xmin"] for item in refined],
+            [item["distance"] for item in refined],
+            marker="x",
+            s=25,
+            color="0.35",
+            label="Refined local minima",
+        )
+    simple_xmin = analysis["simple_drop_xmin"]
+    simple_distance = analysis["simple_drop_distance"]
+    ax.scatter(
+        [simple_xmin],
+        [simple_distance],
+        marker="D",
+        s=28,
+        color="tab:blue",
+        edgecolor="white",
+        linewidth=0.5,
+        zorder=5,
+        label=rf"simpleDrop: $x_{{\min}}={simple_xmin:.1e}$",
+    )
+    if xmin_global_differs(analysis):
+        global_xmin = analysis["global_min_xmin"]
+        ax.scatter(
+            [global_xmin],
+            [analysis["global_min_distance"]],
+            marker="X",
+            s=35,
+            facecolor="white",
+            edgecolor="0.25",
+            linewidth=0.8,
+            zorder=6,
+            label=rf"Global min.: $x_{{\min}}={global_xmin:.1e}$",
+        )
+    annotate_xmin_choices(ax, analysis, add_labels=False)
+    ax.set_xscale("log")
+    ax.set_xlabel(r"$x_{\min}$")
+    ax.set_ylabel(r"$D$")
+    ax.legend(loc="best")
+    return fig, ax
+
+
 def find_xmin_simple_drop(
     drops,
     debug=False,
     nr_initial=100,
-    tail_decades=1.0,
-    min_tail_count=3,
+    min_tail_count=25,
     **kwargs,
 ):
-    """Select xmin with the three-start simpleDrop method."""
-    drops = np.asarray(drops, dtype=float)
-    drops = drops[np.isfinite(drops) & (drops > 0)]
-    if drops.size < 3:
-        raise ValueError("Need at least three finite positive drops.")
-    if int(nr_initial) != nr_initial or nr_initial < 2:
-        raise ValueError("nr_initial must be an integer of at least two.")
-    if tail_decades <= 0:
-        raise ValueError("tail_decades must be positive.")
-
-    candidate_max = float(drops.max() / 10.0**tail_decades)
-    if candidate_max <= drops.min():
-        raise ValueError(
-            f"Data span fewer than {tail_decades:g} decade(s); no xmin candidates."
-        )
-    xmins = np.geomspace(drops.min(), candidate_max, int(nr_initial))
-    distances, param_vals, valid = evaluate_xmin_distances(
+    """Select xmin with the canonical simpleDrop/global-min analysis."""
+    analysis = analyze_xmin(
         drops,
-        xmins,
-        **kwargs,
-    )
-    xmin, details = find_xmin_simple_drop_from_results(
-        drops,
-        xmins,
-        distances,
-        valid,
+        nr_initial=nr_initial,
         min_tail_count=min_tail_count,
         **kwargs,
     )
-    details["param_vals"] = param_vals
-
     if debug:
-        fig, ax = plt.subplots()
-        ax.plot(xmins, distances, marker="o", label="Initial KS scan")
-        left, right = details["largest_drop_interval"]
-        ax.axvspan(left, right, color="0.85", label="Largest drop interval")
-        for result in details["local_minima"]:
-            ax.scatter(result["xmin"], result["distance"], marker="x")
-        ax.axvline(xmin, linestyle="--", label="simpleDrop")
-        ax.set_xscale("log")
-        ax.legend()
+        plot_xmin_analysis(analysis)
         plt.show()
-    return xmin, details
+    return analysis["simple_drop_xmin"], analysis
 
 
 # Backward-compatible Python alias. The public strategy name is ``simpleDrop``.

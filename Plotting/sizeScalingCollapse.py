@@ -43,6 +43,7 @@ CACHE_VERSION = 2
 COLLAPSE_CACHE_VERSION = 3
 EXPONENT_RANGE = (0.5, 2.5)
 DIMENSION_RANGE = (0.25, 2.25)
+XMIN_METHOD = "simpleDrop"
 
 
 def _last_load(path: Path) -> float:
@@ -255,43 +256,14 @@ def log_histogram(data, bins_per_decade=10):
     return centers[mask], density[mask]
 
 
-def fit_xmins(size_drops, strategy, accuracy, parallel, cache_dir: Path):
+def fit_xmins(size_drops, parallel, cache_dir: Path):
     fits = {}
     for size, drops in size_drops.items():
-        if strategy in {"dip", "ks"}:
-            fit = make_fit(
-                drops,
-                cache_dir=str(cache_dir),
-                fast_xmin=strategy == "dip",
-                xmin_accuracy=accuracy,
-                parallel_xmin=parallel,
-            )
-        else:
-            strategy_kwargs = {}
-            if strategy == "simpleDrop":
-                strategy_kwargs["tail_decades"] = 1.0
-                strategy_kwargs["nr_initial"] = 100
-            elif strategy in {"dks", "slope"}:
-                strategy_kwargs["tail_decades"] = 1.0
-                if accuracy is not None:
-                    strategy_kwargs["samples_per_decade"] = 1.0 / accuracy
-            elif strategy == "global_min":
-                strategy_kwargs["tail_decades"] = 1.0
-                if accuracy is not None:
-                    strategy_kwargs["candidate_stride"] = max(
-                        1, int(round(1.0 / accuracy))
-                    )
-            elif accuracy is not None and strategy == "sizer":
-                strategy_kwargs["samplesPerDecade"] = 1.0 / accuracy
-            fit = make_fit(
-                drops,
-                cache_dir=str(cache_dir),
-                xmin_strategy=strategy,
-                xmin_accuracy=accuracy,
-                parallel_xmin=parallel,
-                xmin_strategy_kwargs=strategy_kwargs,
-            )
-        fits[size] = fit
+        fits[size] = make_fit(
+            drops,
+            cache_dir=str(cache_dir),
+            parallel_xmin=parallel,
+        )
     return fits
 
 
@@ -664,8 +636,7 @@ def run(args):
     if args.stage == "extract":
         return
 
-    accuracy_tag = "default" if args.xmin_accuracy is None else f"{args.xmin_accuracy:g}"
-    analysis_dir = output / f"xmin_{args.xmin_strategy}_accuracy_{accuracy_tag}"
+    analysis_dir = output / f"xmin_{XMIN_METHOD}"
     analysis_dir.mkdir(parents=True, exist_ok=True)
 
     do_local = args.stage in {"collapse", "all"}
@@ -683,14 +654,12 @@ def run(args):
         for regime in regimes:
             print(
                 f"Fitting xmin: {protocol}, {regime}-yield, "
-                f"strategy={args.xmin_strategy}",
+                f"strategy={XMIN_METHOD}",
                 flush=True,
             )
             size_drops = pooled[protocol][regime]
             fits = fit_xmins(
                 size_drops,
-                strategy=args.xmin_strategy,
-                accuracy=args.xmin_accuracy,
                 parallel=args.parallel_xmin,
                 cache_dir=output / "cache" / "xmin" / protocol / regime,
             )
@@ -703,7 +672,7 @@ def run(args):
                 protocol,
                 regime,
                 analysis_dir / f"{protocol}_{regime}_raw_xmin.pdf",
-                xmin_note=f"Per-size {args.xmin_strategy} xmin (vertical lines)",
+                xmin_note=f"Per-size {XMIN_METHOD} xmin (vertical lines)",
             )
             if not do_local:
                 continue
@@ -730,7 +699,7 @@ def run(args):
                 protocol,
                 regime,
                 analysis_dir / f"{protocol}_{regime}_collapse.pdf",
-                xmin_note=f"Per-size {args.xmin_strategy} xmin; tail PDFs renormalized",
+                xmin_note=f"Per-size {XMIN_METHOD} xmin; tail PDFs renormalized",
             )
             curves_without_l50 = exclude_size(curves, 50)
             result_without_l50 = optimize_collapse(
@@ -753,7 +722,7 @@ def run(args):
                 / "without_L50"
                 / f"{protocol}_{regime}_collapse_without_L50.pdf",
                 xmin_note=(
-                    f"Per-size {args.xmin_strategy} xmin; L=50 excluded; "
+                    f"Per-size {XMIN_METHOD} xmin; L=50 excluded; "
                     "tail PDFs renormalized"
                 ),
             )
@@ -813,7 +782,7 @@ def run(args):
         "inventory": inventory,
         "seeds_per_size": args.seeds_per_size,
         "xmin_source_size": 250,
-        "xmin_strategy": args.xmin_strategy,
+        "xmin_strategy": XMIN_METHOD,
         "uncertainty_accuracy": args.uncertainty_accuracy,
         "bootstrap_sets": max(1, int(1 / (4 * args.uncertainty_accuracy**2))),
         "results": {},
@@ -829,7 +798,7 @@ def run(args):
             shared_xmins[protocol][regime] = shared_xmin
             note = (
                 f"Shared xmin={shared_xmin:.3e} from L=250 "
-                f"({args.xmin_strategy})"
+                f"({XMIN_METHOD})"
             )
             regime_summary = {
                 "shared_xmin": shared_xmin,
@@ -976,8 +945,6 @@ def parse_args():
     parser.add_argument("--seeds-per-size", type=int, default=6)
     parser.add_argument("--pre", type=float, nargs=2, default=REGIMES["pre"])
     parser.add_argument("--post", type=float, nargs=2, default=REGIMES["post"])
-    parser.add_argument("--xmin-strategy", default="simpleDrop")
-    parser.add_argument("--xmin-accuracy", type=float, default=0.1)
     parser.add_argument("--parallel-xmin", action="store_true")
     parser.add_argument("--uncertainty-accuracy", type=float, default=0.05)
     parser.add_argument("--parallel-uncertainty", action="store_true")
