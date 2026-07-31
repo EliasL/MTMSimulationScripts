@@ -637,7 +637,12 @@ def _add_frame_table(
     if nr_func_evals is not None:
         data_row.append(rf"$N_f$: {nr_func_evals}")
     data_row.append(f"f: {frame_index}")
-    table = ax.table(cellText=[data_row], cellLoc="center", loc="top", edges="open")
+    table = ax.table(
+        cellText=[data_row],
+        cellLoc="center",
+        bbox=(0, 1.02, 1, 0.05),
+        edges="open",
+    )
     table.set_fontsize(10)
     for cell in table.get_celld().values():
         cell.set_linewidth(0)
@@ -707,43 +712,36 @@ def base_plot(
     return ax, fig
 
 
-def calculate_shifts(ax, vtuData):
-    """Calculate shifts needed to cover the visible area based on ax limits and mesh periodicity."""
-    if vtuData.BC != "PBC":
+def calculate_shifts(ax, vtuData, x=None, y=None):
+    """Return shear-aware periodic shifts intersecting the visible area."""
+    if getattr(vtuData, "BC", None) != "PBC":
         return [(0, 0)]  # No shifts needed for non-periodic BC
 
-    # Get axis limits
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
+    if x is None or y is None:
+        nodes = vtuData.get_nodes()
+        x, y = nodes[:, 0], nodes[:, 1]
+    x_min, x_max = float(np.min(x)), float(np.max(x))
+    y_min, y_max = float(np.min(y)), float(np.max(y))
+    x_period, y_period = map(float, vtuData.size)
 
-    N = vtuData.size[0]  # Assumes square mesh
-    # Calculate required shifts in x direction
-    x_shifts = []
-    if xlim[0] < 0 or xlim[1] > N:
-        # Need multiple shifts in x direction
-        min_x_shift = int(np.floor((xlim[0]) / N)) - 1
-        max_x_shift = int(np.ceil((xlim[1]) / N)) + 1
-        x_shifts = list(range(min_x_shift * N, (max_x_shift + 1) * N, N))
-    else:
-        x_shifts = [0]
-
-    # Calculate required shifts in y direction
-    y_shifts = []
-    if ylim[0] < 0 or ylim[1] > N:
-        # Need multiple shifts in y direction
-        min_y_shift = int(np.floor((ylim[0])) / N) - 1
-        max_y_shift = int(np.ceil((ylim[1]) / N)) + 1
-        y_shifts = list(range(min_y_shift * N, (max_y_shift + 1) * N, N))
-    else:
-        y_shifts = [0]
-
-    # Combine shifts (only need combinations where both are needed)
-    if not x_shifts and not y_shifts:
-        return [(0, 0)]
-
-    # Create all combinations of shifts
-    shifts = [(dx, dy) for dx in x_shifts for dy in y_shifts]
-
+    min_y_index = int(np.floor((ylim[0] - y_max) / y_period))
+    max_y_index = int(np.ceil((ylim[1] - y_min) / y_period))
+    shifts = []
+    for y_index in range(min_y_index, max_y_index + 1):
+        dy = y_index * y_period
+        shear_shift = vtuData.load * dy
+        min_x_index = int(
+            np.floor((xlim[0] - x_max - shear_shift) / x_period)
+        )
+        max_x_index = int(
+            np.ceil((xlim[1] - x_min - shear_shift) / x_period)
+        )
+        shifts.extend(
+            (x_index * x_period, dy)
+            for x_index in range(min_x_index, max_x_index + 1)
+        )
     return shifts
 
 
@@ -914,7 +912,7 @@ def plot_nodes(vtu_file, ax=None, axis_limits=None, show_connections=False, **kw
     # Grid
     if show_connections:
         connectivity = data.get_connectivity()
-    shifts = calculate_shifts(ax, data)
+    shifts = calculate_shifts(ax, data, x, y)
 
     for dx, dy in shifts:  # Now unpacking dx, dy from tuples
         sheared_x = x + dx + data.load * dy
@@ -1160,6 +1158,7 @@ def plot_mesh(
         nodes,
         data,
         show_force,
+        colorbar_orientation="horizontal",
     )
 
     return ax, cmap, norm
@@ -1513,7 +1512,7 @@ def _plot_mesh_elements(
     mappable = None
 
     if shifts is None:
-        shifts = calculate_shifts(ax, data)
+        shifts = calculate_shifts(ax, data, x, y)
 
     for dx, dy in shifts:
         shift_x = dx + data.load * dy if apply_shear_to_shift else dx
@@ -1719,13 +1718,21 @@ def _add_additional_elements(
     data,
     show_force,
     colorbar_label=None,
+    colorbar_orientation="vertical",
 ):
     """Add colorbar and rhombus if needed."""
     if add_colorbar and mappable is not None:
         label = colorbar_label
         if label is None:
             label = pretty_mesh_property(mesh_property)
-        cbar = plt.colorbar(mappable, ax=ax, label=label)
+        colorbar_kwargs = {
+            "ax": ax,
+            "label": label,
+            "orientation": colorbar_orientation,
+        }
+        if colorbar_orientation == "horizontal":
+            colorbar_kwargs.update(pad=0.04, fraction=0.08, aspect=40)
+        cbar = ax.figure.colorbar(mappable, **colorbar_kwargs)
         if boundaries is not None:
             if tick_positions is not None or tick_labels is not None:
                 if tick_positions is None:
@@ -1747,7 +1754,12 @@ def _add_additional_elements(
             sm.set_array([])  # Required for ScalarMappable
 
             # Add the colorbar
-            cbar = plt.colorbar(sm, ax=ax, label=r"$|F_{ei}|$")
+            ax.figure.colorbar(
+                sm,
+                ax=ax,
+                label=r"$|F_{ei}|$",
+                orientation=colorbar_orientation,
+            )
 
     if add_rombus:
         if hasattr(data, "BC"):
