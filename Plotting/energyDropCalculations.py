@@ -9,6 +9,20 @@ from MTMath.energyFunction import ContiEnergy
 from .dataFunctions import get_metadata
 
 
+PLASTIC_EVENT_COLUMNS = (
+    "nr_elements_with_m3_fix_change",
+    "nr_elements_with_m3_change",
+)
+
+
+def infer_plastic_event_column(df, *, required=True):
+    """Return the available CSV column containing per-step plastic events."""
+    column = next((name for name in PLASTIC_EVENT_COLUMNS if name in df), None)
+    if column is None and required:
+        raise KeyError(f"Missing plastic-event column; tried {PLASTIC_EVENT_COLUMNS}.")
+    return column
+
+
 def infer_energy_column(df, average_energy=False):
     if average_energy is True:
         candidates = ["avg_energy"]
@@ -369,13 +383,7 @@ def extract_energy_drops_from_dataframe(
     )
 
     if plastic_only:
-        candidates = (
-            "nr_elements_with_m3_fix_change",
-            "nr_elements_with_m3_change",
-        )
-        plastic_col = next((col for col in candidates if col in df), None)
-        if plastic_col is None:
-            raise KeyError(f"Missing plastic-event column; tried {candidates}.")
+        plastic_col = infer_plastic_event_column(df)
         mask &= np.asarray(df[plastic_col] >= 1, dtype=bool)
         info["plastic_event_col"] = plastic_col
 

@@ -204,12 +204,29 @@ class VTUData:
         G11, G12, G22 = [self.get_cell_data(G) for G in ["G11", "G12", "G22"]]
         return CArrsToMat(G11, G12, G22)
 
-    def get_T_total(self):
-        """Return the exported total branch matrix for every element."""
+    def get_T(self):
+        """Return the exported plastic branch matrix for every element."""
         T11, T12, T21, T22 = [
             self.get_cell_data(T) for T in ["T11", "T12", "T21", "T22"]
         ]
         return arrsToMat(T11, T12, T21, T22)
+
+
+    def get_T_total(self):
+        """Return explicit total branch, reconstruct ``F_e @ T``, or use legacy ``T``."""
+        try:
+            components = self.get_matrix_components("T_total")
+            return arrsToMat(
+                components[(1, 1)],
+                components[(1, 2)],
+                components[(2, 1)],
+                components[(2, 2)],
+            )
+        except KeyError:
+            try:
+                return self.get_F_e() @ self.get_T()
+            except KeyError:
+                return self.get_T()
 
 
     def get_F(self):
@@ -221,6 +238,16 @@ class VTUData:
             self.get_cell_data(F) for F in ["F11", "F12", "F21", "F22"]
         ]
         return arrsToMat(F11, F12, F21, F22)
+
+    def get_F_e(self):
+        """
+        Returns a 3D array where each slice (2x2 matrix) corresponds to the
+        [F11, F12, F21, F22] components.
+        """
+        F_E11, F_E12, F_E21, F_E22 = [
+            self.get_cell_data(F_E) for F_E in ["F_E11", "F_E12", "F_E21", "F_E22"]
+        ]
+        return arrsToMat(F_E11, F_E12, F_E21, F_E22)
 
     def get_dN_dX(self):
         """Return exported element shape gradients with shape (n_cells, 3, 2)."""

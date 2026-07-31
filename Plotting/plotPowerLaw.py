@@ -18,6 +18,7 @@ from .makePlots import safePath, maybe_avg, energy_drop_label
 from .dataFunctions import get_metadata
 from .energyDropCalculations import (
     extract_energy_drops_from_dataframe,
+    infer_plastic_event_column,
     infer_stress_column,
 )
 import os
@@ -2163,8 +2164,9 @@ def find_start_of_plastic_events(data_info, debug=False, binsPerDecade=5):
     all_data = data_info["df"]
     mask = data_info["mask"]
     drops = data_info["drops"]
-    if "nr_elements_with_m3_fix_change" in all_data:
-        plastics = all_data["nr_elements_with_m3_fix_change"][mask].to_numpy()
+    plastic_col = infer_plastic_event_column(all_data, required=False)
+    if plastic_col is not None:
+        plastics = all_data[plastic_col][mask].to_numpy()
     else:
         warnings.warn("nr_elements_with_m3_fix_change column not found.")
         return None
@@ -2248,7 +2250,8 @@ def plot_plastic_counts(
     mask = info.get("mask")
     df = info["df"]
     assert mask is not None
-    plastics = df["nr_elements_with_m3_fix_change"][mask].to_numpy()
+    plastic_col = infer_plastic_event_column(df)
+    plastics = df[plastic_col][mask].to_numpy()
     if plastics.size == valid.size:
         plastics = plastics[valid]
 
@@ -2364,7 +2367,8 @@ def plot_plastic_counts_compare(
         mask = info.get("mask")
         df = info["df"]
         assert mask is not None
-        plastics = df["nr_elements_with_m3_fix_change"][mask].to_numpy()
+        plastic_col = infer_plastic_event_column(df)
+        plastics = df[plastic_col][mask].to_numpy()
 
         bin_centers, bin_sums = getHist(
             drops, weights=plastics, density=False, bins_per_decade=binsPerDecade
@@ -2524,8 +2528,9 @@ def plot_plastic_energy_scatter(
 
         mask = info.get("mask")
         assert mask is not None
-        plastics = df["nr_elements_with_m3_fix_change"][mask].to_numpy()
-        # idx = df["nr_elements_with_m3_fix_change"][mask].idxmax()
+        plastic_col = infer_plastic_event_column(df)
+        plastics = df[plastic_col][mask].to_numpy()
+        # idx = df[plastic_col][mask].idxmax()
         # print(df.loc[idx])
 
         if plastics.size != drops.size:

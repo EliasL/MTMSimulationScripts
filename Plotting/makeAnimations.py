@@ -382,19 +382,16 @@ def makeAnimations(
     videoLength = seconds_per_unit_shear * xChange
     nrSteps = videoLength * fps
 
-    # we select a reduced number of frames
-    vtu_files = select_vtu_files(
+    # Most videos use the requested frame rate and are sampled in strain.
+    # These videos intentionally retain every available VTU frame.
+    sampled_vtu_files = select_vtu_files(
         vtu_files,
         nrSteps,
         allImages,
         constant_strain_rate=constant_strain_rate,
         strains=strain_values,
     )
-
-    if len(vtu_files) < nrSteps:
-        # If we don't have enough frames, we need to make each frame last longer
-        # We will make the video last 7 seconds
-        fps = len(vtu_files) / minTime
+    full_frame_video_names = {"m_diff_mesh", "e_drop_plot"}
 
     subset = element_subset
     #subset = "even"
@@ -424,6 +421,8 @@ def makeAnimations(
         "plasticReductionDisk",
         "plasticReductionDisk_velocity",
         "integerShearMesh",
+        "disk_T_total",
+        "disk_F_e",
     }
     poincare_names = {
         "disk",
@@ -465,14 +464,16 @@ def makeAnimations(
         # Move this line to choose where the matrix videos are rendered.
         (plot_and_save_mesh, "mesh"),
         (plot_and_save_integer_shear_mesh, "integerShearMesh"),
-        (plot_and_save_in_poincare_disk, "disk"),
+        (plot_and_save_in_poincare_disk, "disk_T_total"),
+        (plot_and_save_in_poincare_disk, "disk_F_e"),
         #(plot_and_save_g_in_poincare_disk, "disk_G"),
         # *matrix_jobs,
         # (
         #     plot_and_save_velocity_field_in_plastic_reduced_poincare_disk,
         #     "plasticReductionDisk_velocity",
         # ),
-        (plot_and_save_in_plastic_reduced_poincare_disk, "plasticReductionDisk"),
+        # (plot_and_save_in_poincare_disk, "disk"),
+        # (plot_and_save_in_plastic_reduced_poincare_disk, "plasticReductionDisk"),
         (plot_and_save_m_diff_mesh, "m_diff_mesh"),
         (plot_and_save_plot, "energy_plot"),
         (plot_and_save_plot, "e_drop_plot"),
@@ -502,6 +503,13 @@ def makeAnimations(
         fileName = _with_suffixes(base_name)
         extra_kwargs = {}
         subset_arg = _subset_arg(base_name)
+        use_all_frames = allImages or base_name in full_frame_video_names
+        job_vtu_files = range_vtu_files if use_all_frames else sampled_vtu_files
+        job_fps = fps
+        if constant_strain_rate and videoLength > 0:
+            # Keep the physical duration fixed while allowing full-frame jobs
+            # to use every VTU at one constant playback rate.
+            job_fps = len(job_vtu_files) / videoLength
         if matrix_name_for_job is not None:
             extra_kwargs["matrix_name"] = matrix_name_for_job
         if base_name == "integerShearMesh":
@@ -512,12 +520,18 @@ def makeAnimations(
             extra_kwargs["plastic_shear_lims"] = get_plastic_shear_ranges(
                 [range_vtu_files[-1]], reconnecting
             )
+        if base_name in {"disk_T_total", "disk_F_e"}:
+            extra_kwargs["poincare_matrix"] = {
+                "disk_T_total": "T_total",
+                "disk_F_e": "F_e",
+            }[base_name]
         print(
-            f"Starting render job {fileName} ({len(vtu_files)} frames)...",
+            f"Starting render job {fileName} ({len(job_vtu_files)} frames, "
+            f"{job_fps:.3g} fps)...",
             flush=True,
         )
         images = make_images(
-            vtu_files,
+            job_vtu_files,
             num_processes=num_processes,
             macro_data=macroData,
             frameFunction=function,
@@ -544,7 +558,7 @@ def makeAnimations(
         if not os.path.exists(outPath) or os.path.getmtime(outPath) < os.path.getmtime(
             images[-1]
         ):
-            framesToMp4(images, outPath, fps)
+            framesToMp4(images, outPath, job_fps)
             if makeGIF:
                 print(f"Creating GIF for {fileName}...", flush=True)
                 GIFCommand = [
@@ -581,15 +595,16 @@ def makeAnimations(
                 output_path, _with_suffixes("m_mesh"), _with_suffixes("mesh")
             )
             combine_videoes(
-                output_path, _with_suffixes("mesh"), _with_suffixes("disk")
+                output_path, _with_suffixes("mesh"), _with_suffixes("disk_T_total")
             )
             combine_videoes(
-                output_path, _with_suffixes("m_mesh"), _with_suffixes("disk")
+                output_path, _with_suffixes("mesh"), _with_suffixes("disk_F_e")
             )
             combine_videoes(
-                output_path,
-                _with_suffixes("mesh"),
-                _with_suffixes("plasticReductionDisk"),
+                output_path, _with_suffixes("m_mesh"), _with_suffixes("disk_T_total")
+            )
+            combine_videoes(
+                output_path, _with_suffixes("m_mesh"), _with_suffixes("disk_F_e")
             )
         except Exception as e:
             print(e)

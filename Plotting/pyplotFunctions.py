@@ -573,6 +573,46 @@ def _make_discrete_boundaries(min_val, max_val, n_bins=12, gamma=0.5):
     return boundaries
 
 
+def _make_integer_shear_bins(limit):
+    """Return fixed symmetric bins for signed integer shear counts."""
+    limit = max(1, int(np.ceil(abs(float(limit)))))
+    positive_specs = [
+        (1, 1, False),
+        (2, 4, False),
+        (5, 10, False),
+        (11, 20, False),
+        (21, 40, False),
+        (41, np.inf, True),
+    ]
+    intervals = [(0, 0, "0")]
+    for low, high, open_ended in positive_specs:
+        if low > limit:
+            continue
+        high = min(limit, int(high)) if np.isfinite(high) else limit
+        positive_label = "41+" if open_ended else (
+            str(low) if low == high else f"{low}..{high}"
+        )
+        negative_label = "-41+" if open_ended else (
+            str(-low) if low == high else f"-{high}..-{low}"
+        )
+        intervals.extend(
+            [
+                (-high, -low, negative_label),
+                (low, high, positive_label),
+            ]
+        )
+
+    intervals.sort(key=lambda interval: interval[0])
+    boundaries = [intervals[0][0] - 0.5]
+    ticks = []
+    labels = []
+    for low, high, label in intervals:
+        boundaries.append(high + 0.5)
+        ticks.append(0.5 * (low + high))
+        labels.append(label)
+    return np.asarray(boundaries), np.asarray(ticks), labels
+
+
 def _discrete_ticks_and_labels(boundaries):
     centers = 0.5 * (boundaries[:-1] + boundaries[1:])
     labels = []
@@ -1332,7 +1372,7 @@ def plot_integer_shear_mesh(
         ax.set_ylim(y_min, y_max)
         ax.set_xticks([])
         ax.set_yticks([])
-        boundaries = _make_discrete_boundaries(-limit, limit)
+        boundaries, ticks, tick_labels = _make_integer_shear_bins(limit)
         cmap = plt.get_cmap("coolwarm", len(boundaries) - 1)
         norm = mcolors.BoundaryNorm(boundaries, cmap.N)
         mappable = _plot_mesh_elements(
@@ -1364,7 +1404,6 @@ def plot_integer_shear_mesh(
         )
         if add_colorbar:
             colorbar = fig.colorbar(mappable, ax=ax, pad=0.01, label=colorbar_label)
-            ticks, tick_labels = _discrete_ticks_and_labels(boundaries)
             colorbar.set_ticks(ticks)
             colorbar.set_ticklabels(tick_labels)
 
@@ -1890,11 +1929,21 @@ def plot_in_poincare_disk(
         ax, fig = base_plot(vtu_file=vtu_file, **poincare_kwargs)
     data = VTUData(vtu_file)
 
-    poincare_matrix = str(kwargs.get("poincare_matrix", "C")).upper()
+    poincare_matrix = str(kwargs.get("poincare_matrix", "C")).strip().upper()
     if poincare_matrix == "C":
         disk_matrix = data.get_C()
+        legend_label = r"$\mathbf{C}$"
     elif poincare_matrix == "G":
         disk_matrix = data.get_G()
+        legend_label = r"$\mathbf{G}$"
+    elif poincare_matrix == "T_TOTAL":
+        T_total = data.get_T_total()
+        disk_matrix = np.swapaxes(T_total, -1, -2) @ T_total
+        legend_label = r"$\mathbf{T}_{\mathrm{total}}$"
+    elif poincare_matrix == "F_E":
+        F_e = data.get_F_e()
+        disk_matrix = np.swapaxes(F_e, -1, -2) @ F_e
+        legend_label = r"$\mathbf{F}_e$"
     else:
         raise ValueError(f"Unsupported Poincare disk matrix: {poincare_matrix!r}")
 
@@ -1929,7 +1978,6 @@ def plot_in_poincare_disk(
         yieldSurface_kwargs=kwargs.get("yieldSurface_kwargs", None),
     )
 
-    legend_label = rf"$\mathbf{{{poincare_matrix}}}$"
     scatter = drawCScatter(
         ax,
         disk_matrix,
