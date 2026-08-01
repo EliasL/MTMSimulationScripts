@@ -33,7 +33,10 @@ from Plotting.plotPowerLaw import (
     findPrePostSplit,
     plot_plastic_energy_scatter,
 )
-from Plotting.reversibilityPlot import plot_reversibility_histograms
+from Plotting.reversibilityPlot import (
+    plot_reversibility_histograms,
+    plot_reversible_state_differences,
+)
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
     plasticReductionPlots,
@@ -732,6 +735,12 @@ def plotReversibility():
         postRegime=False,
         show=False,
         save_path="Plots/reversibility_pre.pdf",
+    )
+    plot_reversible_state_differences(
+        configs[0],
+        postRegime=None,
+        show=False,
+        save_path="Plots/reversibility_state_differences.pdf",
     )
     plotLog2(configs, labels=labels, postRegime=True)
     plotLog2(configs, labels=labels, postRegime=False)
