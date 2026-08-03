@@ -605,6 +605,7 @@ def _raw_pdf_panel(analysis):
         show_cutoff=False,
         show_title=False,
         show_legend=False,
+        xmin_analysis=False,
     )
     ax.lines[0].set_label("Empirical PDF")
     ax.lines[0].set_markersize(EMPIRICAL_PDF_MARKER_SIZE)
@@ -716,8 +717,35 @@ def _write_analysis_summary(analysis):
         "simple_drop_largest_interval": list(
             analysis["simple_drop_details"]["largest_drop_interval"]
         ),
-        "simple_drop_local_minima": analysis["simple_drop_details"]["local_minima"],
-        "simple_drop_start_summary": analysis["simple_drop_start_summary"],
+        "simple_drop_coarse_average_size": analysis["simple_drop_details"][
+            "coarse_average_size"
+        ],
+        "simple_drop_coarse_coarse_xmins": analysis["simple_drop_details"][
+            "coarse_coarse_xmins"
+        ].tolist(),
+        "simple_drop_coarse_coarse_distances": analysis["simple_drop_details"][
+            "coarse_coarse_distances"
+        ].tolist(),
+        "simple_drop_coarse_coarse_largest_interval": list(
+            analysis["simple_drop_details"][
+                "coarse_coarse_largest_drop_interval"
+            ]
+        ),
+        "simple_drop_interval_coarse_xmins": analysis["simple_drop_details"][
+            "interval_coarse_xmins"
+        ].tolist(),
+        "simple_drop_region_candidate_count": int(
+            analysis["simple_drop_details"]["region_xmins"].size
+        ),
+        "simple_drop_region_best_xmin": analysis["simple_drop_details"][
+            "region_best_xmin"
+        ],
+        "simple_drop_region_best_distance": analysis["simple_drop_details"][
+            "region_best_distance"
+        ],
+        "simple_drop_local_minimum": analysis["simple_drop_details"][
+            "local_minimum"
+        ],
         "alpha": analysis["alpha"],
         "lambda": analysis["lambda"],
         "inverse_lambda": (

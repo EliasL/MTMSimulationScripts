@@ -1,0 +1,11 @@
+setting_parameter,setting,quantity,classified_avalanches,positive_drops,nonpositive_drops
+load_increment,1e-06,energy_drop_density,1992,1952,40
+load_increment,1e-06,stress_drop,1992,1916,76
+load_increment,5e-06,energy_drop_density,1963,1899,64
+load_increment,5e-06,stress_drop,1963,1894,69
+load_increment,1e-05,energy_drop_density,1895,1847,48
+load_increment,1e-05,stress_drop,1895,1828,67
+load_increment,5e-05,energy_drop_density,1813,1634,179
+load_increment,5e-05,stress_drop,1813,1606,207
+load_increment,0.0001,energy_drop_density,1769,1563,206
+load_increment,0.0001,stress_drop,1769,1380,389

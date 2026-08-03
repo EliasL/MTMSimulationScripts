@@ -531,7 +531,7 @@ def getPrettyLabel(string):
         r"(?:LBFGSEpsx|LGBFSEpsx)=([^,]+)", string, flags=re.IGNORECASE
     )
     if eps_x:
-        s = rf"$\epsilon_x$: {eps_x.group(1)}"
+        s = rf"$\epsilon_{{\mathbf{{x}}}}$: {eps_x.group(1)}"
     else:
         load_increment = re.search(r"loadIncrement=([^,]+)", string)
         if load_increment:

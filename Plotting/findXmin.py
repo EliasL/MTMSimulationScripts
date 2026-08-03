@@ -2464,6 +2464,64 @@ def _nearest_sorted_xmin_index(xmins, target):
     )
 
 
+def _evaluate_fine_xmin_indices(
+    drops,
+    fine_xmins,
+    indices,
+    distance_cache,
+    *,
+    min_tail_count=3,
+    parameter_cache=None,
+    initial_params=None,
+    **fit_kwargs,
+):
+    """Evaluate selected observed-xmin indices and update the shared caches."""
+    fine_xmins = np.asarray(fine_xmins, dtype=float)
+    indices = np.asarray(indices, dtype=int)
+    if indices.ndim != 1:
+        raise ValueError("indices must be one-dimensional.")
+    if np.any(indices < 0) or np.any(indices >= fine_xmins.size):
+        raise IndexError("indices contain a value outside fine_xmins.")
+    if parameter_cache is None:
+        parameter_cache = {}
+
+    missing_indices = []
+    missing_xmins = []
+    for index in indices:
+        xmin = float(fine_xmins[index])
+        key = float(np.float64(xmin))
+        if key in distance_cache:
+            continue
+        if np.count_nonzero(drops >= xmin) < int(min_tail_count):
+            distance_cache[key] = np.inf
+        else:
+            missing_indices.append(int(index))
+            missing_xmins.append(xmin)
+
+    if missing_xmins:
+        distances, _, params = evaluate_xmin_distances(
+            drops,
+            missing_xmins,
+            initial_params=initial_params,
+            **fit_kwargs,
+        )
+        for index, distance, params_for_xmin in zip(
+            missing_indices,
+            distances,
+            params,
+        ):
+            key = float(np.float64(fine_xmins[index]))
+            distance_cache[key] = (
+                float(distance) if np.isfinite(distance) else np.inf
+            )
+            parameter_cache[key] = params_for_xmin
+
+    return np.asarray(
+        [distance_cache[float(np.float64(fine_xmins[index]))] for index in indices],
+        dtype=float,
+    )
+
+
 def _simple_drop_local_search(
     drops,
     fine_xmins,
@@ -2508,39 +2566,15 @@ def _simple_drop_local_search(
         parameter_cache = {}
 
     def evaluate_many(indices, initial_params=None):
-        indices = np.asarray(indices, dtype=int)
-        missing_indices = []
-        missing_xmins = []
-        for index in indices:
-            xmin = float(fine_xmins[index])
-            key = float(np.float64(xmin))
-            if key in distance_cache:
-                continue
-            if np.count_nonzero(drops >= xmin) < int(min_tail_count):
-                distance_cache[key] = np.inf
-            else:
-                missing_indices.append(int(index))
-                missing_xmins.append(xmin)
-        if missing_xmins:
-            distances, _, params = evaluate_xmin_distances(
-                drops,
-                missing_xmins,
-                initial_params=initial_params,
-                **fit_kwargs,
-            )
-            for index, distance, params in zip(
-                missing_indices,
-                distances,
-                params,
-            ):
-                key = float(np.float64(fine_xmins[index]))
-                distance_cache[key] = (
-                    float(distance) if np.isfinite(distance) else np.inf
-                )
-                parameter_cache[key] = params
-        return np.asarray(
-            [distance_cache[float(np.float64(fine_xmins[index]))] for index in indices],
-            dtype=float,
+        return _evaluate_fine_xmin_indices(
+            drops,
+            fine_xmins,
+            indices,
+            distance_cache,
+            min_tail_count=min_tail_count,
+            parameter_cache=parameter_cache,
+            initial_params=initial_params,
+            **fit_kwargs,
         )
 
     current_index = start_index
@@ -2657,28 +2691,43 @@ def find_xmin_simple_drop_from_results(
     valid_fits=None,
     *,
     min_tail_count=3,
+    coarse_average_size=10,
     distance_cache=None,
     parameter_cache=None,
     **fit_kwargs,
 ):
-    """Refine xmin around the largest adjacent drop in a coarse KS scan.
+    """Average the coarse KS scan, then exhaustively search one selected interval.
 
-    Three independent local searches begin at the left edge, logarithmic
-    midpoint, and right edge of the interval with the largest decrease in
-    KS distance. The initial interval is found on the coarse scan. Each
-    subsequent search uses the sorted unique observed drops as its fine xmin
-    array and moves only to a direct neighbor in that array. The local
-    minimum with the smallest KS distance is returned.
-
-    Fine refinement is always one observed-candidate index at a time and
-    continues until neither direct neighbor improves the KS distance.
+    Consecutive groups of ``coarse_average_size`` initial KS measurements are
+    averaged. The steepest decrease between adjacent averaged groups selects
+    two groups of original coarse measurements. Within those groups, the two
+    original points with the smallest KS distances bound the fine interval.
+    Every observed xmin in that interval is evaluated and the best one is
+    returned. The fine search is deliberately confined to this interval so
+    that tail noise cannot pull the result away from the smoothed KS drop.
     """
     drops = np.asarray(drops, dtype=float)
     drops = drops[np.isfinite(drops) & (drops > 0)]
     xmins = np.asarray(xmins, dtype=float)
     distances = np.asarray(distances, dtype=float)
+    if xmins.ndim != 1 or distances.ndim != 1:
+        raise ValueError("xmins and distances must be one-dimensional.")
     if xmins.shape != distances.shape:
         raise ValueError("xmins and distances must have the same shape.")
+    if not np.all(np.isfinite(xmins) & (xmins > 0)):
+        raise ValueError("xmins must contain only finite positive values.")
+    if int(coarse_average_size) != coarse_average_size or coarse_average_size < 1:
+        raise ValueError("coarse_average_size must be a positive integer.")
+    coarse_average_size = int(coarse_average_size)
+    if xmins.size < 2 * coarse_average_size:
+        raise ValueError(
+            "Need at least two complete coarse-average groups for simpleDrop."
+        )
+    if xmins.size % coarse_average_size:
+        raise ValueError(
+            "The number of initial xmin measurements must be divisible by "
+            "coarse_average_size."
+        )
 
     finite_mask = np.isfinite(xmins) & np.isfinite(distances) & (xmins > 0)
     fit_validity = (
@@ -2698,60 +2747,78 @@ def find_xmin_simple_drop_from_results(
 
     order = np.argsort(xmins)
     xmins = xmins[order]
+    if np.any(np.diff(xmins) <= 0):
+        raise ValueError("xmins must be distinct.")
     distances = distances[order]
     search_mask = search_mask[order]
     fit_validity = fit_validity[order]
     tail_counts = tail_counts[order]
 
-    valid_pairs = search_mask[:-1] & search_mask[1:]
-    if not np.any(valid_pairs):
-        raise RuntimeError("No adjacent valid KS measurements are available.")
-    changes = np.diff(distances)
-    changes[~valid_pairs] = np.inf
-    largest_drop_index = int(np.argmin(changes))
-    if not np.isfinite(changes[largest_drop_index]):
-        raise RuntimeError("Could not identify a finite decrease in KS distance.")
-    if changes[largest_drop_index] >= 0:
-        warnings.warn(
-            "The initial KS scan contains no decrease; simpleDrop will refine "
-            "around the smallest initial KS measurement."
-        )
-        valid_indices = np.flatnonzero(search_mask)
-        global_index = int(
-            valid_indices[np.argmin(distances[valid_indices])]
-        )
-        largest_drop_index = min(max(global_index - 1, 0), xmins.size - 2)
+    group_count = xmins.size // coarse_average_size
+    grouped_xmins = np.exp(
+        np.mean(np.log(xmins.reshape(group_count, coarse_average_size)), axis=1)
+    )
+    grouped_search_mask = np.all(
+        search_mask.reshape(group_count, coarse_average_size), axis=1
+    )
+    grouped_distances = np.full(group_count, np.nan, dtype=float)
+    grouped_distance_blocks = distances.reshape(group_count, coarse_average_size)
+    grouped_distances[grouped_search_mask] = np.mean(
+        grouped_distance_blocks[grouped_search_mask], axis=1
+    )
 
-    left = float(xmins[largest_drop_index])
-    right = float(xmins[largest_drop_index + 1])
+    grouped_valid_pairs = grouped_search_mask[:-1] & grouped_search_mask[1:]
+    if not np.any(grouped_valid_pairs):
+        raise RuntimeError(
+            "No adjacent valid coarse-average KS groups are available."
+        )
+    grouped_changes = np.diff(grouped_distances)
+    grouped_changes[~grouped_valid_pairs] = np.inf
+    largest_grouped_drop_index = int(np.argmin(grouped_changes))
+    largest_grouped_drop = float(grouped_changes[largest_grouped_drop_index])
+    if not np.isfinite(largest_grouped_drop):
+        raise RuntimeError(
+            "Could not identify a finite decrease in the averaged KS distances."
+        )
+    if largest_grouped_drop >= 0:
+        warnings.warn(
+            "The averaged KS scan contains no decrease; simpleDrop will use "
+            "the interval with the smallest increase."
+        )
+
+    steepest_group_indices = np.asarray(
+        [largest_grouped_drop_index, largest_grouped_drop_index + 1],
+        dtype=int,
+    )
+    steepest_coarse_indices = np.arange(
+        steepest_group_indices[0] * coarse_average_size,
+        (steepest_group_indices[-1] + 1) * coarse_average_size,
+        dtype=int,
+    )
+    steepest_coarse_indices = steepest_coarse_indices[
+        search_mask[steepest_coarse_indices]
+    ]
+    if steepest_coarse_indices.size < 2:
+        raise RuntimeError(
+            "The steepest averaged KS interval contains fewer than two valid "
+            "coarse measurements."
+        )
+    smallest_distance_order = np.lexsort(
+        (
+            xmins[steepest_coarse_indices],
+            distances[steepest_coarse_indices],
+        )
+    )
+    interval_coarse_indices = np.sort(
+        steepest_coarse_indices[smallest_distance_order[:2]]
+    )
+    left = float(xmins[interval_coarse_indices[0]])
+    right = float(xmins[interval_coarse_indices[1]])
     fine_xmins = _fine_xmin_candidates(drops, min_tail_count)
-    start_targets = (left, np.sqrt(left * right), right)
-    start_indices = tuple(
-        _nearest_sorted_xmin_index(fine_xmins, target)
-        for target in start_targets
-    )
-    valid_indices = np.flatnonzero(search_mask)
-    coarse_min_position = int(
-        np.argmin(distances[valid_indices])
-    )
-    coarse_min_lower = xmins[
-        valid_indices[max(0, coarse_min_position - 1)]
-    ]
-    coarse_min_upper = xmins[
-        valid_indices[min(valid_indices.size - 1, coarse_min_position + 1)]
-    ]
-    search_bounds = (
-        min(
-            min(start_indices),
-            _nearest_sorted_xmin_index(fine_xmins, coarse_min_lower),
-        ),
-        max(
-            max(start_indices),
-            _nearest_sorted_xmin_index(fine_xmins, coarse_min_upper),
-        ),
-    )
     if distance_cache is None:
         distance_cache = {}
+    if parameter_cache is None:
+        parameter_cache = {}
     distance_cache.update(
         {
             float(np.float64(xmin)): float(distance)
@@ -2760,29 +2827,48 @@ def find_xmin_simple_drop_from_results(
         }
     )
 
-    local_minima = [
-        _simple_drop_local_search(
-            drops,
-            fine_xmins,
-            start_index,
-            distance_cache,
-            min_tail_count=min_tail_count,
-            parameter_cache=parameter_cache,
-            search_bounds=search_bounds,
-            **fit_kwargs,
-        )
-        for start_index in start_indices
-    ]
-    start_summary = summarize_simple_drop_starts(local_minima)
-    finite_minima = [
-        result for result in local_minima if np.isfinite(result["distance"])
-    ]
-    if not finite_minima:
-        raise RuntimeError("All three simpleDrop local searches failed.")
-    selected = min(
-        finite_minima,
-        key=lambda result: (result["distance"], result["xmin"]),
+    region_indices = np.flatnonzero(
+        (fine_xmins >= left) & (fine_xmins <= right)
     )
+    if region_indices.size == 0:
+        region_indices = np.unique(
+            [
+                _nearest_sorted_xmin_index(fine_xmins, left),
+                _nearest_sorted_xmin_index(fine_xmins, right),
+            ]
+        )
+    region_distances = _evaluate_fine_xmin_indices(
+        drops,
+        fine_xmins,
+        region_indices,
+        distance_cache,
+        min_tail_count=min_tail_count,
+        parameter_cache=parameter_cache,
+        **fit_kwargs,
+    )
+    finite_region = np.isfinite(region_distances)
+    if not np.any(finite_region):
+        raise RuntimeError("No finite KS distances were found in the simpleDrop region.")
+    region_finite_positions = np.flatnonzero(finite_region)
+    region_best_position = int(
+        region_finite_positions[
+            np.argmin(region_distances[region_finite_positions])
+        ]
+    )
+    region_best_index = int(region_indices[region_best_position])
+    local_minimum = _simple_drop_local_search(
+        drops,
+        fine_xmins,
+        region_best_index,
+        distance_cache,
+        min_tail_count=min_tail_count,
+        parameter_cache=parameter_cache,
+        search_bounds=(int(region_indices[0]), int(region_indices[-1])),
+        **fit_kwargs,
+    )
+    if not np.isfinite(local_minimum["distance"]):
+        raise RuntimeError("The simpleDrop fine local search failed.")
+
     evaluated = sorted(
         (
             float(xmin),
@@ -2798,21 +2884,41 @@ def find_xmin_simple_drop_from_results(
         "search_mask": search_mask,
         "tail_counts": tail_counts,
         "largest_drop_interval": (left, right),
-        "largest_distance_drop": float(changes[largest_drop_index]),
-        "local_minima": local_minima,
-        "start_summary": start_summary,
-        "selected_distance": float(selected["distance"]),
+        "largest_distance_drop": largest_grouped_drop,
+        "coarse_average_size": coarse_average_size,
+        "coarse_coarse_xmins": grouped_xmins,
+        "coarse_coarse_distances": grouped_distances,
+        "coarse_coarse_search_mask": grouped_search_mask,
+        "coarse_coarse_largest_drop_interval": tuple(
+            float(grouped_xmins[index]) for index in steepest_group_indices
+        ),
+        "coarse_coarse_largest_distance_drop": largest_grouped_drop,
+        "coarse_coarse_selected_group_indices": steepest_group_indices,
+        "steepest_coarse_candidate_indices": steepest_coarse_indices,
+        "interval_coarse_indices": interval_coarse_indices,
+        "interval_coarse_xmins": xmins[interval_coarse_indices],
+        "interval_coarse_distances": distances[interval_coarse_indices],
+        "region_xmins": fine_xmins[region_indices],
+        "region_distances": region_distances,
+        "region_candidate_indices": region_indices,
+        "region_best_xmin": float(fine_xmins[region_best_index]),
+        "region_best_distance": float(region_distances[region_best_position]),
+        "local_minimum": local_minimum,
+        "selected_distance": float(local_minimum["distance"]),
         "initial_measurement_count": int(xmins.size),
         "fine_candidate_source": "sorted_unique_observed_drops",
         "fine_candidate_count": int(fine_xmins.size),
-        "fine_step": "direct_neighbor_index",
+        "fine_step": "every_observed_xmin_in_selected_interval",
         "fine_candidate_min": float(fine_xmins[0]),
         "fine_candidate_max": float(fine_xmins[-1]),
-        "fine_search_bounds": search_bounds,
+        "fine_search_bounds": (
+            int(region_indices[0]),
+            int(region_indices[-1]),
+        ),
         "evaluated_xmins": [xmin for xmin, _ in evaluated],
         "evaluated_distances": [distance for _, distance in evaluated],
     }
-    return float(selected["xmin"]), details
+    return float(local_minimum["xmin"]), details
 
 
 def find_xmin_refined_global_min_from_results(
@@ -3017,6 +3123,7 @@ def analyze_xmin(
     *,
     nr_initial=100,
     min_tail_count=25,
+    coarse_average_size=10,
     distType=Truncated_Power_Law,
     parallel=False,
 ):
@@ -3025,6 +3132,16 @@ def analyze_xmin(
     drops = drops[np.isfinite(drops) & (drops > 0)]
     if int(nr_initial) != nr_initial or nr_initial < 2:
         raise ValueError("nr_initial must be an integer of at least two.")
+    if int(coarse_average_size) != coarse_average_size or coarse_average_size < 1:
+        raise ValueError("coarse_average_size must be a positive integer.")
+    if nr_initial < 2 * coarse_average_size:
+        raise ValueError(
+            "nr_initial must contain at least two complete coarse-average groups."
+        )
+    if nr_initial % coarse_average_size:
+        raise ValueError(
+            "nr_initial must be divisible by coarse_average_size."
+        )
     if int(min_tail_count) != min_tail_count or min_tail_count < 3:
         raise ValueError("min_tail_count must be an integer of at least three.")
     if drops.size < min_tail_count:
@@ -3056,7 +3173,7 @@ def analyze_xmin(
         ],
         dtype=float,
     )
-    search_kwargs = dict(
+    fit_search_kwargs = dict(
         min_tail_count=int(min_tail_count),
         distType=distType,
         parallel=parallel,
@@ -3068,9 +3185,10 @@ def analyze_xmin(
         xmins,
         distances,
         valid_fits,
+        coarse_average_size=int(coarse_average_size),
         distance_cache=distance_cache,
         parameter_cache=parameter_cache,
-        **search_kwargs,
+        **fit_search_kwargs,
     )
     _, global_search_details = find_xmin_refined_global_min_from_results(
         drops,
@@ -3079,7 +3197,7 @@ def analyze_xmin(
         valid_fits,
         distance_cache=distance_cache,
         parameter_cache=parameter_cache,
-        **search_kwargs,
+        **fit_search_kwargs,
     )
     global_xmin, global_distance, all_evaluations = (
         select_global_min_from_search_details(
@@ -3102,13 +3220,13 @@ def analyze_xmin(
         "simple_drop_xmin": float(simple_drop_xmin),
         "simple_drop_distance": float(simple_drop_details["selected_distance"]),
         "simple_drop_details": simple_drop_details,
-        "simple_drop_start_summary": simple_drop_details["start_summary"],
         "global_min_xmin": global_xmin,
         "global_min_distance": global_distance,
         "global_search_details": global_search_details,
         "all_evaluations": all_evaluations,
         "nr_initial": int(nr_initial),
         "min_tail_count": int(min_tail_count),
+        "coarse_average_size": int(coarse_average_size),
     }
 
 
@@ -3122,20 +3240,20 @@ def xmin_global_differs(analysis, *, rtol=1e-6):
 
 
 def annotate_xmin_choices(ax, analysis, *, add_labels=True):
-    """Mark simpleDrop and, only when different, the refined global minimum."""
+    """Mark the global minimum, and simpleDrop only when it differs."""
     simple_xmin = analysis["simple_drop_xmin"]
-    ax.axvline(
-        simple_xmin,
-        color="tab:blue",
-        linestyle="--",
-        linewidth=1.0,
-        label=(
-            rf"simpleDrop: $x_{{\min}}={simple_xmin:.1e}$"
-            if add_labels
-            else "_nolegend_"
-        ),
-    )
     if xmin_global_differs(analysis):
+        ax.axvline(
+            simple_xmin,
+            color="tab:blue",
+            linestyle="--",
+            linewidth=1.0,
+            label=(
+                rf"simpleDrop: $x_{{\min}}={simple_xmin:.1e}$"
+                if add_labels
+                else "_nolegend_"
+            ),
+        )
         global_xmin = analysis["global_min_xmin"]
         ax.axvline(
             global_xmin,
@@ -3148,83 +3266,91 @@ def annotate_xmin_choices(ax, analysis, *, add_labels=True):
                 else "_nolegend_"
             ),
         )
+    else:
+        global_xmin = analysis["global_min_xmin"]
+        ax.axvline(
+            global_xmin,
+            color="0.25",
+            linestyle=":",
+            linewidth=1.0,
+            label=(
+                rf"Global min.: $x_{{\min}}={global_xmin:.1e}$"
+                if add_labels
+                else "_nolegend_"
+            ),
+        )
 
 
 def plot_xmin_analysis(analysis, ax=None):
-    """Plot the canonical coarse scan and both local-refinement results."""
+    """Plot the coarse scan, averaged background, and final xmin choices."""
     if ax is None:
         fig, ax = plt.subplots()
     else:
         fig = ax.figure
+    simple_details = analysis["simple_drop_details"]
+    grouped_xmins = np.asarray(
+        simple_details["coarse_coarse_xmins"], dtype=float
+    )
+    grouped_distances = np.asarray(
+        simple_details["coarse_coarse_distances"], dtype=float
+    )
+    grouped_mask = np.asarray(
+        simple_details["coarse_coarse_search_mask"], dtype=bool
+    )
+    ax.plot(
+        grouped_xmins[grouped_mask],
+        grouped_distances[grouped_mask],
+        marker="o",
+        markersize=3.5,
+        color="0.65",
+        linewidth=1.0,
+        alpha=0.8,
+        zorder=1,
+        label=(
+            rf"{simple_details['coarse_average_size']}-point averages "
+            rf"({grouped_mask.sum()} points)"
+        ),
+    )
     ax.plot(
         analysis["xmins"],
         analysis["distances"],
         marker="o",
         markersize=2.8,
-        color="tab:blue",
-        label=r"$D(x_{\min})$",
+        color="tab:red",
+        linewidth=0.8,
+        zorder=3,
+        label=rf"Initial $D(x_{{\min}})$ ({analysis['nr_initial']} points)",
     )
-    ax.plot(
-        [],
-        [],
-        linestyle="none",
+    steepest_coarse_indices = np.asarray(
+        simple_details["steepest_coarse_candidate_indices"], dtype=int
+    )
+    candidate_left = float(analysis["xmins"][steepest_coarse_indices[0]])
+    candidate_right = float(analysis["xmins"][steepest_coarse_indices[-1]])
+    ax.axvspan(
+        candidate_left,
+        candidate_right,
+        color="0.7",
+        alpha=0.12,
+        zorder=0,
         label=(
-            "Fine local search: sorted observed xmins, "
-            "direct-neighbor step=1"
+            f"{2 * simple_details['coarse_average_size']} coarse points "
+            "spanning steepest averaged drop"
         ),
     )
-    global_details = analysis["global_search_details"]
-    rough = global_details["rough_local_minima"]
-    refined = global_details["local_minima"]
-    if rough:
-        ax.scatter(
-            [item["xmin"] for item in rough],
-            [item["distance"] for item in rough],
-            marker="s",
-            s=20,
-            facecolor="none",
-            edgecolor="0.35",
-            label="Coarse local minima",
-        )
-    if refined:
-        ax.scatter(
-            [item["xmin"] for item in refined],
-            [item["distance"] for item in refined],
-            marker="x",
-            s=25,
-            color="0.35",
-            label="Refined local minima",
-        )
-    start_summary = analysis["simple_drop_start_summary"]
-    start_markers = ("<", "o", ">")
-    for result, marker in zip(
-        analysis["simple_drop_details"]["local_minima"], start_markers
-    ):
-        ax.scatter(
-            [result["xmin"]],
-            [result["distance"]],
-            marker=marker,
-            s=30,
-            facecolor="white",
-            edgecolor="tab:orange",
-            linewidth=0.9,
-            zorder=7,
-            label=f"simpleDrop {result['start_label']} start",
-        )
     simple_xmin = analysis["simple_drop_xmin"]
     simple_distance = analysis["simple_drop_distance"]
-    ax.scatter(
-        [simple_xmin],
-        [simple_distance],
-        marker="D",
-        s=28,
-        color="tab:blue",
-        edgecolor="white",
-        linewidth=0.5,
-        zorder=5,
-        label=rf"simpleDrop: $x_{{\min}}={simple_xmin:.1e}$",
-    )
     if xmin_global_differs(analysis):
+        ax.scatter(
+            [simple_xmin],
+            [simple_distance],
+            marker="D",
+            s=30,
+            color="tab:blue",
+            edgecolor="white",
+            linewidth=0.5,
+            zorder=5,
+            label=rf"simpleDrop: $x_{{\min}}={simple_xmin:.1e}$",
+        )
         global_xmin = analysis["global_min_xmin"]
         ax.scatter(
             [global_xmin],
@@ -3237,17 +3363,19 @@ def plot_xmin_analysis(analysis, ax=None):
             zorder=6,
             label=rf"Global min.: $x_{{\min}}={global_xmin:.1e}$",
         )
-    ax.plot(
-        [],
-        [],
-        linestyle="none",
-        label=(
-            "simpleDrop starts: "
-            f"{start_summary['unique_local_minimum_count']} distinct; "
-            "middle lowest="
-            f"{start_summary['middle_search_is_lowest']}"
-        ),
-    )
+    else:
+        global_xmin = analysis["global_min_xmin"]
+        ax.scatter(
+            [global_xmin],
+            [analysis["global_min_distance"]],
+            marker="X",
+            s=38,
+            facecolor="white",
+            edgecolor="0.25",
+            linewidth=0.8,
+            zorder=6,
+            label=rf"Global min.: $x_{{\min}}={global_xmin:.1e}$",
+        )
     annotate_xmin_choices(ax, analysis, add_labels=False)
     ax.set_xscale("log")
     ax.set_xlabel(r"$x_{\min}$")

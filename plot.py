@@ -33,7 +33,10 @@ from Plotting.plotPowerLaw import (
     findPrePostSplit,
     plot_plastic_energy_scatter,
 )
-from Plotting.reversibilityPlot import plot_reversibility_histograms
+from Plotting.reversibilityPlot import (
+    plot_reversibility_histograms,
+    plot_reversibility_delta_u_relaxation,
+)
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
 from MTMath.poincareTiling import (
     plasticReductionPlots,
@@ -64,6 +67,7 @@ from Plotting.remotePlotting import (
     plotLogCompare,
     plotPlasticCounts,
     plotReversibilityEnergyDropCorrelation,
+    plotReversibilityQuantityCorrelation,
     get_csv_files,
     plotEnergy,
     plotStress,
@@ -444,10 +448,44 @@ def plotSylvainBatches():
         grouped_configs, grouped_labels, group_labels = (
             ConfigGenerator.group_by_settings(configs, labels=labels)
         )
-        plotReversibilityEnergyDropCorrelation(
+        for x_axis_col in (
+            "rev_energy_diff",
+            "rev_sigma_12_diff",
+            "rev_u_diff",
+        ):
+            plotReversibilityEnergyDropCorrelation(
+                grouped_configs,
+                grouped_labels,
+                xAxisCol=x_axis_col,
+                postRegime=None,
+                name=(
+                    f"sylvain_batch_{batch}_reversibility_"
+                    f"{x_axis_col}_correlation"
+                ),
+            )
+
+        for y_axis_col, x_axis_col, quantity_name in (
+            ("rev_u_diff", "rev_sigma_12_diff", "u_vs_sigma"),
+            ("rev_sigma_12_diff", "rev_u_diff", "sigma_vs_u"),
+            ("rev_u_diff", "rev_energy_diff", "u_vs_energy"),
+            ("rev_energy_diff", "rev_u_diff", "energy_vs_u"),
+        ):
+            plotReversibilityQuantityCorrelation(
+                grouped_configs,
+                grouped_labels,
+                xAxisCol=x_axis_col,
+                yAxisCol=y_axis_col,
+                postRegime=None,
+                name=(
+                    f"sylvain_batch_{batch}_reversibility_"
+                    f"{quantity_name}"
+                ),
+            )
+
+        plot_reversibility_delta_u_relaxation(
             grouped_configs,
             grouped_labels,
-            xAxisCol="rev_energy_diff",
+            name=f"sylvain_batch_{batch}_reversibility_delta_u_R_vs_delta_rev_u",
         )
 
         paths, _ = get_csv_files(

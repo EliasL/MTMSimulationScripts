@@ -496,7 +496,7 @@ def runOnLocalMachine():
     run_many_locally(
         configs,
         taskNames=labels,
-        resume=False,
+        resume=True,
     )
 
 
@@ -715,7 +715,7 @@ if __name__ == "__main__":
     # cleanData()
     #startJobs()
 
-    # runOnLocalMachine()
+    #runOnLocalMachine()
     #restartLongShearWithMinimizationLog()
 
     # plotPropperJob()
