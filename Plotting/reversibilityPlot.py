@@ -94,6 +94,147 @@ def _collect_reversibility_data(csv_paths, strainLim="auto", postRegime=True):
     return drops, is_rev, rev_u
 
 
+def _collect_reversible_state_differences(
+    csv_paths, strainLim="auto", postRegime=True
+):
+    """Collect state-4 minus state-0 diagnostics for reversible drops."""
+    if isinstance(csv_paths, (str, os.PathLike)):
+        csv_paths = [str(csv_paths)]
+    if not csv_paths:
+        raise RuntimeError("No CSV paths provided.")
+
+    L = get_system_size(csv_paths)
+    all_load = []
+    all_energy = []
+    all_sigma12 = []
+
+    required_columns = {
+        "is_reversible",
+        "rev_energy_diff",
+        "rev_sigma_12_diff",
+    }
+
+    for csv_path in csv_paths:
+        df = read_macrodata_csv(csv_path, L=L)
+        missing = required_columns.difference(df.columns)
+        if missing:
+            missing_text = ", ".join(sorted(missing))
+            raise RuntimeError(
+                f"Missing reversibility columns ({missing_text}) in {csv_path}"
+            )
+
+        # Reuse the same event/drop mask as the existing reversibility plots.
+        _, data_info = get_energy_drops(
+            csv_path,
+            df=df,
+            strainLim=strainLim,
+            postRegime=postRegime,
+        )
+        drop_mask = data_info["masks"][0]
+        is_reversible = df["is_reversible"].to_numpy(dtype=bool)[drop_mask]
+
+        load = df["load"].to_numpy(dtype=float)[drop_mask]
+        energy = df["rev_energy_diff"].to_numpy(dtype=float)[drop_mask]
+        sigma12 = df["rev_sigma_12_diff"].to_numpy(dtype=float)[drop_mask]
+        finite = (
+            is_reversible
+            & np.isfinite(load)
+            & np.isfinite(energy)
+            & np.isfinite(sigma12)
+        )
+
+        all_load.append(load[finite])
+        all_energy.append(energy[finite])
+        all_sigma12.append(sigma12[finite])
+
+    return (
+        np.concatenate(all_load) if all_load else np.array([]),
+        np.concatenate(all_energy) if all_energy else np.array([]),
+        np.concatenate(all_sigma12) if all_sigma12 else np.array([]),
+    )
+
+
+def plot_reversible_state_differences(
+    config_file,
+    postRegime: bool | None = True,
+    strainLim="auto",
+    show=True,
+    save_path=None,
+    group_labels=None,
+):
+    """Plot energy and shear-stress return differences for reversible drops."""
+    if isinstance(config_file, (list, tuple)) and config_file:
+        if isinstance(config_file[0], (list, tuple)):
+            groups = list(config_file)
+        else:
+            groups = [config_file]
+    else:
+        groups = [[config_file]]
+
+    if group_labels is None:
+        group_labels = [f"group_{i}" for i in range(len(groups))]
+    elif isinstance(group_labels, (str, os.PathLike)):
+        group_labels = [str(group_labels)]
+
+    figure, axes = plt.subplots(2, 1, sharex=True, figsize=(5.0, 4.5))
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not default_colors:
+        raise RuntimeError("Matplotlib default color cycle is empty.")
+
+    plotted = 0
+    for idx, entries in enumerate(groups):
+        csv_paths = [_resolve_csv_path(entry) for entry in entries]
+        load, energy, sigma12 = _collect_reversible_state_differences(
+            csv_paths,
+            strainLim=strainLim,
+            postRegime=postRegime,
+        )
+        if load.size == 0:
+            continue
+
+        order = np.argsort(load)
+        load = load[order]
+        energy = energy[order]
+        sigma12 = sigma12[order]
+        label = group_labels[idx] if idx < len(group_labels) else f"group_{idx}"
+        display_label = pretty_variant_label(label) or str(label)
+        color = default_colors[idx % len(default_colors)]
+
+        for ax, values in zip(axes, (energy, sigma12)):
+            ax.plot(
+                load,
+                values,
+                linestyle="None",
+                marker="o",
+                markersize=3.0,
+                color=color,
+                alpha=0.7,
+                label=display_label,
+            )
+        plotted += 1
+
+    if plotted == 0:
+        plt.close(figure)
+        raise RuntimeError("No reversible state-difference data found.")
+
+    axes[0].set_ylabel(r"$|E_4-E_0|$")
+    axes[1].set_ylabel(r"$|\sigma_{12,4}-\sigma_{12,0}|$")
+    axes[1].set_xlabel(r"strain $\gamma$")
+    axes[0].legend(loc="best", frameon=True)
+    figure.tight_layout()
+
+    if save_path:
+        figure.savefig(save_path, dpi=300)
+        print(f"Saved figure to {save_path}")
+
+    if show:
+        plt.show()
+    else:
+        plt.close(figure)
+
+    return figure, axes
+
+
 def _smooth_histogram_curve(bin_centers, counts):
     """Smooth positive histogram points in log-log coordinates."""
     mask = (

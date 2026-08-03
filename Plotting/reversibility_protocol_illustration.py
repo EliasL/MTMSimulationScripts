@@ -29,12 +29,15 @@ import matplotlib as mpl
 
 mpl.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
 
 from MTMath.meshUtils import structured_triangular_mesh
 from Plotting.mesh_plotting import MeshFigure, MeshStyle
 
 
 PROTOCOL_GAMMA = 0.65
+MESH_NOISE_STD = 0.1
+MESH_NOISE_SEED = 0
 REVERSIBLE_COLOR = "C0"
 IRREVERSIBLE_COLOR = "C1"
 
@@ -48,8 +51,8 @@ def simple_shear(points: np.ndarray, gamma: float) -> np.ndarray:
     return points @ np.array([[1.0, gamma], [0.0, 1.0]]).T
 
 
-def shift_upper_nodes(nodes: np.ndarray, *, shift: float = 1.0) -> np.ndarray:
-    """Shift the two rightmost nodes on the upper boundary by one lattice step."""
+def shift_upper_rows(nodes: np.ndarray, *, shift: float = 1.0) -> np.ndarray:
+    """Shift the two upper rows by one lattice step."""
 
     nodes = np.asarray(nodes, dtype=float)
     if nodes.ndim != 2 or nodes.shape[1] != 2:
@@ -57,10 +60,11 @@ def shift_upper_nodes(nodes: np.ndarray, *, shift: float = 1.0) -> np.ndarray:
 
     result = nodes.copy()
     ymax = np.max(result[:, 1])
-    upper_ids = np.flatnonzero(np.isclose(result[:, 1], ymax))
-    if len(upper_ids) < 2:
-        raise ValueError("At least two nodes are required on the upper boundary.")
-    result[upper_ids[-2:], 0] += shift
+    y_levels = np.unique(result[:, 1])
+    if len(y_levels) < 2:
+        raise ValueError("At least two rows are required in the mesh.")
+    upper_rows = y_levels[-2:]
+    result[np.isin(result[:, 1], upper_rows), 0] += shift
     return result
 
 
@@ -73,24 +77,29 @@ def build_protocol_states(
         (4, 4), diagonal="minor"
     )
     forward_nodes = simple_shear(initial_nodes, gamma)
-    dislocated_initial = shift_upper_nodes(initial_nodes)
+    dislocated_initial = shift_upper_rows(initial_nodes)
     dislocated_forward = simple_shear(dislocated_initial, gamma)
     reverse_reversible = simple_shear(forward_nodes, -gamma)
     reverse_irreversible = simple_shear(dislocated_forward, -gamma)
+    mesh_noise = np.random.default_rng(MESH_NOISE_SEED).normal(
+        loc=0.0,
+        scale=MESH_NOISE_STD,
+        size=initial_nodes.shape,
+    )
 
     states = {
         "reversible": [
             initial_nodes,
             forward_nodes,
-            forward_nodes.copy(),
-            reverse_reversible,
+            forward_nodes + mesh_noise,
+            reverse_reversible + mesh_noise,
             initial_nodes.copy(),
         ],
         "irreversible": [
             initial_nodes,
             forward_nodes,
-            dislocated_forward,
-            reverse_irreversible,
+            dislocated_forward + mesh_noise,
+            reverse_irreversible + mesh_noise,
             dislocated_initial,
         ],
     }
@@ -120,10 +129,33 @@ def _draw_protocol_panel(
     mesh = MeshFigure(ax)
     mesh.draw_mesh(nodes, connectivity, style=_mesh_style())
     mesh.configure_axis(
-        xlim=(-0.20, 6.20),
-        ylim=(-0.20, 3.20),
+        padding_fraction=0.03,
         equal_aspect=True,
         hide_axes=True,
+    )
+
+
+def _add_protocol_title(
+    ax: plt.Axes,
+    nodes: np.ndarray,
+    title: str,
+    subtitle: str,
+) -> None:
+    """Center a state label over the mesh geometry rather than the axis."""
+
+    nodes = np.asarray(nodes, dtype=float)
+    x_center = 0.5 * (nodes[:, 0].min() + nodes[:, 0].max())
+    y_top = nodes[:, 1].max()
+    ax.text(
+        x_center,
+        y_top + 0.18,
+        f"{title}\n{subtitle}",
+        ha="center",
+        va="bottom",
+        fontsize=9.0,
+        linespacing=1.15,
+        clip_on=False,
+        zorder=5,
     )
 
 
@@ -136,10 +168,8 @@ def make_protocol_figure(
     figure, axes = plt.subplots(
         2,
         5,
-        figsize=(11.5, 4.35),
-        sharex=True,
-        sharey=True,
-        gridspec_kw={"wspace": 0.06, "hspace": 0.38},
+        figsize=(8.05, 3.045),
+        gridspec_kw={"wspace": 0.0, "hspace": 0.38},
     )
 
     titles = (
@@ -165,13 +195,7 @@ def make_protocol_figure(
                 connectivity,
             )
             title, subtitle = (titles if row == 0 else primed_titles)[column]
-            axes[row, column].set_title(
-                f"{title}\n{subtitle}",
-                loc="left",
-                fontsize=8.0,
-                linespacing=1.15,
-                pad=3.0,
-            )
+            _add_protocol_title(axes[row, column], nodes, title, subtitle)
 
         axes[row, 0].text(
             -0.24,
@@ -202,13 +226,59 @@ def _annotate_state(ax: plt.Axes, x: float, y: float, label: str, dx: float, dy:
     )
 
 
+def _draw_directed_path(
+    ax: plt.Axes,
+    points: np.ndarray,
+    *,
+    color: str,
+    linestyle: str,
+    label: str,
+) -> None:
+    """Draw a protocol path with arrowheads on each directed segment."""
+
+    ax.plot(
+        points[:, 0],
+        points[:, 1],
+        marker="o",
+        linestyle=linestyle,
+        color=color,
+        linewidth=1.7,
+        markersize=5.5,
+        label=label,
+        zorder=3,
+    )
+    for start, end in zip(points[:-1], points[1:]):
+        vector = end - start
+        if np.allclose(vector, 0.0):
+            continue
+        direction = vector / np.linalg.norm(vector)
+        normal = np.array([-direction[1], direction[0]])
+        arrow_end = start + 0.88 * vector
+        arrow_base = arrow_end - 0.020 * direction
+        arrow_width = 0.014
+        ax.add_patch(
+            Polygon(
+                [
+                    arrow_end,
+                    arrow_base + 0.5 * arrow_width * normal,
+                    arrow_base - 0.5 * arrow_width * normal,
+                ],
+                closed=True,
+                facecolor=color,
+                edgecolor=color,
+                linewidth=0.0,
+                zorder=4,
+            )
+        )
+
+
 def make_energy_strain_figure() -> tuple[plt.Figure, plt.Axes]:
     """Create the schematic energy--strain version of the protocol."""
 
     reversible = np.array(
         [
             [0.00, 0.00],  # state 0
-            [0.65, 0.46],  # state 1
+            [0.65, 0.38],  # state 1
             [0.65, 0.22],  # state 2
             [0.00, 0.34],  # state 3
             [0.00, 0.00],  # state 4
@@ -217,54 +287,60 @@ def make_energy_strain_figure() -> tuple[plt.Figure, plt.Axes]:
     irreversible = np.array(
         [
             [0.00, 0.00],  # state 0
-            [0.65, 0.46],  # state 1
-            [0.65, 0.19],  # state 2'
-            [0.00, 0.05],  # state 3'
+            [0.65, 0.38],  # state 1
+            [0.65, 0.10],  # state 2'
+            [0.00, 0.13],  # state 3'
             [0.00, -0.16],  # state 4'
         ]
     )
+    reversible[:, 1] += 0.20
+    irreversible[:, 1] += 0.20
 
-    figure, ax = plt.subplots(figsize=(6.0, 4.15))
-    ax.plot(
-        reversible[:, 0],
-        reversible[:, 1],
-        "o-",
+    figure, ax = plt.subplots(figsize=(3.6, 2.5))
+    _draw_directed_path(
+        ax,
+        reversible,
         color=REVERSIBLE_COLOR,
-        linewidth=1.7,
-        markersize=5.5,
         label="elastic / reversible",
-        zorder=3,
+        linestyle="-",
     )
-    ax.plot(
-        irreversible[:, 0],
-        irreversible[:, 1],
-        "o--",
+    _draw_directed_path(
+        ax,
+        irreversible,
         color=IRREVERSIBLE_COLOR,
-        linewidth=1.7,
-        markersize=5.5,
         label="plastic / irreversible",
-        zorder=2,
+        linestyle="--",
     )
 
     # The shared states are labelled once.  States 2--4 receive primed labels
     # on the irreversible path so both histories remain readable.
-    _annotate_state(ax, *reversible[0], "0", 0.014, 0.025)
-    _annotate_state(ax, *reversible[1], "1", 0.014, 0.025)
+    _annotate_state(ax, *reversible[0], "0", 0.014, -0.025)
+    _annotate_state(ax, *reversible[1], "1", 0.014, -0.025)
     _annotate_state(ax, *reversible[2], "2", 0.014, 0.015)
-    _annotate_state(ax, *irreversible[2], r"$2'$", 0.014, -0.100)
+    _annotate_state(ax, *irreversible[2], r"$2'$", 0.014, -0.025)
 
     # Put the return-state labels on the left of their nodes so they do not
     # collide with state 0 at the origin.
     _annotate_state(ax, *reversible[3], "3", -0.020, 0.018)
-    _annotate_state(ax, *irreversible[3], r"$3'$", -0.020, 0.080)
-    _annotate_state(ax, *reversible[4], "4", -0.020, -0.020)
-    _annotate_state(ax, *irreversible[4], r"$4'$", -0.020, 0.000)
+    _annotate_state(ax, *irreversible[3], r"$3'$", -0.020, 0.018)
+    _annotate_state(ax, *reversible[4], "4", -0.020, 0.025)
+    _annotate_state(ax, *irreversible[4], r"$4'$", -0.020, 0.025)
 
     ax.set_xlabel(r"strain $\gamma$")
     ax.set_ylabel(r"$E$")
     ax.set_xlim(-0.105, 0.76)
-    ax.set_ylim(-0.225, 0.52)
-    ax.legend(loc="upper left", frameon=True, framealpha=0.9)
+    ax.set_ylim(0.0, 0.70)
+    ax.legend(
+        loc="upper left",
+        ncol=2,
+        fontsize=8.0,
+        handlelength=1.4,
+        columnspacing=0.5,
+        borderpad=0.25,
+        labelspacing=0.25,
+        frameon=True,
+        framealpha=0.9,
+    )
     figure.tight_layout()
     return figure, ax
 

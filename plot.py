@@ -35,6 +35,7 @@ from Plotting.plotPowerLaw import (
 )
 from Plotting.reversibilityPlot import (
     plot_reversibility_histograms,
+    plot_reversible_state_differences,
     plot_reversibility_delta_u_relaxation,
 )
 from MTMath.meshGeometryReconnecting import run_reconnection_demo
@@ -770,6 +771,12 @@ def plotReversibility():
         postRegime=False,
         show=False,
         save_path="Plots/reversibility_pre.pdf",
+    )
+    plot_reversible_state_differences(
+        configs[0],
+        postRegime=None,
+        show=False,
+        save_path="Plots/reversibility_state_differences.pdf",
     )
     plotLog2(configs, labels=labels, postRegime=True)
     plotLog2(configs, labels=labels, postRegime=False)
