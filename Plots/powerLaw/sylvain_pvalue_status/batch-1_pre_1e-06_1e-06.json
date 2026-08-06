@@ -1,0 +1,9 @@
+{
+  "batch": -1,
+  "eps_x": "1e-06",
+  "id": "batch-1_pre_1e-06_1e-06",
+  "load_increment": "1e-06",
+  "regime": "pre",
+  "started_at": "2026-07-31T22:20:25.873518+00:00",
+  "status": "running"
+}

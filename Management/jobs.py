@@ -284,7 +284,8 @@ def longJob(nrThreads, nrSeeds, size=100, group_by_variant=False):
         epsR=1e-5,
         LBFGSEpsg=1e-8,
         experiment="simpleShear",
-        reconnectionMethod="edgeFlip",
+        #reconnectionMethod="edgeFlip",
+        reconnectionMethod="delaunay",
     )
     return configs, labels
 

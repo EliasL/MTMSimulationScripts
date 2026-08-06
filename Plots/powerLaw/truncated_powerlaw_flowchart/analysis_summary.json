@@ -1,15 +1,15 @@
 {
   "csv_paths": [
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s1_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s2_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s3_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s4_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s5_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s6_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s7_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s8_fixed.csv",
-    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s9_fixed.csv"
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s1_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s2_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s3_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s4_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s5_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s6_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s7_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s8_fixed.csv",
+    "/Users/eliaslundheim/work/PhD/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s9_fixed.csv"
   ],
   "used_fallback": false,
   "actual_size": 250,
@@ -22,8 +22,8 @@
   "minimum_drop": 0.0,
   "number_of_drops": 86023,
   "xmin_method": "simpleDrop",
-  "global_min_xmin": 0.016704986345271747,
-  "global_min_distance": 0.01710301078520926,
+  "global_min_xmin": 0.026907122741249623,
+  "global_min_distance": 0.01911611821733583,
   "global_min_differs_from_simple_drop": false,
   "global_search_rough_local_minima": [
     {
@@ -34,7 +34,7 @@
     {
       "index": 52,
       "xmin": 0.003181797097869953,
-      "distance": 0.18883340983050345
+      "distance": 0.18883654450146026
     },
     {
       "index": 60,
@@ -89,109 +89,209 @@
   ],
   "global_search_refined_local_minima": [
     {
-      "xmin": 0.0002317804655652205,
-      "distance": 0.2946098384896836,
-      "start_xmin": 0.00024181046667095157,
-      "iterations": 16
+      "xmin": 0.0002418289211618685,
+      "distance": 0.29483989587257553,
+      "start_xmin": 0.0002418289211618685,
+      "start_candidate_index": 1009,
+      "final_candidate_index": 1009,
+      "search_bounds": [
+        901,
+        1191
+      ],
+      "iterations": 0
     },
     {
-      "xmin": 0.0035603413497543963,
-      "distance": 0.18790759319789407,
-      "start_xmin": 0.003181797097869953,
-      "iterations": 14
+      "xmin": 0.0031824481779949565,
+      "distance": 0.18882797888384684,
+      "start_xmin": 0.003181673869221413,
+      "start_candidate_index": 16131,
+      "final_candidate_index": 16135,
+      "search_bounds": [
+        12894,
+        21180
+      ],
+      "iterations": 4
     },
     {
-      "xmin": 0.016704986345271747,
-      "distance": 0.01710301078520926,
-      "start_xmin": 0.0177338925267833,
-      "iterations": 16
+      "xmin": 0.01771122031050254,
+      "distance": 0.020192805359838806,
+      "start_xmin": 0.017743060198654348,
+      "start_candidate_index": 82540,
+      "final_candidate_index": 82539,
+      "search_bounds": [
+        79205,
+        82646
+      ],
+      "iterations": 1
     },
     {
-      "xmin": 0.02817797973773626,
-      "distance": 0.019178233695976377,
-      "start_xmin": 0.027248146766781493,
-      "iterations": 13
+      "xmin": 0.027188572633349395,
+      "distance": 0.019193391880841015,
+      "start_xmin": 0.027253935136513974,
+      "start_candidate_index": 82740,
+      "final_candidate_index": 82738,
+      "search_bounds": [
+        82646,
+        82863
+      ],
+      "iterations": 2
     },
     {
-      "xmin": 0.07078406190402456,
-      "distance": 0.021193293422972603,
-      "start_xmin": 0.07973871159232054,
-      "iterations": 15
+      "xmin": 0.08071248549322263,
+      "distance": 0.02136325060852373,
+      "start_xmin": 0.07970979093715869,
+      "start_candidate_index": 83313,
+      "final_candidate_index": 83314,
+      "search_bounds": [
+        83206,
+        83417
+      ],
+      "iterations": 1
     },
     {
-      "xmin": 0.5803035426022155,
-      "distance": 0.024443808321557625,
-      "start_xmin": 0.6828631900871811,
-      "iterations": 16
+      "xmin": 0.6877510147917292,
+      "distance": 0.02555573133086997,
+      "start_xmin": 0.6828410566663479,
+      "start_candidate_index": 84389,
+      "final_candidate_index": 84390,
+      "search_bounds": [
+        84283,
+        84500
+      ],
+      "iterations": 1
     },
     {
-      "xmin": 0.9224506966645464,
-      "distance": 0.025205580350387835,
-      "start_xmin": 1.0492200963227076,
-      "iterations": 17
+      "xmin": 1.0557384229869058,
+      "distance": 0.02557751634799743,
+      "start_xmin": 1.0493126938295063,
+      "start_candidate_index": 84603,
+      "final_candidate_index": 84604,
+      "search_bounds": [
+        84500,
+        84733
+      ],
+      "iterations": 1
     },
     {
-      "xmin": 1.7664876404585783,
-      "distance": 0.01896349537554992,
-      "start_xmin": 1.9983241956753892,
-      "iterations": 16
+      "xmin": 1.9960260672769436,
+      "distance": 0.0218504823493835,
+      "start_xmin": 1.9981208514855098,
+      "start_candidate_index": 84948,
+      "final_candidate_index": 84947,
+      "search_bounds": [
+        84835,
+        85047
+      ],
+      "iterations": 1
     },
     {
-      "xmin": 8.485278630530487,
-      "distance": 0.019572154117535323,
-      "start_xmin": 8.985269109207747,
-      "iterations": 16
+      "xmin": 8.989067353401879,
+      "distance": 0.02187646627244788,
+      "start_xmin": 8.987282529440108,
+      "start_candidate_index": 85592,
+      "final_candidate_index": 85593,
+      "search_bounds": [
+        85518,
+        85673
+      ],
+      "iterations": 1
     },
     {
-      "xmin": 22.599727372072817,
-      "distance": 0.028053645541190997,
-      "start_xmin": 26.294404100610723,
-      "iterations": 17
+      "xmin": 25.074847509027222,
+      "distance": 0.034053235054172015,
+      "start_xmin": 26.306152410273853,
+      "start_candidate_index": 85885,
+      "final_candidate_index": 85876,
+      "search_bounds": [
+        85850,
+        85921
+      ],
+      "iterations": 9
     },
     {
-      "xmin": 38.05732714707639,
-      "distance": 0.03994844578906585,
-      "start_xmin": 40.40138288852384,
-      "iterations": 16
+      "xmin": 39.889101729084814,
+      "distance": 0.04305752274365643,
+      "start_xmin": 39.889101729084814,
+      "start_candidate_index": 85947,
+      "final_candidate_index": 85947,
+      "search_bounds": [
+        85921,
+        85971
+      ],
+      "iterations": 0
     },
     {
-      "xmin": 57.069733079571854,
-      "distance": 0.05491700463813304,
-      "start_xmin": 62.07677242121598,
-      "iterations": 16
+      "xmin": 58.96483570473197,
+      "distance": 0.058777334166547346,
+      "start_xmin": 62.225636775275916,
+      "start_candidate_index": 85985,
+      "final_candidate_index": 85980,
+      "search_bounds": [
+        85971,
+        85998
+      ],
+      "iterations": 5
     }
   ],
-  "global_search_evaluation_count": 372,
-  "selected_xmin": 0.016704986345271747,
-  "simple_drop_distance": 0.01710301078520926,
+  "global_search_evaluation_count": 357,
+  "selected_xmin": 0.026907122741249623,
+  "simple_drop_distance": 0.01911611821733583,
   "simple_drop_largest_interval": [
-    0.01430663915150922,
-    0.0177338925267833
+    0.0177338925267833,
+    0.027248146766781493
   ],
-  "simple_drop_local_minima": [
-    {
-      "xmin": 0.016704986345271747,
-      "distance": 0.01710301078520926,
-      "start_xmin": 0.01430663915150922,
-      "iterations": 17
-    },
-    {
-      "xmin": 0.02817797973773632,
-      "distance": 0.01917823369597793,
-      "start_xmin": 0.015928352116033054,
-      "iterations": 16
-    },
-    {
-      "xmin": 0.016704986345271747,
-      "distance": 0.01710301078520926,
-      "start_xmin": 0.0177338925267833,
-      "iterations": 16
-    }
+  "simple_drop_coarse_average_size": 10,
+  "simple_drop_coarse_coarse_xmins": [
+    1.1817242863390949e-07,
+    1.0120003193664913e-06,
+    8.666527871493776e-06,
+    7.421806486622058e-05,
+    0.0006355856963899778,
+    0.005443003373689352,
+    0.04661257466029536,
+    0.39917890313356463,
+    3.4184723300136657,
+    29.27497665666705
   ],
-  "alpha": 1.0415329423285984,
-  "lambda": 0.02601218751906256,
-  "inverse_lambda": 38.44351803427406,
-  "ks_distance": 0.017103010785208705,
+  "simple_drop_coarse_coarse_distances": [
+    0.45785102444191966,
+    0.4357739357565366,
+    0.39966435511528975,
+    0.33978482736749394,
+    0.2839316913388674,
+    0.26766776296820993,
+    0.02128997360817796,
+    0.027128660320715797,
+    0.03257372864862272,
+    0.05394587617578783
+  ],
+  "simple_drop_coarse_coarse_largest_interval": [
+    0.005443003373689352,
+    0.04661257466029536
+  ],
+  "simple_drop_interval_coarse_xmins": [
+    0.0177338925267833,
+    0.027248146766781493
+  ],
+  "simple_drop_region_candidate_count": 200,
+  "simple_drop_region_best_xmin": 0.026907122741249623,
+  "simple_drop_region_best_distance": 0.01911611821733583,
+  "simple_drop_local_minimum": {
+    "xmin": 0.026907122741249623,
+    "distance": 0.01911611821733583,
+    "start_xmin": 0.026907122741249623,
+    "start_candidate_index": 82731,
+    "final_candidate_index": 82731,
+    "search_bounds": [
+      82540,
+      82739
+    ],
+    "iterations": 0
+  },
+  "alpha": 1.039324075293497,
+  "lambda": 0.026229308235186634,
+  "inverse_lambda": 38.12529064943083,
+  "ks_distance": 0.019116118217337164,
   "xmin_candidates": [
     4.495905159274116e-08,
     5.572930026460267e-08,
@@ -304,56 +404,56 @@
     0.4555206039756735,
     0.45364726998871585,
     0.4516685862008786,
-    0.4496213675195233,
-    0.44748752356010124,
-    0.44520652991094256,
+    0.4496213675195271,
+    0.4474875235601029,
+    0.44520652991094445,
     0.4428199431902714,
-    0.44033367116687105,
-    0.43770503041196174,
-    0.4349418724452768,
-    0.4320232755269453,
+    0.4403336711668704,
+    0.4377050304119614,
+    0.43494187244527627,
+    0.4320232755269452,
     0.4289989502233701,
     0.4257839181487062,
     0.42243864298091827,
     0.4189282532129678,
     0.41518919538738186,
-    0.4113228077196166,
-    0.40719960764833263,
-    0.4028807078111548,
+    0.41132280771962193,
+    0.4071996076483275,
+    0.4028807078111537,
     0.3983367007704567,
-    0.39353323186360967,
-    0.38846625715951,
+    0.393533231863617,
+    0.3884662571595058,
     0.3831754949574574,
-    0.3776112946224107,
-    0.37176141430375487,
+    0.37761129462240817,
+    0.371761414303755,
     0.3657045730823665,
     0.35929591460337207,
-    0.3525359555388413,
+    0.35253595553883965,
     0.3452546254667034,
     0.3376310065913807,
-    0.32961848449140196,
-    0.3212015466041016,
+    0.3296184844914032,
+    0.32120154660410183,
     0.3122452555005295,
     0.3025994974924875,
     0.29484743630921517,
     0.29563761084192325,
     0.29598036916739334,
-    0.29565290194394656,
-    0.2934950534729778,
-    0.2901160718307071,
-    0.2845400670482794,
-    0.2770476362214561,
+    0.29565290194394545,
+    0.2934950534729791,
+    0.290116071830706,
+    0.28454006704827917,
+    0.27704763622145145,
     0.2660090081302977,
     0.24599075842248364,
     0.22819496604184747,
-    0.20892604117822752,
-    0.18883340983050345,
-    0.19067104318162875,
-    0.20184085327867396,
-    0.21416958735098401,
+    0.2089260411782263,
+    0.18883654450146026,
+    0.19067294626686926,
+    0.20185618872871192,
+    0.214169587350985,
     0.25309636375067446,
     0.32622568003958907,
-    0.4582758069524485,
+    0.45827580695244835,
     0.4064235048712873,
     0.02024907427199285,
     0.020286492255913058,

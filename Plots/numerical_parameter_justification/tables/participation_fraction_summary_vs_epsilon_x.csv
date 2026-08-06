@@ -1,0 +1,129 @@
+setting,seed,post_yield,category,category_label,count,q10,median,q90
+1e-07,0,False,no_m3,no $m_3$ change (elastic candidate),37761,0.095383415973,0.23087087272,0.35876684067
+1e-07,0,False,closing_m3,"closing, $m_3$ change",3510,0.0836012278878,0.22704924369,0.351921801311
+1e-07,0,False,nonclosing_m3,"non-closing, $m_3$ change",236,0.088703838184,0.21049880549,0.36169177331
+1e-07,0,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-07,0,True,no_m3,no $m_3$ change (elastic candidate),37994,0.216381206277,0.423906464355,0.5687521219330002
+1e-07,0,True,closing_m3,"closing, $m_3$ change",6198,0.19686574819400002,0.418191221955,0.568479648759
+1e-07,0,True,nonclosing_m3,"non-closing, $m_3$ change",301,0.15996016681,0.41285773335,0.57531043545
+1e-07,0,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-07,1,False,no_m3,no $m_3$ change (elastic candidate),38957,0.0959942569476,0.29196749647,0.42782624274200004
+1e-07,1,False,closing_m3,"closing, $m_3$ change",3174,0.0827656628125,0.26808921793999996,0.41737921180700016
+1e-07,1,False,nonclosing_m3,"non-closing, $m_3$ change",235,0.0977555976746,0.28727809946,0.42459143367400004
+1e-07,1,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-07,1,True,no_m3,no $m_3$ change (elastic candidate),38213,0.248954868646,0.46851497307,0.5947925953459999
+1e-07,1,True,closing_m3,"closing, $m_3$ change",5133,0.22004680923800002,0.46570929809,0.580269210096
+1e-07,1,True,nonclosing_m3,"non-closing, $m_3$ change",288,0.158246380234,0.47363830073,0.588169928278
+1e-07,1,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-07,2,False,no_m3,no $m_3$ change (elastic candidate),41515,0.0944532112792,0.21576712442,0.32895465364
+1e-07,2,False,closing_m3,"closing, $m_3$ change",3276,0.083228302159,0.209852230455,0.322689131255
+1e-07,2,False,nonclosing_m3,"non-closing, $m_3$ change",214,0.0819896248476,0.20884538653,0.3090082837840001
+1e-07,2,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-07,2,True,no_m3,no $m_3$ change (elastic candidate),35549,0.185849394896,0.37914135503,0.468323083166
+1e-07,2,True,closing_m3,"closing, $m_3$ change",5212,0.175342338516,0.35793148867,0.4494282066300001
+1e-07,2,True,nonclosing_m3,"non-closing, $m_3$ change",234,0.146416522273,0.350609959985,0.45613954993300004
+1e-07,2,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-07,3,False,no_m3,no $m_3$ change (elastic candidate),42936,0.09012330211,0.22854593808,0.340374689985
+1e-07,3,False,closing_m3,"closing, $m_3$ change",3931,0.080696083257,0.21368574092,0.33203214571
+1e-07,3,False,nonclosing_m3,"non-closing, $m_3$ change",248,0.0808084971128,0.22250588768500001,0.339859140005
+1e-07,3,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-07,3,True,no_m3,no $m_3$ change (elastic candidate),34450,0.157050522247,0.35136295751,0.452287083575
+1e-07,3,True,closing_m3,"closing, $m_3$ change",4212,0.133714130717,0.33418996813,0.439739543632
+1e-07,3,True,nonclosing_m3,"non-closing, $m_3$ change",223,0.166491424788,0.35438470121,0.4485046449
+1e-07,3,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-06,0,False,no_m3,no $m_3$ change (elastic candidate),39074,0.0955511474588,0.24665798077,0.38168135703300005
+1e-06,0,False,closing_m3,"closing, $m_3$ change",3069,0.0805869182738,0.21957377636,0.356687005092
+1e-06,0,False,nonclosing_m3,"non-closing, $m_3$ change",219,0.077205523594,0.20965862453,0.344596289004
+1e-06,0,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-06,0,True,no_m3,no $m_3$ change (elastic candidate),37736,0.180098628735,0.37551107683,0.524823737635
+1e-06,0,True,closing_m3,"closing, $m_3$ change",5647,0.139132112946,0.30220942662,0.40440774774400007
+1e-06,0,True,nonclosing_m3,"non-closing, $m_3$ change",255,0.187218111842,0.33609016503,0.447439198314
+1e-06,0,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-06,1,False,no_m3,no $m_3$ change (elastic candidate),37419,0.090519509568,0.23683861422,0.39224543318400024
+1e-06,1,False,closing_m3,"closing, $m_3$ change",3328,0.0871339931375,0.21764651496,0.36915480475
+1e-06,1,False,nonclosing_m3,"non-closing, $m_3$ change",210,0.0859003430482,0.21145605936,0.384959513656
+1e-06,1,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-06,1,True,no_m3,no $m_3$ change (elastic candidate),39394,0.187673976921,0.36805121617500003,0.5295685399780001
+1e-06,1,True,closing_m3,"closing, $m_3$ change",5399,0.147293174194,0.29116274982,0.392417832284
+1e-06,1,True,nonclosing_m3,"non-closing, $m_3$ change",250,0.1581280903,0.325286411585,0.45886493880900003
+1e-06,1,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-06,2,False,no_m3,no $m_3$ change (elastic candidate),35918,0.0908591246143,0.20937817796,0.354870295098
+1e-06,2,False,closing_m3,"closing, $m_3$ change",3083,0.08299414841279999,0.19159792187,0.33145231256400004
+1e-06,2,False,nonclosing_m3,"non-closing, $m_3$ change",200,0.0922067957826,0.18836315205499998,0.33438777287199994
+1e-06,2,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-06,2,True,no_m3,no $m_3$ change (elastic candidate),40075,0.325129497522,0.54606228554,0.65304996069
+1e-06,2,True,closing_m3,"closing, $m_3$ change",6427,0.270262809428,0.49679027906,0.627320567302
+1e-06,2,True,nonclosing_m3,"non-closing, $m_3$ change",297,0.246433200164,0.50825725232,0.623201292254
+1e-06,2,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-06,3,False,no_m3,no $m_3$ change (elastic candidate),45472,0.10200647534200001,0.24981159626,0.460178541774
+1e-06,3,False,closing_m3,"closing, $m_3$ change",4152,0.09750873115620001,0.22914601141500002,0.43174950060899997
+1e-06,3,False,nonclosing_m3,"non-closing, $m_3$ change",240,0.08882727273260001,0.224793957135,0.43412021885999996
+1e-06,3,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-06,3,True,no_m3,no $m_3$ change (elastic candidate),31384,0.39397904964700003,0.560277833035,0.6251144268700001
+1e-06,3,True,closing_m3,"closing, $m_3$ change",4528,0.320700652529,0.515789121435,0.5946740110969999
+1e-06,3,True,nonclosing_m3,"non-closing, $m_3$ change",224,0.292032545265,0.5385207585,0.614877467465
+1e-06,3,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-05,0,False,no_m3,no $m_3$ change (elastic candidate),38540,0.0899791131125,0.21904156345,0.386482987016
+1e-05,0,False,closing_m3,"closing, $m_3$ change",3237,0.101997732758,0.19809032847,0.277617590616
+1e-05,0,False,nonclosing_m3,"non-closing, $m_3$ change",207,0.0820349028998,0.20041746033,0.301284448064
+1e-05,0,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-05,0,True,no_m3,no $m_3$ change (elastic candidate),38110,0.18616450897300002,0.25029412916500005,0.48616439619199997
+1e-05,0,True,closing_m3,"closing, $m_3$ change",5663,0.193419159954,0.23115220348,0.30190745560000004
+1e-05,0,True,nonclosing_m3,"non-closing, $m_3$ change",243,0.193341228142,0.2437353077,0.35626984516400007
+1e-05,0,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-05,1,False,no_m3,no $m_3$ change (elastic candidate),36248,0.0982215534362,0.22387638328999998,0.385198853839
+1e-05,1,False,closing_m3,"closing, $m_3$ change",3243,0.10114761729,0.18920906477,0.29446124124600004
+1e-05,1,False,nonclosing_m3,"non-closing, $m_3$ change",203,0.0834662744624,0.19397657657,0.30964817518400006
+1e-05,1,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-05,1,True,no_m3,no $m_3$ change (elastic candidate),40724,0.00246807904901,0.21923387779,0.392002993782
+1e-05,1,True,closing_m3,"closing, $m_3$ change",5297,0.00061640233923,0.2083393962,0.2991925089220001
+1e-05,1,True,nonclosing_m3,"non-closing, $m_3$ change",285,0.0112455117146,0.23022253866,0.347736494094
+1e-05,1,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-05,2,False,no_m3,no $m_3$ change (elastic candidate),44448,0.102637368817,0.21179918737499998,0.359683805291
+1e-05,2,False,closing_m3,"closing, $m_3$ change",3486,0.103319828505,0.194156771265,0.26936906235
+1e-05,2,False,nonclosing_m3,"non-closing, $m_3$ change",238,0.0875650472608,0.190972873955,0.29263155710800004
+1e-05,2,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-05,2,True,no_m3,no $m_3$ change (elastic candidate),32638,0.012970621639,0.24508262141999998,0.440255029719
+1e-05,2,True,closing_m3,"closing, $m_3$ change",4953,0.012492667972800003,0.22840124444,0.29236638570199996
+1e-05,2,True,nonclosing_m3,"non-closing, $m_3$ change",237,0.021279650195400002,0.2446893789,0.33993997455400005
+1e-05,2,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-05,3,False,no_m3,no $m_3$ change (elastic candidate),43581,0.11422930484,0.24063531907,0.40024109458
+1e-05,3,False,closing_m3,"closing, $m_3$ change",3567,0.12318413718400001,0.22042109169,0.289919724712
+1e-05,3,False,nonclosing_m3,"non-closing, $m_3$ change",204,0.10772070186,0.216127652505,0.304185930277
+1e-05,3,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+1e-05,3,True,no_m3,no $m_3$ change (elastic candidate),34112,0.164689264221,0.22735083086500002,0.453541027473
+1e-05,3,True,closing_m3,"closing, $m_3$ change",4333,0.171274074438,0.20983028306,0.27422042721400003
+1e-05,3,True,nonclosing_m3,"non-closing, $m_3$ change",203,0.17388528077999998,0.22550378752,0.3568503061800002
+1e-05,3,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+0.0001,0,False,no_m3,no $m_3$ change (elastic candidate),39410,0.00158153262259,0.0057607227137499994,0.15364620675199994
+0.0001,0,False,closing_m3,"closing, $m_3$ change",395,0.000818487132684,0.0015901110109,0.06606267502140004
+0.0001,0,False,nonclosing_m3,"non-closing, $m_3$ change",2326,0.00484849253665,0.044732009284,0.16564560357500002
+0.0001,0,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+0.0001,0,True,no_m3,no $m_3$ change (elastic candidate),40093,0.000942457378682,0.0018512151242,0.005125158244080002
+0.0001,0,True,closing_m3,"closing, $m_3$ change",1954,0.0005523879685530001,0.0010982972481,0.0021882778282800008
+0.0001,0,True,nonclosing_m3,"non-closing, $m_3$ change",1822,0.0020024921750800002,0.0068845472214,0.04663974273110007
+0.0001,0,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+0.0001,1,False,no_m3,no $m_3$ change (elastic candidate),36535,0.0017651343684399999,0.0089864120575,0.185770333672
+0.0001,1,False,closing_m3,"closing, $m_3$ change",370,0.000818071376217,0.00174092691755,0.07608031168360002
+0.0001,1,False,nonclosing_m3,"non-closing, $m_3$ change",2351,0.0070097471404,0.095197919219,0.18239202403
+0.0001,1,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+0.0001,1,True,no_m3,no $m_3$ change (elastic candidate),42187,0.00109474198788,0.0024580718457,0.00616913647548
+0.0001,1,True,closing_m3,"closing, $m_3$ change",2667,0.0006757195282,0.0014140729762,0.0030084946339800005
+0.0001,1,True,nonclosing_m3,"non-closing, $m_3$ change",1890,0.0024940354131999997,0.00729302641765,0.040720445444000004
+0.0001,1,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+0.0001,2,False,no_m3,no $m_3$ change (elastic candidate),42605,0.00204890295046,0.0068252257534,0.16268614567599995
+0.0001,2,False,closing_m3,"closing, $m_3$ change",489,0.0010912709558400001,0.0020431507649,0.0282617333232
+0.0001,2,False,nonclosing_m3,"non-closing, $m_3$ change",2634,0.00650353942519,0.0651150237135,0.16940741868100007
+0.0001,2,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+0.0001,2,True,no_m3,no $m_3$ change (elastic candidate),36391,0.001564938679,0.0026338702812,0.0062423469249
+0.0001,2,True,closing_m3,"closing, $m_3$ change",2324,0.0010655544497000001,0.0016664615374,0.0029689542590400006
+0.0001,2,True,nonclosing_m3,"non-closing, $m_3$ change",1557,0.00313042016612,0.0090806152475,0.05238935035420002
+0.0001,2,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+0.0001,3,False,no_m3,no $m_3$ change (elastic candidate),44388,0.0018972395342,0.0064154557483500005,0.17181121313900005
+0.0001,3,False,closing_m3,"closing, $m_3$ change",592,0.000980835403775,0.0019390085812499998,0.03881344248349997
+0.0001,3,False,nonclosing_m3,"non-closing, $m_3$ change",2837,0.005941906878980001,0.070515527375,0.17762230166
+0.0001,3,False,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,
+0.0001,3,True,no_m3,no $m_3$ change (elastic candidate),34966,0.00100470783845,0.0016308610378,0.00406170317925
+0.0001,3,True,closing_m3,"closing, $m_3$ change",2061,0.00073603532378,0.0010989747115,0.0020984266992
+0.0001,3,True,nonclosing_m3,"non-closing, $m_3$ change",1156,0.002068105045,0.0062505155035,0.0417373862565
+0.0001,3,True,unrecorded_m3,"$m_3$ change, no recorded reverse cycle",0,,,

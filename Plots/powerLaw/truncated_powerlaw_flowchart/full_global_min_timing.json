@@ -1,0 +1,12 @@
+{
+  "started_at": "2026-08-03T13:21:09.690315+00:00",
+  "dataset": "flowchart repaired L=250 CSVs",
+  "csv_count": 10,
+  "parallel": false,
+  "status": "stopped_by_user",
+  "stop_reason": "Stopped to free CPU for participation plotting before the exhaustive search completed.",
+  "drop_count": 86023,
+  "candidate_count": 85999,
+  "candidate_max": 76.94768833330795,
+  "exhaustive_started_at": "2026-08-03T13:21:40.997732+00:00"
+}

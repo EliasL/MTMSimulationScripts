@@ -39,6 +39,7 @@ from Plotting.plotPowerLaw import (
     get_energy_drops,
     get_stress_drops,
     _drop_quantity_label,
+    findPrePostSplit,
     pretty_variant_label,
     strip_seed_from_label,
 )
@@ -1731,6 +1732,7 @@ def _pretty_reversibility_axis_label(x_axis_col):
         "sigma": r"\sigma",
         "stress": r"\sigma",
         "sigma12": r"\sigma_{12}",
+        "sigma_12": r"\sigma_{12}",
         "p12": r"P_{12}",
     }
     symbol = symbol_map.get(quantity_lower)
@@ -1768,89 +1770,55 @@ def plotReversibilityEnergyDropCorrelation(
     if not paths:
         raise RuntimeError("No CSV paths found for reversibility job.")
 
+    requested_regimes = (
+        ((True, "o", "post-yield"), (False, "^", "pre-yield"))
+        if postRegime is None
+        else (
+            (
+                postRegime,
+                "o" if postRegime is True else "^",
+                "post-yield" if postRegime is True else "pre-yield",
+            ),
+        )
+    )
     energy_drop_specs = [
         {
-            "key": "stress_corrected_energy",
+            "key": f"stress_corrected_energy_{regime_label}",
             "fn": get_energy_drops,
-            "marker": "o",
+            "marker": marker,
+            "shape_label": regime_label,
             "kwargs": dict(
                 strainLim=strainLim,
-                postRegime=postRegime,
+                postRegime=regime,
                 averageEnergy=averageEnergy,
                 stress_corrected=True,
+                stress_correction_order=2,
+                stress_tangent="current",
             ),
             "fallback_label": "Stress-corrected energy drop",
-        },
-        {
-            "key": "inter_strain_energy",
-            "fn": get_energy_drops,
-            "marker": "s",
-            "kwargs": dict(
-                strainLim=strainLim,
-                postRegime=postRegime,
-                averageEnergy=averageEnergy,
-                stress_corrected=False,
-                energy_type="energy_change",
-            ),
-            "fallback_label": "Inter-strain energy drop",
-        },
-        {
-            "key": "relaxation_energy",
-            "fn": get_energy_drops,
-            "marker": "^",
-            "kwargs": dict(
-                strainLim=strainLim,
-                postRegime=postRegime,
-                averageEnergy=averageEnergy,
-                stress_corrected=False,
-                energy_type="e_change_from_init",
-            ),
-            "fallback_label": "Relaxation energy drop",
-        },
+        }
+        for regime, marker, regime_label in requested_regimes
     ]
     stress_drop_specs = [
         {
-            "key": "stress_corrected",
+            "key": f"stress_corrected_{regime_label}",
             "fn": get_stress_drops,
-            "marker": "o",
+            "marker": marker,
+            "shape_label": regime_label,
             "kwargs": dict(
                 strainLim=strainLim,
-                postRegime=postRegime,
+                postRegime=regime,
                 stress_type="stress_corrected",
             ),
             "fallback_label": "Elasticity-corrected stress drop",
-        },
-        {
-            "key": "inter_strain_stress",
-            "fn": get_stress_drops,
-            "marker": "s",
-            "kwargs": dict(
-                strainLim=strainLim,
-                postRegime=postRegime,
-                stress_type="inter_strain",
-            ),
-            "fallback_label": "Inter-strain stress drop",
-        },
-        {
-            "key": "relaxation_stress",
-            "fn": get_stress_drops,
-            "marker": "^",
-            "kwargs": dict(
-                strainLim=strainLim,
-                postRegime=postRegime,
-                stress_type="relaxation",
-            ),
-            "fallback_label": "Relaxation stress drop",
-        },
+        }
+        for regime, marker, regime_label in requested_regimes
     ]
 
-    n_groups = len(paths)
-    blue_cmap = plt.get_cmap("Blues")
-    if n_groups <= 1:
-        shade_vals = np.array([0.75])
-    else:
-        shade_vals = np.linspace(0.45, 0.9, n_groups)
-    group_colors = [blue_cmap(v) for v in shade_vals]
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not default_colors:
+        raise RuntimeError("Matplotlib default color cycle is empty.")
+    group_colors = [default_colors[i % len(default_colors)] for i in range(len(paths))]
 
     group_display_labels = []
     for idx, group_labels in enumerate(labels):
@@ -1963,7 +1931,10 @@ def plotReversibilityEnergyDropCorrelation(
         ]
         shape_handles = []
         for spec in drop_specs:
-            label_text = shape_labels.get(spec["key"], spec["fallback_label"])
+            label_text = spec.get(
+                "shape_label",
+                shape_labels.get(spec["key"], spec["fallback_label"]),
+            )
             shape_handles.append(
                 Line2D(
                     [],
@@ -1979,7 +1950,7 @@ def plotReversibilityEnergyDropCorrelation(
         legend_handles = [
             Line2D([], [], linestyle="None", label="Settings (color)"),
             *color_handles,
-            Line2D([], [], linestyle="None", label="Drop Type (shape)"),
+            Line2D([], [], linestyle="None", label="Yield regime (shape)"),
             *shape_handles,
         ]
 
@@ -2005,19 +1976,185 @@ def plotReversibilityEnergyDropCorrelation(
 
     fig, ax = _plot_drop_specs(
         energy_drop_specs,
-        title="Reversibility vs energy-drop correlation",
-        y_label="Energy drop magnitude",
+        title=r"Reversibility vs. $E_S$ energy-drop correlation",
+        y_label=r"$\Delta E_S$",
         file_suffix=None,
     )
 
     if includeStressDrops:
         _plot_drop_specs(
             stress_drop_specs,
-            title="Reversibility vs stress-drop correlation",
-            y_label="Stress drop magnitude",
+            title=r"Reversibility vs. $\sigma_S$ stress-drop correlation",
+            y_label=r"$\Delta \sigma_S$",
             file_suffix="stressOnly",
         )
 
+    if show:
+        plt.show()
+    return fig, ax
+
+
+def plotReversibilityQuantityCorrelation(
+    configs,
+    labels=None,
+    *,
+    xAxisCol,
+    yAxisCol,
+    show=False,
+    save=True,
+    postRegime=None,
+    name="reversibility_quantity_correlation",
+):
+    """Plot one recorded reversibility quantity against another."""
+    if postRegime not in (True, False, None):
+        raise ValueError(
+            f"postRegime must be True, False, or None; got {postRegime!r}"
+        )
+    for column in (xAxisCol, yAxisCol):
+        if not isinstance(column, str) or not column.startswith("rev_"):
+            raise ValueError(
+                f"Expected a recorded reversibility column starting with 'rev_', got {column!r}."
+            )
+
+    paths, _ = get_csv_files(
+        configs, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    paths, labels = get_group_structure(paths, labels)
+    if not paths:
+        raise RuntimeError("No CSV paths found for reversibility quantity correlation.")
+    if xAxisCol == yAxisCol:
+        raise ValueError("The x- and y-axis reversibility quantities must differ.")
+
+    requested_regimes = (
+        ((True, "o", "post-yield"), (False, "^", "pre-yield"))
+        if postRegime is None
+        else (
+            (
+                postRegime,
+                "o" if postRegime else "^",
+                "post-yield" if postRegime else "pre-yield",
+            ),
+        )
+    )
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not default_colors:
+        raise RuntimeError("Matplotlib default color cycle is empty.")
+
+    group_display_labels = []
+    for idx, group_labels in enumerate(labels):
+        cleaned = [strip_seed_from_label(label) for label in group_labels if label]
+        cleaned = [label for label in cleaned if label]
+        if not cleaned:
+            group_display_labels.append(f"group {idx + 1}")
+        else:
+            base_label = list(dict.fromkeys(cleaned))[0]
+            group_display_labels.append(pretty_variant_label(base_label) or base_label)
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    plotted_group_indices = set()
+    plotted = False
+    for group_idx, group_paths in enumerate(paths):
+        color = default_colors[group_idx % len(default_colors)]
+        for csv_path in group_paths:
+            df = read_macrodata_csv(csv_path)
+            missing = {xAxisCol, yAxisCol}.difference(df.columns)
+            if missing:
+                raise KeyError(f"Missing columns {sorted(missing)} in {csv_path}.")
+            yield_load = findPrePostSplit(df=df)
+            x_all = df[xAxisCol].to_numpy(dtype=float)
+            y_all = df[yAxisCol].to_numpy(dtype=float)
+            load = df["load"].to_numpy(dtype=float)
+            for post_yield, marker, _ in requested_regimes:
+                regime_mask = load > yield_load if post_yield else load <= yield_load
+                valid = (
+                    regime_mask
+                    & np.isfinite(x_all)
+                    & np.isfinite(y_all)
+                    & (x_all > 0)
+                    & (y_all > 0)
+                )
+                if not np.any(valid):
+                    continue
+                ax.scatter(
+                    x_all[valid],
+                    y_all[valid],
+                    marker=marker,
+                    s=18,
+                    facecolors="none",
+                    edgecolors=color,
+                    linewidths=0.8,
+                    alpha=0.2,
+                )
+                plotted = True
+                plotted_group_indices.add(group_idx)
+
+    if not plotted:
+        raise RuntimeError(
+            f"No positive finite data found for {yAxisCol} versus {xAxisCol}."
+        )
+
+    color_handles = [
+        Line2D(
+            [],
+            [],
+            marker="o",
+            linestyle="None",
+            markerfacecolor="none",
+            markeredgecolor=default_colors[idx % len(default_colors)],
+            markersize=6,
+            label=group_display_labels[idx],
+        )
+        for idx in sorted(plotted_group_indices)
+    ]
+    shape_handles = [
+        Line2D(
+            [],
+            [],
+            marker=marker,
+            linestyle="None",
+            markerfacecolor="none",
+            markeredgecolor="black",
+            markersize=6,
+            label=regime_label,
+        )
+        for _, marker, regime_label in requested_regimes
+    ]
+    x_axis_label = _pretty_reversibility_axis_label(xAxisCol)
+    y_axis_label = _pretty_reversibility_axis_label(yAxisCol)
+    ax.set_xlabel(x_axis_label)
+    ax.set_ylabel(y_axis_label)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title("Reversibility quantity correlation")
+    ax.legend(
+        handles=[
+            Line2D([], [], linestyle="None", label="Settings (color)"),
+            *color_handles,
+            Line2D([], [], linestyle="None", label="Yield regime (shape)"),
+            *shape_handles,
+        ],
+        loc="upper left",
+        ncol=1,
+        frameon=True,
+    )
+    fig.tight_layout()
+
+    if save:
+        regime_tag = (
+            "postYield" if postRegime is True else
+            "preYield" if postRegime is False else "allYield"
+        )
+        flat_paths = [str(path) for group in paths for path in group]
+        signature = hashlib.sha1("|".join(flat_paths).encode("utf-8")).hexdigest()[:10]
+        save_name = (
+            f"{safePath(os.path.splitext(name)[0])}_"
+            f"x_{safePath(xAxisCol)}_y_{safePath(yAxisCol)}_"
+            f"{regime_tag}_{signature}.png"
+        )
+        save_path = os.path.join("Plots", save_name)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.savefig(save_path, dpi=300)
+        print(f"Saved figure to {save_path}")
     if show:
         plt.show()
     return fig, ax

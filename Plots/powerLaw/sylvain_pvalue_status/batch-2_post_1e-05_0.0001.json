@@ -1,0 +1,12 @@
+{
+  "batch": -2,
+  "completed_at": "2026-07-31T18:38:00.457731+00:00",
+  "eps_x": "0.0001",
+  "error": "TypeError(\"float() argument must be a string or a real number, not 'dict'\")",
+  "id": "batch-2_post_1e-05_0.0001",
+  "load_increment": "1e-05",
+  "regime": "post",
+  "started_at": "2026-07-31T18:20:09.872608+00:00",
+  "status": "error",
+  "traceback": "Traceback (most recent call last):\n  File \"/Users/eliaslundheim/work/PhD/SimulationScripts/tmp_run_all_sylvain_pvalues.py\", line 315, in main\n    result = _run_analysis(spec)\n             ^^^^^^^^^^^^^^^^^^^\n  File \"/Users/eliaslundheim/work/PhD/SimulationScripts/tmp_run_all_sylvain_pvalues.py\", line 257, in _run_analysis\n    \"simple_drop_local_minimum\": float(simple_details[\"local_minimum\"]),\n                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nTypeError: float() argument must be a string or a real number, not 'dict'\n"
+}

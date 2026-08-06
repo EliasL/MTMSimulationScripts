@@ -1,18 +1,27 @@
 import os
+import re
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
 
 from Management.configGenerator import SimulationConfig
 from Management.updateCSV import update_df_header, read_macrodata_csv
+from Plotting.dataFunctions import get_metadata
+from Plotting.energyDropCalculations import volume_from_metadata
 from Plotting.remotePlotting import get_csv_files
-from Plotting.makePlots import maybe_avg
 from Plotting.plotPowerLaw import (
     get_energy_drops,
     getHist,
+    findPrePostSplit,
     get_system_size,
     pretty_variant_label,
+    strip_seed_from_label,
 )
+from Plotting.remoteDataPaths import RAW_DATA_PATH
+from Plotting.vtuDataForSylvain import VTUData
 
 
 def _resolve_csv_path(config_file, useOldFiles=False, forceUpdate=False):
@@ -58,7 +67,14 @@ def _collect_reversibility_data(csv_paths, strainLim="auto", postRegime=True):
             df=df,
             strainLim=strainLim,
             postRegime=postRegime,
+            stress_corrected=True,
+            stress_correction_order=2,
+            stress_tangent="current",
         )
+        mesh_volume = volume_from_metadata(get_metadata(csv_path))
+        if mesh_volume is None or not np.isfinite(mesh_volume) or mesh_volume <= 0:
+            raise ValueError(f"Could not infer a positive mesh volume for {csv_path}")
+        drops = drops / mesh_volume
         drop_mask = data_info["masks"][0]
         is_rev = np.array(df[rev_col], dtype=bool)[drop_mask]
 
@@ -281,8 +297,8 @@ def plot_reversibility_histograms(
 ):
     """
     Load CSV associated with a config file (or list of configs/paths) and plot
-    histograms of energy drops split by reversibility. Prints the reversible drop
-    number with max rev_d.
+    histograms of first-order stress-corrected energy drops split by
+    reversibility. Prints the reversible drop number with max rev_d.
     """
     if isinstance(config_file, (list, tuple)) and config_file:
         if isinstance(config_file[0], (list, tuple)):
@@ -400,6 +416,7 @@ def plot_reversibility_histograms(
                 "reversible_order": rev_order,
                 "irreversible_order": irrev_order,
                 "label": display_label,
+                "color": color,
             }
         )
 
@@ -408,18 +425,42 @@ def plot_reversibility_histograms(
     ax1.set_yscale("log")
     ax2.set_yscale("log")
 
-    ax1.set_xlabel(rf"$-\Delta {maybe_avg('E')}$")
+    ax1.set_xlabel(r"$-\Delta E_S/V_{\mathrm{mesh}}$")
     ax1.set_ylabel("Reversible count")
     ax2.set_ylabel("Irreversible count")
     ax1.tick_params(axis="y", which="both")
     ax2.tick_params(axis="y", which="both")
     ax1.set_title("Reversible vs. irreversible energy drops")
 
-    handles1, labels1 = ax1.get_legend_handles_labels()
-    handles2, labels2 = ax2.get_legend_handles_labels()
+    setting_handles = [
+        Line2D([], [], color=info["color"], linewidth=2, label=info["label"])
+        for info in infos
+    ]
+    type_handles = [
+        Line2D(
+            [],
+            [],
+            color="black",
+            linestyle="--",
+            marker="x",
+            markersize=6,
+            linewidth=1.5,
+            label="rev",
+        ),
+        Line2D(
+            [],
+            [],
+            color="black",
+            linestyle="-",
+            marker="o",
+            markerfacecolor="none",
+            markersize=6,
+            linewidth=1.5,
+            label="irrev",
+        ),
+    ]
     ax2.legend(
-        handles1 + handles2,
-        labels1 + labels2,
+        handles=setting_handles + type_handles,
         loc="upper left",
         ncol=1,
         frameon=True,
@@ -436,3 +477,227 @@ def plot_reversibility_histograms(
         plt.close(fig)
 
     return fig, ax1, infos
+
+
+_REVERSIBILITY_EVENT_PATTERN = re.compile(
+    r"(?P<kind>rev|irrev)_drop_l_(?P<load>[0-9.eE+-]+)$"
+)
+
+
+def _job_name_from_csv_path(csv_path):
+    path = Path(csv_path)
+    return path.parent.name if path.name == "macroData.csv" else path.stem
+
+
+def _single_state_file(event_dir, state_name, *, allow_missing=False):
+    matches = sorted(event_dir.glob(f"{state_name}.*.vtu"))
+    if allow_missing and not matches:
+        return None
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Expected exactly one {state_name} VTU in {event_dir}, found {matches}."
+        )
+    return matches[0]
+
+
+def _ordered_xy_points(vtu_path):
+    data = VTUData(vtu_path)
+    points = np.asarray(data.points, dtype=float)
+    if points.ndim != 2 or points.shape[1] < 2:
+        raise ValueError(f"Expected 2D point coordinates in {vtu_path}, got {points.shape}.")
+    ref_index, location, _ = data.field("refIndex")
+    if location != "point":
+        raise ValueError(f"Expected point-wise refIndex in {vtu_path}, got {location}.")
+    ref_index = np.asarray(ref_index)
+    if ref_index.ndim != 1 or ref_index.shape[0] != points.shape[0]:
+        raise ValueError(f"Invalid refIndex shape {ref_index.shape} in {vtu_path}.")
+    # Periodic meshes can contain repeated refIndex values for image nodes, so
+    # the point order itself is the unambiguous correspondence here.
+    return points[:, :2], ref_index
+
+
+def _delta_u_relaxation(event_dir):
+    affine_file = _single_state_file(
+        event_dir, "state1_affine_gamma_plus", allow_missing=True
+    )
+    relaxed_file = _single_state_file(
+        event_dir, "state2_relaxed_gamma_plus", allow_missing=True
+    )
+    if affine_file is None and relaxed_file is None:
+        return None
+    if affine_file is None or relaxed_file is None:
+        raise RuntimeError(f"Incomplete affine/relaxed VTU pair in {event_dir}.")
+    affine_points, affine_refs = _ordered_xy_points(affine_file)
+    relaxed_points, relaxed_refs = _ordered_xy_points(relaxed_file)
+    if not np.array_equal(affine_refs, relaxed_refs):
+        raise ValueError(f"The affine and relaxed meshes have different refIndex values in {event_dir}.")
+    displacement = relaxed_points - affine_points
+    displacement -= displacement.mean(axis=0)
+    result = float(np.sqrt(np.mean(np.sum(displacement**2, axis=1))))
+    if not np.isfinite(result) or result < 0:
+        raise ValueError(f"Invalid Delta u_R={result} calculated for {event_dir}.")
+    return result
+
+
+def _reversibility_event_records(csv_path):
+    df = read_macrodata_csv(csv_path)
+    required_columns = {"load", "is_reversible", "rev_u_diff"}
+    missing = required_columns.difference(df.columns)
+    if missing:
+        raise KeyError(f"Missing columns {sorted(missing)} in {csv_path}.")
+
+    metadata = get_metadata(csv_path)
+    load_increment = float(metadata["loadIncrement"])
+    if not np.isfinite(load_increment) or load_increment <= 0:
+        raise ValueError(f"Invalid loadIncrement={load_increment} for {csv_path}.")
+    yield_load = findPrePostSplit(df=df)
+    loads = df["load"].to_numpy(dtype=float)
+    event_root = Path(RAW_DATA_PATH) / _job_name_from_csv_path(csv_path) / "data/reversibilityData"
+    if not event_root.is_dir():
+        return []
+
+    records = []
+    skipped_missing_states = 0
+    for event_dir in sorted(path for path in event_root.iterdir() if path.is_dir()):
+        match = _REVERSIBILITY_EVENT_PATTERN.fullmatch(event_dir.name)
+        if match is None:
+            raise ValueError(f"Unexpected reversibility event directory name: {event_dir}")
+        start_load = float(match.group("load"))
+        event_load = start_load + load_increment
+        candidate_indices = np.flatnonzero(
+            np.isclose(loads, event_load, rtol=1e-9, atol=max(1e-12, load_increment * 1e-6))
+        )
+        if candidate_indices.size != 1:
+            raise RuntimeError(
+                f"Could not uniquely map {event_dir.name} to a macro row in {csv_path}; "
+                f"target load={event_load}, candidates={candidate_indices.tolist()}."
+            )
+        row = df.iloc[int(candidate_indices[0])]
+        expected_reversible = match.group("kind") == "rev"
+        actual_reversible = bool(int(row["is_reversible"]))
+        if actual_reversible != expected_reversible:
+            raise ValueError(
+                f"Reversibility mismatch for {event_dir}: folder says "
+                f"{expected_reversible}, macro row says {actual_reversible}."
+            )
+        rev_u = float(row["rev_u_diff"])
+        if not np.isfinite(rev_u):
+            raise ValueError(f"Non-finite rev_u_diff for {event_dir} in {csv_path}.")
+        delta_u_R = _delta_u_relaxation(event_dir)
+        if delta_u_R is None:
+            skipped_missing_states += 1
+            continue
+        records.append(
+            {
+                "delta_u_R": delta_u_R,
+                "delta_rev_u": rev_u,
+                "post_yield": float(row["load"]) > yield_load,
+                "reversible": expected_reversible,
+            }
+        )
+    if skipped_missing_states:
+        print(
+            f"Skipped {skipped_missing_states} event directories without saved "
+            f"affine/relaxed VTUs in {csv_path}."
+        )
+    return records
+
+
+def plot_reversibility_delta_u_relaxation(
+    configs,
+    labels=None,
+    *,
+    show=False,
+    save=True,
+    name="reversibility_delta_u_R_vs_delta_rev_u",
+):
+    """Plot post-processed relaxation displacement against reversibility displacement."""
+    paths, labels = get_csv_files(
+        configs, labels=labels, useOldFiles=False, forceUpdate=False
+    )
+    if paths is None or len(paths) == 0:
+        raise RuntimeError("No CSV paths found for the reversibility displacement plot.")
+    if not isinstance(paths[0], (list, tuple, np.ndarray)):
+        paths = [paths]
+    if labels is None:
+        labels = [[""] * len(group) for group in paths]
+    elif not isinstance(labels[0], (list, tuple, np.ndarray)):
+        labels = [labels]
+
+    default_colors = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    if not default_colors:
+        raise RuntimeError("Matplotlib default color cycle is empty.")
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    plotted_groups = []
+    for group_index, group_paths in enumerate(paths):
+        group_records = []
+        for csv_path in group_paths:
+            group_records.extend(_reversibility_event_records(csv_path))
+        if not group_records:
+            continue
+        color = default_colors[group_index % len(default_colors)]
+        for post_yield, marker in ((False, "^"), (True, "o")):
+            selected = [record for record in group_records if record["post_yield"] == post_yield]
+            x_values = np.asarray([record["delta_rev_u"] for record in selected], dtype=float)
+            y_values = np.asarray([record["delta_u_R"] for record in selected], dtype=float)
+            valid = np.isfinite(x_values) & np.isfinite(y_values) & (x_values > 0) & (y_values > 0)
+            if np.any(valid):
+                ax.scatter(
+                    x_values[valid],
+                    y_values[valid],
+                    marker=marker,
+                    s=18,
+                    facecolors="none",
+                    edgecolors=color,
+                    linewidths=0.8,
+                    alpha=0.2,
+                )
+        group_labels = labels[group_index] if group_index < len(labels) else []
+        cleaned = [strip_seed_from_label(label) for label in group_labels if label]
+        display_label = pretty_variant_label(cleaned[0]) if cleaned else ""
+        plotted_groups.append(
+            (color, display_label or (cleaned[0] if cleaned else f"group {group_index + 1}"))
+        )
+
+    if not plotted_groups:
+        raise RuntimeError("No valid displacement pairs were found in the reversibility data.")
+
+    color_handles = [
+        Line2D([], [], marker="o", linestyle="None", markerfacecolor="none",
+               markeredgecolor=color, markersize=6, label=label)
+        for color, label in plotted_groups
+    ]
+    shape_handles = [
+        Line2D([], [], marker="o", linestyle="None", markerfacecolor="none",
+               markeredgecolor="black", markersize=6, label="post-yield"),
+        Line2D([], [], marker="^", linestyle="None", markerfacecolor="none",
+               markeredgecolor="black", markersize=6, label="pre-yield"),
+    ]
+    ax.set_xlabel(r"$\Delta_{\mathrm{rev}} \mathbf{u}$")
+    ax.set_ylabel(r"$\Delta \mathbf{u}_R$")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title(r"Relaxation displacement vs. reversibility displacement")
+    ax.legend(
+        handles=[
+            Line2D([], [], linestyle="None", label="Settings (color)"),
+            *color_handles,
+            Line2D([], [], linestyle="None", label="Yield regime (shape)"),
+            *shape_handles,
+        ],
+        loc="upper left",
+        ncol=1,
+        frameon=True,
+    )
+    fig.tight_layout()
+    if save:
+        save_path = Path("Plots") / f"{name}.png"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(save_path, dpi=300)
+        print(f"Saved figure to {save_path}")
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+    return fig, ax

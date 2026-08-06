@@ -1,0 +1,9 @@
+setting_parameter,setting,quantity,classified_avalanches,positive_drops,nonpositive_drops
+eps_x,1e-07,energy_drop_density,1979,1889,90
+eps_x,1e-07,stress_drop,1979,1878,101
+eps_x,1e-06,energy_drop_density,1895,1847,48
+eps_x,1e-06,stress_drop,1895,1828,67
+eps_x,1e-05,energy_drop_density,1820,1687,133
+eps_x,1e-05,stress_drop,1820,1742,78
+eps_x,0.0001,energy_drop_density,16573,11952,4621
+eps_x,0.0001,stress_drop,16573,16325,248

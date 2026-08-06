@@ -2,7 +2,6 @@ from .findXmin import (
     analyze_xmin,
     annotate_xmin_choices,
     plot_xmin_analysis,
-    summarize_simple_drop_starts,
     xmin_global_differs,
 )
 from MTMath.energyFunction import ContiEnergy
@@ -127,7 +126,7 @@ def pretty_variant_label(label):
             pretty_tokens.append(rf"$\Delta \gamma$: {value}")
             continue
         if normalized_key in {"lbfgsepsx", "lgbfsepsx"} and separator:
-            pretty_tokens.append(rf"$\epsilon_x$: {value}")
+            pretty_tokens.append(rf"$\epsilon_{{\mathbf{{x}}}}$: {value}")
             continue
         if normalized_key == "reconnectionmethod" and separator:
             pretty_tokens.append(f"re.met: {value}")
@@ -1596,7 +1595,7 @@ def plot_data_and_fit(
 
     if xmin_analysis is None:
         xmin_analysis = getattr(fit, "xmin_analysis", None)
-    if xmin_analysis is not None:
+    if xmin_analysis is not None and xmin_analysis is not False:
         annotate_xmin_choices(ax, xmin_analysis)
 
     if show_legend:
@@ -2713,7 +2712,7 @@ def make_fit(
         cache_path = _get_cache_path(
             cache_dir,
             data,
-            f"canonical-simpleDrop-v4-observed-neighbor-basin-search:{distType.name}:{xmin_range}:"
+            f"canonical-simpleDrop-v8-hundred-point-ten-average-confined-search:{distType.name}:{xmin_range}:"
             f"{parallel_xmin}:{search_kwargs}",
         )
         # Do not load v1/v2 caches here: those caches contain the old
@@ -2734,12 +2733,6 @@ def make_fit(
                 xmin_range = cache["xmin"]
                 xmin_analysis = cache.get("xmin_analysis")
                 if xmin_analysis is not None:
-                    start_summary = xmin_analysis.get("simple_drop_start_summary")
-                    if start_summary is None:
-                        start_summary = summarize_simple_drop_starts(
-                            xmin_analysis["simple_drop_details"]["local_minima"]
-                        )
-                        xmin_analysis["simple_drop_start_summary"] = start_summary
                     for key, dtype in (
                         ("xmins", float),
                         ("distances", float),
@@ -2752,6 +2745,25 @@ def make_fit(
                             xmin_analysis[key],
                             dtype=dtype,
                         )
+                    simple_details = xmin_analysis.get("simple_drop_details")
+                    if simple_details is not None:
+                        for key, dtype in (
+                            ("coarse_coarse_xmins", float),
+                            ("coarse_coarse_distances", float),
+                            ("coarse_coarse_search_mask", bool),
+                            ("coarse_coarse_selected_group_indices", int),
+                            ("steepest_coarse_candidate_indices", int),
+                            ("interval_coarse_indices", int),
+                            ("interval_coarse_xmins", float),
+                            ("interval_coarse_distances", float),
+                            ("region_xmins", float),
+                            ("region_distances", float),
+                            ("region_candidate_indices", int),
+                        ):
+                            if key in simple_details:
+                                simple_details[key] = np.asarray(
+                                    simple_details[key], dtype=dtype
+                                )
                 cache_loaded = True
                 if candidate != cache_path:
                     cache_loaded = False
@@ -3402,6 +3414,7 @@ def plot_powerlaw_compare(
     debug=False,
     show=False,
     evaluate=True,
+    evaluate_kwargs=None,
     distType: type[Distribution] = Truncated_Power_Law,
     save=True,
     addFit=True,
@@ -3428,6 +3441,7 @@ def plot_powerlaw_compare(
             debug=debug,
             show=show,
             evaluate=evaluate,
+            evaluate_kwargs=evaluate_kwargs,
             distType=distType,
             save=save,
             addFit=addFit,
@@ -3447,6 +3461,7 @@ def plot_powerlaw_compare(
     compare_fits = []
     legend_handles = []
     equation_entry = None
+    evaluate_kwargs = dict(evaluate_kwargs or {})
 
     for idx, (paths, labels) in enumerate(zip(grouped_paths, grouped_labels)):
         if drop_type == "stress":
@@ -3476,7 +3491,7 @@ def plot_powerlaw_compare(
             xmin_search_kwargs=xmin_search_kwargs,
         )
         if evaluate:
-            fit.evaluate_fit()
+            fit.evaluate_fit(**evaluate_kwargs)
 
         color = colors[idx % len(colors)]
         source_label = labels[0] if labels else ""
@@ -3633,6 +3648,7 @@ def plot_powerlaw(
     debug=False,
     show=False,
     evaluate=True,
+    evaluate_kwargs=None,
     distType: type[Distribution] = Truncated_Power_Law,
     save=True,
     addFit=True,
@@ -3660,6 +3676,7 @@ def plot_powerlaw(
             debug=debug,
             show=show,
             evaluate=evaluate,
+            evaluate_kwargs=evaluate_kwargs,
             distType=distType,
             save=save,
             addFit=addFit,
@@ -3698,21 +3715,15 @@ def plot_powerlaw(
     print("simpleDrop xmin:", reported_fit.xmin)
     xmin_analysis = getattr(reported_fit, "xmin_analysis", None)
     if xmin_analysis is not None:
-        start_summary = xmin_analysis["simple_drop_start_summary"]
-        start_xmins = xmin_analysis["simple_drop_details"]["local_minima"]
-        start_text = ", ".join(
-            f"{result['start_label']}={result['xmin']:.3e}"
-            for result in start_xmins
-        )
+        simple_details = xmin_analysis["simple_drop_details"]
         print(
-            "simpleDrop start minima: "
-            f"{start_text}; "
-            f"{start_summary['unique_local_minimum_count']} distinct; "
-            "middle lowest="
-            f"{start_summary['middle_search_is_lowest']}"
+            "simpleDrop exhaustive region: "
+            f"{simple_details['region_xmins'].size} observed candidates; "
+            f"selected minimum={simple_details['region_best_xmin']:.3e}"
         )
     if evaluate:
-        reported_fit.evaluate_fit()
+        evaluate_kwargs = dict(evaluate_kwargs or {})
+        reported_fit.evaluate_fit(**evaluate_kwargs)
 
     d = dist_from_fit(reported_fit)
 
@@ -3730,7 +3741,10 @@ def plot_powerlaw(
         attribute = ""
 
     if evaluate:
-        p, mean_exp, exp_std = reported_fit.evaluate_fit(all_drops, parallel=True)
+        p, mean_exp, exp_std = reported_fit.evaluate_fit(
+            all_drops,
+            **evaluate_kwargs,
+        )
 
         thresholds = [0.05, 0.1, 0.3, float("inf")]
         ratings = ["bad", "poor", "good", "excellent"]
