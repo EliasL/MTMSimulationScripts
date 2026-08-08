@@ -47,6 +47,7 @@ from Management.jobs import (
     longJob,
     longJobStatic,
     size_scaling_job,
+    reversibility_size_scaling_job,
     reconnectionJob,
     reconnectTest,
     reconnectSSTest,
@@ -500,8 +501,18 @@ def runOnLocalMachine():
     )
 
 
-def edgeFlipJobPlan():
-    size_groups, _ = size_scaling_job(reconnection="edgeFlip")
+def edgeFlipJobPlan(reconnectRevert=None, reconnectEdgeLocking=None):
+    reconnection_settings = {
+        key: value
+        for key, value in {
+            "reconnectRevert": reconnectRevert,
+            "reconnectEdgeLocking": reconnectEdgeLocking,
+        }.items()
+        if value is not None
+    }
+    size_groups, _ = size_scaling_job(
+        reconnection="edgeFlip", **reconnection_settings
+    )
     cluster_groups = list(size_groups)
     local_configs = []
     local_labels = []
@@ -512,6 +523,7 @@ def edgeFlipJobPlan():
             batch,
             threads=2 if is_local else 3,
             reconnection="edgeFlip",
+            **reconnection_settings,
         )
         if is_local:
             local_configs.extend(configs)
@@ -533,7 +545,7 @@ def edgeFlipJobPlan():
     return cluster_groups, local_configs, local_labels
 
 
-def queueClusterConfigs(configs, jobCopies=100, submit=False):
+def queueClusterConfigs(configs, jobCopies=100, submit=False, nice=0, **kwargs):
     if not configs:
         return
     nr_threads = configs[0].nrThreads
@@ -548,7 +560,14 @@ def queueClusterConfigs(configs, jobCopies=100, submit=False):
         for config in confs:
             print(f"  {config.name}")
         if confs and submit:
-            queueJobs(server, confs, build=False, jobCopies=jobCopies)
+            queueJobs(
+                server,
+                confs,
+                build=False,
+                jobCopies=jobCopies,
+                nice=nice,
+                **kwargs,
+            )
 
 
 def configsByThreads(cluster_groups):
@@ -558,11 +577,20 @@ def configsByThreads(cluster_groups):
     return configs_by_threads
 
 
-def startJobs(submit=False):
-    cluster_groups, local_configs, local_labels = edgeFlipJobPlan()
+def startJobs(
+    submit=False,
+    reconnectRevert=None,
+    reconnectEdgeLocking=None,
+    nice=0,
+    resume=False,
+):
+    cluster_groups, local_configs, local_labels = edgeFlipJobPlan(
+        reconnectRevert=reconnectRevert,
+        reconnectEdgeLocking=reconnectEdgeLocking,
+    )
     print(f"{'SUBMITTING' if submit else 'DRY RUN'} edge-flip jobs")
     for configs in configsByThreads(cluster_groups).values():
-        queueClusterConfigs(configs, jobCopies=100, submit=submit)
+        queueClusterConfigs(configs, jobCopies=100, submit=submit, nice=nice)
 
     print(f"Local jobs: {len(local_configs)}")
     for config in local_configs:
@@ -573,10 +601,48 @@ def startJobs(submit=False):
             local_configs,
             taskNames=local_labels,
             maxWorkers=4,
-            resume=False,
+            resume=resume,
         )
     else:
         print("DRY RUN COMPLETE: no jobs were submitted or started")
+
+
+def queueReversibilitySizeScalingJobs(
+    submit=False,
+    jobCopies=100,
+    nice=0,
+    reconnection="none",
+    reconnectRevert=1,
+    reconnectEdgeLocking=0,
+    nrSeeds=5,
+):
+    """Plan or queue the size-scaling campaign with reversibility testing."""
+    size_groups, _ = reversibility_size_scaling_job(
+        reconnection=reconnection,
+        reconnectRevert=reconnectRevert,
+        reconnectEdgeLocking=reconnectEdgeLocking,
+        nrSeeds=nrSeeds,
+    )
+    configs = [config for group in size_groups for config in group]
+    if len(configs) != 5 * nrSeeds:
+        raise RuntimeError(
+            f"Unexpected number of reversibility size-scaling jobs: {len(configs)}"
+        )
+    print(
+        f"{'SUBMITTING' if submit else 'DRY RUN'} {len(configs)} "
+        f"reversibility size-scaling jobs ({jobCopies} copies each)"
+    )
+    for group in size_groups:
+        queueClusterConfigs(
+            group,
+            jobCopies=jobCopies,
+            submit=submit,
+            nice=nice,
+            reconnectRevert=reconnectRevert,
+            reconnectEdgeLocking=reconnectEdgeLocking,
+        )
+    if not submit:
+        print("DRY RUN COMPLETE: no jobs were submitted")
 
 
 def restartSizeScalingSeed(size, seed, server, jobCopies=100, submit=False):

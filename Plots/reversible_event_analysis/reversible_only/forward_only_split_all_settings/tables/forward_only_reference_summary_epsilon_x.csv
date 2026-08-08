@@ -1,0 +1,5 @@
+setting,setting_attribute,sample_count,event_count,reference_reversible_count,reference_irreversible_count,discarded_island_count
+1e-07,eps_x,4,22362,20473,1889,0
+1e-06,eps_x,4,26674,24826,1848,0
+1e-05,eps_x,4,16922,15236,1686,155
+0.0001,eps_x,4,11952,10339,1613,3193

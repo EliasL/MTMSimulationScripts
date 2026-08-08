@@ -1,0 +1,97 @@
+attribute,setting,seed,post_yield,class,class_label,count,event_count,fraction
+eps_x,1e-07,0,False,reversible_elastic,reversible elastic,0,3661,0.0
+eps_x,1e-07,0,False,reversible_plastic,reversible plastic,3425,3661,0.935536738596012
+eps_x,1e-07,0,False,irreversible,irreversible,236,3661,0.06446326140398798
+eps_x,1e-07,0,True,reversible_elastic,reversible elastic,0,2551,0.0
+eps_x,1e-07,0,True,reversible_plastic,reversible plastic,2284,2551,0.8953351626813014
+eps_x,1e-07,0,True,irreversible,irreversible,267,2551,0.10466483731869855
+eps_x,1e-07,1,False,reversible_elastic,reversible elastic,0,3268,0.0
+eps_x,1e-07,1,False,reversible_plastic,reversible plastic,3033,3268,0.9280905752753978
+eps_x,1e-07,1,False,irreversible,irreversible,235,3268,0.0719094247246022
+eps_x,1e-07,1,True,reversible_elastic,reversible elastic,0,4228,0.0
+eps_x,1e-07,1,True,reversible_plastic,reversible plastic,3944,4228,0.9328287606433302
+eps_x,1e-07,1,True,irreversible,irreversible,284,4228,0.06717123935666983
+eps_x,1e-07,2,False,reversible_elastic,reversible elastic,0,3232,0.0
+eps_x,1e-07,2,False,reversible_plastic,reversible plastic,3018,3232,0.9337871287128713
+eps_x,1e-07,2,False,irreversible,irreversible,214,3232,0.06621287128712872
+eps_x,1e-07,2,True,reversible_elastic,reversible elastic,0,782,0.0
+eps_x,1e-07,2,True,reversible_plastic,reversible plastic,575,782,0.7352941176470589
+eps_x,1e-07,2,True,irreversible,irreversible,207,782,0.2647058823529412
+eps_x,1e-07,3,False,reversible_elastic,reversible elastic,0,3902,0.0
+eps_x,1e-07,3,False,reversible_plastic,reversible plastic,3656,3902,0.9369554074833418
+eps_x,1e-07,3,False,irreversible,irreversible,246,3902,0.06304459251665813
+eps_x,1e-07,3,True,reversible_elastic,reversible elastic,0,738,0.0
+eps_x,1e-07,3,True,reversible_plastic,reversible plastic,538,738,0.7289972899728997
+eps_x,1e-07,3,True,irreversible,irreversible,200,738,0.27100271002710025
+eps_x,1e-06,0,False,reversible_elastic,reversible elastic,0,2899,0.0
+eps_x,1e-06,0,False,reversible_plastic,reversible plastic,2681,2899,0.9248016557433598
+eps_x,1e-06,0,False,irreversible,irreversible,218,2899,0.07519834425664022
+eps_x,1e-06,0,True,reversible_elastic,reversible elastic,0,1142,0.0
+eps_x,1e-06,0,True,reversible_plastic,reversible plastic,905,1142,0.7924693520140105
+eps_x,1e-06,0,True,irreversible,irreversible,237,1142,0.2075306479859895
+eps_x,1e-06,1,False,reversible_elastic,reversible elastic,0,3098,0.0
+eps_x,1e-06,1,False,reversible_plastic,reversible plastic,2889,3098,0.9325371207230472
+eps_x,1e-06,1,False,irreversible,irreversible,209,3098,0.06746287927695287
+eps_x,1e-06,1,True,reversible_elastic,reversible elastic,0,917,0.0
+eps_x,1e-06,1,True,reversible_plastic,reversible plastic,694,917,0.7568157033805889
+eps_x,1e-06,1,True,irreversible,irreversible,223,917,0.24318429661941113
+eps_x,1e-06,2,False,reversible_elastic,reversible elastic,0,3065,0.0
+eps_x,1e-06,2,False,reversible_plastic,reversible plastic,2865,3065,0.9347471451876019
+eps_x,1e-06,2,False,irreversible,irreversible,200,3065,0.06525285481239804
+eps_x,1e-06,2,True,reversible_elastic,reversible elastic,0,6724,0.0
+eps_x,1e-06,2,True,reversible_plastic,reversible plastic,6427,6724,0.9558298631766805
+eps_x,1e-06,2,True,irreversible,irreversible,297,6724,0.04417013682331945
+eps_x,1e-06,3,False,reversible_elastic,reversible elastic,0,4077,0.0
+eps_x,1e-06,3,False,reversible_plastic,reversible plastic,3838,4077,0.9413784645572725
+eps_x,1e-06,3,False,irreversible,irreversible,239,4077,0.058621535442727496
+eps_x,1e-06,3,True,reversible_elastic,reversible elastic,0,4752,0.0
+eps_x,1e-06,3,True,reversible_plastic,reversible plastic,4527,4752,0.9526515151515151
+eps_x,1e-06,3,True,irreversible,irreversible,225,4752,0.04734848484848485
+eps_x,1e-05,0,False,reversible_elastic,reversible elastic,0,3160,0.0
+eps_x,1e-05,0,False,reversible_plastic,reversible plastic,2953,3160,0.9344936708860759
+eps_x,1e-05,0,False,irreversible,irreversible,207,3160,0.06550632911392405
+eps_x,1e-05,0,True,reversible_elastic,reversible elastic,0,1539,0.0
+eps_x,1e-05,0,True,reversible_plastic,reversible plastic,1333,1539,0.866146848602989
+eps_x,1e-05,0,True,irreversible,irreversible,206,1539,0.13385315139701104
+eps_x,1e-05,1,False,reversible_elastic,reversible elastic,0,3017,0.0
+eps_x,1e-05,1,False,reversible_plastic,reversible plastic,2815,3017,0.9330460722572091
+eps_x,1e-05,1,False,irreversible,irreversible,202,3017,0.06695392774279085
+eps_x,1e-05,1,True,reversible_elastic,reversible elastic,0,2413,0.0
+eps_x,1e-05,1,True,reversible_plastic,reversible plastic,2155,2413,0.8930791545793618
+eps_x,1e-05,1,True,irreversible,irreversible,258,2413,0.1069208454206382
+eps_x,1e-05,2,False,reversible_elastic,reversible elastic,0,3503,0.0
+eps_x,1e-05,2,False,reversible_plastic,reversible plastic,3265,3503,0.9320582357978875
+eps_x,1e-05,2,False,irreversible,irreversible,238,3503,0.06794176420211248
+eps_x,1e-05,2,True,reversible_elastic,reversible elastic,0,536,0.0
+eps_x,1e-05,2,True,reversible_plastic,reversible plastic,337,536,0.628731343283582
+eps_x,1e-05,2,True,irreversible,irreversible,199,536,0.3712686567164179
+eps_x,1e-05,3,False,reversible_elastic,reversible elastic,0,2637,0.0
+eps_x,1e-05,3,False,reversible_plastic,reversible plastic,2434,2637,0.9230185817216534
+eps_x,1e-05,3,False,irreversible,irreversible,203,2637,0.0769814182783466
+eps_x,1e-05,3,True,reversible_elastic,reversible elastic,0,272,0.0
+eps_x,1e-05,3,True,reversible_plastic,reversible plastic,99,272,0.3639705882352941
+eps_x,1e-05,3,True,irreversible,irreversible,173,272,0.6360294117647058
+eps_x,0.0001,0,False,reversible_elastic,reversible elastic,0,2434,0.0
+eps_x,0.0001,0,False,reversible_plastic,reversible plastic,335,2434,0.13763352506162696
+eps_x,0.0001,0,False,irreversible,irreversible,2099,2434,0.862366474938373
+eps_x,0.0001,0,True,reversible_elastic,reversible elastic,0,990,0.0
+eps_x,0.0001,0,True,reversible_plastic,reversible plastic,324,990,0.32727272727272727
+eps_x,0.0001,0,True,irreversible,irreversible,666,990,0.6727272727272727
+eps_x,0.0001,1,False,reversible_elastic,reversible elastic,0,2440,0.0
+eps_x,0.0001,1,False,reversible_plastic,reversible plastic,342,2440,0.14016393442622951
+eps_x,0.0001,1,False,irreversible,irreversible,2098,2440,0.8598360655737705
+eps_x,0.0001,1,True,reversible_elastic,reversible elastic,0,1731,0.0
+eps_x,0.0001,1,True,reversible_plastic,reversible plastic,670,1731,0.3870595031773541
+eps_x,0.0001,1,True,irreversible,irreversible,1061,1731,0.6129404968226458
+eps_x,0.0001,2,False,reversible_elastic,reversible elastic,0,3034,0.0
+eps_x,0.0001,2,False,reversible_plastic,reversible plastic,480,3034,0.15820698747528017
+eps_x,0.0001,2,False,irreversible,irreversible,2554,3034,0.8417930125247198
+eps_x,0.0001,2,True,reversible_elastic,reversible elastic,0,700,0.0
+eps_x,0.0001,2,True,reversible_plastic,reversible plastic,272,700,0.38857142857142857
+eps_x,0.0001,2,True,irreversible,irreversible,428,700,0.6114285714285714
+eps_x,0.0001,3,False,reversible_elastic,reversible elastic,0,2993,0.0
+eps_x,0.0001,3,False,reversible_plastic,reversible plastic,508,2993,0.16972936852656198
+eps_x,0.0001,3,False,irreversible,irreversible,2485,2993,0.830270631473438
+eps_x,0.0001,3,True,reversible_elastic,reversible elastic,0,823,0.0
+eps_x,0.0001,3,True,reversible_plastic,reversible plastic,262,823,0.3183475091130012
+eps_x,0.0001,3,True,irreversible,irreversible,561,823,0.6816524908869988

@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 # For checking how many processes are available
 import os
 import tempfile
+import time
 import uuid
 
 # For parallelization
@@ -681,6 +682,8 @@ def evaluate_xmin_distances(
     parallel=False,
     max_workers=None,
     initial_params=None,
+    progress=False,
+    progress_label="xmin",
 ):
     """Fit a candidate grid in batches and return lightweight diagnostics."""
     drops = np.asarray(drops, dtype=float)
@@ -729,11 +732,37 @@ def evaluate_xmin_distances(
                 tqdm(
                     executor.map(_fit_xmin_batch_worker, tasks),
                     total=len(tasks),
-                    desc="Fitting xmin batches",
+                    desc=f"{progress_label}: xmin batches",
                 )
             )
     else:
-        batch_results = [_fit_xmin_batch_worker(tasks[0])]
+        if not progress:
+            batch_results = [_fit_xmin_batch_worker(tasks[0])]
+        else:
+            batch_results = []
+            total = len(xmin_values)
+            started = time.perf_counter()
+            for index, xmin in enumerate(xmin_values, start=1):
+                elapsed = time.perf_counter() - started
+                rate = (index - 1) / elapsed if index > 1 else 0.0
+                eta = (total - index + 1) / rate if rate > 0 else float("nan")
+                print(
+                    f"{progress_label}: starting candidate {index}/{total}, "
+                    f"xmin={xmin:.6g}, elapsed={elapsed:.1f}s, "
+                    f"ETA={eta:.1f}s",
+                    flush=True,
+                )
+                task = list(tasks[0])
+                task[1] = np.asarray([xmin], dtype=float)
+                batch_results.append(_fit_xmin_batch_worker(tuple(task)))
+                elapsed = time.perf_counter() - started
+                rate = index / elapsed if elapsed > 0 else 0.0
+                eta = (total - index) / rate if rate > 0 else float("nan")
+                print(
+                    f"{progress_label}: finished candidate {index}/{total}, "
+                    f"elapsed={elapsed:.1f}s, ETA={eta:.1f}s",
+                    flush=True,
+                )
 
     distances = np.concatenate(
         [np.asarray(result[0], dtype=float) for result in batch_results]

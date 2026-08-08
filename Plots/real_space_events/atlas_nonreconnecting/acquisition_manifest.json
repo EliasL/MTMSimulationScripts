@@ -1,0 +1,41 @@
+{
+  "downloads": [
+    {
+      "event_id": "/Volumes/data/remoteData/macro/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2.csv:56921",
+      "source": "RemoteSource(host='duchemin.pmmh-cluster.espci.fr', data_root=PosixPath('/data/elundheim/MTS2D_output'))",
+      "remote_event_directory": "/data/elundheim/MTS2D_output/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2/data/reversibilityData/rev_drop_l_0.70921",
+      "local_event_directory": "/Volumes/data/remoteData/real_space_events/atlas_nonreconnecting_states/reversible_plastic_nominal"
+    },
+    {
+      "event_id": "/Volumes/data/remoteData/macro/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2.csv:5883",
+      "source": "RemoteSource(host='duchemin.pmmh-cluster.espci.fr', data_root=PosixPath('/data/elundheim/MTS2D_output'))",
+      "remote_event_directory": "/data/elundheim/MTS2D_output/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2/data/reversibilityData/rev_drop_l_0.19883",
+      "local_event_directory": "/Volumes/data/remoteData/real_space_events/atlas_nonreconnecting_states/reversible_plastic_minimal"
+    },
+    {
+      "event_id": "/Volumes/data/remoteData/macro/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2.csv:47113",
+      "source": "RemoteSource(host='duchemin.pmmh-cluster.espci.fr', data_root=PosixPath('/data/elundheim/MTS2D_output'))",
+      "remote_event_directory": "/data/elundheim/MTS2D_output/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2/data/reversibilityData/rev_drop_l_0.61113",
+      "local_event_directory": "/Volumes/data/remoteData/real_space_events/atlas_nonreconnecting_states/reversible_plastic_extreme"
+    },
+    {
+      "event_id": "/Volumes/data/remoteData/macro/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2.csv:43685",
+      "source": "RemoteSource(host='duchemin.pmmh-cluster.espci.fr', data_root=PosixPath('/data/elundheim/MTS2D_output'))",
+      "remote_event_directory": "/data/elundheim/MTS2D_output/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2/data/reversibilityData/irrev_drop_l_0.57685",
+      "local_event_directory": "/Volumes/data/remoteData/real_space_events/atlas_nonreconnecting_states/irreversible_plastic_nominal"
+    },
+    {
+      "event_id": "/Volumes/data/remoteData/macro/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2.csv:71569",
+      "source": "RemoteSource(host='duchemin.pmmh-cluster.espci.fr', data_root=PosixPath('/data/elundheim/MTS2D_output'))",
+      "remote_event_directory": "/data/elundheim/MTS2D_output/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2/data/reversibilityData/irrev_drop_l_0.85569",
+      "local_event_directory": "/Volumes/data/remoteData/real_space_events/atlas_nonreconnecting_states/irreversible_plastic_minimal"
+    },
+    {
+      "event_id": "/Volumes/data/remoteData/macro/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2.csv:57650",
+      "source": "RemoteSource(host='duchemin.pmmh-cluster.espci.fr', data_root=PosixPath('/data/elundheim/MTS2D_output'))",
+      "remote_event_directory": "/data/elundheim/MTS2D_output/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2/data/reversibilityData/irrev_drop_l_0.71650",
+      "local_event_directory": "/Volumes/data/remoteData/real_space_events/atlas_nonreconnecting_states/irreversible_plastic_extreme"
+    }
+  ],
+  "replays": []
+}

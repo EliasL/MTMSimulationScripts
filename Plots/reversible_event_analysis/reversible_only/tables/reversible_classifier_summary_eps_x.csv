@@ -1,0 +1,5 @@
+setting_parameter,setting,first_otsu_cut,final_otsu_cut,island_removal_cut,rule,recorded_steps,closing_steps,nonclosing_steps,discarded_steps
+eps_x,1e-07,0.000169008481728848,0.000169008481728848,,one Otsu split; discard nothing,22362,20473,1889,0
+eps_x,1e-06,0.0004871165137041288,0.0004871165137041288,,one Otsu split; discard nothing,26674,24826,1848,0
+eps_x,1e-05,0.0009267431631196093,0.0009267431631196093,1e-06,"discard Delta_rev u <= 1e-6, then Otsu-split the remainder",17077,15236,1686,155
+eps_x,0.0001,2.882129330846754e-05,0.004013902701131665,2.882129330846754e-05,"discard the first lower Otsu population, then split the remainder",15145,10339,1613,3193

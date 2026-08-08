@@ -139,7 +139,13 @@ def distributeConfigs(
 
 
 def queueJobs(
-    server, configs, job_names=None, stopExsistingJobs=False, jobCopies=1, **kwargs
+    server,
+    configs,
+    job_names=None,
+    stopExsistingJobs=False,
+    jobCopies=1,
+    nice=0,
+    **kwargs,
 ):
     """
     jobCopies starts the same job multiple times. (Jobs with the same name wait
@@ -152,6 +158,7 @@ def queueJobs(
     dump=None,
     plot=False,
     newOutput=False,
+    nice=0,                 # positive values lower Slurm priority
     """
     if stopExsistingJobs:
         j = JobManager()
@@ -167,17 +174,14 @@ def queueJobs(
     if job_names is None:
         job_names = [conf.name for conf in configs]
 
-    full_pre_command = (
-        pre_command
-        + " "
-        + str(
-            {
-                '"commands"': str(commands).replace('"', "\u203d"),
-                '"job_names"': str(job_names).replace('"', "\u203d"),
-                '"jobCopies"': jobCopies,
-            }
-        )
-    )
+    queue_payload = {
+        '"commands"': str(commands).replace('"', "\u203d"),
+        '"job_names"': str(job_names).replace('"', "\u203d"),
+        '"jobCopies"': jobCopies,
+    }
+    if nice:
+        queue_payload['"nice"'] = nice
+    full_pre_command = pre_command + " " + str(queue_payload)
 
     run_remote_command(server, full_pre_command)
 

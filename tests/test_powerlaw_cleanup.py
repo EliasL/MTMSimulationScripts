@@ -38,9 +38,13 @@ from Plotting.findXmin import (
     summarize_simple_drop_starts,
 )
 from Plotting.plotPowerLaw import (
+    _drop_quantity_label,
+    _resolve_drop_sign,
+    find_best_xmin,
     get_energy_drops,
     get_stress_drops,
     make_fit,
+    plot_data_pdf,
     plot_data_and_fit,
     plot_energy_drop_trace,
     plot_ks_distance,
@@ -48,7 +52,91 @@ from Plotting.plotPowerLaw import (
 )
 
 
+class PValueXminTests(unittest.TestCase):
+    def test_selected_fit_is_sorted_before_refinement_window_is_chosen(self):
+        class DummyFit:
+            def __init__(self, xmin, p):
+                self.xmin = xmin
+                self.p = p
+                self.p_std = 0.01
+                self.alpha_std = 0.01
+
+        rough = [DummyFit(1.0, 0.2), DummyFit(2.0, 0.2), DummyFit(4.0, 0.2)]
+        refined = [DummyFit(1.0, 0.2), DummyFit(2.0, 0.3), DummyFit(4.0, 0.2)]
+        selected = DummyFit(2.5, 0.2)
+
+        with mock.patch(
+            "Plotting.plotPowerLaw.explore_xmin",
+            side_effect=[rough, refined],
+        ) as explore, mock.patch(
+            "Plotting.plotPowerLaw.plot_fits_over_xmin"
+        ), mock.patch(
+            "Plotting.plotPowerLaw.get_lowest_distance_xmin", return_value=None
+        ):
+            best = find_best_xmin(
+                np.array([1.0, 2.0, 4.0]),
+                selected_fit=selected,
+                data_info={"customTitle": "test"},
+                parallel=False,
+            )
+
+        second_call = explore.call_args_list[1]
+        self.assertEqual(second_call.args[1], 1.0)
+        self.assertEqual(second_call.args[2], 4.0)
+        self.assertEqual(best.xmin, 2.0)
+
+    def test_no_p_fit_marker_when_threshold_has_no_local_maximum(self):
+        class DummyFit:
+            def __init__(self, xmin, p):
+                self.xmin = xmin
+                self.p = p
+                self.p_std = 0.01
+                self.alpha_std = 0.01
+
+        rough = [DummyFit(1.0, 0.01), DummyFit(2.0, 0.02), DummyFit(4.0, 0.01)]
+        with mock.patch(
+            "Plotting.plotPowerLaw.explore_xmin", return_value=rough
+        ), mock.patch(
+            "Plotting.plotPowerLaw.plot_fits_over_xmin"
+        ) as plot, mock.patch(
+            "Plotting.plotPowerLaw.get_lowest_distance_xmin", return_value=None
+        ):
+            best = find_best_xmin(
+                np.array([1.0, 2.0, 4.0]),
+                data_info={"customTitle": "test"},
+                parallel=False,
+            )
+
+        self.assertIsNone(plot.call_args.args[1])
+        self.assertFalse(best.p_value_local_max_found)
+
+
 class EnergyDropTests(unittest.TestCase):
+    def test_stress_corrected_drop_labels_use_positive_delta(self):
+        self.assertEqual(
+            _resolve_drop_sign({"stress_corrected": True}),
+            "positive",
+        )
+        self.assertEqual(
+            _drop_quantity_label(r"E_S", drop_sign="positive"),
+            r"\Delta E_S",
+        )
+        self.assertEqual(
+            _drop_quantity_label(r"E_R", drop_sign="negative"),
+            r"-\Delta E_R",
+        )
+
+        fig, ax = plt.subplots()
+        plot_data_pdf(
+            ax,
+            np.geomspace(1.0, 10.0, 20),
+            drop_label=r"E_S",
+            drop_sign="positive",
+            show_legend=False,
+        )
+        self.assertEqual(ax.get_xlabel(), r"$\Delta E_S$ (Energy Drop)")
+        plt.close(fig)
+
     def test_simple_shear_tangent_uses_spatial_configuration(self):
         material_tensor = np.zeros((1, 2, 2, 2, 2), dtype=float)
         material_tensor[..., 0, 1, 0, 1] = 3.5

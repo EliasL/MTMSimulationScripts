@@ -1,0 +1,121 @@
+attribute,setting,seed,post_yield,class,class_label,count,event_count,fraction
+load_increment,1e-06,0,False,reversible_elastic,reversible elastic,0,3004,0.0
+load_increment,1e-06,0,False,reversible_plastic,reversible plastic,2789,3004,0.9284287616511319
+load_increment,1e-06,0,False,irreversible,irreversible,215,3004,0.07157123834886818
+load_increment,1e-06,0,True,reversible_elastic,reversible elastic,0,3074,0.0
+load_increment,1e-06,0,True,reversible_plastic,reversible plastic,2780,3074,0.904359141184125
+load_increment,1e-06,0,True,irreversible,irreversible,294,3074,0.09564085881587508
+load_increment,1e-06,1,False,reversible_elastic,reversible elastic,0,3735,0.0
+load_increment,1e-06,1,False,reversible_plastic,reversible plastic,3502,3735,0.9376171352074967
+load_increment,1e-06,1,False,irreversible,irreversible,233,3735,0.062382864792503344
+load_increment,1e-06,1,True,reversible_elastic,reversible elastic,0,992,0.0
+load_increment,1e-06,1,True,reversible_plastic,reversible plastic,754,992,0.7600806451612904
+load_increment,1e-06,1,True,irreversible,irreversible,238,992,0.2399193548387097
+load_increment,1e-06,2,False,reversible_elastic,reversible elastic,0,3157,0.0
+load_increment,1e-06,2,False,reversible_plastic,reversible plastic,2938,3157,0.9306303452644916
+load_increment,1e-06,2,False,irreversible,irreversible,219,3157,0.0693696547355084
+load_increment,1e-06,2,True,reversible_elastic,reversible elastic,0,4657,0.0
+load_increment,1e-06,2,True,reversible_plastic,reversible plastic,4375,4657,0.9394459952759288
+load_increment,1e-06,2,True,irreversible,irreversible,282,4657,0.06055400472407129
+load_increment,1e-06,3,False,reversible_elastic,reversible elastic,0,4165,0.0
+load_increment,1e-06,3,False,reversible_plastic,reversible plastic,3902,4165,0.9368547418967587
+load_increment,1e-06,3,False,irreversible,irreversible,263,4165,0.0631452581032413
+load_increment,1e-06,3,True,reversible_elastic,reversible elastic,0,860,0.0
+load_increment,1e-06,3,True,reversible_plastic,reversible plastic,652,860,0.7581395348837209
+load_increment,1e-06,3,True,irreversible,irreversible,208,860,0.24186046511627907
+load_increment,5e-06,0,False,reversible_elastic,reversible elastic,0,4122,0.0
+load_increment,5e-06,0,False,reversible_plastic,reversible plastic,3873,4122,0.9395924308588064
+load_increment,5e-06,0,False,irreversible,irreversible,249,4122,0.06040756914119359
+load_increment,5e-06,0,True,reversible_elastic,reversible elastic,0,694,0.0
+load_increment,5e-06,0,True,reversible_plastic,reversible plastic,470,694,0.6772334293948127
+load_increment,5e-06,0,True,irreversible,irreversible,224,694,0.3227665706051873
+load_increment,5e-06,1,False,reversible_elastic,reversible elastic,0,3271,0.0
+load_increment,5e-06,1,False,reversible_plastic,reversible plastic,3062,3271,0.9361051666157139
+load_increment,5e-06,1,False,irreversible,irreversible,209,3271,0.06389483338428616
+load_increment,5e-06,1,True,reversible_elastic,reversible elastic,0,5946,0.0
+load_increment,5e-06,1,True,reversible_plastic,reversible plastic,5646,5946,0.9495459132189707
+load_increment,5e-06,1,True,irreversible,irreversible,300,5946,0.050454086781029264
+load_increment,5e-06,2,False,reversible_elastic,reversible elastic,0,3736,0.0
+load_increment,5e-06,2,False,reversible_plastic,reversible plastic,3515,3736,0.940845824411135
+load_increment,5e-06,2,False,irreversible,irreversible,221,3736,0.0591541755888651
+load_increment,5e-06,2,True,reversible_elastic,reversible elastic,0,1838,0.0
+load_increment,5e-06,2,True,reversible_plastic,reversible plastic,1606,1838,0.8737758433079434
+load_increment,5e-06,2,True,irreversible,irreversible,232,1838,0.12622415669205658
+load_increment,5e-06,3,False,reversible_elastic,reversible elastic,0,3921,0.0
+load_increment,5e-06,3,False,reversible_plastic,reversible plastic,3675,3921,0.9372609028309105
+load_increment,5e-06,3,False,irreversible,irreversible,246,3921,0.06273909716908951
+load_increment,5e-06,3,True,reversible_elastic,reversible elastic,0,1690,0.0
+load_increment,5e-06,3,True,reversible_plastic,reversible plastic,1472,1690,0.8710059171597633
+load_increment,5e-06,3,True,irreversible,irreversible,218,1690,0.1289940828402367
+load_increment,1e-05,0,False,reversible_elastic,reversible elastic,0,2899,0.0
+load_increment,1e-05,0,False,reversible_plastic,reversible plastic,2681,2899,0.9248016557433598
+load_increment,1e-05,0,False,irreversible,irreversible,218,2899,0.07519834425664022
+load_increment,1e-05,0,True,reversible_elastic,reversible elastic,0,1142,0.0
+load_increment,1e-05,0,True,reversible_plastic,reversible plastic,905,1142,0.7924693520140105
+load_increment,1e-05,0,True,irreversible,irreversible,237,1142,0.2075306479859895
+load_increment,1e-05,1,False,reversible_elastic,reversible elastic,0,3098,0.0
+load_increment,1e-05,1,False,reversible_plastic,reversible plastic,2889,3098,0.9325371207230472
+load_increment,1e-05,1,False,irreversible,irreversible,209,3098,0.06746287927695287
+load_increment,1e-05,1,True,reversible_elastic,reversible elastic,0,917,0.0
+load_increment,1e-05,1,True,reversible_plastic,reversible plastic,694,917,0.7568157033805889
+load_increment,1e-05,1,True,irreversible,irreversible,223,917,0.24318429661941113
+load_increment,1e-05,2,False,reversible_elastic,reversible elastic,0,3065,0.0
+load_increment,1e-05,2,False,reversible_plastic,reversible plastic,2865,3065,0.9347471451876019
+load_increment,1e-05,2,False,irreversible,irreversible,200,3065,0.06525285481239804
+load_increment,1e-05,2,True,reversible_elastic,reversible elastic,0,6724,0.0
+load_increment,1e-05,2,True,reversible_plastic,reversible plastic,6427,6724,0.9558298631766805
+load_increment,1e-05,2,True,irreversible,irreversible,297,6724,0.04417013682331945
+load_increment,1e-05,3,False,reversible_elastic,reversible elastic,0,4077,0.0
+load_increment,1e-05,3,False,reversible_plastic,reversible plastic,3838,4077,0.9413784645572725
+load_increment,1e-05,3,False,irreversible,irreversible,239,4077,0.058621535442727496
+load_increment,1e-05,3,True,reversible_elastic,reversible elastic,0,4752,0.0
+load_increment,1e-05,3,True,reversible_plastic,reversible plastic,4527,4752,0.9526515151515151
+load_increment,1e-05,3,True,irreversible,irreversible,225,4752,0.04734848484848485
+load_increment,5e-05,0,False,reversible_elastic,reversible elastic,0,2946,0.0
+load_increment,5e-05,0,False,reversible_plastic,reversible plastic,2727,2946,0.9256619144602851
+load_increment,5e-05,0,False,irreversible,irreversible,219,2946,0.07433808553971487
+load_increment,5e-05,0,True,reversible_elastic,reversible elastic,0,350,0.0
+load_increment,5e-05,0,True,reversible_plastic,reversible plastic,159,350,0.4542857142857143
+load_increment,5e-05,0,True,irreversible,irreversible,191,350,0.5457142857142857
+load_increment,5e-05,1,False,reversible_elastic,reversible elastic,0,2616,0.0
+load_increment,5e-05,1,False,reversible_plastic,reversible plastic,2407,2616,0.9201070336391437
+load_increment,5e-05,1,False,irreversible,irreversible,209,2616,0.07989296636085627
+load_increment,5e-05,1,True,reversible_elastic,reversible elastic,0,1003,0.0
+load_increment,5e-05,1,True,reversible_plastic,reversible plastic,796,1003,0.7936191425722832
+load_increment,5e-05,1,True,irreversible,irreversible,207,1003,0.20638085742771686
+load_increment,5e-05,2,False,reversible_elastic,reversible elastic,0,2764,0.0
+load_increment,5e-05,2,False,reversible_plastic,reversible plastic,2560,2764,0.9261939218523878
+load_increment,5e-05,2,False,irreversible,irreversible,204,2764,0.07380607814761216
+load_increment,5e-05,2,True,reversible_elastic,reversible elastic,0,724,0.0
+load_increment,5e-05,2,True,reversible_plastic,reversible plastic,561,724,0.7748618784530387
+load_increment,5e-05,2,True,irreversible,irreversible,163,724,0.22513812154696133
+load_increment,5e-05,3,False,reversible_elastic,reversible elastic,0,2998,0.0
+load_increment,5e-05,3,False,reversible_plastic,reversible plastic,2760,2998,0.9206137424949966
+load_increment,5e-05,3,False,irreversible,irreversible,238,2998,0.07938625750500333
+load_increment,5e-05,3,True,reversible_elastic,reversible elastic,0,2319,0.0
+load_increment,5e-05,3,True,reversible_plastic,reversible plastic,2116,2319,0.91246226821906
+load_increment,5e-05,3,True,irreversible,irreversible,203,2319,0.08753773178094006
+load_increment,0.0001,0,False,reversible_elastic,reversible elastic,0,2217,0.0
+load_increment,0.0001,0,False,reversible_plastic,reversible plastic,2023,2217,0.9124943617501128
+load_increment,0.0001,0,False,irreversible,irreversible,194,2217,0.08750563824988723
+load_increment,0.0001,0,True,reversible_elastic,reversible elastic,0,386,0.0
+load_increment,0.0001,0,True,reversible_plastic,reversible plastic,235,386,0.6088082901554405
+load_increment,0.0001,0,True,irreversible,irreversible,151,386,0.3911917098445596
+load_increment,0.0001,1,False,reversible_elastic,reversible elastic,0,2340,0.0
+load_increment,0.0001,1,False,reversible_plastic,reversible plastic,2117,2340,0.9047008547008547
+load_increment,0.0001,1,False,irreversible,irreversible,223,2340,0.0952991452991453
+load_increment,0.0001,1,True,reversible_elastic,reversible elastic,0,590,0.0
+load_increment,0.0001,1,True,reversible_plastic,reversible plastic,416,590,0.7050847457627119
+load_increment,0.0001,1,True,irreversible,irreversible,174,590,0.29491525423728815
+load_increment,0.0001,2,False,reversible_elastic,reversible elastic,0,2625,0.0
+load_increment,0.0001,2,False,reversible_plastic,reversible plastic,2404,2625,0.9158095238095239
+load_increment,0.0001,2,False,irreversible,irreversible,221,2625,0.08419047619047619
+load_increment,0.0001,2,True,reversible_elastic,reversible elastic,0,628,0.0
+load_increment,0.0001,2,True,reversible_plastic,reversible plastic,463,628,0.7372611464968153
+load_increment,0.0001,2,True,irreversible,irreversible,165,628,0.2627388535031847
+load_increment,0.0001,3,False,reversible_elastic,reversible elastic,0,2807,0.0
+load_increment,0.0001,3,False,reversible_plastic,reversible plastic,2558,2807,0.9112931955824723
+load_increment,0.0001,3,False,irreversible,irreversible,249,2807,0.08870680441752761
+load_increment,0.0001,3,True,reversible_elastic,reversible elastic,0,1111,0.0
+load_increment,0.0001,3,True,reversible_plastic,reversible plastic,925,1111,0.8325832583258326
+load_increment,0.0001,3,True,irreversible,irreversible,186,1111,0.16741674167416742

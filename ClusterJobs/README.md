@@ -41,3 +41,38 @@ submission script discovers only the requested batch folders on that server,
 reports missing expected folders, submits a Slurm array, and submits a merge
 job after the array succeeds. It does not delete or modify the raw simulation
 data.
+
+## Targeted elastic-event replay
+
+`replay_elastic_from_dumps.py` selects the first one or two rows with zero
+forward m3 changes after each supplied dump, runs the patched
+`reversibilityProtocolTest` in a private output directory, and saves the five
+states under `elastic_replay_l_*`.  The C++ option
+`saveElasticReversibilityStates` is disabled by default; when enabled, the
+replay performs the backward minimization and records the measured closure
+distance.  `maximumSavedElasticReversibilityStates` is a hard in-process cap;
+enabling elastic saves without a positive cap raises an error.  The driver
+validates both the source and replay macro rows,
+including zero forward m3 change and `is_reversible=1` when that column is
+available.
+
+For example, on a cluster login node:
+
+```bash
+PYTHONPATH=~/simulation/SimulationScripts \
+  python3 ~/simulation/SimulationScripts/ClusterJobs/replay_elastic_from_dumps.py \
+  --source-job /data2/elundheim/MTS2D_output/JOB \
+  --output-root /data2/elundheim/MTS2D_elastic_replays \
+  --mts2d-binary ~/simulation/MTS2D/build-release/MTS2D \
+  --maximum-events-per-dump 2
+```
+
+The raw source job and its dumps are read only.  The output manifest records
+the dump, target load, event directory, and verified forward m3 count.
+
+`replay_selected_real_space_event.py` can instead target one known plastic
+event with `--expected-event-kind plastic`.  Its private configuration enables
+`saveFinalReversibilityState`, disables dumps and ordinary mesh VTUs, and
+suppresses the normal sparse reversibility-snapshot cadence.  Thus a run with
+`--maximum-elastic-events 2` can write at most fifteen VTUs: five for the final
+plastic target and five for each of two elastic examples.

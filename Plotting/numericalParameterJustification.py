@@ -4,9 +4,10 @@ Running this module without arguments regenerates the complete analysis::
 
     .venv/bin/python -m Plotting.numericalParameterJustification
 
-Avalanches are defined only from the measured cycle displacement.  For every
-parameter setting, an exact unbinned Otsu split in ``log10(rev_u_diff)`` is
-computed from all recorded cycles pooled over seeds.  The stored
+Avalanches are defined from measured cycles with a genuine positive
+stress-corrected energy drop.  For every parameter setting, an exact unbinned
+Otsu split in ``log10(rev_u_diff)`` is computed from those cycles pooled over
+seeds.  The stored
 ``is_reversible`` flag is never used.
 """
 
@@ -76,7 +77,11 @@ class SampleData:
     rev_sigma: np.ndarray
     energy_drop_density: np.ndarray
     stress_drop: np.ndarray
+    relaxation_stress_drop: np.ndarray
+    inter_strain_stress_drop: np.ndarray
     relaxation_energy: np.ndarray
+    relaxation_energy_density: np.ndarray
+    inter_strain_energy_density: np.ndarray
     m3_changes: np.ndarray
     participation_fraction: np.ndarray
     m3_participation_fraction: np.ndarray
@@ -89,7 +94,7 @@ class SampleData:
     def avalanche(self) -> np.ndarray:
         if not np.isfinite(self.rev_u_cut) or self.rev_u_cut <= 0:
             raise ValueError(f"Invalid rev_u_cut={self.rev_u_cut} for {self.path}.")
-        return self.rev_u > self.rev_u_cut
+        return real_energy_drop_mask(self) & (self.rev_u > self.rev_u_cut)
 
     @property
     def cycle_recorded(self) -> np.ndarray:
@@ -101,8 +106,31 @@ class SampleData:
 
     @property
     def closing_cycle(self) -> np.ndarray:
-        return self.cycle_recorded & ~self.avalanche
+        return real_energy_drop_mask(self) & ~self.avalanche
 
+
+def real_energy_drop_mask(sample: SampleData) -> np.ndarray:
+    """Return recorded cycles with a genuine positive stress-corrected drop.
+
+    ``energy_drop_density`` is the second-order stress-corrected
+    :math:`\Delta E_S/V_0`.  A non-positive value is an energy increase (or a
+    zero change), even when the reversibility diagnostics contain non-zero
+    values.  Reversible energy/stress plots must use this event-level mask
+    before applying their quantity-specific y-axis filter.
+    """
+    return sample.cycle_recorded & np.isfinite(sample.energy_drop_density) & (
+        sample.energy_drop_density > 0
+    )
+
+
+def real_closing_mask(sample: SampleData) -> np.ndarray:
+    """Positive-\N{GREEK CAPITAL LETTER DELTA}E_S cycles below the rev_u cut."""
+    return real_energy_drop_mask(sample) & ~sample.avalanche
+
+
+def real_avalanche_mask(sample: SampleData) -> np.ndarray:
+    """Positive-\N{GREEK CAPITAL LETTER DELTA}E_S cycles above the rev_u cut."""
+    return real_energy_drop_mask(sample) & sample.avalanche
 
 def _job_name(path: Path) -> str:
     return path.parent.name if path.name == "macroData.csv" else path.stem
@@ -124,6 +152,7 @@ def _read_required_columns(path: Path) -> tuple[pd.DataFrame, str]:
     required = {
         "load",
         "total_energy",
+        "total_energy_change",
         "total_e_change_from_init",
         "avg_sigma12",
         "avg_sigma12_change_from_init",
@@ -176,6 +205,7 @@ def _load_sample(path: Path, config: SimulationConfig, batch: int) -> SampleData
 
     numeric_columns = [
         "total_energy",
+        "total_energy_change",
         "total_e_change_from_init",
         "avg_sigma12",
         "avg_sigma12_change_from_init",
@@ -227,10 +257,16 @@ def _load_sample(path: Path, config: SimulationConfig, batch: int) -> SampleData
         "stress_corrected_drop_second_order"
     ].to_numpy(dtype=float) / volume
     stress_drop = stress_steps["stress_corrected_drop"].to_numpy(dtype=float)
+    relaxation_stress_drop = stress_steps["relaxation_drop"].to_numpy(dtype=float)
+    inter_strain_stress_drop = stress_steps["inter_strain_drop"].to_numpy(dtype=float)
     if not np.all(np.isfinite(energy_drop_density)):
         raise ValueError(f"Non-finite second-order corrected energy drops in {path}.")
     if not np.all(np.isfinite(stress_drop)):
         raise ValueError(f"Non-finite corrected stress drops in {path}.")
+    if not np.all(np.isfinite(relaxation_stress_drop)):
+        raise ValueError(f"Non-finite relaxation stress drops in {path}.")
+    if not np.all(np.isfinite(inter_strain_stress_drop)):
+        raise ValueError(f"Non-finite inter-strain stress drops in {path}.")
 
     gamma = load[1:]
     yield_load = float(findPrePostSplit(df=df))
@@ -249,7 +285,15 @@ def _load_sample(path: Path, config: SimulationConfig, batch: int) -> SampleData
         rev_sigma=df["rev_sigma_12_diff"].to_numpy(dtype=float)[1:],
         energy_drop_density=energy_drop_density,
         stress_drop=stress_drop,
+        relaxation_stress_drop=relaxation_stress_drop,
+        inter_strain_stress_drop=inter_strain_stress_drop,
         relaxation_energy=-df["total_e_change_from_init"].to_numpy(dtype=float)[1:],
+        relaxation_energy_density=(
+            -df["total_e_change_from_init"].to_numpy(dtype=float)[1:] / volume
+        ),
+        inter_strain_energy_density=(
+            -df["total_energy_change"].to_numpy(dtype=float)[1:] / volume
+        ),
         m3_changes=np.rint(m3_changes).astype(np.int32),
         participation_fraction=participation_fraction,
         m3_participation_fraction=m3_participation_fraction,
@@ -340,7 +384,7 @@ def load_batch(batch: int) -> list[SampleData]:
     classified_samples = []
     for setting, setting_samples in _setting_groups(samples, setting_attribute).items():
         recorded_distances = np.concatenate(
-            [sample.rev_u[sample.cycle_recorded] for sample in setting_samples]
+            [sample.rev_u[real_energy_drop_mask(sample)] for sample in setting_samples]
         )
         cut, details = unbinned_log_otsu_cut(recorded_distances)
         print(
@@ -510,12 +554,15 @@ _PARTICIPATION_CATEGORIES = (
 
 def _participation_masks(sample: SampleData) -> dict[str, np.ndarray]:
     changed = sample.m3_changes > 0
-    recorded = sample.cycle_recorded
+    recorded = real_energy_drop_mask(sample)
+    positive_energy = np.isfinite(sample.energy_drop_density) & (
+        sample.energy_drop_density > 0
+    )
     return {
-        "no_m3": ~changed,
-        "closing_m3": sample.closing_cycle & changed,
-        "nonclosing_m3": sample.avalanche & changed,
-        "unrecorded_m3": changed & ~recorded,
+        "no_m3": positive_energy & ~changed,
+        "closing_m3": real_closing_mask(sample) & changed,
+        "nonclosing_m3": real_avalanche_mask(sample) & changed,
+        "unrecorded_m3": positive_energy & changed & ~recorded,
     }
 
 
@@ -787,7 +834,9 @@ def plot_participation_event_metrics(samples: list[SampleData]):
                 masks = _participation_masks(sample)
                 for key, _, color, marker in _PARTICIPATION_CATEGORIES:
                     indices = _sampled_indices(
-                        masks[key] & (sample.post_yield == post_yield)
+                        masks[key]
+                        & real_energy_drop_mask(sample)
+                        & (sample.post_yield == post_yield)
                     )
                     x = np.abs(np.asarray(getattr(sample, field))[indices])
                     y = sample.participation_fraction[indices]
@@ -972,7 +1021,7 @@ def plot_threshold_diagnostics(samples: list[SampleData], attribute: str, name: 
             raise ValueError(f"Inconsistent rev_u cuts for {attribute}={setting}: {cuts}")
         cut = cuts.pop()
         recorded_u = np.concatenate(
-            [sample.rev_u[sample.cycle_recorded] for sample in setting_samples]
+            [sample.rev_u[real_energy_drop_mask(sample)] for sample in setting_samples]
         )
         x, y = _ecdf(recorded_u)
         axes[0].plot(
@@ -987,7 +1036,9 @@ def plot_threshold_diagnostics(samples: list[SampleData], attribute: str, name: 
 
         for post_yield, marker in ((False, "^"), (True, "o")):
             for sample in setting_samples:
-                selected = sample.cycle_recorded & (sample.post_yield == post_yield)
+                selected = real_energy_drop_mask(sample) & (
+                    sample.post_yield == post_yield
+                )
                 x_values = sample.rev_u[selected]
                 for ax, y_values in (
                     (axes[1], np.abs(sample.rev_energy_density[selected])),
@@ -1031,6 +1082,74 @@ def plot_threshold_diagnostics(samples: list[SampleData], attribute: str, name: 
     return _save(fig, name)
 
 
+def plot_energy_drop_vs_rev_u(
+    samples: list[SampleData], attribute: str, name: str
+):
+    groups = _setting_groups(samples, attribute)
+    colors = _colors(len(groups))
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+
+    for color, (setting, setting_samples) in zip(colors, groups.items()):
+        cuts = {sample.rev_u_cut for sample in setting_samples}
+        if len(cuts) != 1:
+            raise ValueError(f"Inconsistent rev_u cuts for {attribute}={setting}: {cuts}")
+        for post_yield, marker in ((False, "^"), (True, "o")):
+            for sample in setting_samples:
+                selected = real_energy_drop_mask(sample) & (
+                    sample.post_yield == post_yield
+                )
+                indices = _sampled_indices(selected)
+                x_values = sample.rev_u[indices]
+                y_values = sample.energy_drop_density[indices]
+                valid = (
+                    np.isfinite(x_values)
+                    & np.isfinite(y_values)
+                    & (x_values > 0)
+                    & (y_values > 0)
+                )
+                ax.scatter(
+                    x_values[valid],
+                    y_values[valid],
+                    marker=marker,
+                    s=18,
+                    facecolors="none",
+                    edgecolors=color,
+                    linewidths=0.8,
+                    alpha=SCATTER_ALPHA,
+                    rasterized=True,
+                )
+        ax.axvline(
+            cuts.pop(),
+            color=color,
+            linestyle=":",
+            linewidth=1.0,
+            alpha=0.8,
+        )
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel(r"$\Delta_{\mathrm{rev}}\mathbf{u}$")
+    ax.set_ylabel(r"$\Delta E_S/V_0$")
+    ax.legend(
+        handles=_setting_handles(groups, attribute, colors)
+        + [
+            Line2D([], [], marker="^", linestyle="None", color="black", label="pre-yield"),
+            Line2D([], [], marker="o", linestyle="None", color="black", label="post-yield"),
+            Line2D(
+                [],
+                [],
+                color="black",
+                linestyle=":",
+                label=r"setting-specific $\Delta_{\rm rev}u$ cut",
+            ),
+        ],
+        loc="upper left",
+        ncol=1,
+        frameon=True,
+    )
+    return _save(fig, name)
+
+
 _CLOSURE_METRICS = (
     ("rev_u", r"$\Delta_{\mathrm{rev}}\mathbf{u}$", 1.0),
     ("rev_energy_density", r"$|\Delta_{\mathrm{rev}}E|/V_0$", 2.0),
@@ -1039,7 +1158,8 @@ _CLOSURE_METRICS = (
 
 
 def _sample_closing_values(sample: SampleData, field: str) -> np.ndarray:
-    values = np.asarray(getattr(sample, field), dtype=float)[sample.closing_cycle]
+    closing_real_drop = real_closing_mask(sample)
+    values = np.asarray(getattr(sample, field), dtype=float)[closing_real_drop]
     return values if field == "rev_u" else np.abs(values)
 
 
@@ -1189,7 +1309,7 @@ def plot_closing_collapses(samples: list[SampleData]):
 def _sample_rate_rows(samples: list[SampleData], attribute: str) -> pd.DataFrame:
     rows = []
     for sample in samples:
-        avalanche_count = int(np.sum(sample.avalanche))
+        avalanche_count = int(np.sum(real_avalanche_mask(sample)))
         rows.append(
             {
                 "setting": float(getattr(sample, attribute)),
@@ -1199,8 +1319,8 @@ def _sample_rate_rows(samples: list[SampleData], attribute: str) -> pd.DataFrame
                 "avalanche_count": avalanche_count,
                 "P_av": avalanche_count / sample.gamma.size,
                 "rate": avalanche_count / sample.exposure,
-                "recorded_cycles": int(np.sum(sample.cycle_recorded)),
-                "closing_cycles": int(np.sum(sample.closing_cycle)),
+                "recorded_cycles": int(np.sum(real_energy_drop_mask(sample))),
+                "closing_cycles": int(np.sum(real_closing_mask(sample))),
             }
         )
     return pd.DataFrame(rows)
@@ -1358,7 +1478,8 @@ def plot_local_rates(samples: list[SampleData]):
         for color, (delta_gamma, setting_samples) in zip(colors, groups.items()):
             rates = np.asarray(
                 [
-                    np.histogram(sample.gamma[sample.avalanche], bins=edges)[0] / widths
+                    np.histogram(sample.gamma[real_avalanche_mask(sample)], bins=edges)[0]
+                    / widths
                     for sample in setting_samples
                 ]
             )
@@ -1429,7 +1550,12 @@ def plot_avalanche_size_ccdf(samples: list[SampleData], attribute: str, name: st
         linestyle = _setting_linestyle(attribute, setting)
         for ax, (field, xlabel) in zip(axes, quantities):
             raw_values = np.concatenate(
-                [getattr(sample, field)[sample.avalanche] for sample in setting_samples]
+                [
+                    getattr(sample, field)[
+                        real_avalanche_mask(sample)
+                    ]
+                    for sample in setting_samples
+                ]
             )
             values = raw_values[np.isfinite(raw_values) & (raw_values > 0)]
             count_rows.append(
@@ -1573,6 +1699,7 @@ def plot_elastic_energy_collapses(samples: list[SampleData]):
                 for sample in setting_samples:
                     definitely_elastic = (
                         (sample.m3_changes == 0)
+                        & real_energy_drop_mask(sample)
                         & ~sample.avalanche
                         & (sample.post_yield == post_yield)
                     )
@@ -1624,9 +1751,13 @@ def _write_classification_summary(samples: list[SampleData], tag: str):
                 "eps_x": sample.eps_x,
                 "steps": sample.gamma.size,
                 "exposure": sample.exposure,
-                "recorded_cycles": int(np.sum(sample.cycle_recorded)),
-                "closing_cycles": int(np.sum(sample.closing_cycle)),
-                "avalanches": int(np.sum(sample.avalanche)),
+                "recorded_cycles": int(np.sum(real_energy_drop_mask(sample))),
+                "closing_cycles": int(
+                    np.sum(real_closing_mask(sample))
+                ),
+                "avalanches": int(
+                    np.sum(real_avalanche_mask(sample))
+                ),
                 "rev_u_cut": sample.rev_u_cut,
             }
         )
@@ -1638,7 +1769,7 @@ def _write_classification_summary(samples: list[SampleData], tag: str):
     threshold_rows = []
     for setting, setting_samples in _setting_groups(samples, attribute).items():
         recorded = np.concatenate(
-            [sample.rev_u[sample.cycle_recorded] for sample in setting_samples]
+            [sample.rev_u[real_energy_drop_mask(sample)] for sample in setting_samples]
         )
         cut, details = unbinned_log_otsu_cut(recorded)
         stored_cuts = {sample.rev_u_cut for sample in setting_samples}
@@ -1714,6 +1845,11 @@ def main() -> None:
         "eps_x",
         "threshold_diagnostics_vs_epsilon_x",
     )
+    plot_energy_drop_vs_rev_u(
+        epsilon_samples,
+        "eps_x",
+        "energy_drop_vs_rev_u_epsilon_x",
+    )
     plot_closing_quantile_scaling(epsilon_samples)
     plot_closing_collapses(epsilon_samples)
     _plot_epsilon_participation(epsilon_samples)
@@ -1737,6 +1873,11 @@ def main() -> None:
         delta_gamma_samples,
         "load_increment",
         "threshold_diagnostics_vs_delta_gamma",
+    )
+    plot_energy_drop_vs_rev_u(
+        delta_gamma_samples,
+        "load_increment",
+        "energy_drop_vs_rev_u_delta_gamma",
     )
     _plot_delta_gamma_participation(delta_gamma_samples)
     plot_global_rate_vs_delta_gamma(delta_gamma_samples)

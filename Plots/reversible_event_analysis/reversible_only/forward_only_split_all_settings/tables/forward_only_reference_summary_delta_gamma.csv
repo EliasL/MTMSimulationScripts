@@ -1,0 +1,6 @@
+setting,setting_attribute,sample_count,event_count,reference_reversible_count,reference_irreversible_count,discarded_island_count
+1e-06,load_increment,4,23644,21692,1952,0
+5e-06,load_increment,4,25218,23319,1899,0
+1e-05,load_increment,4,26674,24826,1848,0
+5e-05,load_increment,4,15720,14086,1634,0
+0.0001,load_increment,4,12704,11141,1563,0

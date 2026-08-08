@@ -1,0 +1,222 @@
+{
+  "FIRE": {
+    "source_paths": [
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s1/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s2/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s3/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s4/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s5/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s6/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s7/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s8/macroData.csv",
+      "/Volumes/data/MTS2D_output/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s9/macroData.csv"
+    ],
+    "n_seeds": 10,
+    "seeds_with_drops": 10,
+    "empty_post_regime_seeds": [],
+    "seed_drop_counts": [
+      41749,
+      41643,
+      43080,
+      41715,
+      43600,
+      38606,
+      36481,
+      41240,
+      43338,
+      43239
+    ],
+    "seed_strain_limits": [
+      [
+        0.5824900000000001,
+        1.0
+      ],
+      [
+        0.58355,
+        1.0
+      ],
+      [
+        0.56918,
+        1.0
+      ],
+      [
+        0.58283,
+        1.0
+      ],
+      [
+        0.56398,
+        1.0
+      ],
+      [
+        0.61393,
+        1.0
+      ],
+      [
+        0.63518,
+        1.0
+      ],
+      [
+        0.5875900000000001,
+        1.0
+      ],
+      [
+        0.5666100000000001,
+        1.0
+      ],
+      [
+        0.5676,
+        1.0
+      ]
+    ],
+    "n_drops": 414691
+  },
+  "CG": {
+    "source_paths": [
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s1.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s2.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s3.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s4.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s5.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s6.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s7.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s8.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s9.csv"
+    ],
+    "n_seeds": 10,
+    "seeds_with_drops": 10,
+    "empty_post_regime_seeds": [],
+    "seed_drop_counts": [
+      1827,
+      4271,
+      8860,
+      9870,
+      5104,
+      7716,
+      10932,
+      14875,
+      14651,
+      19264
+    ],
+    "seed_strain_limits": [
+      [
+        0.61856,
+        0.63684
+      ],
+      [
+        0.60657,
+        0.64929
+      ],
+      [
+        0.56968,
+        0.6583
+      ],
+      [
+        0.56638,
+        0.66511
+      ],
+      [
+        0.5796,
+        0.63066
+      ],
+      [
+        0.5867,
+        0.66388
+      ],
+      [
+        0.55702,
+        0.66636
+      ],
+      [
+        0.56285,
+        0.71163
+      ],
+      [
+        0.5792700000000001,
+        0.7258
+      ],
+      [
+        0.53137,
+        0.72404
+      ]
+    ],
+    "n_drops": 97370
+  },
+  "LBFGS": {
+    "source_paths": [
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s0.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s1.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s2.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s3.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s4.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s5.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s6.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s7.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s8.csv",
+      "/Volumes/data/remoteData/macro/simpleShear,s200x200l0.15,1e-05,1.0PBCt3LBFGSEpsg1e-05CGEpsg1e-05eps1e-05s9.csv"
+    ],
+    "n_seeds": 10,
+    "seeds_with_drops": 7,
+    "empty_post_regime_seeds": [
+      1,
+      5,
+      6
+    ],
+    "seed_drop_counts": [
+      881,
+      0,
+      1354,
+      4029,
+      4946,
+      0,
+      0,
+      4092,
+      3338,
+      1116
+    ],
+    "seed_strain_limits": [
+      [
+        0.57426,
+        0.58308
+      ],
+      [
+        0.6049100000000001,
+        0.59491
+      ],
+      [
+        0.589,
+        0.60255
+      ],
+      [
+        0.5639500000000001,
+        0.60425
+      ],
+      [
+        0.5724400000000001,
+        0.62191
+      ],
+      [
+        0.35985,
+        0.35003
+      ],
+      [
+        0.52303,
+        0.51348
+      ],
+      [
+        0.58986,
+        0.63079
+      ],
+      [
+        0.56088,
+        0.59427
+      ],
+      [
+        0.57269,
+        0.58386
+      ]
+    ],
+    "n_drops": 19756
+  }
+}

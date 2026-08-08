@@ -1,0 +1,15 @@
+{
+  "reversible_population": "positive Delta E_S cycles classified by setting-wise unbinned log-Otsu split of Delta_rev u",
+  "secondary_epsilon_rules": {
+    "1e-5": "discard Delta_rev u <= 1e-6, then Otsu-split the remainder into reversible and irreversible",
+    "1e-4": "discard the first lower Otsu population, then split the remainder into reversible and irreversible",
+    "other settings": "one Otsu split into reversible and irreversible; discard nothing"
+  },
+  "energy_fields": {
+    "R": "relaxation_energy_density",
+    "S": "energy_drop_density",
+    "I": "inter_strain_energy_density"
+  },
+  "simpleDrop_search_max_xmin": 0.0001,
+  "xmin_refinement": "coarse_scan"
+}

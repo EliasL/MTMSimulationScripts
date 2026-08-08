@@ -2484,12 +2484,13 @@ def _resolve_stress_column(df, macro_data):
         )
         return "avg_RSS", r"\mathrm{RSS}"
     if "avg_P12" in df.columns:
-        print(
-            f"Warning: 'avg_sigmaxy' not found in {macro_data}. Using 'avg_Pxy' instead."
+        raise KeyError(
+            f"Missing avg_sigma12 in {macro_data}; refusing to use avg_P12 "
+            "as a sigma12 substitute."
         )
-        return "avg_P12", r"P_{xy}"
     raise KeyError(
-        "Missing stress column: expected 'avg_sigmaxy' (or fallback 'avg_RSS'/'avg_Pxy')."
+        "Missing stress column: expected native 'avg_sigma12' "
+        "(or an explicitly requested avg_RSS diagnostic)."
     )
 
 
