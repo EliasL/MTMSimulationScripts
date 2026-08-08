@@ -530,33 +530,43 @@ def plot_stress(
         )  # Adjust the width based on the aspect ratio
         figsize = (fig_width, base_height)  # Create the dynamic figsize
         _, ax = plt.subplots(1, 1, figsize=figsize)
-    # If the alg does not have results, we are done
-    if alg not in results.keys():
+    # If the requested algorithm does not have results, we are done.
+    if alg != "all" and alg not in results.keys():
         return
-    # Plot the energy for each optimization method
+
+    # Plot either the gradient norm or the objective value for each method.
     for method, data in results.items():
         if alg != "all" and alg != method:
             continue
-        if alg == "all" or alg == "L-BFGS":
-            ax.set_ylabel(r"$|\Delta f(\mathbf{x})|$")
 
         # Decide whether to plot against iterations or function evaluations
         if itOrFeval == "f-eval":
-            # Get the energy data to plot
-            stress_lists = data["f-eval_stress"]
+            # f-eval_stress stores the two components of grad f at every
+            # function evaluation.  The plotted quantity is its Euclidean norm.
+            value_lists = data["f-eval_stress"]
+            ylabel = r"$\|\nabla f(\mathbf{x})\|_2$"
             ax.set_xlabel("Function evaluations")
         elif itOrFeval == "iterations":
-            # Get the energy data to plot
-            stress_lists = data["path_energy"]
-            ax.set_xlabel("Itterations")
+            # path_energy contains the objective value at each optimizer path
+            # point, so plot it directly rather than taking a vector norm.
+            value_lists = data["path_energy"]
+            ylabel = r"$f(\mathbf{x})$"
+            ax.set_xlabel("Iterations")
         else:
             raise ValueError(f"Unknown option for itOrFeval: {itOrFeval}")
-        # Plot energy vs iteration/f-eval for each path
-        for i, stress in enumerate(stress_lists):
-            stress_mag = np.linalg.norm(stress, axis=1)
+
+        if alg == "all" or alg == "L-BFGS":
+            ax.set_ylabel(ylabel)
+
+        # Plot the selected quantity against iteration/function-evaluation count.
+        for i, values in enumerate(value_lists):
+            if itOrFeval == "f-eval":
+                values = np.linalg.norm(values, axis=1)
+            else:
+                values = np.asarray(values)
             ax.plot(
-                range(1, len(stress) + 1),  # X-axis is iteration or f-eval count
-                stress_mag,  # Y-axis is energy
+                range(1, len(values) + 1),
+                values,
                 styles[method],  # Use predefined style for the method
                 label=method,
                 color=colors[method],
@@ -589,7 +599,10 @@ def plot_stress(
     elif results is not None:
         ax.legend()
 
-    ax.set_yscale("log")
+    # A gradient norm is positive and is useful on a logarithmic scale.  The
+    # objective value may be negative, so keep the iteration/energy view linear.
+    if itOrFeval == "f-eval":
+        ax.set_yscale("log")
     # Layout and save figure
     # plt.tight_layout()
     # This gets the directory of the script
@@ -736,8 +749,18 @@ def explore_six_hump_camel_different_minima():
 
     algorithms = ["L-BFGS", "CG", "FIRE"]
     labels = ["(a)", "(b)", "(c)"]
+    # Use the same per-evaluation gradient norm as plot_stress when choosing
+    # common y-limits for the three panels.
     y_values = np.concatenate(
-        [np.linalg.norm(results[alg]["f-eval_stress"], axis=0) for alg in algorithms]
+        [
+            np.concatenate(
+                [
+                    np.linalg.norm(gradient, axis=1)
+                    for gradient in results[alg]["f-eval_stress"]
+                ]
+            )
+            for alg in algorithms
+        ]
     )
 
     global_y_min = np.min(y_values) * 1.7
@@ -834,8 +857,18 @@ def explore_six_hump_camel():
 
     algorithms = ["L-BFGS", "CG", "FIRE"]
     labels = ["(a)", "(b)", "(c)"]
+    # Use the same per-evaluation gradient norm as plot_stress when choosing
+    # common y-limits for the three panels.
     y_values = np.concatenate(
-        [np.linalg.norm(results[alg]["f-eval_stress"], axis=0) for alg in algorithms]
+        [
+            np.concatenate(
+                [
+                    np.linalg.norm(gradient, axis=1)
+                    for gradient in results[alg]["f-eval_stress"]
+                ]
+            )
+            for alg in algorithms
+        ]
     )
 
     global_y_min = np.min(y_values) * 1.7
