@@ -5,9 +5,8 @@ bootstrapData
 .DS_Store
 _*
 MTS2D_reversibility_dump/
-Plots/powerLaw/**/cache/
-Plots/powerLaw/*_cache/
 /tmp/
 *.log
 *_data
 output
+cache

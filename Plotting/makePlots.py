@@ -735,7 +735,13 @@ def makePlot(
         if reverse_x_axis is None:
             # Check if we should reverse the x axis
             # We do this by checking which direction the X values go in by index
-            if df[X][1] - df[X][0] < 0:
+            x_values = df[X]
+            if len(x_values) < 2:
+                raise ValueError(
+                    f"Cannot determine the direction of X={X!r} in {csv_file_path}: "
+                    "the data contains fewer than two rows."
+                )
+            if x_values.iloc[1] - x_values.iloc[0] < 0:
                 reverse_x_axis = True
             else:
                 reverse_x_axis = False

@@ -98,6 +98,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import textwrap
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Sequence
@@ -108,13 +109,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from Management.jobs import size_scaling_job
 try:
     from Management.updateCSV import HEADER_RENAME_MAP
 except ModuleNotFoundError as error:
     # Cluster runner environments intentionally need only the CSV aliases and
     # standard-library replay code; pandas is not required to run a segment.
-    if error.name != "pandas":
+    if error.name not in {"pandas", "Management.updateCSV"}:
         raise
     HEADER_RENAME_MAP = {
         "Load": "load",
@@ -184,6 +184,7 @@ EVOLUTION_VALIDATION_COLUMNS = (
 _DUMP_LOAD_PATTERN = re.compile(
     r"_l(?P<load>-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)"
 )
+REMOTE_INVENTORY_TIMEOUT = 900
 
 _REMOTE_INVENTORY_SCRIPT = r'''
 import gzip
@@ -218,18 +219,32 @@ def state(path):
         return None, None
     opener = gzip.open if path.name.endswith(".gz") else open
     load = step = None
-    with opener(path, "rt", encoding="utf-8") as stream:
-        for line in stream:
-            if load is None:
-                match = re.search(r"<load>([^<]+)</load>", line)
-                if match:
-                    load = float(match.group(1))
-            if step is None:
-                match = re.search(r"<loadSteps>([^<]+)</loadSteps>", line)
-                if match:
-                    step = int(match.group(1))
+    patterns = (
+        (b"load", re.compile(rb"<load>([^<]+)</load>")),
+        (b"loadSteps", re.compile(rb"<loadSteps>([^<]+)</loadSteps>")),
+    )
+    # Dump metadata is near the end of very large XML files.  Scanning decoded
+    # Python lines makes a full inventory unnecessarily slow; scan bytes in
+    # large chunks and retain only a short boundary for split tags instead.
+    with opener(path, "rb") as stream:
+        tail = b""
+        while True:
+            chunk = stream.read(4 * 1024 * 1024)
+            if not chunk:
+                break
+            data = tail + chunk
+            for tag, pattern in patterns:
+                if tag == b"load" and load is None:
+                    match = pattern.search(data)
+                    if match:
+                        load = float(match.group(1))
+                elif tag == b"loadSteps" and step is None:
+                    match = pattern.search(data)
+                    if match:
+                        step = int(match.group(1))
             if load is not None and step is not None:
                 return load, step
+            tail = data[-64:]
     raise ValueError(f"Dump has no load/loadSteps metadata: {path}")
 
 dumps = sorted(
@@ -378,6 +393,8 @@ class ValidationTolerance:
 
 def expected_run_names(reconnection: str = "none") -> dict[str, tuple[int, int]]:
     """Reuse the canonical job generator instead of duplicating run names."""
+
+    from Management.jobs import size_scaling_job
 
     groups, _ = size_scaling_job(reconnection=reconnection)
     return {
@@ -597,8 +614,40 @@ def remote_inventory(
     format_era: str,
     fingerprint_dumps: bool = False,
     read_dump_states: bool = False,
+    cache_path: Path | None = None,
 ) -> dict[str, object]:
     """Collect remote config/macro/dump metadata without copying large files."""
+
+    if cache_path is not None:
+        cache_path = Path(cache_path).expanduser().resolve()
+        if cache_path.exists():
+            try:
+                inventory = json.loads(cache_path.read_text())
+            except (OSError, json.JSONDecodeError) as error:
+                raise RuntimeError(f"Invalid remote inventory cache: {cache_path}") from error
+            expected_folder = str(Path(source_folder).resolve())
+            if inventory.get("folder") != expected_folder:
+                raise ValueError(
+                    f"Remote inventory cache path mismatch: {cache_path}; "
+                    f"expected {expected_folder}, got {inventory.get('folder')}"
+                )
+            if not inventory.get("dumps"):
+                raise ValueError(f"Remote inventory cache has no dumps: {cache_path}")
+            if read_dump_states and any(
+                dump.get("state_load") is None or dump.get("state_step") is None
+                for dump in inventory["dumps"]
+            ):
+                raise ValueError(
+                    f"Remote inventory cache lacks exact dump states: {cache_path}"
+                )
+            if fingerprint_dumps and any(
+                dump.get("sha256") in (None, "not-computed")
+                for dump in inventory["dumps"]
+            ):
+                raise ValueError(
+                    f"Remote inventory cache lacks dump fingerprints: {cache_path}"
+                )
+            return inventory
 
     try:
         completed = subprocess.run(
@@ -610,12 +659,13 @@ def remote_inventory(
             input=_REMOTE_INVENTORY_SCRIPT,
             text=True,
             capture_output=True,
-            timeout=60,
+            timeout=REMOTE_INVENTORY_TIMEOUT,
             check=False,
         )
     except subprocess.TimeoutExpired as error:
         raise TimeoutError(
-            f"Remote inventory exceeded 60 seconds on {server} for {source_folder}."
+            f"Remote inventory exceeded {REMOTE_INVENTORY_TIMEOUT} seconds on "
+            f"{server} for {source_folder}."
         ) from error
     if completed.returncode != 0:
         raise RuntimeError(
@@ -636,6 +686,11 @@ def remote_inventory(
         )
     if not inventory.get("dumps"):
         raise FileNotFoundError(f"No dumps found in remote source {source_folder}")
+    if cache_path is not None:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = cache_path.with_name(f".{cache_path.name}.partial")
+        temporary.write_text(json.dumps(inventory, indent=2) + "\n")
+        os.replace(temporary, cache_path)
     return inventory
 
 
@@ -713,6 +768,7 @@ def prepare_remote_plan(
     reconnection: str = "none",
     fingerprint_dumps: bool = False,
     read_dump_states: bool = False,
+    inventory_cache: Path | None = None,
 ) -> Path:
     """Build a local plan from a remote source and a local macro CSV."""
 
@@ -725,6 +781,7 @@ def prepare_remote_plan(
         format_era=format_era,
         fingerprint_dumps=fingerprint_dumps,
         read_dump_states=read_dump_states,
+        cache_path=inventory_cache,
     )
     if not read_dump_states:
         raise ValueError(
@@ -1569,6 +1626,24 @@ def _validate_replay(
             f"Replay {replay_macro} has no native {CORRECT_SIGMA_COLUMN}; "
             "refusing to use a P12 substitute."
         )
+    if "avg_P12" not in replay_header:
+        raise KeyError(
+            f"Replay {replay_macro} has no avg_P12 diagnostic required for the "
+            "sigma-copy guard."
+        )
+    high_strain_rows = [
+        row for row in replay_rows if _row_key(row)[1] > 0.3
+    ]
+    if high_strain_rows and all(
+        _numeric(row, CORRECT_SIGMA_COLUMN, replay_macro)
+        == _numeric(row, "avg_P12", replay_macro)
+        for row in high_strain_rows
+    ):
+        raise ValueError(
+            f"Replay {replay_macro} has avg_sigma12 identical to avg_P12 for "
+            f"all {len(high_strain_rows)} rows above strain 0.3; refusing a "
+            "copied P12 trace."
+        )
     source_by_step: dict[int, dict[str, str]] = {}
     for row in source_rows:
         step, _ = _row_key(row)
@@ -1694,6 +1769,34 @@ def validate_prefix(
     )
 
 
+def run_and_validate_segment(
+    segment: SegmentPlan, *, executable: Path
+) -> Path:
+    """Run one independent dump replay and validate it before job success."""
+
+    replay_macro = run_segment(segment, executable=executable)
+    source_macro = _source_folder_from_dump(Path(segment.start_dump.path)) / "macroData.csv"
+    return validate_segment(
+        segment,
+        replay_macro,
+        source_macro,
+        ValidationTolerance(),
+    )
+
+
+def run_and_validate_prefix(prefix: PrefixPlan, *, executable: Path) -> Path:
+    """Run one from-scratch prefix and validate it before job success."""
+
+    replay_macro = run_prefix_plan(prefix, executable=executable)
+    source_macro = Path(prefix.source_config).resolve().parent / "macroData.csv"
+    return validate_prefix(
+        prefix,
+        replay_macro,
+        source_macro,
+        ValidationTolerance(),
+    )
+
+
 def stitch_rescued_sigma(
     source: SourceRun,
     intervals: Sequence[SchemaInterval],
@@ -1797,25 +1900,210 @@ def stitch_rescued_sigma(
     return destination
 
 
-def submit_segments(
-    segments_manifest: Path,
-    *,
-    server: str,
-    dry_run: bool = True,
-) -> None:
-    """Prepare Slurm work; submission must remain dry-run by default.
+RESCUE_THREADS_BY_SIZE = {50: 2, 100: 3, 150: 4, 200: 8, 250: 8}
+RESCUE_ARRAY_CONCURRENCY = {2: 16, 3: 12, 4: 10, 8: 6}
 
-    During L=50 testing, reuse ``queueLocalJobs.get_batch_script`` for a few
-    explicit jobs.  Before full scale, implement a Slurm array where each task
-    reads exactly one immutable JSONL record and invokes ``run-segment``.  Reuse
-    ``runOnCluster.run_remote_command`` for the final remote submission.  Print
-    resolved source/output paths, task count, CPUs, memory and time limits in a
-    dry run, and require an explicit ``--submit`` switch for external changes.
+
+def _remote_rescue_root(source_folder: str, campaign_name: str) -> Path:
+    source = Path(source_folder)
+    if source.parent.name != "MTS2D_output":
+        raise ValueError(f"Unexpected source layout: {source}")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", campaign_name):
+        raise ValueError(f"Unsafe campaign name: {campaign_name!r}")
+    return source.parent.parent / "MTS2D_sigma_rescue" / campaign_name
+
+
+def render_submission_campaign(
+    plan_root: Path,
+    destination: Path,
+    *,
+    campaign_name: str,
+    executable: str = "/home/elundheim/simulation/MTS2D/build-release/MTS2D",
+) -> Path:
+    """Render immutable server-local manifests and Slurm arrays without submitting.
+
+    The planning manifests deliberately remain unchanged.  Submission copies
+    replace only their output directories, placing each replay on the same
+    cluster filesystem as its immutable source dump.
     """
 
-    if dry_run:
-        raise NotImplementedError("Dry-run rendering has not been implemented yet.")
-    raise RuntimeError("Submission is disabled in the sigma-rescue skeleton.")
+    plan_root = Path(plan_root).expanduser().resolve()
+    destination = Path(destination).expanduser().resolve()
+    if destination.exists():
+        raise FileExistsError(f"Refusing to overwrite submission: {destination}")
+    plan_paths = sorted(plan_root.glob("L*_s*/plan.json"))
+    if not plan_paths:
+        raise FileNotFoundError(f"No frozen plans below {plan_root}")
+
+    grouped_tasks: dict[tuple[str, int], list[tuple[str, str]]] = {}
+    server_roots: dict[str, Path] = {}
+    server_directories: dict[str, Path] = {}
+    output_directories: set[str] = set()
+    sources: set[tuple[int, int]] = set()
+
+    for plan_path in plan_paths:
+        plan = json.loads(plan_path.read_text())
+        source = plan["source"]
+        size, seed = int(source["size"]), int(source["seed"])
+        identity = (size, seed)
+        if identity in sources:
+            raise ValueError(f"Duplicate frozen plan identity: {identity}")
+        sources.add(identity)
+        try:
+            threads = RESCUE_THREADS_BY_SIZE[size]
+        except KeyError as error:
+            raise ValueError(f"Unsupported rescue size: {size}") from error
+        server = str(source["server"])
+        short_server = server.split(".", 1)[0]
+        remote_root = _remote_rescue_root(str(source["folder"]), campaign_name)
+        previous_root = server_roots.setdefault(server, remote_root)
+        if previous_root != remote_root:
+            raise ValueError(
+                f"One server maps to multiple rescue roots: {server}: "
+                f"{previous_root}, {remote_root}"
+            )
+        local_server = server_directories.setdefault(
+            server, destination / short_server
+        )
+        manifest_root = local_server / "stage" / "manifests"
+        remote_manifest_root = remote_root / "stage" / "manifests"
+
+        prefix_data = dict(plan["prefix"])
+        if not prefix_data:
+            raise ValueError(f"Frozen plan has no prefix: {plan_path}")
+        prefix_data["output_directory"] = str(
+            remote_root / "outputs" / "prefix" / source["name"]
+            / re.sub(r"[^A-Za-z0-9.-]", "", prefix_data["prefix_id"])
+        )
+        prefix_name = (
+            "prefix_" + re.sub(r"[^A-Za-z0-9.-]", "", prefix_data["prefix_id"])
+            + ".json"
+        )
+        prefix_path = manifest_root / prefix_name
+        prefix_path.parent.mkdir(parents=True, exist_ok=True)
+        prefix_path.write_text(json.dumps(prefix_data, indent=2) + "\n")
+        remote_prefix_path = str(remote_manifest_root / prefix_name)
+        grouped_tasks.setdefault((server, threads), []).append(
+            ("prefix", remote_prefix_path)
+        )
+        output_directories.add(prefix_data["output_directory"])
+
+        for segment_data_original in plan["segments"]:
+            segment_data = dict(segment_data_original)
+            safe_id = re.sub(r"[^A-Za-z0-9.-]", "", segment_data["segment_id"])
+            segment_data["output_directory"] = str(
+                remote_root / "outputs" / "segments" / source["name"] / safe_id
+            )
+            segment_name = f"segment_{safe_id}.json"
+            segment_path = manifest_root / segment_name
+            if segment_path.exists():
+                raise FileExistsError(f"Duplicate segment manifest: {segment_path}")
+            segment_path.write_text(json.dumps(segment_data, indent=2) + "\n")
+            grouped_tasks.setdefault((server, threads), []).append(
+                ("segment", str(remote_manifest_root / segment_name))
+            )
+            if segment_data["output_directory"] in output_directories:
+                raise ValueError(
+                    f"Duplicate rescue output: {segment_data['output_directory']}"
+                )
+            output_directories.add(segment_data["output_directory"])
+
+    arrays = []
+    for (server, threads), tasks in sorted(grouped_tasks.items()):
+        short_server = server.split(".", 1)[0]
+        local_server = server_directories[server]
+        remote_root = server_roots[server]
+        stage_root = local_server / "stage"
+        management = stage_root / "Management"
+        arrays_root = stage_root / "arrays"
+        logs_root = local_server / "logs"
+        management.mkdir(parents=True, exist_ok=True)
+        arrays_root.mkdir(parents=True, exist_ok=True)
+        logs_root.mkdir(parents=True, exist_ok=True)
+        (management / "__init__.py").write_text("")
+        (management / "sigmaRescue.py").write_text(Path(__file__).read_text())
+
+        task_name = f"t{threads}.tasks.tsv"
+        task_path = arrays_root / task_name
+        task_path.write_text(
+            "".join(f"{kind}\t{manifest}\n" for kind, manifest in tasks)
+        )
+        remote_task_path = remote_root / "stage" / "arrays" / task_name
+        remote_runner = remote_root / "stage" / "Management" / "sigmaRescue.py"
+        job_name = f"sigR_{short_server}_t{threads}"
+        concurrency = RESCUE_ARRAY_CONCURRENCY[threads]
+        script_name = f"t{threads}.sbatch"
+        script_path = arrays_root / script_name
+        script_path.write_text(
+            textwrap.dedent(
+                f"""\
+                #!/bin/bash
+                #SBATCH --job-name={job_name}
+                #SBATCH --time=5-00:00:00
+                #SBATCH --nodes=1
+                #SBATCH --ntasks=1
+                #SBATCH --cpus-per-task={threads}
+                #SBATCH --array=0-{len(tasks) - 1}%{concurrency}
+                #SBATCH --output={remote_root}/logs/{job_name}_%A_%a.out
+                #SBATCH --error={remote_root}/logs/{job_name}_%A_%a.err
+
+                set -euo pipefail
+                export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+                export OMP_PLACES=cores
+                export OMP_PROC_BIND=close
+
+                task_line=$(sed -n "$((SLURM_ARRAY_TASK_ID + 1))p" "{remote_task_path}")
+                IFS=$'\\t' read -r task_kind manifest <<< "$task_line"
+                test -n "$task_kind"
+                test -f "$manifest"
+                case "$task_kind" in
+                  prefix)
+                    command_name=run-prefix-task
+                    manifest_flag=--prefix-json
+                    ;;
+                  segment)
+                    command_name=run-segment-task
+                    manifest_flag=--segment-json
+                    ;;
+                  *)
+                    echo "Unknown task kind: $task_kind" >&2
+                    exit 2
+                    ;;
+                esac
+                srun --cpu-bind=cores --distribution=block:block \\
+                  python3 -u "{remote_runner}" "$command_name" \\
+                  "$manifest_flag" "$manifest" --executable "{executable}"
+                """
+            )
+        )
+        os.chmod(script_path, 0o755)
+        arrays.append(
+            {
+                "server": server,
+                "threads": threads,
+                "tasks": len(tasks),
+                "max_concurrent": concurrency,
+                "remote_root": str(remote_root),
+                "remote_script": str(remote_root / "stage" / "arrays" / script_name),
+                "remote_tasks": str(remote_task_path),
+                "executable": executable,
+            }
+        )
+
+    campaign = {
+        "status": "rendered-not-submitted",
+        "campaign_name": campaign_name,
+        "plan_root": str(plan_root),
+        "runner_sha256": sha256_file(Path(__file__)),
+        "source_runs": len(sources),
+        "tasks": sum(array["tasks"] for array in arrays),
+        "output_directories": len(output_directories),
+        "arrays": arrays,
+    }
+    destination.mkdir(parents=True, exist_ok=True)
+    campaign_path = destination / "campaign.json"
+    campaign_path.write_text(json.dumps(campaign, indent=2) + "\n")
+    return campaign_path
 
 
 def segment_to_json(segment: SegmentPlan, path: Path) -> Path:
@@ -1894,6 +2182,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prefix_plan_parser.add_argument("--prefix-json", type=Path, required=True)
     prefix_plan_parser.add_argument("--executable", type=Path, required=True)
+    segment_task_parser = subparsers.add_parser(
+        "run-segment-task", help="Run and validate one frozen segment."
+    )
+    segment_task_parser.add_argument("--segment-json", type=Path, required=True)
+    segment_task_parser.add_argument("--executable", type=Path, required=True)
+    prefix_task_parser = subparsers.add_parser(
+        "run-prefix-task", help="Run and validate one frozen prefix."
+    )
+    prefix_task_parser.add_argument("--prefix-json", type=Path, required=True)
+    prefix_task_parser.add_argument("--executable", type=Path, required=True)
     smoke_parser = subparsers.add_parser(
         "loader-smoke", help="Load one frozen dump into a private smoke-test tree."
     )
@@ -1933,6 +2231,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Read exact load/step values from compressed dumps before planning.",
     )
+    prepare_parser.add_argument(
+        "--inventory-cache",
+        type=Path,
+        help="Read/write a persistent exact dump metadata cache.",
+    )
     inventory_parser = subparsers.add_parser(
         "inventory-remote",
         help="Collect lightweight remote file metadata without planning jobs.",
@@ -1942,6 +2245,17 @@ def build_parser() -> argparse.ArgumentParser:
     inventory_parser.add_argument("--format-era", required=True)
     inventory_parser.add_argument("--fingerprint-dumps", action="store_true")
     inventory_parser.add_argument("--read-dump-states", action="store_true")
+    render_parser = subparsers.add_parser(
+        "render-submission",
+        help="Render server-local manifests and Slurm arrays without submitting.",
+    )
+    render_parser.add_argument("--plan-root", type=Path, required=True)
+    render_parser.add_argument("--destination", type=Path, required=True)
+    render_parser.add_argument("--campaign-name", required=True)
+    render_parser.add_argument(
+        "--executable",
+        default="/home/elundheim/simulation/MTS2D/build-release/MTS2D",
+    )
     return parser
 
 
@@ -1970,6 +2284,18 @@ def main() -> int:
             prefix_from_json(args.prefix_json), executable=args.executable
         )
         print(prefix_macro)
+        return 0
+    if args.command == "run-segment-task":
+        validated = run_and_validate_segment(
+            segment_from_json(args.segment_json), executable=args.executable
+        )
+        print(validated)
+        return 0
+    if args.command == "run-prefix-task":
+        validated = run_and_validate_prefix(
+            prefix_from_json(args.prefix_json), executable=args.executable
+        )
+        print(validated)
         return 0
     if args.command == "loader-smoke":
         segment = segment_from_json(args.segment_json)
@@ -2009,6 +2335,7 @@ def main() -> int:
             reconnection=args.reconnection,
             fingerprint_dumps=args.fingerprint_dumps,
             read_dump_states=args.read_dump_states,
+            inventory_cache=args.inventory_cache,
         )
         print(plan)
         return 0
@@ -2031,6 +2358,15 @@ def main() -> int:
                 indent=2,
             )
         )
+        return 0
+    if args.command == "render-submission":
+        campaign = render_submission_campaign(
+            args.plan_root,
+            args.destination,
+            campaign_name=args.campaign_name,
+            executable=args.executable,
+        )
+        print(campaign)
         return 0
     build_parser().print_help()
     print("\nJob submission remains intentionally disabled in this development step.")

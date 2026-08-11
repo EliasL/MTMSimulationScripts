@@ -861,6 +861,7 @@ def plot_setting_scatter(
 ) -> None:
     scatter_fields = {
         "S": ("energy_drop_density", r"$\Delta E_S/V_0$", False),
+        "R": ("relaxation_energy_density", r"$\Delta E_R/V_0$", False),
         "sigma": ("rev_sigma", r"$|\Delta_{\mathrm{rev}}\sigma_{12}|$", True),
     }
     try:
@@ -1006,17 +1007,19 @@ def plot_setting_scatter(
         setting = next(iter(groups))
         ax.set_title(npj._setting_label(attribute, setting))
         setting_tag = f"{setting:.0e}".replace("+", "")
-        output_name = (
-            f"reversible_energy_drop_vs_rev_u_{setting_axis_tag}_"
-            if scatter_key == "S"
-            else f"reversible_sigma12_vs_rev_u_{setting_axis_tag}_"
-        ) + setting_tag
+        output_prefix = {
+            "S": "reversible_energy_drop_vs_rev_u",
+            "R": "reversible_relaxation_energy_vs_rev_u",
+            "sigma": "reversible_sigma12_vs_rev_u",
+        }[scatter_key]
+        output_name = f"{output_prefix}_{setting_axis_tag}_" + setting_tag
     else:
-        output_name = (
-            f"reversible_energy_drop_vs_rev_u_{setting_axis_tag}"
-            if scatter_key == "S"
-            else f"reversible_sigma12_vs_rev_u_{setting_axis_tag}"
-        )
+        output_prefix = {
+            "S": "reversible_energy_drop_vs_rev_u",
+            "R": "reversible_relaxation_energy_vs_rev_u",
+            "sigma": "reversible_sigma12_vs_rev_u",
+        }[scatter_key]
+        output_name = f"{output_prefix}_{setting_axis_tag}"
     _save(fig, output_name)
 
 
@@ -1142,11 +1145,17 @@ def plot_irreversible_delta_gamma_energy_pdf(
 def plot_delta_gamma_energy_pdfs(
     samples: list[npj.SampleData],
     classifications: dict[float, SettingClassification],
+    *,
+    field_key: str = "S",
 ) -> None:
-    """Plot the positive energy-drop PDF and its reversible split."""
+    """Plot one energy PDF and its reversible/irreversible split."""
+    if field_key not in ENERGY_FIELDS:
+        raise ValueError(f"Unknown energy field: {field_key!r}")
     groups = npj._setting_groups(samples, "load_increment")
     colors = npj._colors(len(groups))
-    population_values = _delta_gamma_population_values(samples, classifications)
+    population_values = _delta_gamma_population_values(
+        samples, classifications, field_key=field_key
+    )
 
     all_values = np.concatenate(list(population_values["all"].values()))
     density_values = []
@@ -1206,7 +1215,7 @@ def plot_delta_gamma_energy_pdfs(
                 population_values[population][setting],
                 color=color,
                 show_legend=False,
-                drop_label=r"E_S/V_0",
+                drop_label=rf"E_{field_key}/V_0",
             )
         ax.set_xlim(x_limits)
         ax.set_ylim(y_limits)
@@ -1214,8 +1223,8 @@ def plot_delta_gamma_energy_pdfs(
         ax.set_yscale("log")
         ax.tick_params(labelsize="small")
         ax.set_title(titles[population], pad=4)
-        ax.set_xlabel(r"$\Delta E_S/V_0$")
-        ax.set_ylabel(r"$p(\Delta E_S/V_0)$")
+        ax.set_xlabel(rf"$\Delta E_{field_key}/V_0$")
+        ax.set_ylabel(rf"$p(\Delta E_{field_key}/V_0)$")
 
     legend_axis.legend(
         handles=handles,
@@ -1230,11 +1239,12 @@ def plot_delta_gamma_energy_pdfs(
     axes["irreversible"].set_ylabel("")
     axes["reversible"].set_xlabel("")
     axes["reversible"].tick_params(labelbottom=False)
-    _save(
-        fig,
-        "energy_drop_pdf_delta_gamma_population_decomposition",
-        tight_layout=False,
+    output_name = (
+        "energy_drop_pdf_delta_gamma_population_decomposition"
+        if field_key == "S"
+        else f"energy_drop_pdf_delta_gamma_E_{field_key}_population_decomposition"
     )
+    _save(fig, output_name, tight_layout=False)
 
 
 def make_irreversible_delta_gamma_fits(
@@ -1387,12 +1397,24 @@ def main() -> None:
         delta_gamma_samples,
         delta_gamma_classifications,
         "load_increment",
+        scatter_key="R",
+        settings=DELTA_GAMMA_SCATTER_SETTINGS,
+    )
+    plot_setting_scatter(
+        delta_gamma_samples,
+        delta_gamma_classifications,
+        "load_increment",
         scatter_key="sigma",
         settings=DELTA_GAMMA_SCATTER_SETTINGS,
     )
     plot_delta_gamma_energy_pdfs(
         delta_gamma_samples,
         delta_gamma_classifications,
+    )
+    plot_delta_gamma_energy_pdfs(
+        delta_gamma_samples,
+        delta_gamma_classifications,
+        field_key="R",
     )
     make_irreversible_delta_gamma_fits(
         delta_gamma_samples,

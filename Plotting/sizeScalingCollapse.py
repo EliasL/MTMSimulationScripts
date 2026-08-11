@@ -70,7 +70,7 @@ def _last_load(path: Path) -> float:
 
 
 def completed_size_scaling_paths(data_root: Path, seeds_per_size: int, post_hi: float):
-    groups, _ = size_scaling_job()
+    groups, _ = size_scaling_job(reconnection="none")
     paths = {}
     inventory = {}
     for group in groups:
@@ -145,13 +145,7 @@ def _read_mixed_selected(path: Path, wanted: set[str]) -> pd.DataFrame:
     return pd.DataFrame(values)
 
 
-def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = _file_cache_path(path, size, regimes, cache_dir)
-    if cache_path.exists() and not force:
-        with np.load(cache_path) as cached:
-            return {key: cached[key] for key in cached.files}
-
+def _read_energy_step_values(path: Path, size: int):
     wanted = {
         "load_step",
         "load",
@@ -217,13 +211,26 @@ def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
         values[protocol] = values[protocol].copy()
         values[protocol][invalid_steps] = np.nan
 
-    extracted = {}
     for protocol, drops in values.items():
         if drops.shape != step_load.shape:
             raise ValueError(
                 f"Shape mismatch for {protocol} in {path}: "
                 f"{drops.shape} vs {step_load.shape}."
             )
+    return step_load, values
+
+
+def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = _file_cache_path(path, size, regimes, cache_dir)
+    if cache_path.exists() and not force:
+        with np.load(cache_path) as cached:
+            return {key: cached[key] for key in cached.files}
+
+    step_load, values = _read_energy_step_values(path, size)
+
+    extracted = {}
+    for protocol, drops in values.items():
         for regime, (low, high) in regimes.items():
             mask = (
                 np.isfinite(drops)
@@ -234,6 +241,67 @@ def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
             extracted[f"{protocol}_{regime}"] = drops[mask]
     np.savez_compressed(cache_path, **extracted)
     return extracted
+
+
+def extract_aligned_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
+    """Cache E_S and E_R values for the same positive-E_R events.
+
+    The E_R mask is intentionally the only event-selection mask here.  E_S is
+    kept aligned, including non-positive or non-finite values, so a later
+    positive-E_S filter cannot change which events were labeled irreversible.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = _file_cache_path(path, size, regimes, cache_dir)
+    if cache_path.exists() and not force:
+        with np.load(cache_path) as cached:
+            return {key: cached[key] for key in cached.files}
+
+    step_load, values = _read_energy_step_values(path, size)
+    e_r = values["initial_guess_energy"]
+    e_s = values["second_order"]
+    extracted = {}
+    for regime, (low, high) in regimes.items():
+        mask = (
+            np.isfinite(e_r)
+            & (e_r > 0)
+            & (step_load > low)
+            & (step_load < high)
+        )
+        extracted[f"initial_guess_energy_{regime}"] = e_r[mask]
+        extracted[f"second_order_{regime}"] = e_s[mask]
+    np.savez_compressed(cache_path, **extracted)
+    return extracted
+
+
+def pool_aligned_events(paths_by_size, regimes, cache_dir: Path, force=False):
+    """Pool aligned E_R/E_S event pairs by system size and strain regime."""
+    pooled = {
+        regime: {size: {"initial_guess_energy": [], "second_order": []}
+                 for size in paths_by_size}
+        for regime in regimes
+    }
+    for size, paths in paths_by_size.items():
+        print(
+            f"Extracting/caching aligned events L={size}: {len(paths)} completed runs",
+            flush=True,
+        )
+        per_run = [
+            extract_aligned_run(
+                path, size, regimes, cache_dir / "runs", force=force
+            )
+            for path in paths
+        ]
+        for regime in regimes:
+            for protocol in ("initial_guess_energy", "second_order"):
+                arrays = [run[f"{protocol}_{regime}"] for run in per_run]
+                pooled[regime][size][protocol] = np.concatenate(arrays)
+            e_r = pooled[regime][size]["initial_guess_energy"]
+            e_s = pooled[regime][size]["second_order"]
+            if e_r.shape != e_s.shape:
+                raise RuntimeError(
+                    f"Aligned E_R/E_S shape mismatch for L={size}, {regime}."
+                )
+    return pooled
 
 
 def pool_drops(paths_by_size, regimes, cache_dir: Path, force=False):
@@ -273,6 +341,7 @@ def fit_xmins(
     cache_dir: Path,
     description="xmin",
     narrow_search=False,
+    refine=True,
 ):
     fits = {}
     for size, drops in size_drops.items():
@@ -284,6 +353,8 @@ def fit_xmins(
         }
         if narrow_search:
             xmin_search_kwargs["narrow_search"] = True
+        if not refine:
+            xmin_search_kwargs["refine"] = False
         fits[size] = make_fit(
             drops,
             cache_dir=str(cache_dir),

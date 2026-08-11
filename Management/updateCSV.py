@@ -114,6 +114,11 @@ def read_macrodata_csv(
             if warn_on_dtype:
                 warnings.simplefilter("always", DtypeWarning)
             df_local = pd.read_csv(csv_path)
+        if not isinstance(df_local.index, pd.RangeIndex):
+            raise pd.errors.ParserError(
+                f"Unexpected {type(df_local.index).__name__} while reading {csv_path}. "
+                "The CSV contains rows wider than its header."
+            )
         has_dtype_warning = any(
             issubclass(w.category, DtypeWarning) for w in warn_list
         )
@@ -246,6 +251,22 @@ NEW_MACRODATA_HEADER = [
     "rev_p21_diff",
     "rev_p22_diff",
 ]
+
+RECONNECT_REVERSIBILITY_MACRODATA_HEADER = (
+    NEW_MACRODATA_HEADER[:31]
+    + ["nr_elements_with_m3_change"]
+    + NEW_MACRODATA_HEADER[32:36]
+    + NEW_MACRODATA_HEADER[40:47]
+    + [
+        "nr_total_edge_flips",
+        "nr_reconnect_cycles",
+        "reconnect_stop_reason",
+        "rejected_reconnect_energy_delta",
+        "edge_flip_chosen_minus_other_energy",
+        "edge_flip_always_chose_lower_energy",
+    ]
+    + NEW_MACRODATA_HEADER[47:]
+)
 
 MID_MACRODATA_HEADER = [
     "load_step",
@@ -405,14 +426,12 @@ def fix_mixed_macrodata_csv(
         elif L is not None:
             nr_elements = int(L) * int(L) * 2
 
-    parser_error = None
     try:
         df = pd.read_csv(csv_path)
-    except pd.errors.ParserError as exc:
-        parser_error = exc
+    except pd.errors.ParserError:
         df = None
 
-    if df is not None:
+    if df is not None and isinstance(df.index, pd.RangeIndex):
         df = update_df_header(
             df,
             add_total_columns=False,
@@ -431,7 +450,8 @@ def fix_mixed_macrodata_csv(
     first_header = None
     rows_before: list[list[str]] = []
     rows_after: list[list[str]] = []
-    pending_bad_row: tuple[int, int, int] | None = None
+    pending_bad_row: tuple[int, int, int, list[str]] | None = None
+    schema_was_inferred = False
 
     def _normalize_header(header_row: list[str]) -> list[str]:
         return [h.strip() for h in header_row if h.strip()]
@@ -448,6 +468,84 @@ def fix_mixed_macrodata_csv(
             )
         rows.append(row)
 
+    def _infer_header(row_length: int) -> list[str] | None:
+        candidates = [
+            header
+            for header in (
+                new_header,
+                RECONNECT_REVERSIBILITY_MACRODATA_HEADER,
+            )
+            if header is not None and len(header) == row_length
+        ]
+        if len(candidates) != 1:
+            return None
+        return list(candidates[0])
+
+    def _validate_header_transition(source_header, target_header):
+        source = [rename_map.get(name, name) for name in source_header]
+        target = [rename_map.get(name, name) for name in target_header]
+        if len(target) != len(set(target)):
+            raise ValueError(f"Duplicate columns in inferred schema for {csv_path}.")
+        if source != target[: len(source)]:
+            raise ValueError(
+                f"Inferred schema for {csv_path} does not preserve the original "
+                "column order. Refusing to relabel the data."
+            )
+
+    def _validate_repaired_data(df):
+        if df.empty:
+            return
+
+        duration_columns = {
+            "run_time",
+            "minimization_time",
+            "write_time",
+            "est_time_remaining",
+        }
+        text_columns = {
+            column
+            for column in df.columns
+            if column.endswith("_Term_reason") or column == "reconnect_stop_reason"
+        }
+        numeric_columns = set(df.columns) - duration_columns - text_columns
+        numeric_values = {}
+        for column in numeric_columns:
+            values = pd.to_numeric(df[column], errors="coerce").to_numpy(dtype=float)
+            if np.any(~np.isfinite(values)):
+                raise ValueError(
+                    f"Non-numeric or non-finite values found in numeric column "
+                    f"{column!r} while repairing {csv_path}."
+                )
+            numeric_values[column] = values
+
+        load_step = numeric_values["load_step"]
+        if not np.allclose(load_step, np.round(load_step)):
+            raise ValueError(f"Non-integer load_step values found while repairing {csv_path}.")
+        if len(load_step) > 1 and np.any(np.diff(load_step) <= 0):
+            raise ValueError(f"load_step is not strictly increasing in {csv_path}.")
+
+        for column in (column for column in df.columns if column.startswith("nr_")):
+            values = numeric_values[column]
+            if not np.allclose(values, np.round(values)) or np.any(values < 0):
+                raise ValueError(
+                    f"Invalid count values found in column {column!r} while "
+                    f"repairing {csv_path}."
+                )
+
+        for column in ("is_reversible",):
+            if column in numeric_values and not np.all(np.isin(numeric_values[column], [0, 1])):
+                raise ValueError(
+                    f"Expected only 0/1 values in {column!r} while repairing {csv_path}."
+                )
+
+        for column in ("participationFraction", "m3_participationFraction"):
+            if column in numeric_values:
+                values = numeric_values[column]
+                if np.any((values < 0) | (values > 1)):
+                    raise ValueError(
+                        f"Values outside [0, 1] found in {column!r} while repairing {csv_path}."
+                    )
+
     with open(csv_path, "r", newline="") as f_in:
         reader = csv.reader(f_in)
         for line_no, row in enumerate(reader, start=1):
@@ -463,7 +561,18 @@ def fix_mixed_macrodata_csv(
                 continue
             if header_line is None:
                 if pending_bad_row is not None:
-                    prev_line, expected_len, got_len = pending_bad_row
+                    prev_line, expected_len, got_len, prev_row = pending_bad_row
+                    inferred_header = _infer_header(got_len)
+                    if inferred_header is not None and len(row) == got_len:
+                        header_line = inferred_header
+                        schema_was_inferred = True
+                        rows_after.extend((prev_row, row))
+                        pending_bad_row = None
+                        print(
+                            f"Detected unmarked header change in {csv_path} at line "
+                            f"{prev_line}: using the {got_len}-column schema."
+                        )
+                        continue
                     raise ValueError(
                         f"Row length mismatch in {csv_path} at line {prev_line}: "
                         f"expected {expected_len}, got {got_len}. "
@@ -471,19 +580,28 @@ def fix_mixed_macrodata_csv(
                         "Only a corrupted final row is allowed in this mode."
                     )
                 if len(row) != len(first_header):
-                    pending_bad_row = (line_no, len(first_header), len(row))
+                    pending_bad_row = (line_no, len(first_header), len(row), row)
                     continue
                 rows_before.append(row)
             else:
                 _append_row(rows_after, row, len(header_line), line_no)
 
     if header_line is not None and pending_bad_row is not None:
-        bad_line, expected_len, got_len = pending_bad_row
+        bad_line, expected_len, got_len, _ = pending_bad_row
         raise ValueError(
             f"Row length mismatch in {csv_path} at line {bad_line}: "
             f"expected {expected_len}, got {got_len}. "
             "A #HEADER line was found later, so this mismatch is unexpected."
         )
+
+    if header_line is None and pending_bad_row is not None:
+        _, _, got_len, bad_row = pending_bad_row
+        inferred_header = _infer_header(got_len)
+        if inferred_header is not None:
+            header_line = inferred_header
+            schema_was_inferred = True
+            rows_after.append(bad_row)
+            pending_bad_row = None
 
     if header_line is None:
         if pending_bad_row is None:
@@ -491,7 +609,7 @@ def fix_mixed_macrodata_csv(
                 f"Parser error while reading {csv_path}, but no #HEADER line found. "
                 "No single corrupted final row was detected."
             )
-        bad_line, expected_len, got_len = pending_bad_row
+        bad_line, expected_len, got_len, _ = pending_bad_row
         if first_header is None:
             raise ValueError(
                 f"Parser error while reading {csv_path}, but no header line found."
@@ -514,8 +632,11 @@ def fix_mixed_macrodata_csv(
             return csv_path
         return out_path
 
-    old_header = old_header or first_header or []
     new_header = new_header or header_line
+    source_header = old_header or first_header or []
+    if schema_was_inferred or rows_before:
+        _validate_header_transition(source_header, new_header)
+    old_header = new_header if not rows_before else source_header
 
     def _rename_headers(headers: list[str]) -> list[str]:
         return [rename_map.get(col, col) for col in headers]
@@ -565,13 +686,6 @@ def fix_mixed_macrodata_csv(
     df_first = df_first[df_second.columns]
     df_out = pd.concat([df_first, df_second], ignore_index=True)
     if not df_out.empty:
-        time_cols = {
-            "run_time",
-            "minimization_time",
-            "write_time",
-            "est_time_remaining",
-        }
-
         def _is_numeric(val) -> bool:
             if val is None:
                 return True
@@ -584,11 +698,11 @@ def fix_mixed_macrodata_csv(
             except ValueError:
                 return False
 
-        numeric_cols = [col for col in df_out.columns if col not in time_cols]
         last_row = df_out.iloc[-1]
-        if any(not _is_numeric(last_row[col]) for col in numeric_cols):
+        if "load_step" in df_out and not _is_numeric(last_row["load_step"]):
             print(f"Warning: dropping corrupted final row in {csv_path}")
             df_out = df_out.iloc[:-1]
+    _validate_repaired_data(df_out)
     df_out.to_csv(out_path, index=False)
     print(f"Fixed CSV written to {out_path}")
 
