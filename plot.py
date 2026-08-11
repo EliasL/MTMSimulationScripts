@@ -60,6 +60,7 @@ from MTMath.decomposeElasticPlastic import showDecomposition
 from MTMath.poincareEnergy import (
     generate_cauchy_stress_grid,
     generate_energy_grid,
+    plot3DEnergyDensityComparison,
     plot_reduction_history,
 )
 from plotAll import plotAll
@@ -1121,6 +1122,18 @@ if __name__ == "__main__":
 
     # debugPlotAll()
     # energyField()
+    plot3DEnergyDensityComparison(
+        resolution=500,
+        energy_lim=(0.0, 0.51),
+        z_scale=0.3,
+        z_tick_count=4,
+        zoom=1.5,
+        show_grid=True,
+        elev=35,
+        azim=80,
+        #show=True,
+        output_path="Plots/3d_energy_density_comparison.png",
+    )
     #plotReductionHistory()
     #showPoincareDisk()
     # showInstabilityAngle()
@@ -1158,7 +1171,7 @@ if __name__ == "__main__":
     # investigateJobs()
     # print_remote_runtimes()
     #plotSylvainBatches()
-    plotPristineCrystalPredictionErrorNormalized()
+    #plotPristineCrystalPredictionErrorNormalized()
     # compare_center_node_forces()
     # compare_energy_three_sims()
     pass

@@ -261,8 +261,11 @@ class XminCleanupTests(unittest.TestCase):
         self.assertEqual(calls[0].size, 100)
         self.assertEqual(details["nr_initial"], 100)
         simple_details = details["simple_drop_details"]
-        self.assertEqual(simple_details["coarse_average_size"], 10)
-        self.assertEqual(simple_details["coarse_coarse_xmins"].size, 10)
+        self.assertEqual(simple_details["interval_coarse_indices"].size, 2)
+        self.assertEqual(
+            simple_details["selection_min_tail_count"],
+            100,
+        )
         self.assertGreaterEqual(simple_details["region_xmins"].size, 1)
         self.assertIn("local_minimum", simple_details)
         self.assertEqual(
@@ -310,7 +313,6 @@ class XminCleanupTests(unittest.TestCase):
                 coarse_xmins,
                 coarse_distances,
                 min_tail_count=3,
-                coarse_average_size=5,
             )
 
         fine_xmins = np.arange(1.0, 11.0)
@@ -324,15 +326,15 @@ class XminCleanupTests(unittest.TestCase):
         )
         np.testing.assert_array_equal(
             details["region_xmins"],
-            [5.0, 6.0],
+            [4.0],
         )
-        self.assertAlmostEqual(details["region_best_xmin"], 5.0)
-        self.assertAlmostEqual(xmin, 5.0)
-        self.assertEqual(details["local_minimum"]["start_candidate_index"], 4)
-        self.assertEqual(details["local_minimum"]["final_candidate_index"], 4)
-        self.assertEqual(details["local_minimum"]["search_bounds"], (4, 5))
+        self.assertAlmostEqual(details["region_best_xmin"], 4.0)
+        self.assertAlmostEqual(xmin, 4.0)
+        self.assertEqual(details["local_minimum"]["start_candidate_index"], 3)
+        self.assertEqual(details["local_minimum"]["final_candidate_index"], 3)
+        self.assertEqual(details["local_minimum"]["search_bounds"], (3, 3))
 
-    def test_simple_drop_averaging_suppresses_an_isolated_tail_drop(self):
+    def test_simple_drop_uses_the_largest_raw_adjacent_drop(self):
         xmins = np.arange(1.0, 101.0)
         distances = np.full(100, 0.5)
         distances[40:] = 0.2
@@ -345,16 +347,29 @@ class XminCleanupTests(unittest.TestCase):
             min_tail_count=3,
         )
 
-        self.assertEqual(
-            tuple(details["coarse_coarse_selected_group_indices"]),
-            (3, 4),
+        np.testing.assert_array_equal(details["interval_coarse_xmins"], [90.0, 91.0])
+        self.assertEqual(details["largest_adjacent_drop_index"], 89)
+        self.assertEqual(xmin, 91.0)
+
+    def test_simple_drop_excludes_adjacent_pairs_below_tail_count(self):
+        drops = np.arange(1.0, 201.0)
+        xmins = np.arange(1.0, 151.0)
+        distances = np.full(xmins.size, 0.5)
+        distances[19:21] = [0.8, 0.1]
+        distances[100:102] = [0.9, 0.0]
+
+        xmin, details = find_xmin_simple_drop_from_results(
+            drops,
+            xmins,
+            distances,
+            min_tail_count=100,
         )
-        np.testing.assert_array_equal(
-            details["steepest_coarse_candidate_indices"],
-            np.arange(30, 50),
-        )
-        np.testing.assert_array_equal(details["interval_coarse_xmins"], [41.0, 42.0])
-        self.assertEqual(xmin, 41.0)
+
+        self.assertTrue(details["search_mask"][100])
+        self.assertFalse(details["search_mask"][101])
+        self.assertTrue(np.isnan(details["adjacent_drop_values"][100]))
+        np.testing.assert_array_equal(details["interval_coarse_xmins"], [20.0, 21.0])
+        self.assertEqual(xmin, 21.0)
 
     def test_simple_drop_records_start_minimum_agreement(self):
         results = [
@@ -397,10 +412,10 @@ class XminCleanupTests(unittest.TestCase):
                 np.geomspace(1.0, 16.0, 10),
                 [0.50, 0.55, 0.60, 0.65, 0.70, 0.20, 0.21, 0.22, 0.23, 0.24],
                 [True, False, False, True, True, True, True, True, True, True],
-                coarse_average_size=5,
+                min_tail_count=3,
             )
 
-        self.assertEqual(details["coarse_coarse_search_mask"].tolist(), [True, True])
+        self.assertTrue(details["search_mask"].all())
 
     def test_refined_global_min_searches_every_rough_local_minimum(self):
         def distance_function(candidates):

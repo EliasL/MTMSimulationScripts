@@ -1,0 +1,118 @@
+{
+  "classification": "irreversible if Delta E_R >= Delta E_R simpleDrop xmin",
+  "delta_E_R_simpleDrop_xmin": 3.9377796611e-05,
+  "n_all_positive_delta_E_R": 275075,
+  "n_irreversible_delta_E_R": 5638,
+  "n_irreversible_delta_E_S": 4444,
+  "simpleDrop": {
+    "xmin": 0.0043433220196220645,
+    "p": 0.0,
+    "p_std": 0.05,
+    "alpha": 1.0095022924770025,
+    "alpha_std": 0.008019700579806716,
+    "lambda": 0.02894052039092171,
+    "inverse_lambda": 34.55362883915826,
+    "D": 0.027472589724158877,
+    "tail_count": 4179,
+    "p_bootstrap_sets": 99
+  },
+  "global_minimum": {
+    "xmin": 0.009973374797027645,
+    "p": 0.0,
+    "p_std": 0.05,
+    "alpha": 1.0403413744124215,
+    "alpha_std": 0.0076833109692146665,
+    "lambda": 0.02608125653601281,
+    "inverse_lambda": 38.34171097620267,
+    "D": 0.015959124954245396,
+    "tail_count": 3858,
+    "p_bootstrap_sets": 99
+  },
+  "counts_by_file": [
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0_fixed.csv",
+      "relaxation_events": 45891,
+      "stress_corrected_events": 9462,
+      "irreversible_relaxation_events": 926,
+      "irreversible_stress_corrected_events": 688
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s1_fixed.csv",
+      "relaxation_events": 42901,
+      "stress_corrected_events": 14119,
+      "irreversible_relaxation_events": 849,
+      "irreversible_stress_corrected_events": 669
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s2_fixed.csv",
+      "relaxation_events": 43199,
+      "stress_corrected_events": 15671,
+      "irreversible_relaxation_events": 862,
+      "irreversible_stress_corrected_events": 674
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s3_fixed.csv",
+      "relaxation_events": 33153,
+      "stress_corrected_events": 464,
+      "irreversible_relaxation_events": 669,
+      "irreversible_stress_corrected_events": 464
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s4_fixed.csv",
+      "relaxation_events": 43396,
+      "stress_corrected_events": 27739,
+      "irreversible_relaxation_events": 941,
+      "irreversible_stress_corrected_events": 875
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s5_fixed.csv",
+      "relaxation_events": 40423,
+      "stress_corrected_events": 3653,
+      "irreversible_relaxation_events": 839,
+      "irreversible_stress_corrected_events": 571
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s6_fixed.csv",
+      "relaxation_events": 13507,
+      "stress_corrected_events": 7243,
+      "irreversible_relaxation_events": 294,
+      "irreversible_stress_corrected_events": 263
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s7_fixed.csv",
+      "relaxation_events": 0,
+      "stress_corrected_events": 0,
+      "irreversible_relaxation_events": 0,
+      "irreversible_stress_corrected_events": 0
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s8_fixed.csv",
+      "relaxation_events": 12605,
+      "stress_corrected_events": 7672,
+      "irreversible_relaxation_events": 258,
+      "irreversible_stress_corrected_events": 240
+    },
+    {
+      "file": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s9_fixed.csv",
+      "relaxation_events": 0,
+      "stress_corrected_events": 0,
+      "irreversible_relaxation_events": 0,
+      "irreversible_stress_corrected_events": 0
+    }
+  ],
+  "source_paths": [
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s1_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s2_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s3_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s4_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s5_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s6_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s7_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s8_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s9_fixed.csv"
+  ],
+  "twin_axis_plot": "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/delta_E_S_irreversible_from_ER_simpleDrop/twin_axes_irreversible_E_S.pdf",
+  "twin_axis_scan_bootstrap_confidence": 0.05,
+  "twin_axis_scan_bootstrap_sets": 99
+}

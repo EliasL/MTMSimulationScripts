@@ -7,6 +7,7 @@ from pathlib import Path
 from .energyFunction import (
     EnergyFunction,
     ContiEnergy,
+    PieceWiseQuadratic,
     SShear,
     F_from_C,
 )
@@ -339,6 +340,7 @@ def generate_grid(
     lim=None,
     return_XY=False,
     poincareDisk=True,
+    transformation=None,
     eps=1e-9,
     **kwargs,
 ):
@@ -346,7 +348,12 @@ def generate_grid(
     y_min, y_max = -0.5, 0.5
     # Poicare disk
     if poincareDisk:
-        C = generate_poincare_disk(resolution, zoom, eps=eps)
+        C = generate_poincare_disk(
+            resolution,
+            zoom,
+            transformation=transformation,
+            eps=eps,
+        )
     else:
         # Create the meshgrid for the x and y coordinates
         X, Y = np.meshgrid(
@@ -1551,6 +1558,63 @@ def drawAllVariations(
     return drawn
 
 
+def drawPoincareSymmetryPoints(
+    ax,
+    grid_size=200,
+    depth=5,
+    zoom=1,
+    transformation=None,
+    color="gray",
+    alpha=0.7,
+    square_size=42,
+    triangular_size=46,
+    linewidth=0.9,
+    zorder=14,
+):
+    """Draw square- and triangular-lattice symmetry points on the disk.
+
+    The square point is the identity metric ``C = I``. The triangular point
+    is the determinant-one metric with ``C11 = C22 = 2/sqrt(3)`` and
+    ``C12 = 1/sqrt(3)``. ``drawAllVariations`` tiles both points using the
+    same symmetry moves as the Lagrange-reduction grid.
+    """
+    square_C = np.eye(2, dtype=float)
+    triangular_C = np.array(
+        [
+            [2.0 / np.sqrt(3.0), 1.0 / np.sqrt(3.0)],
+            [1.0 / np.sqrt(3.0), 2.0 / np.sqrt(3.0)],
+        ]
+    )
+
+    common_kwargs = {
+        "grid_size": grid_size,
+        "depth": depth,
+        "zoom": zoom,
+        "transformation": transformation,
+        "scatter": True,
+        "c": None,
+        "facecolors": "none",
+        "edgecolors": color,
+        "alpha": alpha,
+        "linewidths": linewidth,
+        "zorder": zorder,
+    }
+    drawAllVariations(
+        ax,
+        square_C,
+        marker="s",
+        s=square_size,
+        **common_kwargs,
+    )
+    drawAllVariations(
+        ax,
+        triangular_C,
+        marker="^",
+        s=triangular_size,
+        **common_kwargs,
+    )
+
+
 def generateShearTransformations(depth, startingPoint=None, leftApplied=True):
     # Generate all unique combinations of up, down, left, right moves up to the given depth
     # Remove duplicate transformations using a set
@@ -1697,9 +1761,19 @@ def plotEnergyField(
     scale=1.0,
     withYieldSurface=True,
     withGrid=True,
+    grid_depth=6,
+    withFundamentalDomain=False,
+    fundamentalDomain_kwargs=None,
+    fundamentalDomain_label=None,
+    fundamentalDomain_label_xy=(-0.35, 0.12),
+    fundamentalDomain_label_kwargs=None,
+    withSymmetryPoints=False,
+    symmetryPoints_kwargs=None,
     minimalTicks=False,
     transformation=None,
     yieldSurface_kwargs=None,
+    show_colorbar_cap=True,
+    colorbar_label="Energy",
     output_path="energy_field.pdf",
 ):
     grid_size = len(energy_grid)
@@ -1714,6 +1788,7 @@ def plotEnergyField(
         ax=ax,
         withCircle=True,
         withGrid=withGrid,
+        grid_depth=grid_depth,
         minimalTicks=minimalTicks,
         withYieldSurface=withYieldSurface,
         transformation=transformation,
@@ -1745,7 +1820,7 @@ def plotEnergyField(
         zorder=0,
     )
 
-    cbar = fig.colorbar(img, label="Energy", pad=-0.01)
+    cbar = fig.colorbar(img, label=colorbar_label, pad=-0.01)
     vmin, vmax = img.get_clim()
     if np.isfinite(vmin) and np.isfinite(vmax) and vmin < vmax:
         t = np.linspace(0.0, 1.0, 7)
@@ -1754,10 +1829,62 @@ def plotEnergyField(
         cbar.set_ticks(ticks)
         cbar.formatter = ticker.FormatStrFormatter("%.2f")
         cbar.update_ticks()
-    default_font_size = plt.rcParams["font.size"]  # Fetch default font size
-    cbar.ax.set_title(
-        f"Capped at ${max_energy}$", fontsize=default_font_size, loc="left"
-    )
+    if show_colorbar_cap:
+        default_font_size = plt.rcParams["font.size"]  # Fetch default font size
+        cbar.ax.set_title(
+            f"Capped at ${max_energy}$", fontsize=default_font_size, loc="left"
+        )
+
+    if withFundamentalDomain:
+        domain_kwargs = {
+            "grid_size": grid_size,
+            "zoom": zoom,
+            "transformation": transformation,
+            "c": "black",
+            "linewidth": 1.8,
+            "zorder": 12,
+        }
+        if fundamentalDomain_kwargs:
+            domain_kwargs.update(fundamentalDomain_kwargs)
+        drawFundamentalDomain(ax, **domain_kwargs)
+
+        if fundamentalDomain_label is not None:
+            label_kwargs = {
+                "color": "black",
+                "fontsize": 20,
+                "ha": "center",
+                "va": "center",
+                "zorder": 16,
+            }
+            if fundamentalDomain_label_kwargs:
+                label_kwargs.update(fundamentalDomain_label_kwargs)
+            label_x, label_y = fundamentalDomain_label_xy
+            center = grid_size / 2
+            half = grid_size / 2
+            ax.text(
+                center + zoom * half * label_x,
+                center + zoom * half * label_y,
+                fundamentalDomain_label,
+                **label_kwargs,
+            )
+
+    if withSymmetryPoints:
+        point_kwargs = {
+            "grid_size": grid_size,
+            "zoom": zoom,
+            "transformation": transformation,
+            "depth": grid_depth,
+            "color": "gray",
+            "alpha": 0.7,
+            "square_size": 42,
+            "triangular_size": 46,
+            "linewidth": 0.9,
+            "zorder": 14,
+        }
+        if symmetryPoints_kwargs:
+            point_kwargs.update(symmetryPoints_kwargs)
+        drawPoincareSymmetryPoints(ax, **point_kwargs)
+
     if add_title:
         ax.set_title("Energy field in a Poincaré disk")
 
@@ -1779,6 +1906,7 @@ def prepPoincareFig(
     ax=None,
     withCircle=True,
     withGrid=True,
+    grid_depth=6,
     minimalTicks=False,
     withYieldSurface=True,
     transformation=None,
@@ -1810,6 +1938,7 @@ def prepPoincareFig(
             ax,
             grid_size=grid_size,
             zoom=zoom,
+            depth=grid_depth,
             c="gray",
             alpha=0.7,
             zorder=1,
@@ -2521,3 +2650,295 @@ def make3DEnergyField(
     plt.savefig(output_path, dpi=500)
     print(f"Saved plot to {output_path.resolve()}")
     plt.show()
+
+
+def crop_white_border(
+    image_path,
+    output_path=None,
+    white_threshold=255,
+):
+    """Crop only the fully white outer border from a raster image.
+
+    White rows and columns inside the image are preserved. The image is
+    replaced in place when ``output_path`` is omitted.
+
+    Returns
+    -------
+    pathlib.Path
+        The path of the cropped image.
+    """
+    from PIL import Image
+
+    image_path = Path(image_path)
+    output_path = image_path if output_path is None else Path(output_path)
+    white_threshold = int(white_threshold)
+    if not 0 <= white_threshold <= 255:
+        raise ValueError(
+            f"white_threshold must be between 0 and 255, got {white_threshold}."
+        )
+
+    with Image.open(image_path) as image:
+        pixels = np.asarray(image.convert("RGBA"))
+
+    is_white = np.all(pixels[..., :3] >= white_threshold, axis=-1)
+    nonwhite_rows = np.flatnonzero(~np.all(is_white, axis=1))
+    nonwhite_columns = np.flatnonzero(~np.all(is_white, axis=0))
+    if not nonwhite_rows.size or not nonwhite_columns.size:
+        raise ValueError(f"Image contains no non-white pixels: {image_path}")
+
+    row_start, row_end = nonwhite_rows[[0, -1]]
+    column_start, column_end = nonwhite_columns[[0, -1]]
+    cropped = pixels[row_start : row_end + 1, column_start : column_end + 1]
+    Image.fromarray(cropped, mode="RGBA").save(output_path)
+    return output_path
+
+
+def remove_blank_rows_and_columns(
+    image_path,
+    output_path=None,
+    white_threshold=255,
+):
+    """Backward-compatible alias for :func:`crop_white_border`."""
+    return crop_white_border(
+        image_path,
+        output_path=output_path,
+        white_threshold=white_threshold,
+    )
+
+
+def plot3DEnergyDensityComparison(
+    resolution=250,
+    zoom=1.0,
+    transformation=None,
+    loops=1000,
+    conti_beta=-0.25,
+    conti_K=4.0,
+    conti_noise=1.0,
+    quadratic_energy_function=PieceWiseQuadratic,
+    quadratic_kappa=1.0,
+    quadratic_xi=1.0,
+    quadratic_eta=1.0,
+    energy_lim=(0.0, 0.37),
+    data_radius=0.8,
+    add_front_hole=True,
+    z_scale=0.6,
+    z_tick_count=4,
+    elev=35.0,
+    azim=80.0,
+    roll=0.0,
+    figsize=(10, 5),
+    cmap="coolwarm",
+    remove_max_color=True,
+    surface_alpha=1.0,
+    surface_kwargs=None,
+    show_colorbars=True,
+    show_grid=True,
+    titles=(r"(a) $\Phi$", r"(b) $\Phi_{\mathrm{quad}}$"),
+    z_axis_labels=(r"$\Phi$", r"$\Phi_{\mathrm{quad}}$"),
+    title_y=0.95,
+    title_pad=-12.0,
+    output_path=None,
+    dpi=300,
+    save_pad_inches=0.02,
+    autocrop_png=True,
+    white_threshold=255,
+    show=False,
+):
+    """Plot the square Conti and quadratic energy densities side by side.
+
+    The energy surfaces use the same Poincare-disk coordinates and shared
+    color/z limits, making the two landscapes directly comparable.  The
+    default quadratic model is :class:`PieceWiseQuadratic`; pass
+    ``SuperSimple`` as ``quadratic_energy_function`` for the simple quadratic
+    model instead.
+
+    Parameters most likely to be adjusted for a publication figure are
+    ``resolution``, ``zoom``, ``energy_lim``, ``z_scale``, ``elev``, ``azim``,
+    ``roll``, ``data_radius``, ``z_tick_count``, ``show_grid``, and
+    ``surface_kwargs``. For PNG output, ``autocrop_png`` removes fully white
+    the fully white outer border after saving. ``quadratic_kappa``,
+    ``quadratic_xi``, and ``quadratic_eta`` are passed to
+    ``PieceWiseQuadratic`` as its three coefficients.
+
+    Returns
+    -------
+    fig, axes
+        The Matplotlib figure and the two 3D axes.
+    """
+    resolution = int(resolution)
+    if resolution < 2:
+        raise ValueError(f"resolution must be at least 2, got {resolution}.")
+    zoom = float(zoom)
+    if zoom <= 0:
+        raise ValueError(f"zoom must be positive, got {zoom}.")
+    z_scale = float(z_scale)
+    if z_scale <= 0:
+        raise ValueError(f"z_scale must be positive, got {z_scale}.")
+    z_tick_count = int(z_tick_count)
+    if z_tick_count < 2:
+        raise ValueError(
+            f"z_tick_count must be at least 2, got {z_tick_count}."
+        )
+    if data_radius is not None and float(data_radius) <= 0:
+        raise ValueError(
+            f"data_radius must be positive or None, got {data_radius}."
+        )
+    if len(titles) != 2:
+        raise ValueError("titles must contain exactly two labels.")
+    if len(z_axis_labels) != 2:
+        raise ValueError("z_axis_labels must contain exactly two labels.")
+
+    # generate_grid currently returns plotting coordinates for its flat-plane
+    # branch even when the energy is generated on a Poincare disk.  Build the
+    # matching coordinates here so the surface is not shifted or stretched.
+    radius = 1.0 / zoom
+    disk_axis = np.linspace(-radius, radius, resolution)
+    X, Y = np.meshgrid(disk_axis, disk_axis)
+
+    conti_grid = generate_energy_grid(
+        E_func=ContiEnergy,
+        beta=conti_beta,
+        K=conti_K,
+        energy_lim=None,
+        resolution=resolution,
+        zoom=zoom,
+        transformation=transformation,
+        poincareDisk=True,
+        loops=loops,
+    )
+    quadratic_grid = generate_energy_grid(
+        E_func=quadratic_energy_function,
+        beta=quadratic_kappa,
+        K=quadratic_xi,
+        noise=quadratic_eta,
+        energy_lim=None,
+        resolution=resolution,
+        zoom=zoom,
+        transformation=transformation,
+        poincareDisk=True,
+        loops=loops,
+    )
+    grids = [
+        np.array(conti_grid, dtype=float, copy=True),
+        np.array(quadratic_grid, dtype=float, copy=True),
+    ]
+
+    geometric_mask = np.zeros_like(X, dtype=bool)
+    if data_radius is not None:
+        geometric_mask |= np.hypot(X, Y) > float(data_radius)
+    if add_front_hole:
+        geometric_mask |= np.hypot(X, Y - 1.4) < 1.0
+
+    finite_values = [
+        grid[np.isfinite(grid) & ~geometric_mask]
+        for grid in grids
+    ]
+    finite_values = [values for values in finite_values if values.size]
+    if not finite_values:
+        raise ValueError("Neither energy grid contains any finite values.")
+    all_values = np.concatenate(finite_values)
+
+    if energy_lim is None:
+        z_min, z_max = np.nanmin(all_values), np.nanmax(all_values)
+    else:
+        if len(energy_lim) != 2:
+            raise ValueError("energy_lim must be None or a (min, max) pair.")
+        z_min = (
+            np.nanmin(all_values)
+            if energy_lim[0] is None
+            else float(energy_lim[0])
+        )
+        z_max = (
+            np.nanmax(all_values)
+            if energy_lim[1] is None
+            else float(energy_lim[1])
+        )
+    if not np.isfinite(z_min) or not np.isfinite(z_max) or z_min >= z_max:
+        raise ValueError(
+            "energy_lim must define a finite increasing range, "
+            f"got {(z_min, z_max)}."
+        )
+
+    # Clip before plotting so the shared z/color limits are also the visible
+    # limits, while preserving NaNs from the edge of the Poincare disk.
+    for grid in grids:
+        finite = np.isfinite(grid)
+        grid[finite] = np.clip(grid[finite], z_min, z_max)
+        grid[geometric_mask] = np.nan
+
+    if remove_max_color:
+        base_cmap = cm.get_cmap(cmap, 256)
+        cmap_values = base_cmap(np.linspace(0, 1, 256))
+        cmap_values[-2:, -1] = np.linspace(1, 0, 2) ** 0.5
+        surface_cmap = colors.ListedColormap(cmap_values)
+    else:
+        surface_cmap = cmap
+
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=figsize,
+        subplot_kw={"projection": "3d"},
+        constrained_layout=True,
+    )
+    axes = np.atleast_1d(axes)
+    surface_options = {
+        "cmap": surface_cmap,
+        "linewidth": 0,
+        "antialiased": False,
+        "rstride": 1,
+        "cstride": 1,
+        "vmin": z_min,
+        "vmax": z_max,
+        "alpha": surface_alpha,
+    }
+    if surface_kwargs:
+        surface_options.update(surface_kwargs)
+
+    surfaces = []
+    for ax, grid, title, z_axis_label in zip(
+        axes, grids, titles, z_axis_labels
+    ):
+        surface = ax.plot_surface(X, Y, grid, **surface_options)
+        surfaces.append(surface)
+
+        ax.set_title(title, y=title_y, pad=title_pad)
+        ax.set_xlabel(r"$x_p$")
+        ax.set_ylabel(r"$y_p$")
+        ax.set_zlabel(z_axis_label)
+        ax.set_xlim(-radius, radius)
+        ax.set_ylim(-radius, radius)
+        ax.set_zlim(z_min, z_max)
+        ax.zaxis.set_major_locator(ticker.LinearLocator(numticks=z_tick_count))
+        ax.set_box_aspect((1.0, 1.0, z_scale))
+        ax.grid(show_grid)
+        try:
+            ax.view_init(elev=elev, azim=azim, roll=roll)
+        except TypeError:  # Matplotlib versions before the roll argument.
+            ax.view_init(elev=elev, azim=azim)
+
+    if show_colorbars:
+        cbar = fig.colorbar(surfaces[0], ax=axes, shrink=0.5, pad=-0.0)
+        cbar.set_label("Energy density")
+        cbar.locator = ticker.LinearLocator(numticks=z_tick_count)
+        cbar.update_ticks()
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        fig.savefig(
+            output_path,
+            dpi=dpi,
+            bbox_inches="tight",
+            pad_inches=save_pad_inches,
+            facecolor="white",
+        )
+        if autocrop_png and output_path.suffix.lower() == ".png":
+            crop_white_border(
+                output_path,
+                white_threshold=white_threshold,
+            )
+        print(f"Saved plot to {output_path.resolve()}")
+    if show:
+        plt.show()
+    return fig, axes
