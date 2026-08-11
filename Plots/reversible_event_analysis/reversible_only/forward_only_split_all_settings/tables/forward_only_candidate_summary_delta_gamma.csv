@@ -1,0 +1,4 @@
+feature,mean_balanced_accuracy,minimum_balanced_accuracy,maximum_balanced_accuracy
+relaxation_energy_magnitude,0.9705348715801151,0.9388995521433141,0.9930840163934427
+relaxation_stress_magnitude,0.937872052003421,0.8761098575733388,0.981022031994873
+energy_drop_density,0.8500369260372548,0.8122200895713372,0.90625

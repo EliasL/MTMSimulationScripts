@@ -666,7 +666,17 @@ def reversibilityJob(
     reconnection="edgeFlip",
     loadIncrement=1e-5,
     LBFGSEpsx=1e-6,
+    reconnectRevert=None,
+    reconnectEdgeLocking=None,
 ):
+    reconnection_settings = {
+        key: value
+        for key, value in {
+            "reconnectRevert": reconnectRevert,
+            "reconnectEdgeLocking": reconnectEdgeLocking,
+        }.items()
+        if value is not None
+    }
     configs, labels = ConfigGenerator.generate(
         seed=range(nrSeeds),
         group_by_variant=group_by_variant,
@@ -686,6 +696,7 @@ def reversibilityJob(
         # temp
         energyDropThreshold=1e-5,
         #logDuringMinimization=1,
+        **reconnection_settings,
     )
     return configs, labels
 
@@ -697,6 +708,8 @@ def sylvainBatches(
     threads=3,
     group_by_variant: bool = False,
     reconnection= "none",
+    reconnectRevert=None,
+    reconnectEdgeLocking=None,
 ):
     """
     Batch plan (all based on reversibilityJob):
@@ -733,6 +746,8 @@ def sylvainBatches(
         reconnection=reconnection,
         loadIncrement=params["loadIncrement"],
         LBFGSEpsx=params["LBFGSEpsx"],
+        reconnectRevert=reconnectRevert,
+        reconnectEdgeLocking=reconnectEdgeLocking,
     )
     return configs, labels
 
@@ -891,12 +906,22 @@ def umutJobs(loadIncrement=2e-5):
     return all_configs, all_labels
 
 
-def size_scaling_job(reconnection="none"):
+def size_scaling_job(
+    reconnection="none",
+    reconnectRevert=None,
+    reconnectEdgeLocking=None,
+    experiment="simpleShear",
+    startLoad=0.15,
+    energyDropThreshold=None,
+    nrSeeds=10,
+):
     """
     Generates a job for size scaling tests.
     """
     sizes = [50, 100, 150, 200, 250]  # , 300]
-    nr_samples = [10, 10, 10, 10, 10]  # , 10]
+    if not isinstance(nrSeeds, int) or nrSeeds <= 0:
+        raise ValueError("nrSeeds must be a positive integer")
+    nr_samples = [nrSeeds] * len(sizes)
     nr_threads = [2, 3, 4, 8, 8]  # , 8]
     sizes.reverse()
     nr_samples.reverse()
@@ -908,21 +933,48 @@ def size_scaling_job(reconnection="none"):
             seed=range(samples),
             rows=size,
             cols=size,
-            startLoad=0.15,
+            startLoad=startLoad,
             maxLoad=1.0,
             loadIncrement=1e-5,
             nrThreads=threads,
             minimizer="LBFGS",
             LBFGSEpsx=1e-6,
             reconnectionMethod=reconnection,
+            **{
+                key: value
+                for key, value in {
+                    "reconnectRevert": reconnectRevert,
+                    "reconnectEdgeLocking": reconnectEdgeLocking,
+                }.items()
+                if value is not None
+            },
             # epsR=1e-6,
-            experiment="simpleShear",
+            experiment=experiment,
+            energyDropThreshold=energyDropThreshold,
         )
         # Append the generated configs and labels to the main lists
         all_configs.append(configs)
         all_labels.append(list(map(lambda x: f"L={size}, " + x, labels)))
 
     return all_configs, all_labels
+
+
+def reversibility_size_scaling_job(
+    reconnection="none",
+    reconnectRevert=1,
+    reconnectEdgeLocking=0,
+    nrSeeds=5,
+):
+    """Generate the size-scaling campaign using the reversibility protocol."""
+    return size_scaling_job(
+        reconnection=reconnection,
+        reconnectRevert=reconnectRevert,
+        reconnectEdgeLocking=reconnectEdgeLocking,
+        experiment="reversibilityProtocolTest",
+        startLoad=0.14,
+        energyDropThreshold=1e-5,
+        nrSeeds=nrSeeds,
+    )
 
 
 def triangular_edge_flip_job(

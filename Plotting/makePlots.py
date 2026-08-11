@@ -24,6 +24,7 @@ from .dataFunctions import (
 from .energyDropCalculations import (
     calculate_energy_step_data,
     infer_plastic_event_column,
+    infer_stress_column,
 )
 from Management.updateCSV import update_df_header, read_macrodata_csv
 from collections import defaultdict
@@ -1736,9 +1737,7 @@ def plot_predicted_energy_error_distribution(
             step_energy_change < -float(drop_threshold)
         )
 
-        stress_col = "avg_sigma12" if "avg_sigma12" in raw_df else "avg_P12"
-        if stress_col not in raw_df:
-            raise KeyError(f"{csv_path} has no yield-stress column.")
+        stress_col = infer_stress_column(raw_df)
         stress = np.asarray(raw_df[stress_col], dtype=float)
         finite_stress = np.isfinite(stress)
         if not np.any(finite_stress):
@@ -2101,9 +2100,7 @@ def plot_predicted_energy_error_distribution_with_reconnection_events(
                 step_energy_change < -float(drop_threshold)
             )
 
-            stress_col = "avg_sigma12" if "avg_sigma12" in raw_df else "avg_P12"
-            if stress_col not in raw_df:
-                raise KeyError(f"{csv_path} has no yield-stress column.")
+            stress_col = infer_stress_column(raw_df)
             stress = np.asarray(raw_df[stress_col], dtype=float)
             finite_stress = np.isfinite(stress)
             if not np.any(finite_stress):
@@ -2374,9 +2371,7 @@ def plot_average_elastic_frobenius_norm_vs_gamma(
             energy = np.asarray(energy_df["avg_energy"], dtype=float)
             if load.shape != energy.shape:
                 raise ValueError(f"Energy/load shape mismatch in {csv_path}.")
-            stress_col = "avg_sigma12" if "avg_sigma12" in energy_df else "avg_P12"
-            if stress_col not in energy_df:
-                raise KeyError(f"{csv_path} has no yield-stress column.")
+            stress_col = infer_stress_column(energy_df)
             stress = np.asarray(energy_df[stress_col], dtype=float)
             finite_stress = np.isfinite(stress)
             if not np.any(finite_stress):

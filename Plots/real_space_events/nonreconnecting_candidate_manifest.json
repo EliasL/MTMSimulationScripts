@@ -1,0 +1,11 @@
+{
+  "downloads": [
+    {
+      "event_id": "/Volumes/data/remoteData/macro/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2.csv:5883",
+      "source": "RemoteSource(host='duchemin.pmmh-cluster.espci.fr', data_root=PosixPath('/data/elundheim/MTS2D_output'))",
+      "remote_event_directory": "/data/elundheim/MTS2D_output/reversibilityProtocolTest,s100x100l0.14,1e-05,1.0PBCt3LBFGSEpsx1e-06energyDropThreshold1e-05s2/data/reversibilityData/rev_drop_l_0.19883",
+      "local_event_directory": "/Volumes/data/remoteData/real_space_events/nonreconnecting_reversible_plastic_s2_load0.19884"
+    }
+  ],
+  "replays": []
+}

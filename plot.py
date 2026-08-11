@@ -484,6 +484,22 @@ def plotSylvainBatches():
                 ),
             )
 
+        plotReversibilityQuantityCorrelation(
+            grouped_configs,
+            grouped_labels,
+            xAxisCol="rev_sigma_12_diff",
+            yAxisCol="rev_energy_diff",
+            postRegime=None,
+            title=(
+                r"$|\Delta_{\mathrm{rev}} E|$ vs. "
+                r"$|\Delta_{\mathrm{rev}}\sigma_{12}|$, varying "
+                + (r"$\Delta\Gamma$" if batch == -1 else r"$\epsilon_X")
+            ),
+            name=(
+                f"sylvain_batch_{batch}_reversibility_energy_vs_sigma12"
+            ),
+        )
+
         plot_reversibility_delta_u_relaxation(
             grouped_configs,
             grouped_labels,

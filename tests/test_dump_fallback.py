@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+from Management.configGenerator import SimulationConfig
 from Management.queueLocalJobs import get_batch_script
 from Management.simulationManager import SimulationManager
 
@@ -85,6 +86,15 @@ class DumpFallbackTests(unittest.TestCase):
     def test_slurm_time_limit_is_one_day_and_five_minutes(self):
         script = get_batch_script("true", "test", 1, "/tmp")
         self.assertIn("#SBATCH --time=1-00:05:00", script)
+
+    def test_slurm_nice_is_only_added_when_requested(self):
+        normal = get_batch_script("true", "test", 1, "/tmp")
+        low_priority = get_batch_script("true", "test", 1, "/tmp", nice=10000)
+        self.assertNotIn("#SBATCH --nice=", normal)
+        self.assertIn("#SBATCH --nice=10000", low_priority)
+
+    def test_edge_locking_is_disabled_by_default(self):
+        self.assertEqual(SimulationConfig().reconnectEdgeLocking, 0)
 
 
 if __name__ == "__main__":

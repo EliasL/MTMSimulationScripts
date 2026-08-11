@@ -1,0 +1,6 @@
+setting_parameter,setting,first_otsu_cut,final_otsu_cut,island_removal_cut,rule,recorded_steps,closing_steps,nonclosing_steps,discarded_steps
+load_increment,1e-06,0.0002833540117684935,0.0002833540117684935,,one Otsu split; discard nothing,23644,21692,1952,0
+load_increment,5e-06,0.0004583653292233264,0.0004583653292233264,,one Otsu split; discard nothing,25218,23319,1899,0
+load_increment,1e-05,0.0004871165137041288,0.0004871165137041288,,one Otsu split; discard nothing,26674,24826,1848,0
+load_increment,5e-05,0.00032774221679043137,0.00032774221679043137,,one Otsu split; discard nothing,15720,14086,1634,0
+load_increment,0.0001,0.00024184783383779068,0.00024184783383779068,,one Otsu split; discard nothing,12704,11141,1563,0

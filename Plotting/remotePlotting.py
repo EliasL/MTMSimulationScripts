@@ -1743,6 +1743,17 @@ def _pretty_reversibility_axis_label(x_axis_col):
             escaped = quantity.replace("_", r"\_")
             symbol = rf"\mathrm{{{escaped}}}"
 
+    magnitude = quantity_lower in {
+        "energy",
+        "avg_energy",
+        "total_energy",
+        "sigma",
+        "stress",
+        "sigma12",
+        "sigma_12",
+    }
+    if magnitude:
+        return rf"$|\Delta_{{\mathrm{{rev}}}} {symbol}|$"
     return rf"$\Delta_{{\mathrm{{rev}}}} {symbol}$"
 
 
@@ -2003,6 +2014,7 @@ def plotReversibilityQuantityCorrelation(
     show=False,
     save=True,
     postRegime=None,
+    title=None,
     name="reversibility_quantity_correlation",
 ):
     """Plot one recorded reversibility quantity against another."""
@@ -2125,7 +2137,7 @@ def plotReversibilityQuantityCorrelation(
     ax.set_ylabel(y_axis_label)
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_title("Reversibility quantity correlation")
+    ax.set_title(title or "Reversibility quantity correlation")
     ax.legend(
         handles=[
             Line2D([], [], linestyle="None", label="Settings (color)"),
@@ -2134,8 +2146,9 @@ def plotReversibilityQuantityCorrelation(
             *shape_handles,
         ],
         loc="upper left",
-        ncol=1,
+        ncol=2,
         frameon=True,
+        fontsize="small",
     )
     fig.tight_layout()
 

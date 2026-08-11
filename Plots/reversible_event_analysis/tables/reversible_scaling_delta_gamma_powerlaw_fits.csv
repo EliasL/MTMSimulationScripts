@@ -1,0 +1,9 @@
+attribute,field,post_yield,quantile,slope,intercept_log
+load_increment,rev_energy_density,False,0.5,-0.023446931882402516,-31.467543904839673
+load_increment,rev_energy_density,False,0.99,-0.11527075563861837,-29.70165774663027
+load_increment,rev_sigma,False,0.5,1.004675316227662,0.5630049214135179
+load_increment,rev_sigma,False,0.99,1.0017648202748426,0.7202763486046129
+load_increment,rev_energy_density,True,0.5,-0.011013819782379591,-29.626659102776372
+load_increment,rev_energy_density,True,0.99,-0.13867265102937282,-28.75679852911919
+load_increment,rev_sigma,True,0.5,1.0070927821945688,0.3910232666196518
+load_increment,rev_sigma,True,0.99,0.9737166701144165,0.19708229557690843

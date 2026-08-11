@@ -1,0 +1,10 @@
+{
+  "classifier": "setting-wise unbinned log-Otsu split of recorded positive Delta E_S cycles in Delta_rev u",
+  "reversible_elastic": "recorded reversible cycle and m3 change == 0",
+  "reversible_plastic": "recorded reversible cycle and m3 change > 0",
+  "irreversible": "event row not in the reversible population",
+  "stress_drop": "second-order stress-corrected Delta sigma_S",
+  "energy_drop": "second-order stress-corrected Delta E_S divided by V_0",
+  "inter_strain_energy_drop": "-total_energy_change divided by V_0; positive means the measured energy decreases between consecutive relaxed states",
+  "uncertainty": "standard deviation across samples"
+}

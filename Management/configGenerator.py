@@ -19,7 +19,7 @@ class SimulationConfig:
         self.usingPBC = "true"
         self.reconnectionMethod = "none"  # "none", "edgeFlip", "delaunay"
         self.reconnectRevert = 1  # Stop if a reconnection raises the energy
-        self.reconnectEdgeLocking = 1 #True
+        self.reconnectEdgeLocking = 0  # Edge locking is opt-in.
         self.experiment = "simpleShear"
         self.nrThreads = 1  # This needs to be 1. Don't change. (see queueLocalJobs)
         self.seed = 0

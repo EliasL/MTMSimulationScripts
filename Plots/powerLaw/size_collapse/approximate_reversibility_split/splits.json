@@ -1,0 +1,193 @@
+{
+  "data_root": "/Volumes/data/remoteData/macro",
+  "sizes": [
+    50,
+    100,
+    150,
+    200,
+    250
+  ],
+  "seeds_per_size": 6,
+  "bins_per_decade": 10,
+  "inventory": {
+    "250": 6,
+    "200": 6,
+    "150": 10,
+    "100": 10,
+    "50": 10
+  },
+  "protocol": "initial_guess_energy (Delta E_R)",
+  "splits": {
+    "50": {
+      "pre": {
+        "cut": 9.81361595987859e-10,
+        "otsu_cut": 9.183173403370183e-10,
+        "otsu_bin": 60,
+        "minimum_bin": 60,
+        "local_minimum_bins": [
+          46,
+          47,
+          48,
+          49,
+          50,
+          51,
+          52,
+          53,
+          54,
+          55,
+          56,
+          57,
+          58,
+          59,
+          60,
+          61,
+          62,
+          63,
+          64,
+          65,
+          66,
+          67,
+          68,
+          69,
+          70,
+          71,
+          72,
+          73,
+          74
+        ],
+        "descent_path": [
+          60
+        ],
+        "sample_count": 205827
+      },
+      "post": {
+        "cut": 1.9043342792299064e-07,
+        "otsu_cut": 1.773772879687425e-07,
+        "otsu_bin": 7,
+        "minimum_bin": 7,
+        "local_minimum_bins": [
+          7
+        ],
+        "descent_path": [
+          7
+        ],
+        "sample_count": 179994
+      }
+    },
+    "100": {
+      "pre": {
+        "cut": 1.4389973197237569e-06,
+        "otsu_cut": 1.5800172476917408e-06,
+        "otsu_bin": 6,
+        "minimum_bin": 6,
+        "local_minimum_bins": [
+          6
+        ],
+        "descent_path": [
+          6
+        ],
+        "sample_count": 209994
+      },
+      "post": {
+        "cut": 5.22655748795003e-07,
+        "otsu_cut": 5.677116518306339e-07,
+        "otsu_bin": 3,
+        "minimum_bin": 3,
+        "local_minimum_bins": [
+          3
+        ],
+        "descent_path": [
+          3
+        ],
+        "sample_count": 179988
+      }
+    },
+    "150": {
+      "pre": {
+        "cut": 3.0702365240013283e-06,
+        "otsu_cut": 3.435957791901362e-06,
+        "otsu_bin": 4,
+        "minimum_bin": 4,
+        "local_minimum_bins": [
+          4
+        ],
+        "descent_path": [
+          4
+        ],
+        "sample_count": 209984
+      },
+      "post": {
+        "cut": 1.4654469126039308e-06,
+        "otsu_cut": 1.503043677045318e-06,
+        "otsu_bin": 4,
+        "minimum_bin": 4,
+        "local_minimum_bins": [
+          4
+        ],
+        "descent_path": [
+          4
+        ],
+        "sample_count": 179985
+      }
+    },
+    "200": {
+      "pre": {
+        "cut": 6.805093041125615e-06,
+        "otsu_cut": 6.254154442349533e-06,
+        "otsu_bin": 5,
+        "minimum_bin": 5,
+        "local_minimum_bins": [
+          5
+        ],
+        "descent_path": [
+          5
+        ],
+        "sample_count": 209978
+      },
+      "post": {
+        "cut": 2.4139433211377235e-06,
+        "otsu_cut": 2.705499127611484e-06,
+        "otsu_bin": 4,
+        "minimum_bin": 4,
+        "local_minimum_bins": [
+          4
+        ],
+        "descent_path": [
+          4
+        ],
+        "sample_count": 179981
+      }
+    },
+    "250": {
+      "pre": {
+        "cut": 6.811502058098446e-05,
+        "otsu_cut": 5.0863402518042935e-05,
+        "otsu_bin": 12,
+        "minimum_bin": 13,
+        "local_minimum_bins": [
+          11,
+          13
+        ],
+        "descent_path": [
+          12,
+          11
+        ],
+        "sample_count": 209975
+      },
+      "post": {
+        "cut": 7.007521163570234e-05,
+        "otsu_cut": 6.917439632932312e-05,
+        "otsu_bin": 17,
+        "minimum_bin": 17,
+        "local_minimum_bins": [
+          16,
+          17
+        ],
+        "descent_path": [
+          17
+        ],
+        "sample_count": 179968
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+relation,setting_parameter,setting,positive_points,alpha,log10_prefactor,sample_count
+irreversible_deltaE_vs_delta_revE_selected_delta_gamma,load_increment,1e-05,1848,1.0,0.0936902584749148,4
+irreversible_delta_sigma12_vs_delta_rev_sigma12_selected_delta_gamma,load_increment,1e-05,1848,0.9916149871969522,-0.030385323471262733,4
+irreversible_deltaE_vs_m3_delta_sigma12_squared_selected_delta_gamma,load_increment,1e-05,1848,0.4957034275420207,-0.629165279947728,4

@@ -13,6 +13,15 @@ PLASTIC_EVENT_COLUMNS = (
     "nr_elements_with_m3_fix_change",
     "nr_elements_with_m3_change",
 )
+SIGMA12_RESCUE_SENTINEL = -1.0
+
+
+def sigma12_rescue_invalid_mask(df):
+    """Return rows explicitly marked unusable by sigma rescue."""
+
+    if "avg_sigma12" not in df:
+        raise KeyError("Missing avg_sigma12 while checking rescue sentinels.")
+    return np.asarray(df["avg_sigma12"], dtype=float) == SIGMA12_RESCUE_SENTINEL
 
 
 def infer_plastic_event_column(df, *, required=True):
@@ -40,20 +49,69 @@ def infer_energy_column(df, average_energy=False):
 
 
 def infer_stress_column(df):
-    """Return the preferred shear-stress column for general legacy analyses."""
-    sigma_col = "avg_sigma12"
-    piola_col = "avg_P12"
-    if sigma_col in df:
-        sigma = np.asarray(df[sigma_col], dtype=float)
-        if not np.all(sigma == 0):
-            return sigma_col
-    if piola_col in df:
-        print(
-            "Warning: avg_sigma12 is unavailable or identically zero; using "
-            "avg_P12 for a legacy stress analysis."
+    """Return Cauchy shear stress, refusing a raw Piola fallback."""
+    validate_sigma12_column(df)
+    return "avg_sigma12"
+
+
+def validate_sigma12_column(
+    df,
+    *,
+    strain_threshold=0.3,
+    context="provided data",
+    equality_rtol=1e-10,
+    equality_atol=1e-12,
+):
+    """Require native ``avg_sigma12`` and reject copied ``avg_P12`` values.
+
+    ``avg_P12`` is not an acceptable substitute for the Cauchy shear stress in
+    the affine energy prediction.  In particular, a copied column can look
+    plausible at small strain, so equality is checked only above the requested
+    strain threshold where the two tensors should generally differ.  Rows with
+    the sigma-rescue sentinel ``-1`` are deliberately masked by the step-data
+    functions rather than interpreted as physical stresses.
+    """
+    if "avg_sigma12" not in df:
+        raise KeyError(
+            f"{context} is missing 'avg_sigma12'; refusing to substitute "
+            "'avg_P12'. Do not substitute 'avg_P12' for sigma12."
         )
-        return piola_col
-    raise KeyError("No stress column found")
+
+    sigma = np.asarray(df["avg_sigma12"], dtype=float)
+    if not np.all(np.isfinite(sigma)):
+        raise ValueError(f"{context} contains non-finite avg_sigma12 values.")
+
+    if "avg_P12" not in df or "load" not in df:
+        return "avg_sigma12"
+
+    piola = np.asarray(df["avg_P12"], dtype=float)
+    strain = np.asarray(df["load"], dtype=float)
+    if sigma.shape != piola.shape or sigma.shape != strain.shape:
+        raise ValueError(
+            f"{context} has mismatched sigma/P12/load shapes: "
+            f"{sigma.shape}, {piola.shape}, {strain.shape}."
+        )
+    finite = (
+        np.isfinite(strain)
+        & np.isfinite(piola)
+        & (sigma != SIGMA12_RESCUE_SENTINEL)
+    )
+    copied = finite & (strain > strain_threshold) & np.isclose(
+        sigma,
+        piola,
+        rtol=equality_rtol,
+        atol=equality_atol,
+    )
+    if np.any(copied):
+        indices = np.flatnonzero(copied)
+        preview = ", ".join(
+            f"row {int(i)} (load={strain[i]:.8g})" for i in indices[:3]
+        )
+        raise ValueError(
+            f"{context} has avg_sigma12 equal to avg_P12 above strain "
+            f"{strain_threshold:g}; refusing copied-P12 stress data at {preview}."
+        )
+    return "avg_sigma12"
 
 
 def infer_energy_prediction_stress_column(df):
@@ -69,20 +127,15 @@ def infer_energy_prediction_stress_column(df):
     component average. It is also not conjugate to this loading path once
     element deformation gradients become heterogeneous.
     """
-    stress_col = "avg_sigma12"
-    if stress_col in df:
-        if "avg_P12" in df:
-            warnings.warn(
-                "Using avg_sigma12 for the affine-step energy prediction; "
-                "avg_P12 is intentionally ignored.",
-                RuntimeWarning,
-                stacklevel=2,
-            )
-        return stress_col
-    raise KeyError(
-        "Missing Cauchy shear-stress column 'avg_sigma12'. Do not substitute "
-        "'avg_P12' in the affine-step energy prediction."
-    )
+    validate_sigma12_column(df, context="energy prediction data")
+    if "avg_P12" in df:
+        warnings.warn(
+            "Using avg_sigma12 for the affine-step energy prediction; "
+            "avg_P12 is intentionally ignored.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return "avg_sigma12"
 
 
 def stress_corrected_drop_column(correction_order=2, tangent="current"):
@@ -188,6 +241,7 @@ def calculate_stress_step_data(
     missing = sorted(required - set(df.columns))
     if missing:
         raise KeyError(f"Missing stress columns: {missing}")
+    validate_sigma12_column(df, context="stress-step data")
 
     load = np.asarray(df["load"], dtype=float)
     sigma = np.asarray(df["avg_sigma12"], dtype=float)
@@ -214,7 +268,7 @@ def calculate_stress_step_data(
         a1212_i = np.full_like(load_i, np.nan, dtype=float)
     sigma_pred_ip1 = sigma[:-1] + a1212_i * delta_gamma
 
-    return pd.DataFrame(
+    step_df = pd.DataFrame(
         {
             "load_i": load_i,
             "load_ip1": load[1:],
@@ -227,7 +281,19 @@ def calculate_stress_step_data(
             "inter_strain_drop": sigma[:-1] - sigma[1:],
             "relaxation_drop": -relaxation_change[1:],
         }
-    ), {
+    )
+    invalid_rows = (
+        (sigma == SIGMA12_RESCUE_SENTINEL)
+        | (relaxation_change == SIGMA12_RESCUE_SENTINEL)
+    )
+    invalid_steps = invalid_rows[:-1] | invalid_rows[1:]
+    if np.any(invalid_steps):
+        step_df.loc[
+            invalid_steps,
+            step_df.columns.difference(["load_i", "load_ip1", "delta_gamma"]),
+        ] = np.nan
+
+    return step_df, {
         "csv_path": str(csv_path) if csv_path is not None else None,
         "stress_col": "avg_sigma12",
         "relaxation_col": "avg_sigma12_change_from_init",
@@ -409,6 +475,13 @@ def calculate_energy_step_data(
             "stress_corrected_drop_second_order_gamma0": second_order_gamma0_drop,
         }
     )
+    invalid_rows = cauchy_stress == SIGMA12_RESCUE_SENTINEL
+    invalid_steps = invalid_rows[:-1] | invalid_rows[1:]
+    if np.any(invalid_steps):
+        step_df.loc[
+            invalid_steps,
+            step_df.columns.difference(["load_i", "load_ip1", "delta_gamma"]),
+        ] = np.nan
     info = {
         "csv_path": str(csv_path) if csv_path is not None else None,
         "reference_volume": reference_volume,

@@ -19,24 +19,32 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.lines import Line2D
 
 from Management.jobs import size_scaling_job
 from Management.updateCSV import HEADER_RENAME_MAP, update_df_header
-from Plotting.energyDropCalculations import calculate_energy_step_data
+from Plotting.energyDropCalculations import (
+    SIGMA12_RESCUE_SENTINEL,
+    calculate_energy_step_data,
+    validate_sigma12_column,
+)
 from Plotting.plotPowerLaw import dist_from_fit, make_fit
 
 
 PROTOCOLS = (
     "second_order",
-    "first_order",
     "previous_energy",
     "initial_guess_energy",
 )
 PROTOCOL_LABELS = {
-    "second_order": "Second-order elastic continuation",
-    "first_order": "First-order elastic continuation",
-    "previous_energy": "Previous relaxed energy",
-    "initial_guess_energy": "Affine initial-guess energy",
+    "second_order": r"$E_S$ (stress corrected)",
+    "previous_energy": r"$E_I$ (inter-strain)",
+    "initial_guess_energy": r"$E_R$ (relaxation)",
+}
+PROTOCOL_DROP_SYMBOLS = {
+    "second_order": r"\Delta E_S",
+    "previous_energy": r"\Delta E_I",
+    "initial_guess_energy": r"\Delta E_R",
 }
 REGIMES = {"pre": (0.15, 0.5), "post": (0.7, 1.0)}
 CACHE_VERSION = 2
@@ -175,13 +183,12 @@ def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
     nonfinite = [column for column in required if not np.isfinite(df[column]).all()]
     if nonfinite:
         raise ValueError(f"Non-finite required columns {nonfinite} in {path}.")
-    stress_columns = [
-        column
-        for column in ("avg_sigma12", "avg_P12")
-        if column in df and np.isfinite(df[column]).all()
-    ]
-    if not stress_columns:
-        raise ValueError(f"No complete stress column in {path}.")
+    if "avg_sigma12" not in df:
+        raise ValueError(
+            f"Missing native avg_sigma12 in {path}; refusing to use avg_P12 "
+            "as a substitute."
+        )
+    validate_sigma12_column(df, context=str(path))
     load = np.asarray(df["load"], dtype=float)
     if not np.all(np.isfinite(load)) or np.any(np.diff(load) <= 0):
         raise ValueError(f"Load must be finite and strictly increasing: {path}")
@@ -197,14 +204,18 @@ def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
         "second_order": np.asarray(
             steps["stress_corrected_drop_second_order"], dtype=float
         ),
-        "first_order": np.asarray(
-            steps["stress_corrected_drop_first_order"], dtype=float
-        ),
         "previous_energy": -np.asarray(df["total_energy_change"], dtype=float)[1:],
         "initial_guess_energy": -np.asarray(
             df["total_e_change_from_init"], dtype=float
         )[1:],
     }
+    invalid_rows = (
+        df["avg_sigma12"].to_numpy(dtype=float) == SIGMA12_RESCUE_SENTINEL
+    )
+    invalid_steps = invalid_rows[:-1] | invalid_rows[1:]
+    for protocol in ("previous_energy", "initial_guess_energy"):
+        values[protocol] = values[protocol].copy()
+        values[protocol][invalid_steps] = np.nan
 
     extracted = {}
     for protocol, drops in values.items():
@@ -256,14 +267,30 @@ def log_histogram(data, bins_per_decade=10):
     return centers[mask], density[mask]
 
 
-def fit_xmins(size_drops, parallel, cache_dir: Path):
+def fit_xmins(
+    size_drops,
+    parallel,
+    cache_dir: Path,
+    description="xmin",
+    narrow_search=False,
+):
     fits = {}
     for size, drops in size_drops.items():
+        mode = "parallel" if parallel else "serial"
+        print(f"Fitting xmin ({mode}): {description}, L={size}", flush=True)
+        xmin_search_kwargs = {
+            "progress": True,
+            "progress_label": f"{description}, L={size}",
+        }
+        if narrow_search:
+            xmin_search_kwargs["narrow_search"] = True
         fits[size] = make_fit(
             drops,
             cache_dir=str(cache_dir),
             parallel_xmin=parallel,
+            xmin_search_kwargs=xmin_search_kwargs,
         )
+        print(f"Finished xmin: {description}, L={size}", flush=True)
     return fits
 
 
@@ -392,11 +419,33 @@ def plot_raw_and_xmin(
     applied_xmins=None,
     xmin_note=None,
 ):
-    applied_xmins = applied_xmins or {
-        size: float(fit.xmin) for size, fit in fits.items()
-    }
+    del applied_xmins, xmin_note
     fig, (ax_pdf, ax_xmin) = plt.subplots(1, 2, figsize=(11, 4.2))
-    for size, (drop, density) in raw_curves.items():
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    for curve_index, (size, (drop, density)) in enumerate(raw_curves.items()):
+        analysis = getattr(fits[size], "xmin_analysis", None)
+        if analysis is None:
+            raise RuntimeError(f"Missing xmin analysis for L={size}.")
+        simple_xmin = float(analysis["simple_drop_xmin"])
+        global_xmin = float(analysis["global_min_xmin"])
+        global_distance = float(analysis["global_min_distance"])
+        color = colors[curve_index % len(colors)]
+        ax_pdf.axvline(
+            simple_xmin,
+            color=color,
+            linestyle="--",
+            linewidth=1.0,
+            alpha=0.85,
+            zorder=0.1,
+        )
+        ax_xmin.axvline(
+            simple_xmin,
+            color=color,
+            linestyle="--",
+            linewidth=1.0,
+            alpha=0.85,
+            zorder=0.1,
+        )
         pdf_points = ax_pdf.plot(
             drop,
             density,
@@ -404,11 +453,9 @@ def plot_raw_and_xmin(
             ms=3,
             linestyle="none",
             label=f"L={size}",
+            color=color,
+            zorder=3,
         )[0]
-        color = pdf_points.get_color()
-        ax_pdf.axvline(
-            applied_xmins[size], color=color, alpha=0.25, zorder=0
-        )
         results = getattr(fits[size], "xmin_fitting_results", None) or {}
         xmins = np.asarray(results.get("xmins", []), dtype=float)
         distances = np.asarray(results.get("distances", []), dtype=float)
@@ -422,28 +469,43 @@ def plot_raw_and_xmin(
                 valid_distances,
                 color=color,
                 label=f"L={size}",
-            )
-            ax_xmin.axvline(
-                applied_xmins[size],
-                color=color,
-                alpha=0.25,
-                zorder=0,
+                zorder=3,
             )
             ax_xmin.scatter(
-                [applied_xmins[size]],
-                [np.interp(applied_xmins[size], valid_xmins, valid_distances)],
+                [global_xmin],
+                [global_distance],
+                marker="x",
                 color=color,
-                s=20,
+                s=55,
+                linewidths=1.8,
+                zorder=20,
             )
-    ax_pdf.set(xscale="log", yscale="log", xlabel="Energy drop $s$", ylabel="$P(s;L)$")
-    ax_pdf.legend()
-    ax_xmin.set(xscale="log", xlabel="$x_{min}$ candidate", ylabel="KS distance")
-    ax_xmin.legend()
-    title = f"{PROTOCOL_LABELS[protocol]} - {regime}-yield"
-    if xmin_note:
-        title += f"\n{xmin_note}"
-    fig.suptitle(title)
-    fig.tight_layout()
+    drop_symbol = PROTOCOL_DROP_SYMBOLS[protocol]
+    ax_pdf.set(
+        xscale="log",
+        yscale="log",
+        xlabel=rf"${drop_symbol}$",
+        ylabel=rf"$p({drop_symbol})$",
+    )
+    legend_extras = [
+        Line2D([], [], color="black", linestyle="--", label="simple drop"),
+        Line2D(
+            [],
+            [],
+            color="black",
+            marker="x",
+            linestyle="none",
+            markersize=7,
+            markeredgewidth=1.8,
+            label="global min",
+        ),
+    ]
+    for axis in (ax_pdf, ax_xmin):
+        handles, labels = axis.get_legend_handles_labels()
+        axis.legend(handles + legend_extras, labels + ["simple drop", "global min"])
+    ax_xmin.set(xscale="log", xlabel=r"$\Delta E_{\min}$", ylabel=r"$D$")
+    fig.suptitle("Pre-yield" if regime == "pre" else "Post-yield")
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
 
@@ -537,9 +599,18 @@ def fixed_xmin_parameter_fits(
 ):
     records = {}
     for size, drops in size_drops.items():
+        size_xmin = (
+            float(xmin[size])
+            if isinstance(xmin, dict)
+            else float(xmin)
+        )
+        print(
+            f"Fitting parameters: {description}, L={size}, xmin={size_xmin:.6g}",
+            flush=True,
+        )
         fit = make_fit(
             drops,
-            xmin_range=float(xmin),
+            xmin_range=size_xmin,
             cache_dir=str(fit_cache_dir),
         )
         fit.evaluate_fit(
@@ -549,6 +620,7 @@ def fixed_xmin_parameter_fits(
             cache_dir=str(evaluation_cache_dir),
             tqdmDesc=f"{description}, L={size}",
         )
+        print(f"Finished parameters: {description}, L={size}", flush=True)
         distribution = dist_from_fit(fit)
         alpha = float(distribution.alpha)
         cutoff = float(getattr(distribution, "Lambda", np.nan))
@@ -563,12 +635,14 @@ def fixed_xmin_parameter_fits(
             "alpha_std": alpha_std,
             "Lambda": cutoff,
             "Lambda_std": cutoff_std,
-            "tail_count": int(np.count_nonzero(np.asarray(drops) >= xmin)),
+            "xmin": size_xmin,
+            "tail_count": int(np.count_nonzero(np.asarray(drops) >= size_xmin)),
         }
     return records
 
 
-def plot_parameter_vs_size(parameter_results, shared_xmins, parameter, path: Path):
+def plot_parameter_vs_size(parameter_results, xmins, parameter, path: Path):
+    del xmins
     if parameter not in {"alpha", "Lambda"}:
         raise ValueError("parameter must be 'alpha' or 'Lambda'.")
     markers = ("o", "s", "^", "D")
@@ -593,23 +667,49 @@ def plot_parameter_vs_size(parameter_results, shared_xmins, parameter, path: Pat
                 yerr=yerr,
                 marker=marker,
                 capsize=3,
-                label=(
-                    f"{PROTOCOL_LABELS[protocol]} "
-                    f"($x_{{min}}={shared_xmins[protocol][regime]:.2e}$)"
-                ),
+                label=PROTOCOL_LABELS[protocol],
             )
-        ax.set_title(f"{regime}-yield")
         ax.set_xlabel("System size $L$")
         ax.grid(alpha=0.2)
+        ax.set_title("Pre-yield" if regime == "pre" else "Post-yield")
         if parameter == "Lambda":
             ax.set_yscale("log")
             ax.set_ylabel(r"Cutoff rate $\lambda$")
         else:
             ax.set_ylabel(r"Exponent $\alpha$")
         ax.legend(fontsize="small")
-    fig.suptitle(
-        r"Shared $x_{min}$ from $L=250$; error bars are one bootstrap standard deviation"
-    )
+    fig.tight_layout()
+    fig.savefig(path, bbox_inches="tight")
+    fig.savefig(path.with_suffix(".png"), dpi=180, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_xmin_vs_size(xmins, method: str, path: Path):
+    if method not in xmins:
+        raise ValueError(f"Unknown xmin method {method!r}.")
+    markers = ("o", "s", "^")
+    colors = ("#0072B2", "#E69F00", "#009E73")
+    fig, axes = plt.subplots(1, len(REGIMES), figsize=(11, 4.4), sharex=True)
+    for ax, regime in zip(axes, REGIMES):
+        for marker, color, protocol in zip(markers, colors, PROTOCOLS):
+            values = xmins[method][protocol][regime]
+            sizes = np.asarray(sorted(values), dtype=float)
+            y = np.asarray([values[int(size)] for size in sizes], dtype=float)
+            ax.plot(
+                sizes,
+                y,
+                marker=marker,
+                color=color,
+                linewidth=1.1,
+                label=PROTOCOL_LABELS[protocol],
+            )
+        ax.set_xlabel("System size $L$")
+        ax.set_xticks(sizes)
+        ax.set_yscale("log")
+        ax.grid(alpha=0.2)
+        ax.set_title("Pre-yield" if regime == "pre" else "Post-yield")
+    axes[0].set_ylabel(r"$\Delta E_{\min}$")
+    axes[0].legend(fontsize="small")
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
     fig.savefig(path.with_suffix(".png"), dpi=180, bbox_inches="tight")
@@ -648,7 +748,12 @@ def run(args):
     all_results = {protocol: {} for protocol in PROTOCOLS}
     all_curves_without_l50 = {protocol: {} for protocol in PROTOCOLS}
     all_results_without_l50 = {protocol: {} for protocol in PROTOCOLS}
-    summary = {"inventory": inventory, "seeds_per_size": args.seeds_per_size, "results": {}}
+    summary = {
+        "inventory": inventory,
+        "seeds_per_size": args.seeds_per_size,
+        "narrow_search": args.narrow_search,
+        "results": {},
+    }
     for protocol in PROTOCOLS:
         summary["results"][protocol] = {}
         for regime in regimes:
@@ -662,6 +767,8 @@ def run(args):
                 size_drops,
                 parallel=args.parallel_xmin,
                 cache_dir=output / "cache" / "xmin" / protocol / regime,
+                description=f"{protocol}, {regime}-yield",
+                narrow_search=args.narrow_search,
             )
             all_fits[protocol][regime] = fits
             raw_curves = histogram_curves(size_drops, args.bins_per_decade)
@@ -770,6 +877,88 @@ def run(args):
     if not (do_shared or do_parameters):
         return
 
+    if do_parameters:
+        parameter_dir = analysis_dir / "parameters_per_size"
+        parameter_dir.mkdir(parents=True, exist_ok=True)
+        parameter_xmins = {
+            "simple_drop": {protocol: {} for protocol in PROTOCOLS},
+            "global_min": {protocol: {} for protocol in PROTOCOLS},
+        }
+        parameter_results = {
+            method: {protocol: {} for protocol in PROTOCOLS}
+            for method in parameter_xmins
+        }
+        for method in parameter_xmins:
+            for protocol in PROTOCOLS:
+                for regime in regimes:
+                    size_drops = pooled[protocol][regime]
+                    parameter_xmins[method][protocol][regime] = {
+                        size: float(
+                            all_fits[protocol][regime][size].xmin_analysis[
+                                "simple_drop_xmin"
+                                if method == "simple_drop"
+                                else "global_min_xmin"
+                            ]
+                        )
+                        for size in size_drops
+                    }
+                    parameter_results[method][protocol][regime] = (
+                        fixed_xmin_parameter_fits(
+                            size_drops,
+                            parameter_xmins[method][protocol][regime],
+                            fit_cache_dir=(
+                                parameter_dir
+                                / "cache"
+                                / "fixed_xmin"
+                                / method
+                                / protocol
+                                / regime
+                            ),
+                            evaluation_cache_dir=(
+                                parameter_dir
+                                / "cache"
+                                / "evaluation"
+                                / method
+                                / protocol
+                                / regime
+                            ),
+                            uncertainty_accuracy=args.uncertainty_accuracy,
+                            parallel=args.parallel_uncertainty,
+                            description=f"{method}, {protocol}, {regime}-yield",
+                        )
+                    )
+        for method in parameter_results:
+            plot_parameter_vs_size(
+                parameter_results[method],
+                parameter_xmins[method],
+                "alpha",
+                parameter_dir / f"alpha_vs_size_{method}.pdf",
+            )
+            plot_parameter_vs_size(
+                parameter_results[method],
+                parameter_xmins[method],
+                "Lambda",
+                parameter_dir / f"lambda_vs_size_{method}.pdf",
+            )
+            plot_xmin_vs_size(
+                parameter_xmins,
+                method,
+                parameter_dir / f"xmin_vs_size_{method}.pdf",
+            )
+        (parameter_dir / "parameter_results.json").write_text(
+            json.dumps(
+                {
+                    "inventory": inventory,
+                    "seeds_per_size": args.seeds_per_size,
+                    "sizes": sorted(paths),
+                    "protocols": PROTOCOLS,
+                    "xmins": parameter_xmins,
+                    "records": parameter_results,
+                },
+                indent=2,
+            )
+        )
+
     shared_dir = analysis_dir / "shared_L250_xmin"
     shared_dir.mkdir(parents=True, exist_ok=True)
     shared_xmins = {protocol: {} for protocol in PROTOCOLS}
@@ -873,24 +1062,6 @@ def run(args):
                     ),
                 }
 
-            if do_parameters:
-                records = fixed_xmin_parameter_fits(
-                    size_drops,
-                    shared_xmin,
-                    fit_cache_dir=(
-                        output / "cache" / "fixed_xmin" / protocol / regime
-                    ),
-                    evaluation_cache_dir=(
-                        shared_dir / "cache" / "evaluation" / protocol / regime
-                    ),
-                    uncertainty_accuracy=args.uncertainty_accuracy,
-                    parallel=args.parallel_uncertainty,
-                    description=f"{protocol}, {regime}-yield",
-                )
-                parameter_results[protocol][regime] = records
-                regime_summary["parameters"] = {
-                    str(size): record for size, record in records.items()
-                }
             shared_summary["results"][protocol][regime] = regime_summary
 
     if do_shared:
@@ -908,19 +1079,6 @@ def run(args):
             / "protocol_collapse_comparison_shared_xmin_without_L50.pdf",
             shared_xmins=shared_xmins,
             figure_note="Collapse excluding the L=50 system; shared L=250 xmin",
-        )
-    if do_parameters:
-        plot_parameter_vs_size(
-            parameter_results,
-            shared_xmins,
-            "alpha",
-            shared_dir / "alpha_vs_size_shared_xmin.pdf",
-        )
-        plot_parameter_vs_size(
-            parameter_results,
-            shared_xmins,
-            "Lambda",
-            shared_dir / "lambda_vs_size_shared_xmin.pdf",
         )
     (shared_dir / "shared_xmin_results.json").write_text(
         json.dumps(shared_summary, indent=2)
@@ -946,6 +1104,12 @@ def parse_args():
     parser.add_argument("--pre", type=float, nargs=2, default=REGIMES["pre"])
     parser.add_argument("--post", type=float, nargs=2, default=REGIMES["post"])
     parser.add_argument("--parallel-xmin", action="store_true")
+    parser.add_argument(
+        "--narrow-search",
+        action="store_true",
+        help="Refine only the adjacent coarse-candidate interval around the "
+        "steepest coarse KS decrease.",
+    )
     parser.add_argument("--uncertainty-accuracy", type=float, default=0.05)
     parser.add_argument("--parallel-uncertainty", action="store_true")
     parser.add_argument("--bins-per-decade", type=int, default=10)

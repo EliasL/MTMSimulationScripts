@@ -3,8 +3,10 @@ import textwrap
 import subprocess
 
 
-def get_batch_script(command, job_name, nrThreads, outPath):
+def get_batch_script(command, job_name, nrThreads, outPath, nice=0):
     assert len(job_name) < 256, "Job name cannot be longer than 256 characters!"
+    if not isinstance(nice, int) or nice < 0:
+        raise ValueError("nice must be a non-negative integer")
 
     output_file = os.path.join(outPath, f"log-{job_name}.out")
     error_file = os.path.join(outPath, f"err-{job_name}.err")
@@ -17,6 +19,7 @@ def get_batch_script(command, job_name, nrThreads, outPath):
         #SBATCH --nodes=1
         #SBATCH --ntasks=1
         #SBATCH --cpus-per-task={nrThreads}
+        {f"#SBATCH --nice={nice}" if nice else ""}
         #SBATCH --output={output_file}.tmp
         #SBATCH --error={error_file}.tmp
 
@@ -50,7 +53,12 @@ def get_threads_from_command(command):
 
 
 def queue_local_jobs(
-    commands, job_names, useSingletons=True, useQueueSystem=True, jobCopies=1
+    commands,
+    job_names,
+    useSingletons=True,
+    useQueueSystem=True,
+    jobCopies=1,
+    nice=0,
 ):
     base_path = "~/simulation/MTS2D/"
     # Expand the user's home directory and check if the path exists
@@ -68,7 +76,7 @@ def queue_local_jobs(
         os.makedirs(outPath, exist_ok=True)
 
         nrThreads = get_threads_from_command(command)
-        batch_script = get_batch_script(command, job_name, nrThreads, outPath)
+        batch_script = get_batch_script(command, job_name, nrThreads, outPath, nice=nice)
 
         # Write the batch script to a file
         with open(batch_script_path, "w") as f:
