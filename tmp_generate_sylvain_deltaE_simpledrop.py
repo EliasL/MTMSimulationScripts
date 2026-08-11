@@ -182,8 +182,7 @@ def _run_simple_drop(distributions):
             analysis = analyze_xmin(
                 drops,
                 nr_initial=100,
-                min_tail_count=25,
-                coarse_average_size=10,
+                min_tail_count=100,
                 distType=Truncated_Power_Law,
                 parallel=False,
                 max_xmin=1e-4,
@@ -203,10 +202,22 @@ def _save_diagnostic_plots(
     output_dir.mkdir(parents=True, exist_ok=True)
     x_values = np.asarray([float(value) for value in LOAD_SETTINGS])
     handles = [
-        Line2D([0], [0], color="0.65", marker="o", linewidth=1, label="10-point averages"),
-        Line2D([0], [0], color="tab:red", marker="o", linewidth=1, label="Initial $D(x_{\min})$"),
-        Line2D([0], [0], color="tab:blue", marker="D", linestyle="none", label="simpleDrop"),
-        Line2D([0], [0], color="0.25", marker="X", markerfacecolor="white", linestyle="none", label="Global minimum"),
+        Line2D(
+            [0], [0], color="0.65", marker="o", linewidth=1,
+            label=r"Displayed only: $n_{tail}<100$",
+        ),
+        Line2D(
+            [0], [0], color="tab:red", marker="o", linewidth=0,
+            label=r"Eligible raw $D(x_{\min})$",
+        ),
+        Line2D(
+            [0], [0], color="tab:blue", marker="D", linestyle="none",
+            label="simpleDrop",
+        ),
+        Line2D(
+            [0], [0], color="0.25", marker="X", markerfacecolor="white",
+            linestyle="none", label="Global minimum",
+        ),
     ]
     for name, label in DROP_LABELS.items():
         fig, axes = plt.subplots(1, len(LOAD_SETTINGS), figsize=(18, 4.3), sharey=True)

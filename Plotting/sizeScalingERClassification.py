@@ -596,7 +596,6 @@ def run(
                 parallel=parallel_xmin,
                 cache_dir=output_dir / "cache" / "xmin" / "initial_guess_energy" / regime,
                 description=f"E_R {regime}-yield simpleDrop",
-                narrow_search=True,
                 refine=False,
             )
             xmins = {size: float(fit.xmin) for size, fit in er_xmin_fits.items()}

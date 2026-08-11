@@ -41,7 +41,6 @@ def parameter_records(
     xmin_cache_root: Path,
     accuracy: float,
     parallel_xmin: bool,
-    narrow_search: bool,
 ):
     paths, inventory = completed_size_scaling_paths(data_root, 6, REGIMES["post"][1])
     paths = {size: paths[size] for size in SIZES}
@@ -69,7 +68,6 @@ def parameter_records(
                 parallel=parallel_xmin,
                 cache_dir=xmin_cache_root / protocol / regime,
                 description=f"{protocol}, {regime}-yield",
-                narrow_search=narrow_search,
             )
             xmins["simple_drop"][protocol][regime] = {
                 size: float(fits[protocol][regime][size].xmin_analysis["simple_drop_xmin"])
@@ -160,12 +158,6 @@ def main():
     )
     parser.add_argument("--uncertainty-accuracy", type=float, default=0.1)
     parser.add_argument("--parallel-xmin", action="store_true")
-    parser.add_argument(
-        "--narrow-search",
-        action="store_true",
-        help="Refine only the adjacent coarse-candidate interval around the "
-        "steepest coarse KS decrease.",
-    )
     args = parser.parse_args()
 
     records, xmins, inventory = parameter_records(
@@ -174,7 +166,6 @@ def main():
         args.xmin_cache_root,
         args.uncertainty_accuracy,
         args.parallel_xmin,
-        args.narrow_search,
     )
     (args.output_dir / "parameter_results.json").write_text(
         json.dumps(
@@ -182,7 +173,6 @@ def main():
                 "inventory": inventory,
                 "sizes": SIZES,
                 "protocols": PROTOCOLS,
-                "narrow_search": args.narrow_search,
                 "xmins": xmins,
                 "records": records,
             },

@@ -155,7 +155,7 @@ def _run(example: dict) -> tuple[Path, Path | None]:
         use_cache=True,
         cache_dir=str(XMIN_CACHE),
         parallel_xmin=False,
-        xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 25},
+        xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 100},
     )
     fit.evaluate_fit(
         data=drops,

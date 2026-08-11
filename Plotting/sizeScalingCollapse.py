@@ -340,7 +340,6 @@ def fit_xmins(
     parallel,
     cache_dir: Path,
     description="xmin",
-    narrow_search=False,
     refine=True,
 ):
     fits = {}
@@ -351,8 +350,6 @@ def fit_xmins(
             "progress": True,
             "progress_label": f"{description}, L={size}",
         }
-        if narrow_search:
-            xmin_search_kwargs["narrow_search"] = True
         if not refine:
             xmin_search_kwargs["refine"] = False
         fits[size] = make_fit(
@@ -822,7 +819,6 @@ def run(args):
     summary = {
         "inventory": inventory,
         "seeds_per_size": args.seeds_per_size,
-        "narrow_search": args.narrow_search,
         "results": {},
     }
     for protocol in PROTOCOLS:
@@ -839,7 +835,6 @@ def run(args):
                 parallel=args.parallel_xmin,
                 cache_dir=output / "cache" / "xmin" / protocol / regime,
                 description=f"{protocol}, {regime}-yield",
-                narrow_search=args.narrow_search,
             )
             all_fits[protocol][regime] = fits
             raw_curves = histogram_curves(size_drops, args.bins_per_decade)
@@ -1175,12 +1170,6 @@ def parse_args():
     parser.add_argument("--pre", type=float, nargs=2, default=REGIMES["pre"])
     parser.add_argument("--post", type=float, nargs=2, default=REGIMES["post"])
     parser.add_argument("--parallel-xmin", action="store_true")
-    parser.add_argument(
-        "--narrow-search",
-        action="store_true",
-        help="Refine only the adjacent coarse-candidate interval around the "
-        "steepest coarse KS decrease.",
-    )
     parser.add_argument("--uncertainty-accuracy", type=float, default=0.05)
     parser.add_argument("--parallel-uncertainty", action="store_true")
     parser.add_argument("--bins-per-decade", type=int, default=10)

@@ -70,7 +70,7 @@ def _fit_stress(example):
         use_cache=True,
         cache_dir=str(XMIN_CACHE),
         parallel_xmin=True,
-        xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 25},
+        xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 100},
     )
     fit.evaluate_fit(
         data=drops,
@@ -179,7 +179,7 @@ def main() -> None:
             use_cache=True,
             cache_dir=str(XMIN_CACHE),
             parallel_xmin=False,
-            xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 25},
+            xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 100},
         )
         if fit.xmin_analysis is not None:
             fit.xmin_analysis.setdefault("data_max", float(np.max(drops)))

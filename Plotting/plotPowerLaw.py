@@ -2218,7 +2218,7 @@ def find_best_xmin(
         selected_analysis = getattr(selected_fit, "xmin_analysis", None)
         if selected_analysis is not None:
             plot_data_info["xmin_min_tail_count"] = selected_analysis.get(
-                "min_tail_count", 25
+                "min_tail_count", 100
             )
     global_xmin = get_lowest_distance_xmin(xmin_results)
     global_distance = None
@@ -2785,7 +2785,7 @@ def make_fit(
         cache_path = _get_cache_path(
             cache_dir,
             data,
-            f"canonical-simpleDrop-v9-raw-adjacent-tail100-search:{distType.name}:{xmin_range}:"
+            f"canonical-simpleDrop-v10-raw-adjacent-tail100-search:{distType.name}:{xmin_range}:"
             f"{parallel_xmin}:{search_kwargs}",
         )
         # The cache key deliberately changes whenever the xmin-selection
@@ -2843,13 +2843,17 @@ def make_fit(
                 print(e)
 
     if xmin_range is None:
+        analysis_kwargs = dict(search_kwargs)
+        if progress:
+            analysis_kwargs.update(
+                progress=True,
+                progress_label=progress_label,
+            )
         xmin_analysis = analyze_xmin(
             data,
             distType=distType,
             parallel=parallel_xmin,
-            progress=progress,
-            progress_label=progress_label,
-            **search_kwargs,
+            **analysis_kwargs,
         )
         xmin_range = xmin_analysis["simple_drop_xmin"]
 
@@ -3162,9 +3166,9 @@ def plot_fits_over_xmin(
     )
     raw_drops = raw_drops[np.isfinite(raw_drops) & (raw_drops > 0.0)]
     min_tail_count = int(
-        data_info.get("xmin_min_tail_count", 25)
+        data_info.get("xmin_min_tail_count", 100)
         if data_info is not None
-        else 25
+        else 100
     )
     if raw_drops.size >= min_tail_count:
         full_range_max = float(np.max(raw_drops))

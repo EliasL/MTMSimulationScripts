@@ -43,9 +43,8 @@ SCALING_DIR = OUTPUT_DIR / "scaling"
 SCALING_TABLE_DIR = SCALING_DIR / "tables"
 FIGURE_DPI = 250
 SEARCH_MAX_XMIN = 1e-4
-MIN_TAIL_COUNT = 25
+MIN_TAIL_COUNT = 100
 NR_INITIAL = 100
-COARSE_AVERAGE_SIZE = 10
 SCATTER_ALPHA = 0.2
 DELTA_GAMMA_SCATTER_SETTINGS = (1e-6, 1e-5, 1e-4)
 IRREVERSIBLE_FIT_CONFIDENCE = 0.01
@@ -268,7 +267,6 @@ def _xmin_analysis(values: np.ndarray) -> dict:
         values,
         nr_initial=NR_INITIAL,
         min_tail_count=MIN_TAIL_COUNT,
-        coarse_average_size=COARSE_AVERAGE_SIZE,
         distType=Truncated_Power_Law,
         max_xmin=SEARCH_MAX_XMIN,
         refine=False,
