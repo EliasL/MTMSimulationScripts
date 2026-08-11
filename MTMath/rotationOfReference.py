@@ -93,11 +93,93 @@ def build_rotation_study(
         "mesh_cells": mesh_cells,
         "nodes_per_side": nodes_per_side,
         "shear": shear,
+        "rotation_name": "Reference",
         "thetas": thetas,
         "theta_deg": np.rad2deg(thetas),
         "reference_positions": reference_positions,
         "rotated_reference_positions": rotated_reference_positions,
         "current_positions": current_positions,
+        "connectivity": connectivity,
+        "F": F_values,
+        "P": P,
+        "sigma": sigma,
+    }
+
+
+def build_current_rotation_study(
+    mesh_cells: int = 2,
+    shear: float = 0.8,
+    n_angles: int = 181,
+) -> dict[str, np.ndarray | float | int]:
+    """Rotate the current mesh while keeping the reference mesh fixed.
+
+    The resulting deformation gradients are, up to numerical roundoff,
+    ``F(theta) = R(theta) @ F(0)``.  Therefore the right Cauchy--Green tensor
+    is fixed while the spatial components of both PK1 and Cauchy stress rotate.
+    """
+    if mesh_cells < 1:
+        raise ValueError(f"mesh_cells must be at least 1, got {mesh_cells}.")
+    if n_angles < 2:
+        raise ValueError(f"n_angles must be at least 2, got {n_angles}.")
+
+    nodes_per_side = mesh_cells + 1
+    shear_values = np.array([shear], dtype=float)
+    position_history, elements, _, _ = simpleShearSystem2(
+        L=nodes_per_side,
+        shearValues=shear_values,
+    )
+
+    reference_positions = perfect_grid_nodes((nodes_per_side, nodes_per_side))
+    current_positions = np.asarray(position_history[0], dtype=float)
+    connectivity = _element_connectivity(elements)
+
+    if current_positions.shape != reference_positions.shape:
+        raise RuntimeError(
+            "miniMTM returned an unexpected number of node positions: "
+            f"{current_positions.shape} vs reference {reference_positions.shape}."
+        )
+
+    thetas = np.linspace(0.0, 2.0 * np.pi, n_angles, endpoint=True)
+    center = current_positions.mean(axis=0)
+
+    rotated_current_positions = np.empty(
+        (n_angles, len(current_positions), 2), dtype=float
+    )
+    F_values = np.empty((n_angles, len(connectivity), 2, 2), dtype=float)
+
+    for i, theta in enumerate(thetas):
+        current_rot = _rotate_points(current_positions, theta, center)
+        rotated_current_positions[i] = current_rot
+        F_values[i] = element_deformation_gradients(
+            reference_positions, current_rot, connectivity
+        )
+
+    P = ContiEnergy.P_from_F(F_values)
+    sigma = ContiEnergy.cauchy_from_F(F_values)
+
+    _assert_equal_across_elements(F_values, "F")
+    _assert_equal_across_elements(P, "P")
+    _assert_equal_across_elements(sigma, "sigma")
+
+    # Rotating the current configuration must preserve C=F^T F.
+    C_values = np.einsum("...ji,...jk->...ik", F_values, F_values)
+    if not np.allclose(C_values, C_values[0:1], rtol=1e-9, atol=1e-12):
+        diff = np.max(np.abs(C_values - C_values[0:1]))
+        raise RuntimeError(
+            "Current rotation changed C; expected a rigid spatial rotation. "
+            f"max |delta C|={diff:.3e}"
+        )
+
+    return {
+        "mesh_cells": mesh_cells,
+        "nodes_per_side": nodes_per_side,
+        "shear": shear,
+        "rotation_name": "Current",
+        "thetas": thetas,
+        "theta_deg": np.rad2deg(thetas),
+        "reference_positions": reference_positions,
+        "current_positions": current_positions,
+        "rotated_current_positions": rotated_current_positions,
         "connectivity": connectivity,
         "F": F_values,
         "P": P,
@@ -114,6 +196,7 @@ def plot_stress_components(
     sigma = np.asarray(study["sigma"])
     theta_deg = np.asarray(study["theta_deg"])
     shear = float(study["shear"])
+    rotation_name = str(study.get("rotation_name", "Reference"))
 
     if not 0 <= element_index < P.shape[1]:
         raise IndexError(
@@ -133,11 +216,14 @@ def plot_stress_components(
 
     axes[0].set_ylabel("PK1 stress")
     axes[0].set_title(
-        f"First Piola-Kirchhoff stress, element {element_index}, simple shear gamma={shear:.3g}"
+        f"First Piola-Kirchhoff stress, element {element_index}, "
+        f"simple shear gamma={shear:.3g}"
     )
     axes[1].set_ylabel("Cauchy stress")
-    axes[1].set_xlabel("Reference rotation (deg)")
-    axes[1].set_title("Cauchy stress for the same current element")
+    axes[1].set_xlabel(f"{rotation_name} rotation (deg)")
+    axes[1].set_title(
+        f"Cauchy stress for the same element under {rotation_name.lower()} rotation"
+    )
 
     for ax in axes:
         ax.grid(True, alpha=0.3)

@@ -1581,7 +1581,7 @@ def plot_avalanche_size_ccdf(samples: list[SampleData], attribute: str, name: st
                     values,
                     distType=Truncated_Power_Law,
                     cache_dir=str(OUTPUT_DIR / "fit_cache"),
-                    xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 25},
+                    xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 100},
                 )
                 distribution = dist_from_fit(fit)
                 tail_count = int(np.sum(values >= fit.xmin))

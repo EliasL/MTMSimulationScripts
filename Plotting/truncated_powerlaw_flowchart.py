@@ -106,9 +106,9 @@ DROP_COLUMN = "stress_corrected_drop_second_order"
 # selected later and limits the likelihood fit, not the raw data shown.
 MIN_DROP = 0.0
 XMIN_CANDIDATE_COUNT = 100
-# Scan the complete admissible positive-drop range. The upper endpoint is the
-# largest cutoff that still retains the requested number of tail events.
-MIN_TAIL_COUNT = 25
+# Scan through the low-count tail for diagnostics. Candidates with fewer than
+# this many retained events are displayed but excluded from simpleDrop.
+MIN_TAIL_COUNT = 100
 PARALLEL_XMIN_FITS = False
 
 # Raw energy panel and inset.
@@ -717,20 +717,12 @@ def _write_analysis_summary(analysis):
         "simple_drop_largest_interval": list(
             analysis["simple_drop_details"]["largest_drop_interval"]
         ),
-        "simple_drop_coarse_average_size": analysis["simple_drop_details"][
-            "coarse_average_size"
+        "simple_drop_largest_adjacent_drop": analysis["simple_drop_details"][
+            "largest_distance_drop"
         ],
-        "simple_drop_coarse_coarse_xmins": analysis["simple_drop_details"][
-            "coarse_coarse_xmins"
+        "simple_drop_adjacent_coarse_indices": analysis["simple_drop_details"][
+            "interval_coarse_indices"
         ].tolist(),
-        "simple_drop_coarse_coarse_distances": analysis["simple_drop_details"][
-            "coarse_coarse_distances"
-        ].tolist(),
-        "simple_drop_coarse_coarse_largest_interval": list(
-            analysis["simple_drop_details"][
-                "coarse_coarse_largest_drop_interval"
-            ]
-        ),
         "simple_drop_interval_coarse_xmins": analysis["simple_drop_details"][
             "interval_coarse_xmins"
         ].tolist(),

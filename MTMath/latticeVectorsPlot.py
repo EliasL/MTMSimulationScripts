@@ -129,6 +129,9 @@ class LatticeFigure:
             offset_norm = float(np.linalg.norm(offset))
             if offset_norm < 1e-12:
                 return
+            plot_kwargs = dict(kwargs)
+            line_alpha = plot_kwargs.pop("alpha", 0.7)
+            line_width = plot_kwargs.pop("linewidth", 1)
             max_dim = max(
                 abs(limits[0]), abs(limits[1]), abs(limits[2]), abs(limits[3])
             )
@@ -142,12 +145,12 @@ class LatticeFigure:
                 self.ax.plot(
                     [p_start[0], p_end[0]],
                     [p_start[1], p_end[1]],
-                    linewidth=1,
-                    alpha=0.7,
+                    linewidth=line_width,
+                    alpha=line_alpha,
                     linestyle=linestyle,
                     color=color,
                     zorder=0,
-                    **kwargs,
+                    **plot_kwargs,
                 )
 
         # First family: lines parallel to e1, offset by e2.
@@ -499,11 +502,11 @@ def three_bases_same_lattice():
     lf = LatticeFigure(ax, limits=(-2, 3, -1, 1))
 
     # Fundamental parallelograms
-    lf.draw_parallelogram(e1, e2, labels=r"\mathbf{e}", origin=o1, color="black")
+    lf.draw_parallelogram(e1, e2, labels=r"\mathbf{a}", origin=o1, color="black")
     lf.draw_parallelogram(
         e1bar,
         e2bar,
-        labels=r"\bar\mathbf{e}",
+        labels=r"\bar{\mathbf{a}}",
         has=("right", "right"),
         origin=o2,
         color="tab:blue",
@@ -512,7 +515,7 @@ def three_bases_same_lattice():
     lf.draw_parallelogram(
         e1hat,
         e2hat,
-        labels=r"\hat\mathbf{e}",
+        labels=r"\hat{\mathbf{a}}",
         has=("left", None),
         origin=o3,
         color="tab:red",
@@ -809,6 +812,182 @@ def lagrange_reduction_bases_row(
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, bbox_inches="tight")
     print(f"Fig saved to : {out}")
+    if show:
+        plt.show()
+    return fig, axes
+
+
+def coordinate_index_conventions(
+    save_path: str | Path = "Plots/CoordinateIndexConventions.pdf",
+    show: bool = False,
+):
+    """Illustrate reference/current Cartesian and lattice-vector conventions.
+
+    The reference lattice is generated from unit vectors
+    ``a_1^0=(1, 0)`` and ``a_2^0=(1/2, sqrt(3)/2)``.  The current lattice is
+    obtained from the homogeneous deformation
+
+    ``F = [[1, 0], [1/4, 1]]``.
+
+    The lattice origin is placed at ``(1, 1)`` in each panel so that the
+    figure emphasizes the transformation of lattice vectors rather than the
+    arbitrary translation used to draw them.
+    """
+
+    e1: Vec2 = (1.0, 0.0)
+    e2: Vec2 = (0.0, 1.0)
+    a1: Vec2 = (1.0, 0.0)
+    a2: Vec2 = (0.5, float(np.sqrt(3.0) / 2.0))
+    deformation = np.array([[1.0, 0.0], [0.25, 1.0]])
+    a1_current = deformation @ np.asarray(a1, dtype=float)
+    a2_current = deformation @ np.asarray(a2, dtype=float)
+
+    lattice_origin: Vec2 = (1.0, 1.0)
+    common_limits = (-0.20, 3.20, -0.20, 3.20)
+    arrow_kwargs = dict(
+        width=0.006,
+        headwidth=3.0,
+        headlength=4.0,
+        headaxislength=3.5,
+    )
+
+    def draw_configuration(
+        ax,
+        lattice_basis,
+        *,
+        cartesian_labels,
+        lattice_label_base,
+        title,
+    ):
+        lattice_basis_1, lattice_basis_2 = lattice_basis
+        third_family_basis = (
+            lattice_basis_2[0] - lattice_basis_1[0],
+            lattice_basis_2[1] - lattice_basis_1[1],
+        )
+
+        # The coordinate grid remains orthonormal in both frames.  Only its
+        # labels change from the reference basis E_I to the current basis e_i.
+        cartesian = LatticeFigure(
+            ax,
+            limits=common_limits,
+            basis=(e1, e2),
+            origin=(0.0, 0.0),
+            margin=0.0,
+            font_size=10,
+        )
+        cartesian.drawGrid(linestyle=":", color="0.55", alpha=0.30)
+
+        # The two calls provide the three line families of the triangular
+        # lattice: horizontal, +60 degrees, and -60 degrees.  After F is
+        # applied, these become the corresponding sheared line families.
+        lattice = LatticeFigure(
+            ax,
+            limits=common_limits,
+            basis=(lattice_basis_1, lattice_basis_2),
+            origin=lattice_origin,
+            margin=0.0,
+            point_fmt="C0.",
+            vector_color="tab:blue",
+            font_size=10,
+        )
+        lattice.drawGrid(linestyle="-", color="tab:blue", alpha=0.20)
+        third_family = LatticeFigure(
+            ax,
+            limits=common_limits,
+            basis=(lattice_basis_1, third_family_basis),
+            origin=lattice_origin,
+            margin=0.0,
+        )
+        third_family.drawGrid(linestyle="-", color="tab:blue", alpha=0.20)
+        lattice.draw_lattice_points(
+            xlim_=common_limits[:2],
+            ylim_=common_limits[2:],
+            maxDepth=8,
+        )
+
+        cartesian.draw_vector(
+            e1,
+            label=rf"$\mathbf{{{cartesian_labels[0]}}}_1$",
+            label_pos=(0.38, -0.10),
+            color="0.15",
+            ha="center",
+            va="top",
+            **arrow_kwargs,
+        )
+        cartesian.draw_vector(
+            e2,
+            label=rf"$\mathbf{{{cartesian_labels[1]}}}_2$",
+            label_pos=(-0.10, 0.38),
+            color="0.15",
+            ha="right",
+            va="center",
+            **arrow_kwargs,
+        )
+
+        lattice.draw_vector(
+            lattice_basis_1,
+            origin=lattice_origin,
+            label=rf"${lattice_label_base}_1$",
+            label_pos=(0.0, -0.10),
+            color="tab:blue",
+            ha="center",
+            va="top",
+            label_spacing=0.08,
+            **arrow_kwargs,
+        )
+        lattice.draw_vector(
+            lattice_basis_2,
+            origin=lattice_origin,
+            label=rf"${lattice_label_base}_2$",
+            label_pos=(-0.08, 0.0),
+            color="tab:blue",
+            ha="right",
+            va="center",
+            label_spacing=0.08,
+            **arrow_kwargs,
+        )
+
+        ax.set_xlim(common_limits[:2])
+        ax.set_ylim(common_limits[2:])
+        ax.set_aspect("equal", adjustable="box")
+        ax.set_xticks(np.arange(0.0, 4.0, 1.0))
+        ax.set_yticks(np.arange(0.0, 4.0, 1.0))
+        ax.tick_params(
+            axis="both",
+            which="both",
+            length=2.5,
+            width=0.6,
+            colors="0.35",
+            labelsize=8,
+        )
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.set_title(title, fontsize=10.5, pad=3)
+
+    fig, axes = plt.subplots(1, 2, figsize=(6.0, 3.1), sharex=True, sharey=True)
+    draw_configuration(
+        axes[0],
+        (a1, a2),
+        cartesian_labels=("E", "E"),
+        lattice_label_base=r"\mathbf{a}^{0}",
+        title="Reference Configuration",
+    )
+    draw_configuration(
+        axes[1],
+        (a1_current, a2_current),
+        cartesian_labels=("e", "e"),
+        lattice_label_base=r"\mathbf{a}",
+        title="Current Configuration",
+    )
+    axes[1].set_ylabel("")
+    axes[1].tick_params(labelleft=False)
+    fig.subplots_adjust(wspace=0.04, left=0.06, right=0.98, bottom=0.08, top=0.86)
+
+    output = Path(save_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, bbox_inches="tight")
+    fig.savefig(output.with_suffix(".png"), dpi=300, bbox_inches="tight")
+    print(f"Fig saved to : {output}")
     if show:
         plt.show()
     return fig, axes

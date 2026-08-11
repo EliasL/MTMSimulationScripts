@@ -97,7 +97,6 @@ def main() -> None:
         drops,
         nr_initial=flow.XMIN_CANDIDATE_COUNT,
         min_tail_count=flow.MIN_TAIL_COUNT,
-        coarse_average_size=10,
         distType=Truncated_Power_Law,
         parallel=False,
     )

@@ -1,0 +1,41 @@
+{
+  "energy_type": "Delta E_S",
+  "post_yield": true,
+  "n_drops": 86023,
+  "scan_bootstrap_confidence": 0.2,
+  "selected_fit_bootstrap_confidence": 0.05,
+  "scan_points": 11,
+  "simpleDrop": {
+    "xmin": 0.026907122741249623,
+    "p": 0.0,
+    "p_std": 0.05,
+    "alpha": 1.039324075293497,
+    "alpha_std": 0.011406596439962783,
+    "lambda": 0.026229308235186634,
+    "inverse_lambda": 38.12529064943083,
+    "D": 0.019116118217337164
+  },
+  "global_minimum": {
+    "xmin": 0.026907122741249623,
+    "p": 0.0,
+    "p_std": 0.05,
+    "alpha": 1.039324075293497,
+    "alpha_std": 0.011406596439962783,
+    "lambda": 0.026229308235186634,
+    "inverse_lambda": 38.12529064943083,
+    "D": 0.019116118217337164
+  },
+  "source_paths": [
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s1_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s2_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s3_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s4_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s5_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s6_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s7_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s8_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s9_fixed.csv"
+  ],
+  "plotting_function": "Plotting.plotPowerLaw.plot_fits_over_xmin"
+}

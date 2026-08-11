@@ -168,7 +168,7 @@ def _run_analysis(spec: dict) -> dict:
         use_cache=True,
         cache_dir=str(XMIN_CACHE),
         parallel_xmin=False,
-        xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 25},
+        xmin_search_kwargs={"nr_initial": 100, "min_tail_count": 100},
     )
 
     parallel_fallback = False

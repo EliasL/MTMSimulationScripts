@@ -2785,12 +2785,11 @@ def make_fit(
         cache_path = _get_cache_path(
             cache_dir,
             data,
-            f"canonical-simpleDrop-v8-hundred-point-ten-average-confined-search:{distType.name}:{xmin_range}:"
+            f"canonical-simpleDrop-v9-raw-adjacent-tail100-search:{distType.name}:{xmin_range}:"
             f"{parallel_xmin}:{search_kwargs}",
         )
-        # Do not load v1/v2 caches here: those caches contain the old
-        # continuous log-space refinement and would silently reintroduce the
-        # bug this cache version is meant to exclude.
+        # The cache key deliberately changes whenever the xmin-selection
+        # algorithm changes, so older averaged-search results are not reused.
         cache_candidates = [cache_path]
         for candidate in cache_candidates:
             cache_path_json = candidate
@@ -2821,11 +2820,8 @@ def make_fit(
                     simple_details = xmin_analysis.get("simple_drop_details")
                     if simple_details is not None:
                         for key, dtype in (
-                            ("coarse_coarse_xmins", float),
-                            ("coarse_coarse_distances", float),
-                            ("coarse_coarse_search_mask", bool),
-                            ("coarse_coarse_selected_group_indices", int),
-                            ("steepest_coarse_candidate_indices", int),
+                            ("adjacent_drop_values", float),
+                            ("eligible_adjacent_mask", bool),
                             ("interval_coarse_indices", int),
                             ("interval_coarse_xmins", float),
                             ("interval_coarse_distances", float),
@@ -2958,6 +2954,10 @@ def plot_fits_over_xmin(
 ):
     """
     Plot KS distance/p-value, exponent alpha, and inverse cutoff 1/lambda versus xmin.
+
+    ``selected_label`` and ``ks_label`` name the two optional vertical xmin
+    markers in the legend.  The defaults match the canonical simpleDrop and
+    global-minimum choices used by the current analysis.
     """
     fits.sort(key=lambda f: f.xmin)
     tag = ks_tag(fits=fits, fast_xmin=fast_xmin)
