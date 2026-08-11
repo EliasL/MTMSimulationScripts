@@ -6,6 +6,11 @@ at the corresponding histogram bin and descends to a neighbouring local
 minimum.  The search uses probability mass per bin, not density.  A
 zero-count plateau is represented by its middle bin.
 
+This is not the standard power-law workflow.  For the standard result, use
+post-yield ``Delta E_R`` ``simpleDrop`` for the reversible/irreversible split,
+fit only irreversible ``Delta E_S`` events, search all observed xmin
+candidates, and then perform the maximum-likelihood fit.
+
 Run the size-scaling diagnostic with::
 
     .venv/bin/python -m Plotting.approximateReversibilitySplit
@@ -24,6 +29,7 @@ mpl.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from MTMath.evaluatePowerlawFit import POWERLAW_STANDARD_WORKFLOW
 from Plotting.numericalParameterJustification import unbinned_log_otsu_cut
 from Plotting.sizeScalingCollapse import (
     REGIMES,
@@ -323,7 +329,11 @@ def run_size_scaling_diagnostic(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=POWERLAW_STANDARD_WORKFLOW,
+    )
     parser.add_argument(
         "--data-root",
         type=Path,

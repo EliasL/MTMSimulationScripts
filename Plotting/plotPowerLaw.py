@@ -1,3 +1,15 @@
+"""General plotting and fitting helpers for power-law event data.
+
+These functions intentionally support several populations, distributions, and
+xmin strategies.  For the standard simulation energy-drop result, callers
+should use the post-yield :math:`\\Delta E_R` ``simpleDrop`` split, fit only
+the irreversible :math:`\\Delta E_S` events, search every observed candidate
+for the global xmin, and then perform the maximum-likelihood fit.  The shared
+message is also summarized in the ``Standard power-law energy-drop workflow``
+section of the repository ``ReadMe.md``; alternatives should be selected and
+documented deliberately.
+"""
+
 from .findXmin import (
     analyze_xmin,
     annotate_xmin_choices,
@@ -11,7 +23,11 @@ from matplotlib import pyplot as plt
 import matplotlib as mpl
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-from MTMath.evaluatePowerlawFit import Fit, Truncated_Power_Law
+from MTMath.evaluatePowerlawFit import (
+    Fit,
+    POWERLAW_STANDARD_WORKFLOW,
+    Truncated_Power_Law,
+)
 from powerlaw import Distribution
 from Management.updateCSV import update_df_header, read_macrodata_csv
 from .makePlots import safePath, maybe_avg, energy_drop_label

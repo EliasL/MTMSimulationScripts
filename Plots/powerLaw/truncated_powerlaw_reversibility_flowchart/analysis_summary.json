@@ -1,0 +1,32 @@
+{
+  "csv_paths": [
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s1_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s2_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s3_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s4_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s5_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s6_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s7_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s8_fixed.csv",
+    "/Users/elias/Work/PhD/Code/SimulationScripts/Plots/powerLaw/truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s9_fixed.csv"
+  ],
+  "post_yield": true,
+  "number_of_delta_E_R_events": 275075,
+  "delta_E_R_drop_detection_xmin": 4.916534840091201e-06,
+  "reversible_delta_E_R_events": 268705,
+  "irreversible_delta_E_R_events": 6370,
+  "reversible_delta_E_S_events": 81429,
+  "irreversible_delta_E_S_events": 4582,
+  "xmin_selection_mode": "exhaustive",
+  "xmin_selection_is_approximate": false,
+  "xmin_candidate_count": 4558,
+  "true_global_event_threshold": 10000,
+  "drop_detection_method": "drop detection",
+  "delta_E_S_global_xmin": 0.007248644908031565,
+  "delta_E_S_global_distance": 0.015063369362776746,
+  "delta_E_S_global_alpha": 1.0413719849500993,
+  "delta_E_S_global_lambda": 0.026021963386718652,
+  "delta_E_S_global_D": 0.015063369362776802,
+  "delta_E_R_drop_detection_alpha": 0.955241703422882
+}

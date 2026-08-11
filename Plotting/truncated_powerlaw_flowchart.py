@@ -4,6 +4,12 @@ The slow mode reads the simulation CSVs, recomputes the energy drops and fits,
 and caches five plot panels.  The fast mode only recomposes those cached panels,
 which makes layout iteration nearly instantaneous.
 
+This is the generic/original flowchart.  It does not itself perform the
+standard reversibility workflow (post-yield :math:`\\Delta E_R` ``simpleDrop``
+split, irreversible-only :math:`\\Delta E_S` fit, exhaustive global xmin, and
+maximum-likelihood fitting); use the reversibility-aware flowchart or configure
+the analysis explicitly when that is the intended result.
+
 Examples
 --------
 Regenerate the analysis and every plot panel::
@@ -40,6 +46,7 @@ from pypdf import PageObject, PdfReader, PdfWriter, Transformation
 from Management.jobs import size_scaling_job
 from Management.updateCSV import read_macrodata_csv
 from MTMath.evaluatePowerlawFit import (
+    POWERLAW_STANDARD_WORKFLOW,
     Truncated_Power_Law,
 )
 from Plotting.dataFunctions import get_metadata
@@ -1142,7 +1149,11 @@ def compose_flowchart(summary):
 
 
 def _parse_args():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=POWERLAW_STANDARD_WORKFLOW,
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--regenerate-subplots",

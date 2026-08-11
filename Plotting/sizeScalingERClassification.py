@@ -5,10 +5,13 @@ system size and strain regime.  A canonical ``simpleDrop`` xmin is found from
 the positive :math:`\\Delta E_R` values.  Events below that threshold are
 reversible; events at or above it are irreversible.  The labels are then
 applied to the aligned :math:`\\Delta E_S` values from the same events.  The
-irreversible-only :math:`\\Delta E_R` and :math:`\\Delta E_S` fits use their
-respective refined global-minimum xmins.  With ``population_mode="all"``, no
-initial E_R split is made and both fields are fitted directly on the aligned
-positive event populations.
+The standard reported fit is the irreversible-only :math:`\\Delta E_S` fit,
+using an exhaustive global-minimum xmin whenever feasible.  This script also
+produces :math:`\\Delta E_R` diagnostics, and ``population_mode="all"`` is an
+explicit comparison mode that bypasses the standard split; neither should be
+mistaken for the standard result.  With ``population_mode="all"``, no initial
+E_R split is made and both fields are fitted directly on the aligned positive
+event populations.
 
 Run from the repository root with::
 
@@ -32,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from Plotting.plotPowerLaw import (
+    POWERLAW_STANDARD_WORKFLOW,
     dist_from_fit,
     plot_data_pdf,
     plot_fit_pdf,
@@ -759,7 +763,11 @@ def run(
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=POWERLAW_STANDARD_WORKFLOW,
+    )
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--seeds-per-size", type=int, default=6)

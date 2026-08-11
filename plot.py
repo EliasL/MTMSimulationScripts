@@ -958,6 +958,19 @@ def plotTruncatedPowerLawFlowchart(regenerateSubplots=None, show=False):
     )
 
 
+def plotTruncatedPowerLawReversibilityFlowchart(
+    regenerateSubplots=None, show=False
+):
+    """Generate the reversibility-aware truncated-power-law flowchart."""
+
+    from Plotting.truncated_powerlaw_reversibility_flowchart import generate_flowchart
+
+    return generate_flowchart(
+        regenerate_subplots=regenerateSubplots,
+        show=show,
+    )
+
+
 def analyseLongData():
     configs, labels = longJob(8, 1, size=300)
 

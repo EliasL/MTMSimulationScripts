@@ -1,3 +1,13 @@
+"""Power-law distributions, fitting, and xmin-search helpers.
+
+The fitting classes in this module are intentionally generic: they can fit
+any positive event population and can evaluate several xmin-selection
+strategies.  For the simulation energy-drop analysis, the standard workflow
+is more specific; see the ``Standard power-law energy-drop workflow`` section
+in the repository ``ReadMe.md`` and make any departure from it explicit in
+the calling script.
+"""
+
 import powerlaw
 from powerlaw import Distribution, trim_to_range, bisect_map, SUPPORTED_DISTRIBUTIONS
 from powerlaw import Truncated_Power_Law as Original_Truncated_Power_Law
@@ -18,6 +28,36 @@ import multiprocessing
 from scipy.optimize import OptimizeWarning
 import warnings
 from tqdm import tqdm
+
+
+POWERLAW_STANDARD_WORKFLOW = r"""
+Recommended simulation energy-drop workflow
+--------------------------------------------
+1. Restrict the event extraction to the post-yield region.
+2. Extract aligned Delta E_R and Delta E_S values from the same events.
+3. Apply the ``simpleDrop`` xmin rule to Delta E_R.  Use the resulting
+   Delta E_R,min as the reversible/irreversible threshold.
+4. Transfer that classification to the aligned Delta E_S events and fit
+   Delta E_S only for the irreversible events.
+5. Select Delta E_min by evaluating the KS distance at every observed
+   candidate in the irreversible Delta E_S population, then choose the true
+   global minimum.  A coarse/local search is an approximation and should be
+   selected deliberately (and marked as such); caching the exhaustive search
+   is fine.
+6. With that Delta E_min fixed, perform the maximum-likelihood fit for
+   alpha and lambda.
+
+The low-level ``Fit`` and xmin functions remain deliberately flexible and do
+not enforce this sequence.  If a script fits Delta E_R, includes reversible
+events, uses a different split (for example Otsu or a slope criterion), or
+uses a coarse xmin search, that is an alternative analysis and should be
+stated explicitly rather than treated as the standard result.
+""".strip()
+
+
+def get_powerlaw_standard_workflow() -> str:
+    """Return the recommended simulation energy-drop analysis recipe."""
+    return POWERLAW_STANDARD_WORKFLOW
 
 """
 Currently just templated; doesn't work yet.
