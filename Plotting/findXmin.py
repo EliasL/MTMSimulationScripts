@@ -1,7 +1,7 @@
 """xmin-selection helpers used by the power-law analysis scripts.
 
 The functions are intentionally general and expose several alternative
-selection strategies.  The standard simulation workflow is to split aligned
+selection strategies.  The standard simulation workflow is to split paired
 post-yield events with ``Delta E_R`` ``simpleDrop``, fit only irreversible
 ``Delta E_S`` events, evaluate every observed candidate for the global xmin,
 and then perform the maximum-likelihood fit.  Callers using another strategy

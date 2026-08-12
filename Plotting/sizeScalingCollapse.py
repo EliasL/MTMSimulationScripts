@@ -243,12 +243,13 @@ def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
     return extracted
 
 
-def extract_aligned_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
-    """Cache E_S and E_R values for the same positive-E_R events.
+def extract_event_pairs(path: Path, size: int, regimes, cache_dir: Path, force=False):
+    """Cache E_R/E_S values for the same positive-E_R events.
 
-    The E_R mask is intentionally the only event-selection mask here.  E_S is
-    kept aligned, including non-positive or non-finite values, so a later
-    positive-E_S filter cannot change which events were labeled irreversible.
+    The E_R mask is intentionally the only event-selection mask here.  The
+    E_S array retains the corresponding position for every event, including
+    non-positive or non-finite values, so a later positive-E_S filter cannot
+    change which events were labeled irreversible.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = _file_cache_path(path, size, regimes, cache_dir)
@@ -273,8 +274,8 @@ def extract_aligned_run(path: Path, size: int, regimes, cache_dir: Path, force=F
     return extracted
 
 
-def pool_aligned_events(paths_by_size, regimes, cache_dir: Path, force=False):
-    """Pool aligned E_R/E_S event pairs by system size and strain regime."""
+def pool_event_pairs(paths_by_size, regimes, cache_dir: Path, force=False):
+    """Pool E_R/E_S event pairs by system size and strain regime."""
     pooled = {
         regime: {size: {"initial_guess_energy": [], "second_order": []}
                  for size in paths_by_size}
@@ -282,11 +283,11 @@ def pool_aligned_events(paths_by_size, regimes, cache_dir: Path, force=False):
     }
     for size, paths in paths_by_size.items():
         print(
-            f"Extracting/caching aligned events L={size}: {len(paths)} completed runs",
+            f"Extracting/caching event pairs L={size}: {len(paths)} completed runs",
             flush=True,
         )
         per_run = [
-            extract_aligned_run(
+            extract_event_pairs(
                 path, size, regimes, cache_dir / "runs", force=force
             )
             for path in paths

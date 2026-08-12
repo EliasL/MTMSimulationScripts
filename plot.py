@@ -943,14 +943,15 @@ def testRealData():
 
 
 def plotTruncatedPowerLawFlowchart(regenerateSubplots=None, show=False):
-    """Generate the truncated-power-law analysis flowchart.
+    """Generate the standard reversibility-aware power-law flowchart.
 
     Set ``regenerateSubplots=False`` to reuse the cached panels while adjusting
     the layout. Leaving it as ``None`` follows ``REGENERATE_SUBPLOTS`` in the
-    flowchart script.
+    standard flowchart script.  The standard path classifies events with
+    ``Delta E_R`` and fits only irreversible ``Delta E_S`` events.
     """
 
-    from Plotting.truncated_powerlaw_flowchart import generate_flowchart
+    from Plotting.truncated_powerlaw_reversibility_flowchart import generate_flowchart
 
     return generate_flowchart(
         regenerate_subplots=regenerateSubplots,
