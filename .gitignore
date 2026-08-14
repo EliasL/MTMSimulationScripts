@@ -9,4 +9,4 @@ MTS2D_reversibility_dump/
 *.log
 *_data
 output
-cache
+*cache

@@ -76,3 +76,44 @@ event with `--expected-event-kind plastic`.  Its private configuration enables
 suppresses the normal sparse reversibility-snapshot cadence.  Thus a run with
 `--maximum-elastic-events 2` can write at most fifteen VTUs: five for the final
 plastic target and five for each of two elastic examples.
+
+## Post-yield xmin collection scaffold
+
+`collect_post_yield_xmin_events.py` separates the near-xmin collection into
+seven reviewable stages and includes a `run` command that executes them in
+order.  It waits for new source checkpoints when necessary and never permits
+more than two concurrent two-thread replays.
+
+Run the stages from the repository root with `PYTHONPATH=.`:
+
+1. `select` fits the post-yield irreversible xmin and freezes ten targets plus
+   five backups on each side using only energy ratio and seed.
+2. `inventory` lists existing Pascal dumps into
+   `checkpoint_inventory.csv` without downloading them.
+3. `plan` attaches the nearest preceding dump and groups ready events into
+   waves of two two-thread replays.
+4. `fetch` downloads only the planned configs, macro files, and dumps.
+5. `replay` executes one target per private output directory.
+6. `validate` rejects any target that does not reproduce the source event
+   or lacks exactly five states.
+7. `render` produces the marked PDF followed by the 3x2 event sheets.
+
+The `run` command uses the 100 GB free-space guard by default.  It terminates
+active replay children immediately if the data volume falls below that limit.
+
+To run the complete campaign from the repository root:
+
+```bash
+MPLCONFIGDIR=/tmp/mpl-cache PYTHONPATH=. ./.venv/bin/python -u \
+  ClusterJobs/collect_post_yield_xmin_events.py run \
+  --mts2d-binary /Users/eliaslundheim/work/PhD/MTS2D/build-release/MTS2D \
+  --poll-seconds 1800
+```
+
+If the terminal is interrupted after the campaign has created its manifest,
+rerun the same command with `--resume`.  The default output is on
+`/Volumes/data/MTS2D_xmin_collection/post_yield_irreversible`.
+
+The primary matched comparison uses `0.5 <= Delta E_S/(V0*xmin) < 1` below
+and `1 <= Delta E_S/(V0*xmin) <= 2` above.  Pass
+`--above-max-ratio 10` to preselect a separate one-decade context cohort.
