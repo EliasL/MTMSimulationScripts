@@ -89,6 +89,7 @@ class ReplayArguments:
     target_load: float
     output_directory: Path
     mts2d_binary: Path
+    nr_threads: int = 2
     expected_event_kind: str = "elastic"
     maximum_elastic_events: int = 1
     allow_stress_diagnostic_mismatch: bool = False
@@ -101,6 +102,8 @@ class ReplayArguments:
             )
         if self.maximum_elastic_events < 0:
             raise ValueError("maximum_elastic_events cannot be negative")
+        if self.nr_threads <= 0:
+            raise ValueError("nr_threads must be positive")
 
 
 def prepare_replay_configuration(args: ReplayArguments) -> Path:
@@ -123,6 +126,7 @@ def prepare_replay_configuration(args: ReplayArguments) -> Path:
     lines = source_config.read_text().splitlines()
     overrides = {
         "experiment": "reversibilityProtocolTest",
+        "nrThreads": str(args.nr_threads),
         "maxLoad": f"{args.target_load:.17g}",
         "writeDumps": "false",
         "writeMeshVTUs": "false",
@@ -337,6 +341,7 @@ def validate_saved_events(args: ReplayArguments, target_directory: Path) -> Path
             target_load=event_start_load(event_directory) + increment,
             output_directory=args.output_directory,
             mts2d_binary=args.mts2d_binary,
+            nr_threads=args.nr_threads,
             expected_event_kind="elastic",
             maximum_elastic_events=args.maximum_elastic_events,
             allow_stress_diagnostic_mismatch=args.allow_stress_diagnostic_mismatch,
@@ -359,6 +364,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--target-load", type=float, required=True)
     parser.add_argument("--output-directory", type=Path, required=True)
     parser.add_argument("--mts2d-binary", type=Path, required=True)
+    parser.add_argument("--nr-threads", type=int, default=2)
     parser.add_argument(
         "--expected-event-kind", choices=("elastic", "plastic"), default="elastic"
     )
@@ -375,6 +381,7 @@ def main() -> int:
         target_load=ns.target_load,
         output_directory=ns.output_directory,
         mts2d_binary=ns.mts2d_binary,
+        nr_threads=ns.nr_threads,
         expected_event_kind=ns.expected_event_kind,
         maximum_elastic_events=ns.maximum_elastic_events,
         allow_stress_diagnostic_mismatch=ns.allow_stress_diagnostic_mismatch,
