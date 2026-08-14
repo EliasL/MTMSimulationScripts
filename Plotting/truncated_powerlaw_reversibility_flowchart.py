@@ -5,7 +5,7 @@ post-yield relaxation-energy drops ``Delta E_R`` to make the reversible /
 irreversible split, and then fits only the irreversible stress-corrected
 ``Delta E_S`` drops.  The existing flowchart is not modified.
 
-For the default small-data case, the final ``Delta E_min`` is selected by
+For the default small-data case, the final ``Delta E_S,min^KS`` is selected by
 evaluating every observed candidate in the irreversible ``Delta E_S``
 population and choosing the true global KS minimum before the maximum-
 likelihood fit.  The coarse/local search is an explicit approximation for
@@ -110,10 +110,10 @@ FIT_PDF_MAX_MARKERS = 400
 # Leave this as None to recompute the coarse drop-detection threshold.  Set a
 # number explicitly when the threshold should be frozen for a data release or
 # a layout comparison.
-ER_DROP_XMIN_OVERRIDE = None
+ER_DET_OVERRIDE = None
 
 # The event split is deliberately based only on Delta E_R simpleDrop.
-ER_DROP_METHOD_LABEL = "drop detection"
+ER_DROP_METHOD_LABEL = "simpleDrop on Delta E_R"
 REVERSIBLE_COLOR = "#b9dff2"       # light blue
 IRREVERSIBLE_COLOR = "#f6c28b"      # light orange
 ER_ALL_COLOR = "0.55"
@@ -554,8 +554,8 @@ def _collect_analysis(csv_paths):
         for value in _resolve_strain_lim(STRAIN_LIMIT, df=raw_df, postRegime=True)
     )
 
-    # Keep the original panel-a trace, while collecting aligned E_R and E_S
-    # rows for the cross-quantity reversibility split.
+    # Keep the original panel-a trace, while collecting paired E_R/E_S rows
+    # for the cross-quantity reversibility split.
     records = []
     er_all = []
     for path in csv_paths:
@@ -601,8 +601,8 @@ def _collect_analysis(csv_paths):
     er_all = er_all[np.isfinite(er_all) & (er_all > MIN_DROP)]
     er_fit = None
     er_analysis = None
-    if ER_DROP_XMIN_OVERRIDE is not None:
-        er_xmin = float(ER_DROP_XMIN_OVERRIDE)
+    if ER_DET_OVERRIDE is not None:
+        er_det = float(ER_DET_OVERRIDE)
     else:
         # Drop detection intentionally stops at the first coarse candidate
         # after the largest adjacent KS decrease.  In particular, it does
@@ -612,57 +612,55 @@ def _collect_analysis(csv_paths):
         interval = er_analysis["simple_drop_details"]["interval_coarse_xmins"]
         if len(interval) < 2:
             raise RuntimeError("The drop-detection scan did not produce an interval.")
-        er_xmin = float(interval[1])
+        er_det = float(interval[1])
         # Keep the optional diagnostic fit consistent with the threshold that
         # is actually used for the reversible/irreversible split.
         er_fit = Fit(
             data=er_all,
-            xmin=er_xmin,
+            xmin=er_det,
             xmin_distribution=Truncated_Power_Law.name,
             verbose=0,
         )
 
-    reversible_er = er_all[er_all < er_xmin]
-    irreversible_er = er_all[er_all >= er_xmin]
-    reversible_es = []
-    irreversible_es = []
+    er_rev = er_all[er_all < er_det]
+    er_irrev = er_all[er_all >= er_det]
+    es_rev = []
+    es_irrev = []
     for record in records:
         er_valid = record["er_mask"] & np.isfinite(record["er_signed"])
-        reversible_rows = er_valid & (record["er_signed"] > -er_xmin)
-        irreversible_rows = er_valid & (record["er_signed"] <= -er_xmin)
-        reversible_es_rows = record["es_mask"] & reversible_rows
-        irreversible_es_rows = record["es_mask"] & irreversible_rows
-        reversible_es.extend((-record["es_signed"][reversible_es_rows]).tolist())
-        irreversible_es.extend(
-            (-record["es_signed"][irreversible_es_rows]).tolist()
-        )
-    reversible_es = np.asarray(reversible_es, dtype=float)
-    reversible_es = reversible_es[
-        np.isfinite(reversible_es) & (reversible_es > MIN_DROP)
+        rev_rows = er_valid & (record["er_signed"] > -er_det)
+        irrev_rows = er_valid & (record["er_signed"] <= -er_det)
+        es_rev_rows = record["es_mask"] & rev_rows
+        es_irrev_rows = record["es_mask"] & irrev_rows
+        es_rev.extend((-record["es_signed"][es_rev_rows]).tolist())
+        es_irrev.extend((-record["es_signed"][es_irrev_rows]).tolist())
+    es_rev = np.asarray(es_rev, dtype=float)
+    es_rev = es_rev[
+        np.isfinite(es_rev) & (es_rev > MIN_DROP)
     ]
-    irreversible_es = np.asarray(irreversible_es, dtype=float)
-    irreversible_es = irreversible_es[
-        np.isfinite(irreversible_es) & (irreversible_es > MIN_DROP)
+    es_irrev = np.asarray(es_irrev, dtype=float)
+    es_irrev = es_irrev[
+        np.isfinite(es_irrev) & (es_irrev > MIN_DROP)
     ]
-    if irreversible_es.size < XMIN_MIN_TAIL_COUNT:
+    if es_irrev.size < XMIN_MIN_TAIL_COUNT:
         raise RuntimeError(
-            f"Only {irreversible_es.size} irreversible Delta E_S drops were found."
+            f"Only {es_irrev.size} irreversible Delta E_S drops were found."
         )
 
     use_true_global = (
         USE_TRUE_GLOBAL_FOR_SMALL_DATA
-        and irreversible_es.size < TRUE_GLOBAL_EVENT_THRESHOLD
+        and es_irrev.size < TRUE_GLOBAL_EVENT_THRESHOLD
     )
     if use_true_global:
         es_fit = None
-        es_analysis = _exhaustive_xmin_analysis(irreversible_es)
+        es_analysis = _exhaustive_xmin_analysis(es_irrev)
     else:
-        es_fit = _fit(irreversible_es)
+        es_fit = _fit(es_irrev)
         es_analysis = es_fit.xmin_analysis
-    global_xmin = float(es_analysis["global_min_xmin"])
-    global_fit = Fit(
-        data=irreversible_es,
-        xmin=global_xmin,
+    es_xmin_ks = float(es_analysis["global_min_xmin"])
+    es_fit_fixed = Fit(
+        data=es_irrev,
+        xmin=es_xmin_ks,
         xmin_distribution=Truncated_Power_Law.name,
         verbose=0,
     )
@@ -676,19 +674,19 @@ def _collect_analysis(csv_paths):
         "er_all": er_all,
         "er_fit": er_fit,
         "er_analysis": er_analysis,
-        "er_xmin": er_xmin,
-        "reversible_er": reversible_er,
-        "irreversible_er": irreversible_er,
-        "reversible_es": reversible_es,
-        "irreversible_es": irreversible_es,
+        "er_det": er_det,
+        "er_rev": er_rev,
+        "er_irrev": er_irrev,
+        "es_rev": es_rev,
+        "es_irrev": es_irrev,
         "es_fit": es_fit,
         "es_analysis": es_analysis,
         "xmin_selection_mode": (
             "exhaustive" if use_true_global else "coarse_local_search"
         ),
         "xmin_selection_is_approximate": not use_true_global,
-        "global_xmin": global_xmin,
-        "global_fit": global_fit,
+        "es_xmin_ks": es_xmin_ks,
+        "es_fit_fixed": es_fit_fixed,
     }
 
 
@@ -786,7 +784,7 @@ def _reversibility_er_panel(analysis):
     """Show the raw Delta E_R PDF and its drop-detection threshold."""
     fig, ax = _new_panel("reversibility_er")
     er_all = analysis["er_all"]
-    er_xmin = analysis["er_xmin"]
+    er_det = analysis["er_det"]
     plot_data_pdf(
         ax,
         er_all,
@@ -797,14 +795,14 @@ def _reversibility_er_panel(analysis):
     )
     _set_pdf_axes(ax, r"\Delta E_R")
     lo, hi = ax.get_xlim()
-    ax.axvspan(lo, er_xmin, color=REVERSIBLE_COLOR, alpha=0.34, zorder=0)
-    ax.axvspan(er_xmin, hi, color=IRREVERSIBLE_COLOR, alpha=0.30, zorder=0)
+    ax.axvspan(lo, er_det, color=REVERSIBLE_COLOR, alpha=0.34, zorder=0)
+    ax.axvspan(er_det, hi, color=IRREVERSIBLE_COLOR, alpha=0.30, zorder=0)
     ax.axvline(
-        er_xmin,
+        er_det,
         color=DROP_DETECTION_LINE_COLOR,
         linestyle="--",
         linewidth=1.2,
-        label=rf"$\Delta E_{{R,\min}}={_format_scientific_math(er_xmin)}$",
+        label=rf"$\Delta E_{{R,\mathrm{{det}}}}={_format_scientific_math(er_det)}$",
         zorder=4,
     )
     ax.legend(loc="best", fontsize=5.4)
@@ -814,8 +812,8 @@ def _reversibility_er_panel(analysis):
 def _reversibility_es_panel(analysis):
     """Show reversible and irreversible PDFs after the Delta E_R split."""
     fig, ax = _new_panel("reversibility_es")
-    reversible = analysis["reversible_es"]
-    irreversible = analysis["irreversible_es"]
+    reversible = analysis["es_rev"]
+    irreversible = analysis["es_irrev"]
     plot_data_pdf(
         ax,
         reversible,
@@ -841,10 +839,10 @@ def _reversibility_es_panel(analysis):
 
 def _ccdf_panel(analysis):
     fig, ax = _new_panel("ccdf_ks")
-    global_xmin = analysis["global_xmin"]
+    es_xmin_ks = analysis["es_xmin_ks"]
     plot_ks_distance(
-        analysis["irreversible_es"],
-        global_xmin,
+        analysis["es_irrev"],
+        es_xmin_ks,
         ax=ax,
         save=False,
         close=False,
@@ -920,10 +918,10 @@ def _xmin_panel(analysis):
             zorder=4,
         )
 
-    global_xmin = float(analysis["global_xmin"])
+    es_xmin_ks = float(analysis["es_xmin_ks"])
     global_distance = float(analysis["es_analysis"]["global_min_distance"])
     ax.scatter(
-        [global_xmin],
+        [es_xmin_ks],
         [global_distance],
         marker="o",
         s=20,
@@ -933,9 +931,9 @@ def _xmin_panel(analysis):
         label="global minimum*" if is_approximate else "global minimum",
         zorder=6,
     )
-    ax.axvline(global_xmin, color="0.20", linestyle=":", linewidth=0.9, zorder=3)
+    ax.axvline(es_xmin_ks, color="0.20", linestyle=":", linewidth=0.9, zorder=3)
     ax.set_xscale("log")
-    ax.set_xlabel(r"$\Delta E_{\min}$")
+    ax.set_xlabel(r"$\Delta E_{S,\min}^{KS}$")
     ax.set_ylabel(r"$D$")
     ax.grid(False, which="both")
     ax.legend(loc="best", fontsize=5.0)
@@ -945,7 +943,7 @@ def _xmin_panel(analysis):
 def _fit_panel(analysis):
     """Fit panel with alpha(xmin) on a twin y-axis."""
     fig, ax1 = _new_panel("mle_fit")
-    fit = analysis["global_fit"]
+    fit = analysis["es_fit_fixed"]
     alpha_fit = dist_from_fit(fit)
     plot_data_and_fit(
         fit,
@@ -1001,26 +999,26 @@ def _fit_panel(analysis):
         markersize=2.8,
         markevery=_marker_stride(x_valid.size, ALPHA_MAX_MARKERS),
         linewidth=1.1,
-        label=r"$\alpha(\Delta E_{\min})$",
+        label=r"$\alpha(\Delta E_{S,\min}^{KS})$",
         zorder=4,
     )
-    global_xmin = analysis["global_xmin"]
+    es_xmin_ks = analysis["es_xmin_ks"]
     ax2.axvline(
-        global_xmin,
+        es_xmin_ks,
         color="0.25",
         linestyle=":",
         linewidth=1.0,
         label=(
-            rf"$\Delta E_{{\min}}^*={global_xmin:.2e}$"
+            rf"$\Delta E_{{S,\min}}^{{KS,*}}={es_xmin_ks:.2e}$"
             if analysis.get("xmin_selection_is_approximate", False)
-            else rf"$\Delta E_{{\min}}={global_xmin:.2e}$"
+            else rf"$\Delta E_{{S,\min}}^{{KS}}={es_xmin_ks:.2e}$"
         ),
         zorder=3,
     )
     ax2.set_xscale("log")
     # Keep the alpha curve colored, but use the normal black axis styling so
     # the twin axis does not dominate the panel visually.
-    ax2.set_ylabel(r"$\alpha(\Delta E_{\min})$")
+    ax2.set_ylabel(r"$\alpha(\Delta E_{S,\min}^{KS})$")
     ax2.tick_params(axis="y", colors="black")
     ax2.spines["right"].set_color("black")
     ax2.grid(False, which="both")
@@ -1039,16 +1037,16 @@ def _fit_panel(analysis):
 
 
 def _write_analysis_summary(analysis):
-    es_fit_dist = dist_from_fit(analysis["global_fit"])
+    es_fit_dist = dist_from_fit(analysis["es_fit_fixed"])
     summary = {
         "csv_paths": analysis["csv_paths"],
         "post_yield": True,
         "number_of_delta_E_R_events": int(analysis["er_all"].size),
-        "delta_E_R_drop_detection_xmin": analysis["er_xmin"],
-        "reversible_delta_E_R_events": int(analysis["reversible_er"].size),
-        "irreversible_delta_E_R_events": int(analysis["irreversible_er"].size),
-        "reversible_delta_E_S_events": int(analysis["reversible_es"].size),
-        "irreversible_delta_E_S_events": int(analysis["irreversible_es"].size),
+        "delta_E_R_det": analysis["er_det"],
+        "reversible_delta_E_R_events": int(analysis["er_rev"].size),
+        "irreversible_delta_E_R_events": int(analysis["er_irrev"].size),
+        "reversible_delta_E_S_events": int(analysis["es_rev"].size),
+        "irreversible_delta_E_S_events": int(analysis["es_irrev"].size),
         "xmin_selection_mode": analysis["xmin_selection_mode"],
         "xmin_selection_is_approximate": bool(
             analysis["xmin_selection_is_approximate"]
@@ -1056,11 +1054,12 @@ def _write_analysis_summary(analysis):
         "xmin_candidate_count": int(analysis["es_analysis"]["xmins"].size),
         "true_global_event_threshold": TRUE_GLOBAL_EVENT_THRESHOLD,
         "drop_detection_method": ER_DROP_METHOD_LABEL,
-        "delta_E_S_global_xmin": analysis["global_xmin"],
-        "delta_E_S_global_distance": analysis["es_analysis"]["global_min_distance"],
-        "delta_E_S_global_alpha": float(es_fit_dist.alpha),
-        "delta_E_S_global_lambda": float(es_fit_dist.Lambda),
-        "delta_E_S_global_D": float(es_fit_dist.D),
+        "delta_E_S_xmin_ks": analysis["es_xmin_ks"],
+        "delta_E_S_xmin_ks_distance": analysis["es_analysis"]["global_min_distance"],
+        "delta_E_S_xmin_ks_alpha": float(es_fit_dist.alpha),
+        "delta_E_S_xmin_ks_lambda": float(es_fit_dist.Lambda),
+        "delta_E_S_xmin_ks_D": float(es_fit_dist.D),
+        "fit_population": "irreversible_delta_E_S",
     }
     if analysis["er_fit"] is not None:
         summary["delta_E_R_drop_detection_alpha"] = float(

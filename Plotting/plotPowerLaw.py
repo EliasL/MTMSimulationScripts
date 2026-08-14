@@ -1,12 +1,15 @@
 """General plotting and fitting helpers for power-law event data.
 
 These functions intentionally support several populations, distributions, and
-xmin strategies.  For the standard simulation energy-drop result, callers
-should use the post-yield :math:`\\Delta E_R` ``simpleDrop`` split, fit only
-the irreversible :math:`\\Delta E_S` events, search every observed candidate
-for the global xmin, and then perform the maximum-likelihood fit.  The shared
-message is also summarized in the ``Standard power-law energy-drop workflow``
-section of the repository ``ReadMe.md``; alternatives should be selected and
+xmin strategies.  ``plot_powerlaw`` and ``make_fit`` are low-level generic
+helpers: they fit the array supplied by the caller and do not classify
+reversible versus irreversible events.  For the standard simulation
+energy-drop result, callers must first use the post-yield
+:math:`\\Delta E_R` ``simpleDrop`` split, fit only the irreversible
+:math:`\\Delta E_S` events, search every observed candidate for the global
+xmin, and then perform the maximum-likelihood fit.  The shared message is
+also summarized in the ``Standard power-law energy-drop workflow`` section
+of the repository ``ReadMe.md``; alternatives should be selected and
 documented deliberately.
 """
 
@@ -2769,7 +2772,11 @@ def make_fit(
     xmin_search_kwargs=None,
     debug=False,
 ) -> Fit:
-    """Fit at a fixed xmin or at the canonical simpleDrop-selected xmin."""
+    """Fit the supplied positive population at a fixed or searched xmin.
+
+    This helper does not perform the standard Delta E_R classification or
+    choose the irreversible Delta E_S population.
+    """
     if xmin_range is not None:
         if not np.isscalar(xmin_range):
             raise ValueError(
