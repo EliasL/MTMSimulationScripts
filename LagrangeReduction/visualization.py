@@ -14,6 +14,9 @@ from .LagrangeReduction import (
     generate_matrix,
     lagrange_reduction,
     lagrange_reduction_visualization,
+    lag_m1,
+    lag_m2,
+    lag_m3,
 )
 from .vectorPair import VectorPair
 from MTMath.poincareEnergy import (
@@ -27,6 +30,7 @@ from MTMath.poincareEnergy import (
 from MTMath.energyFunction import ContiEnergy, SShear, PieceWiseQuadratic
 from MTMath.reduction import (
     plastic_reduction_history,
+    plastic_reduction_step,
     lagrange_reduction_history,
 )
 
@@ -986,6 +990,14 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         self.updateGVSpheres()
         self.updateFEnergyBackground()
 
+    def applyBasisTransformation(self, transform, roundToInt=False):
+        """Apply a basis operation regardless of the current modifier keys."""
+        for VP in [self.LR_VP, self.GV_VP]:
+            VP.applyBasisTransformation(transform, roundToInt)
+        self.updateMarkers()
+        self.updateGVSpheres()
+        self.updateFEnergyBackground()
+
     def drawHistory(
         self,
         history,
@@ -1219,6 +1231,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         if self._handle_rotation_keys(event):
             return
 
+        # Single reduction steps (1: m1, 2: m2, 3: m3, 4: plastic)
+        if self._handle_reduction_step_keys(event):
+            return
+
         # Shear shortcuts (Y/U, I/O)
         if self._handle_shear_shortcuts(event):
             return
@@ -1327,6 +1343,31 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
             return False
 
         self.applyTransformation(transform)
+        return True
+
+    def _handle_reduction_step_keys(self, event):
+        """Apply one named Lagrange step or the next plastic-reduction step."""
+        key = event.key()
+        transform = np.eye(2, dtype=int)
+
+        if key == Qt.Key_1:
+            lag_m1(transform)
+        elif key == Qt.Key_2:
+            lag_m2(transform)
+        elif key == Qt.Key_3:
+            lag_m3(transform)
+        elif key == Qt.Key_4:
+            if not hasattr(self, "VP"):
+                self.VP = self.LR_VP
+            _, C = generate_matrix(self.VP.pos1(), self.VP.pos2())
+            transform = plastic_reduction_step(C)
+            if transform is None:
+                return True
+        else:
+            return False
+
+        # These are basis operations even if Alt (point-transform mode) is held.
+        self.applyBasisTransformation(transform)
         return True
 
     def _handle_view_toggles(self, event):

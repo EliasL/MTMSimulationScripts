@@ -14,6 +14,7 @@ from MTMath.poincareEnergy import (
 from MTMath.reduction import (
     plastic_reduction,
     plastic_reduction_history,
+    plastic_reduction_step,
     lagrange_reduction,
     lagrange_reduction_history,
 )
@@ -71,6 +72,19 @@ class ReductionHistoryPlotTests(unittest.TestCase):
         F = np.array([[1.0, 5.0], [0.0, 1.0]])
         history = plastic_reduction_history(F.T @ F)
         np.testing.assert_allclose(history[:, 0, 1], [5, 4, 3, 2, 1, 0])
+
+    def test_plastic_step_selects_each_integer_shear(self):
+        cases = (
+            (np.array([[1.0, 0.75], [0.75, 2.0]]), [[1, -1], [0, 1]]),
+            (np.array([[1.0, -0.75], [-0.75, 2.0]]), [[1, 1], [0, 1]]),
+            (np.array([[2.0, 0.75], [0.75, 1.0]]), [[1, 0], [-1, 1]]),
+            (np.array([[2.0, -0.75], [-0.75, 1.0]]), [[1, 0], [1, 1]]),
+        )
+        for C, expected in cases:
+            with self.subTest(C=C):
+                np.testing.assert_array_equal(plastic_reduction_step(C), expected)
+
+        self.assertIsNone(plastic_reduction_step(np.eye(2)))
 
     def test_plot_uses_white_background_and_draws_both_histories(self):
         with matplotlib.rc_context({"text.usetex": False}):
