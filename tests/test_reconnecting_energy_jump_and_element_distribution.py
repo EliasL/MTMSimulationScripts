@@ -13,6 +13,7 @@ from Plotting.reconnectingEnergyJumpAndElementDistribution import (
     read_vtu_pair_details,
     select_pairs,
 )
+from Plotting.dataFunctions import get_data_from_name
 
 
 class ReconnectingEnergyJumpTests(unittest.TestCase):
@@ -30,6 +31,33 @@ class ReconnectingEnergyJumpTests(unittest.TestCase):
             self.assertEqual(float(frame["load"].iloc[0]), 0.1)
             self.assertEqual(path.read_bytes(), original)
             self.assertFalse(path.with_name("macroData_fixed.csv").exists())
+
+    def test_live_csv_reader_ignores_undeclared_trailing_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "macroData.csv"
+            path.write_text(
+                "load_step,load,total_energy_change,avg_sigma12\n"
+                "7,0.2,-3.0,0.4,unheadered,reversibility,diagnostics\n"
+            )
+            frame = read_live_macro_snapshot(
+                path,
+                columns=("load_step", "load", "total_energy_change"),
+            )
+            self.assertEqual(frame.columns.tolist(), [
+                "load_step", "load", "total_energy_change",
+            ])
+            self.assertEqual(frame.iloc[0].to_dict(), {
+                "load_step": "7",
+                "load": 0.2,
+                "total_energy_change": "-3.0",
+            })
+
+    def test_explicit_load_increment_supports_nested_protocol_state_paths(self):
+        result = get_data_from_name(
+            "/missing/job/data/reversibilityData/irrev_drop_l_1.2/state0_min_gamma.3.vtu",
+            load_increment=1e-5,
+        )
+        self.assertEqual(result["loadIncrement"], 1e-5)
 
     def test_reconnection_pairs_are_selected_by_numeric_min_step(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -91,6 +119,10 @@ class ReconnectingEnergyJumpTests(unittest.TestCase):
                     "T12": [np.array([1.0, 0.0])],
                     "T21": [np.array([0.0, 1.0])],
                     "T22": [np.array([1.0, 1.0])],
+                    "F_E11": [np.ones(2)],
+                    "F_E12": [np.zeros(2)],
+                    "F_E21": [np.zeros(2)],
+                    "F_E22": [np.ones(2)],
                     "nrm3": [np.array([0, 0])],
                 }
 

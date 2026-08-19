@@ -9,10 +9,17 @@ from MTMath.meshUtils import arrsToMat, CArrsToMat
 
 
 class VTUData:
-    def __init__(self, vtu_file_path):
+    def __init__(self, vtu_file_path, *, load_increment=None):
+        """Read a VTU file, optionally supplying metadata absent from its path.
+
+        Protocol-state VTUs are nested below an event folder rather than the
+        simulation folder, so their immediate path does not encode the load
+        increment and does not contain ``macroData.csv``.  Supplying the known
+        increment lets those states use the same loader as ordinary VTUs.
+        """
         self.vtu_file_path = vtu_file_path
         self.mesh = self._read_vtu_file()
-        result = get_data_from_name(vtu_file_path)
+        result = get_data_from_name(vtu_file_path, load_increment=load_increment)
         if "BC" in result:
             self.BC = result["BC"]
         if "load" in result:
@@ -204,16 +211,33 @@ class VTUData:
         G11, G12, G22 = [self.get_cell_data(G) for G in ["G11", "G12", "G22"]]
         return CArrsToMat(G11, G12, G22)
 
-    def get_T(self):
-        """Return the exported plastic branch matrix for every element."""
+    def get_T_p(self):
+        """Return the plastic factor stored in the legacy ``T..`` VTU fields.
+
+        The simulation-side notation predates the notation now used in the
+        analysis and manuscript: ``T11``, ..., ``T22`` in a VTU represent
+        :math:`T_p`, not the total :math:`T`.  Keep the raw reader explicit so
+        callers never accidentally plot the plastic factor as the total map.
+        """
         T11, T12, T21, T22 = [
             self.get_cell_data(T) for T in ["T11", "T12", "T21", "T22"]
         ]
         return arrsToMat(T11, T12, T21, T22)
 
+    def get_T(self):
+        """Return the total map :math:`T = F_e T_p` for every element.
+
+        See :meth:`get_T_p` for the legacy simulation/VTU field naming.
+        """
+        return self.get_F_e() @ self.get_T_p()
 
     def get_T_total(self):
-        """Return explicit total branch, reconstruct ``F_e @ T``, or use legacy ``T``."""
+        """Return total :math:`T`; retained as a compatibility alias.
+
+        A few archived VTUs contain explicit ``T_total..`` fields.  Prefer
+        those when present; current VTUs store ``T_p`` under the legacy
+        ``T..`` names and are reconstructed through :meth:`get_T`.
+        """
         try:
             components = self.get_matrix_components("T_total")
             return arrsToMat(
@@ -223,10 +247,7 @@ class VTUData:
                 components[(2, 2)],
             )
         except KeyError:
-            try:
-                return self.get_F_e() @ self.get_T()
-            except KeyError:
-                return self.get_T()
+            return self.get_T()
 
 
     def get_F(self):
@@ -781,7 +802,7 @@ def _metadata_score(metadata):
     return sum(key in metadata for key in informative_keys)
 
 
-def get_data_from_name(nameOrPath):
+def get_data_from_name(nameOrPath, *, load_increment=None):
     if not isinstance(nameOrPath, str):
         nameOrPath = str(nameOrPath)
     path = Path(nameOrPath)
@@ -816,7 +837,12 @@ def get_data_from_name(nameOrPath):
     if "seed" not in result:
         print("Warning: seed not found in file name")
         result["seed"] = 0
-    if "loadIncrement" not in result:
+    if load_increment is not None:
+        supplied_increment = float(load_increment)
+        if not np.isfinite(supplied_increment):
+            raise ValueError("load_increment must be finite when supplied.")
+        result["loadIncrement"] = supplied_increment
+    elif "loadIncrement" not in result:
         inferred_load_increment = _infer_constant_load_increment(nameOrPath)
         if (
             not is_csv

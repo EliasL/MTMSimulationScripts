@@ -113,6 +113,14 @@ class PlasticShearCountTests(unittest.TestCase):
                 data.get_T_total(), [[[2.0, 3.0], [4.0, 5.0]]]
             )
 
+    def test_total_T_composes_elastic_and_legacy_plastic_factors(self):
+        data = VTUData.__new__(VTUData)
+        with patch.object(data, "get_F_e", return_value=np.array([[[2.0, 1.0], [0.0, 1.0]]])), \
+             patch.object(data, "get_T_p", return_value=np.array([[[1.0, 3.0], [0.0, 1.0]]])):
+            np.testing.assert_allclose(
+                data.get_T(), [[[2.0, 7.0], [0.0, 1.0]]]
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -289,6 +289,174 @@ def calculate_energy_change_field(
     return grid_values, FieldGeometry(kind="grid", x=x, y=y, values=grid_values)
 
 
+def _periodic_unit_cell_centres(
+    state: MeshState, *, load: float, box_size: float
+) -> np.ndarray:
+    """Return cell centres in the square, sheared-periodic unit cell.
+
+    The coordinate transform and edge treatment are shared with the normal
+    periodic mesh renderer.  Triangle centres are formed only after each
+    triangle has been unwrapped locally, so triangles crossing a periodic edge
+    remain local rather than being spuriously centred in the middle of the box.
+    """
+
+    from Plotting.pyplotFunctions import wrap_periodic_mesh
+
+    _, _, wrapped_points = wrap_periodic_mesh(
+        state.points,
+        state.triangles,
+        np.zeros(len(state.triangles), dtype=float),
+        state.reference_indices,
+        load,
+        box_size,
+        source_path=str(state.path),
+    )
+    polygons = wrapped_points[state.triangles]
+    unwrapped = polygons[:, :1] + (
+        polygons - polygons[:, :1] - np.round(polygons - polygons[:, :1])
+    )
+    return np.mod(np.mean(unwrapped, axis=1), 1.0)
+
+
+def calculate_periodic_energy_change_field(
+    first: MeshState,
+    second: MeshState,
+    *,
+    first_load: float,
+    second_load: float,
+    box_size: float,
+    common_grid_resolution: int = 400,
+) -> tuple[np.ndarray, FieldGeometry]:
+    """Project ``E(first)-E(second)`` onto one square periodic unit cell.
+
+    Reconnecting meshes have no cell-index correspondence.  This routine
+    maps both state geometries through the established sheared-PBC transform,
+    then evaluates both fields with periodic nearest-cell-centre sampling on
+    the same unit-square grid.  It therefore preserves periodic adjacency and
+    avoids the tilted raw-coordinate bounding box.
+    """
+
+    if common_grid_resolution < 2:
+        raise ValueError("common_grid_resolution must be at least two.")
+    if not np.isfinite(first_load) or not np.isfinite(second_load):
+        raise ValueError("Periodic state loads must be finite.")
+    if not np.isfinite(box_size) or box_size <= 0:
+        raise ValueError("box_size must be finite and positive.")
+    first_energy = np.asarray(first.cell_fields["energy_field"], dtype=float)
+    second_energy = np.asarray(second.cell_fields["energy_field"], dtype=float)
+    if first_energy.shape != (len(first.triangles),):
+        raise ValueError("First energy field does not have one value per triangle.")
+    if second_energy.shape != (len(second.triangles),):
+        raise ValueError("Second energy field does not have one value per triangle.")
+    if not np.all(np.isfinite(first_energy)) or not np.all(np.isfinite(second_energy)):
+        raise ValueError("Energy fields must be finite for periodic projection.")
+
+    from scipy.spatial import cKDTree
+
+    def periodic_nearest_values(centres: np.ndarray, values: np.ndarray, samples: np.ndarray) -> np.ndarray:
+        shifts = np.array([(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)])
+        tiled_centres = (centres[None, :, :] + shifts[:, None, :]).reshape(-1, 2)
+        nearest = cKDTree(tiled_centres).query(samples)[1] % len(centres)
+        return values[nearest]
+
+    first_centres = _periodic_unit_cell_centres(
+        first, load=first_load, box_size=box_size
+    )
+    second_centres = _periodic_unit_cell_centres(
+        second, load=second_load, box_size=box_size
+    )
+    x = np.linspace(0.0, 1.0, common_grid_resolution)
+    y = np.linspace(0.0, 1.0, common_grid_resolution)
+    xx, yy = np.meshgrid(x, y, indexing="xy")
+    samples = np.column_stack((xx.ravel(), yy.ravel()))
+    values = (
+        periodic_nearest_values(first_centres, first_energy, samples)
+        - periodic_nearest_values(second_centres, second_energy, samples)
+    ).reshape(xx.shape)
+    return values, FieldGeometry(kind="grid", x=x, y=y, values=values)
+
+
+def _central_periodic_box_origin(
+    state: MeshState, *, load: float, box_size: float
+) -> np.ndarray:
+    """Choose an equivalent PBC-cell origin centred on the saved mesh images."""
+
+    reference_origins = state.points[state.reference_indices == 0]
+    if reference_origins.size == 0:
+        raise ValueError(f"No refIndex=0 periodic origin found in {state.path}.")
+    a = np.array([box_size, 0.0])
+    b = np.array([load * box_size, box_size])
+    shifts = np.array(
+        [i * a + j * b for i in range(-2, 3) for j in range(-2, 3)]
+    )
+    candidates = (reference_origins[:, None, :] + shifts[None, :, :]).reshape(-1, 2)
+    target = np.mean(state.points, axis=0)
+    centres = candidates + 0.5 * (a + b)
+    return candidates[np.argmin(np.sum((centres - target) ** 2, axis=1))]
+
+
+def plot_deformed_periodic_energy_change_background(
+    ax,
+    state: MeshState,
+    energy_change: np.ndarray,
+    geometry: FieldGeometry,
+    *,
+    load: float,
+    box_size: float,
+    periodic_shifts: list[tuple[float, float]],
+    symmetric_limit: float | None = None,
+    rasterized: bool = False,
+):
+    """Draw a periodic unit-cell field in its deformed shear parallelogram.
+
+    ``geometry`` must come from :func:`calculate_periodic_energy_change_field`.
+    It has already assigned every pixel through periodic nearest-cell matching.
+    The field is mapped back to a deformed PBC cell and repeated using the
+    viewport-aware shifts produced by ``pyplotFunctions.calculate_shifts``;
+    the selected reference cell remains the black dashed outline.
+    """
+
+    if geometry.kind != "grid" or geometry.x is None or geometry.y is None:
+        raise ValueError("A periodic energy field must use grid geometry.")
+    values = np.asarray(energy_change, dtype=float)
+    x = np.asarray(geometry.x, dtype=float)
+    y = np.asarray(geometry.y, dtype=float)
+    if values.shape != (len(y), len(x)):
+        raise ValueError("Periodic energy grid does not match its coordinates.")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("Periodic energy grid contains non-finite values.")
+    limit = symmetric_limit or float(np.nanmax(np.abs(values)))
+    if not np.isfinite(limit) or limit <= 0:
+        raise ValueError("symmetric_limit must be finite and positive.")
+    if not periodic_shifts:
+        raise ValueError("At least one viewport-intersecting periodic shift is required.")
+    origin = _central_periodic_box_origin(state, load=load, box_size=box_size)
+    u, v = np.meshgrid(x, y, indexing="xy")
+    deformed_x = origin[0] + box_size * (u + load * v)
+    deformed_y = origin[1] + box_size * v
+
+    from Plotting.pyplotFunctions import draw_periodic_shear_box
+
+    norm = mcolors.TwoSlopeNorm(vmin=-limit, vcenter=0.0, vmax=limit)
+    meshes = []
+    for dx, dy in periodic_shifts:
+        shift_x = dx + load * dy
+        mesh = ax.pcolormesh(
+            deformed_x + shift_x,
+            deformed_y + dy,
+            values,
+            cmap="coolwarm",
+            norm=norm,
+            shading="auto",
+        )
+        if rasterized:
+            mesh.set_rasterized(True)
+        meshes.append(mesh)
+    draw_periodic_shear_box(ax, origin=origin, load=load, box_size=box_size)
+    ax.set_aspect("equal", adjustable="box")
+    return meshes[0]
+
+
 def choose_activity_zoom(
     state: MeshState,
     displacement: np.ndarray,

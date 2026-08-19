@@ -34,6 +34,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--energy-threshold", type=float, default=1e-10)
     parser.add_argument("--poll-seconds", type=float, default=0.25)
     parser.add_argument("--timeout-seconds", type=float, default=7200.0)
+    parser.add_argument(
+        "--fire-max-it",
+        type=int,
+        default=10_000,
+        help="Maximum FIRE iterations per loading step (default: 10000).",
+    )
     parser.add_argument("--algorithms", nargs="+", choices=ALGORITHMS, default=list(ALGORITHMS))
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -49,9 +55,16 @@ def dump_load(dump_path: Path) -> float:
     raise RuntimeError(f"Could not find <load> in {dump_path}")
 
 
-def config_text(algorithm: str, load: float, max_load: float, threads: int, name: str) -> str:
+def config_text(
+    algorithm: str,
+    load: float,
+    max_load: float,
+    threads: int,
+    name: str,
+    fire_max_it: int = 10_000,
+) -> str:
     values = {
-        "FIRE": ("1e-5", "0", "1e-5", "10000"),
+        "FIRE": ("1e-5", "0", "1e-5", str(fire_max_it)),
         "CG": ("1e-5", "0", "1e-5", "0"),
         "LBFGS": ("1e-5", "0", "1e-5", "0"),
     }
@@ -264,6 +277,7 @@ def run_one(
     poll_seconds: float,
     timeout_seconds: float,
     dry_run: bool,
+    fire_max_it: int = 10_000,
 ) -> dict:
     stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", source_dump.name.replace(".xml.gz", ""))
     name = f"same_event_{stem}_{algorithm}"
@@ -272,7 +286,9 @@ def run_one(
         raise FileExistsError(f"Refusing to reuse existing output directory: {run_dir}")
     run_dir.mkdir(parents=True)
     config_path = run_dir / "launch.conf"
-    config_path.write_text(config_text(algorithm, load, load + lookahead, threads, name))
+    config_path.write_text(
+        config_text(algorithm, load, load + lookahead, threads, name, fire_max_it)
+    )
     command = [str(binary), "-d", str(source_dump), "-c", str(config_path), "-o", str(output_root)]
     print(f"\n=== {algorithm} ===")
     print(" ".join(command))
@@ -339,7 +355,12 @@ def main() -> None:
         raise FileNotFoundError(args.binary)
     if not args.source_dump.is_file():
         raise FileNotFoundError(args.source_dump)
-    if args.threads < 1 or args.lookahead <= 0 or args.energy_threshold < 0:
+    if (
+        args.threads < 1
+        or args.lookahead <= 0
+        or args.energy_threshold < 0
+        or args.fire_max_it < 1
+    ):
         raise ValueError("threads, lookahead, and energy threshold must be valid positive values")
     load = dump_load(args.source_dump)
     args.output_root.mkdir(parents=True, exist_ok=True)
@@ -360,6 +381,7 @@ def main() -> None:
                 args.poll_seconds,
                 args.timeout_seconds,
                 args.dry_run,
+                args.fire_max_it,
             )
         )
     manifest = {

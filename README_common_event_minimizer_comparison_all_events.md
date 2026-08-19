@@ -77,6 +77,13 @@ Other useful fields are:
 
 The summarized quantities include total/average energy, energy changes, force, function evaluations, iterations, participation fractions, plastic-state counts, and maximum energy.
 
+Important distinction: `trajectory_total_energy_change_*` and
+`trajectory_avg_energy_change_*` summarize the MTS2D `total_energy_change` and
+`avg_energy_change` columns. Those are changes relative to the previous load
+step, not the change between the final two optimizer evaluations. The latter is
+stored only in the raw `min_iter_total_energy_change` and
+`min_iter_avg_energy_change` columns inside each retained `macroData.csv`.
+
 ### Derived comparison columns
 
 - `*_winner`: minimizer with the lowest value for that metric. Lower is treated as better.
@@ -85,9 +92,16 @@ The summarized quantities include total/average energy, energy changes, force, f
 - `first_drop_load_span`: difference between the largest and smallest minimizer-reported first-drop load.
 - `first_drop_loads_match_within_5e_minus_9`: whether all three first-drop loads agree within `5e-9`.
 
-Energy winner/tie fields use the documented absolute tolerance:
+Energy winner/tie fields in this export use the following absolute tolerance:
 
 `comparison_energy_tie_absolute_tolerance = 1e-10`
+
+However, `total_energy` is written with 11 significant digits. Around total
+energies of a few hundred, that gives a stored-value resolution of roughly
+`1e-8`, so the `1e-10` comparison is finer than the precision of that field.
+Those tie columns should therefore be treated as historical diagnostics, not
+as evidence that two physical minima agree to `1e-10`. A reliable strict test
+requires higher-precision energies and synchronized loads.
 
 Function-call and force comparisons use exact numeric ordering unless the values are identical.
 
@@ -97,4 +111,6 @@ Function-call and force comparisons use exact numeric ordering unless the values
 2. First-drop energies can be evaluated at slightly different load steps, so energy-winner counts should be treated as a diagnostic rather than a perfectly synchronized final-energy comparison.
 3. The trajectory minimum/final fields summarize the retained minimization directory, not every raw file in the run directory.
 4. Empty cells mean that the source record did not provide that field or that the value was not numeric; they are not automatically zeros.
-
+5. In the 246-event collection, 200 events have identical recorded first-drop
+   loads for FIRE, CG, and LBFGS. The previously reported number 169 refers to
+   the historical union of energy-tie flags, not to a common-load event count.

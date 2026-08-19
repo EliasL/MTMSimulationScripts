@@ -2707,13 +2707,15 @@ def find_xmin_simple_drop_from_results(
     refine=True,
     **fit_kwargs,
 ):
-    """Select the largest raw eligible KS drop, then search its interval.
+    """Select the largest raw eligible KS drop, then descend to a local minimum.
 
     The coarse scan is kept unsmoothed. Only adjacent coarse candidates that
     both retain at least ``min_tail_count`` drops are considered. The largest
     decrease in KS distance between those adjacent candidates defines the
-    fine-search interval. Every observed xmin in that interval is evaluated
-    and the best one is returned.
+    fine-search interval. Every observed xmin in that interval is evaluated,
+    then the best candidate is used as the starting point for a direct-neighbor
+    search over the complete observed candidate array.  The latter continuation
+    is deliberately independent of the coarse xmin grid.
 
     Coarse candidates with fewer than ``min_tail_count`` retained drops remain
     available in the supplied scan for plotting, but cannot define or win the
@@ -2843,15 +2845,17 @@ def find_xmin_simple_drop_from_results(
         ]
     )
     region_best_index = int(region_indices[region_best_position])
-    local_minimum = {
-        "xmin": float(fine_xmins[region_best_index]),
-        "distance": float(region_distances[region_best_position]),
-        "start_xmin": float(fine_xmins[region_best_index]),
-        "start_candidate_index": int(region_best_index),
-        "final_candidate_index": int(region_best_index),
-        "search_bounds": (int(region_indices[0]), int(region_indices[-1])),
-        "iterations": 0,
-    }
+    region_best_xmin = float(fine_xmins[region_best_index])
+    local_minimum = _simple_drop_local_search(
+        drops,
+        fine_xmins,
+        region_best_index,
+        distance_cache,
+        min_tail_count=min_tail_count,
+        parameter_cache=parameter_cache,
+        search_bounds=None,
+        **fit_kwargs,
+    )
     if not np.isfinite(local_minimum["distance"]):
         raise RuntimeError("The simpleDrop fine local search failed.")
 
@@ -2880,7 +2884,7 @@ def find_xmin_simple_drop_from_results(
         "region_xmins": fine_xmins[region_indices],
         "region_distances": region_distances,
         "region_candidate_indices": region_indices,
-        "region_best_xmin": float(fine_xmins[region_best_index]),
+        "region_best_xmin": region_best_xmin,
         "region_best_distance": float(region_distances[region_best_position]),
         "local_minimum": local_minimum,
         "selected_distance": float(local_minimum["distance"]),
@@ -2890,14 +2894,17 @@ def find_xmin_simple_drop_from_results(
         ),
         "fine_candidate_count": int(fine_xmins.size),
         "fine_step": (
-            "every_observed_xmin_in_selected_interval" if refine else "none"
+            "selected_interval_then_direct_neighbor_descent_over_all_observed_xmins"
+            if refine
+            else "none"
         ),
         "fine_candidate_min": float(fine_xmins[0]),
         "fine_candidate_max": float(fine_xmins[-1]),
-        "fine_search_bounds": (
-            int(region_indices[0]),
-            int(region_indices[-1]),
+        "fine_search_bounds": local_minimum["search_bounds"],
+        "local_search_scope": (
+            "all_observed_xmins" if refine else "coarse_scan"
         ),
+        "local_search_start_xmin": region_best_xmin,
         "evaluated_xmins": [xmin for xmin, _ in evaluated],
         "evaluated_distances": [distance for _, distance in evaluated],
         "eligible_initial_measurement_count": int(search_mask.sum()),

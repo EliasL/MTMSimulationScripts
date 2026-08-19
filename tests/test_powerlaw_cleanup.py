@@ -13,6 +13,8 @@ matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 
 from MTMath.evaluatePowerlawFit import (
+    CLAUSET_EVALUATION_PROTOCOL,
+    EVALUATION_CACHE_VERSION,
     Fit,
     Truncated_Power_Law,
     evaluate_xmin,
@@ -53,6 +55,54 @@ from Plotting.plotPowerLaw import (
 
 
 class PValueXminTests(unittest.TestCase):
+    def test_clauset_pvalue_uses_v2_semiparametric_cache(self):
+        data = np.asarray([1.0, 1.5, 2.0, 2.5, 3.0, 4.0])
+        fit = Fit(
+            data=data,
+            xmin=2.0,
+            xmin_distribution=Truncated_Power_Law.name,
+            verbose=0,
+        )
+        fit.xmin_selection = "global"
+        fit.xmin_analysis = {
+            "nr_initial": 10,
+            "min_tail_count": 3,
+            "max_xmin": None,
+            "refinement": "refined",
+        }
+
+        with tempfile.TemporaryDirectory() as cache_dir, mock.patch(
+            "MTMath.evaluatePowerlawFit._clauset_refit_xmin_task",
+            return_value=(0.5, [1.2, 0.3], 2.0),
+        ) as refit:
+            fit.evaluate_clauset_pvalue(
+                data,
+                confidence=0.5,
+                parallel=False,
+                cache_dir=cache_dir,
+            )
+            sample = refit.call_args.args[0][0]
+            self.assertEqual(sample.size, data.size)
+            self.assertTrue(np.all(np.isin(sample[sample < fit.xmin], [1.0, 1.5])))
+
+            cache_paths = list(Path(cache_dir).glob("*.json"))
+            self.assertEqual(len(cache_paths), 1)
+            with open(cache_paths[0], encoding="utf-8") as stream:
+                payload = json.load(stream)
+            self.assertIn(EVALUATION_CACHE_VERSION, payload["evaluation_protocol"])
+            self.assertIn(CLAUSET_EVALUATION_PROTOCOL, payload["evaluation_protocol"])
+
+            with mock.patch(
+                "MTMath.evaluatePowerlawFit._clauset_refit_xmin_task",
+                side_effect=AssertionError("v2 cache was not reused"),
+            ):
+                fit.evaluate_clauset_pvalue(
+                    data,
+                    confidence=0.5,
+                    parallel=False,
+                    cache_dir=cache_dir,
+                )
+
     def test_selected_fit_is_sorted_before_refinement_window_is_chosen(self):
         class DummyFit:
             def __init__(self, xmin, p):
@@ -70,7 +120,7 @@ class PValueXminTests(unittest.TestCase):
             side_effect=[rough, refined],
         ) as explore, mock.patch(
             "Plotting.plotPowerLaw.plot_fits_over_xmin"
-        ), mock.patch(
+        ) as plot, mock.patch(
             "Plotting.plotPowerLaw.get_lowest_distance_xmin", return_value=None
         ):
             best = find_best_xmin(
@@ -84,6 +134,7 @@ class PValueXminTests(unittest.TestCase):
         self.assertEqual(second_call.args[1], 1.0)
         self.assertEqual(second_call.args[2], 4.0)
         self.assertEqual(best.xmin, 2.0)
+        self.assertFalse(plot.call_args.kwargs["show_p_xmin"])
 
     def test_no_p_fit_marker_when_threshold_has_no_local_maximum(self):
         class DummyFit:
@@ -362,15 +413,26 @@ class XminCleanupTests(unittest.TestCase):
         )
         self.assertEqual(
             simple_details["fine_step"],
-            "every_observed_xmin_in_selected_interval",
+            "selected_interval_then_direct_neighbor_descent_over_all_observed_xmins",
         )
         self.assertEqual(
             simple_details["fine_search_bounds"],
             tuple(simple_details["local_minimum"]["search_bounds"]),
         )
-        self.assertEqual(xmin, simple_details["region_best_xmin"])
-        self.assertGreaterEqual(xmin, simple_details["largest_drop_interval"][0])
-        self.assertLessEqual(xmin, simple_details["largest_drop_interval"][1])
+        self.assertEqual(simple_details["local_search_scope"], "all_observed_xmins")
+        self.assertEqual(
+            simple_details["local_search_start_xmin"],
+            simple_details["region_best_xmin"],
+        )
+        self.assertEqual(xmin, simple_details["local_minimum"]["xmin"])
+        self.assertGreater(
+            simple_details["local_minimum"]["iterations"],
+            0,
+        )
+        self.assertGreaterEqual(
+            xmin,
+            simple_details["local_minimum"]["start_xmin"],
+        )
 
     def test_simple_drop_fine_search_only_evaluates_observed_xmins(self):
         drops = np.arange(1.0, 13.0)
@@ -417,10 +479,10 @@ class XminCleanupTests(unittest.TestCase):
             [4.0],
         )
         self.assertAlmostEqual(details["region_best_xmin"], 4.0)
-        self.assertAlmostEqual(xmin, 4.0)
+        self.assertAlmostEqual(xmin, 5.0)
         self.assertEqual(details["local_minimum"]["start_candidate_index"], 3)
-        self.assertEqual(details["local_minimum"]["final_candidate_index"], 3)
-        self.assertEqual(details["local_minimum"]["search_bounds"], (3, 3))
+        self.assertEqual(details["local_minimum"]["final_candidate_index"], 4)
+        self.assertEqual(details["local_minimum"]["search_bounds"], (0, 9))
 
     def test_simple_drop_uses_the_largest_raw_adjacent_drop(self):
         xmins = np.arange(1.0, 101.0)

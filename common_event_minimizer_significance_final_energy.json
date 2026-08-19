@@ -1,0 +1,217 @@
+{
+  "csv_path": "/Users/eliaslundheim/work/PhD/SimulationScripts/common_event_minimizer_comparison_all_events.csv",
+  "method": {
+    "multiple_comparisons": "Bonferroni correction across the three planned pairwise tests",
+    "name": "exact paired sign test",
+    "null_hypothesis": "after excluding equal stored energies, either algorithm is lower with probability 0.5 on each event",
+    "ties": "equal stored energies are excluded as unresolved at CSV precision"
+  },
+  "metric": "trajectory_total_energy_final",
+  "pairwise_results": [
+    {
+      "bonferroni_adjusted_p_for_3_tests": 7.2920938776156555e-06,
+      "claim": "CG lower than LBFGS",
+      "exact_one_sided_p_supporting_claim": 0.9999996304234147,
+      "exact_one_sided_p_supporting_opposite_order": 1.2153489796026092e-06,
+      "exact_two_sided_sign_test_p": 2.4306979592052185e-06,
+      "left_minus_right": "CG minus LBFGS",
+      "losses_opposing_claim": 63,
+      "resolved_events": 83,
+      "seed_majority_check": {
+        "bonferroni_adjusted_p_for_3_tests": 1.0,
+        "one_sided_p": 1.0,
+        "opposes": 9,
+        "outcomes": [
+          {
+            "outcome": "tie",
+            "seed": 0
+          },
+          {
+            "outcome": "opposes",
+            "seed": 1
+          },
+          {
+            "outcome": "opposes",
+            "seed": 2
+          },
+          {
+            "outcome": "opposes",
+            "seed": 3
+          },
+          {
+            "outcome": "opposes",
+            "seed": 4
+          },
+          {
+            "outcome": "opposes",
+            "seed": 5
+          },
+          {
+            "outcome": "opposes",
+            "seed": 6
+          },
+          {
+            "outcome": "opposes",
+            "seed": 7
+          },
+          {
+            "outcome": "opposes",
+            "seed": 8
+          },
+          {
+            "outcome": "opposes",
+            "seed": 9
+          }
+        ],
+        "resolved": 9,
+        "supports": 0,
+        "tied": 1
+      },
+      "ties_at_csv_precision": 117,
+      "win_fraction": 0.24096385542168675,
+      "win_fraction_wilson_ci_95": [
+        0.16174743841159034,
+        0.34309736055955287
+      ],
+      "wins_supporting_claim": 20
+    },
+    {
+      "bonferroni_adjusted_p_for_3_tests": 1.772350341856006e-05,
+      "claim": "FIRE higher than CG",
+      "exact_one_sided_p_supporting_claim": 2.953917236426677e-06,
+      "exact_one_sided_p_supporting_opposite_order": 0.9999989261542356,
+      "exact_two_sided_sign_test_p": 5.907834472853354e-06,
+      "left_minus_right": "FIRE minus CG",
+      "losses_opposing_claim": 28,
+      "resolved_events": 102,
+      "seed_majority_check": {
+        "bonferroni_adjusted_p_for_3_tests": 0.1640625,
+        "one_sided_p": 0.0546875,
+        "opposes": 2,
+        "outcomes": [
+          {
+            "outcome": "supports",
+            "seed": 0
+          },
+          {
+            "outcome": "supports",
+            "seed": 1
+          },
+          {
+            "outcome": "supports",
+            "seed": 2
+          },
+          {
+            "outcome": "supports",
+            "seed": 3
+          },
+          {
+            "outcome": "supports",
+            "seed": 4
+          },
+          {
+            "outcome": "supports",
+            "seed": 5
+          },
+          {
+            "outcome": "opposes",
+            "seed": 6
+          },
+          {
+            "outcome": "supports",
+            "seed": 7
+          },
+          {
+            "outcome": "supports",
+            "seed": 8
+          },
+          {
+            "outcome": "opposes",
+            "seed": 9
+          }
+        ],
+        "resolved": 10,
+        "supports": 8,
+        "tied": 0
+      },
+      "ties_at_csv_precision": 98,
+      "win_fraction": 0.7254901960784313,
+      "win_fraction_wilson_ci_95": [
+        0.6318943708450752,
+        0.8027179305398532
+      ],
+      "wins_supporting_claim": 74
+    },
+    {
+      "bonferroni_adjusted_p_for_3_tests": 6.478389006364253e-09,
+      "claim": "FIRE higher than LBFGS",
+      "exact_one_sided_p_supporting_claim": 1.0797315010607088e-09,
+      "exact_one_sided_p_supporting_opposite_order": 0.9999999996601604,
+      "exact_two_sided_sign_test_p": 2.1594630021214176e-09,
+      "left_minus_right": "FIRE minus LBFGS",
+      "losses_opposing_claim": 33,
+      "resolved_events": 135,
+      "seed_majority_check": {
+        "bonferroni_adjusted_p_for_3_tests": 0.0029296875,
+        "one_sided_p": 0.0009765625,
+        "opposes": 0,
+        "outcomes": [
+          {
+            "outcome": "supports",
+            "seed": 0
+          },
+          {
+            "outcome": "supports",
+            "seed": 1
+          },
+          {
+            "outcome": "supports",
+            "seed": 2
+          },
+          {
+            "outcome": "supports",
+            "seed": 3
+          },
+          {
+            "outcome": "supports",
+            "seed": 4
+          },
+          {
+            "outcome": "supports",
+            "seed": 5
+          },
+          {
+            "outcome": "supports",
+            "seed": 6
+          },
+          {
+            "outcome": "supports",
+            "seed": 7
+          },
+          {
+            "outcome": "supports",
+            "seed": 8
+          },
+          {
+            "outcome": "supports",
+            "seed": 9
+          }
+        ],
+        "resolved": 10,
+        "supports": 10,
+        "tied": 0
+      },
+      "ties_at_csv_precision": 65,
+      "win_fraction": 0.7555555555555555,
+      "win_fraction_wilson_ci_95": [
+        0.6766515328653203,
+        0.8203181805479448
+      ],
+      "wins_supporting_claim": 102
+    }
+  ],
+  "selection": {
+    "criterion": "all three algorithms have the same first_drop_load_step",
+    "n_selected": 200
+  }
+}
