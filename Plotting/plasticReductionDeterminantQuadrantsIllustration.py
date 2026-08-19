@@ -41,8 +41,8 @@ DISK_ALPHA = 0.62
 CMAP_BY_DETERMINANT = {1: "coolwarm", -1: "viridis"}
 PANEL_COLOR_STRENGTH = DISK_ALPHA
 HISTORY_F = np.array([[-0.43, 1.21], [-1.19, 1.02]], dtype=float)
-LAGRANGE_PATH_COLOR = "#008A27"
-ELASTIC_PATH_COLOR = "#69D86E"
+LAGRANGE_PATH_COLOR = "#69D86E"
+PLASTIC_PATH_COLOR = "#008A27"
 INITIAL_MARKER_COLOR = "#C62828"
 
 
@@ -341,6 +341,8 @@ def _elastic_transform_label(history, step):
     a, b, c = before[0, 0], before[1, 1], before[0, 1]
     if a <= b:
         n = int(round((after[0, 1] - c) / a))
+        if n == 1:
+            return r"$\mathbf{M}$"
         return rf"$\mathbf{{E}}_{{12}}({n})$"
     n = int(round((after[0, 1] - c) / b))
     return rf"$\mathbf{{E}}_{{21}}({n})$"
@@ -352,7 +354,7 @@ def _draw_history_paths(ax, F=HISTORY_F):
     initial_point = None
     for name, color in (
         ("lagrange", LAGRANGE_PATH_COLOR),
-        ("elastic", ELASTIC_PATH_COLOR),
+        ("elastic", PLASTIC_PATH_COLOR),
     ):
         entry = histories[name]
         points = [
@@ -433,7 +435,7 @@ def _draw_history_paths(ax, F=HISTORY_F):
         Line2D(
             [0],
             [0],
-            color=ELASTIC_PATH_COLOR,
+            color=PLASTIC_PATH_COLOR,
             linewidth=2.0,
             label="Plastic reduction",
         ),
@@ -446,7 +448,7 @@ def _draw_history_paths(ax, F=HISTORY_F):
             markerfacecolor=INITIAL_MARKER_COLOR,
             markeredgecolor="white",
             markeredgewidth=0.8,
-            label=r"Initial $\mathbf F$",
+            label="Initial",
         ),
     ]
     legend = ax.legend(

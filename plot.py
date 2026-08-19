@@ -57,12 +57,14 @@ from MTMath.poincareTiling import (
     drawRotation2ExplanationFigs,
 )
 from MTMath.decomposeElasticPlastic import showDecomposition
+from MTMath.reduction import lagrange_reduction, plastic_reduction_history
 from MTMath.poincareEnergy import (
     generate_cauchy_stress_grid,
     generate_energy_grid,
     plot3DEnergyDensityComparison,
     plot_reduction_history,
 )
+from Plotting.matrix_visualization import draw_matrix_columns
 from plotAll import plotAll
 from Plotting.remotePlotting import (
     plotLog2,
@@ -343,15 +345,116 @@ def plotSquareContiYieldSurface(
     return ax.figure, ax
 
 
+def _reduction_factor_data(F):
+    """Return elastic/plastic factors for the Lagrange and plastic reductions."""
+
+    F = np.asarray(F, dtype=float)
+    C = F.T @ F
+    _, lagrange_M = lagrange_reduction(C)
+    _, plastic_M = plastic_reduction_history(C, return_M=True)
+    return (
+        (
+            F @ lagrange_M,
+            np.linalg.inv(lagrange_M),
+            "Lagrange",
+            (r"$\mathbf{F}_e^{(L)}$", r"$\mathbf{F}_p^{(L)}$"),
+        ),
+        (
+            F @ plastic_M,
+            np.linalg.inv(plastic_M),
+            "Plastic",
+            (r"$\mathbf{F}_e^{(P)}$", r"$\mathbf{F}_p^{(P)}$"),
+        ),
+    )
+
+
+def _draw_reduction_factor(ax, matrix, title, limit):
+    """Draw one reduction factor as arrows for its two columns."""
+
+    draw_matrix_columns(
+        ax,
+        matrix,
+        limits=(-limit, limit),
+        colors=("#087E8B", "#D95F02"),
+        linestyles=("-", "--"),
+        linewidth=1.55,
+        mutation_scale=8.5,
+        grid_color="#CBD2D8",
+        origin_color="#20262E",
+        show_ticks=False,
+    )
+    ax.axhline(0.0, color="#CBD2D8", linewidth=0.45, zorder=0)
+    ax.axvline(0.0, color="#CBD2D8", linewidth=0.45, zorder=0)
+    ax.set_title(title, fontsize=9.0, pad=3.5)
+
+
 def plotReductionHistory(show=True):
     F = np.array([[-0.43, 1.21], [-1.19, 1.02]])
-    fig, ax = plot_reduction_history(
+    factor_rows = _reduction_factor_data(F)
+    matrices = [matrix for row in factor_rows for matrix in row[:2]]
+    factor_limit = max(1.2, 1.08 * np.max(np.abs(matrices)))
+
+    fig = plt.figure(figsize=(9.0, 4.3))
+    layout = fig.add_gridspec(
+        2,
+        3,
+        width_ratios=(2.7, 1.0, 1.0),
+        left=0.065,
+        right=0.99,
+        bottom=0.12,
+        top=0.93,
+        wspace=0.30,
+        hspace=0.28,
+    )
+
+    history_ax = fig.add_subplot(layout[:, 0])
+    history_resolution = 1000
+    plot_reduction_history(
         F,
-        resolution=1000,
+        ax=history_ax,
+        resolution=history_resolution,
         grid_depth=6,
         show_grid=True,
         show_legend=True,
     )
+    history_ticks = np.linspace(0.0, history_resolution, 5)
+    history_tick_labels = [f"{value:.1f}" for value in np.linspace(-1.0, 1.0, 5)]
+    history_ax.set_xticks(history_ticks, history_tick_labels)
+    history_ax.set_yticks(history_ticks, history_tick_labels)
+    history_ax.set_xlabel(r"$x_p$")
+    history_ax.set_ylabel(r"$y_p$")
+
+    factor_axes = []
+    for row_index, (_, _, row_label, titles) in enumerate(factor_rows):
+        elastic_ax = fig.add_subplot(layout[row_index, 1])
+        plastic_ax = fig.add_subplot(layout[row_index, 2])
+        _draw_reduction_factor(
+            elastic_ax,
+            factor_rows[row_index][0],
+            titles[0],
+            factor_limit,
+        )
+        _draw_reduction_factor(
+            plastic_ax,
+            factor_rows[row_index][1],
+            titles[1],
+            factor_limit,
+        )
+        factor_axes.append((elastic_ax, plastic_ax, row_label))
+
+    fig.canvas.draw()
+    for elastic_ax, _, row_label in factor_axes:
+        box = elastic_ax.get_position()
+        fig.text(
+            box.x0 - 0.018,
+            box.y0 + 0.5 * box.height,
+            row_label,
+            ha="right",
+            va="center",
+            fontsize=8.5,
+            color="#20262E",
+        )
+
     output_stem = Path("Plots/reduction_history")
     output_stem.parent.mkdir(parents=True, exist_ok=True)
     pdf_path = output_stem.with_suffix(".pdf")
@@ -361,7 +464,7 @@ def plotReductionHistory(show=True):
     print(f"Saved plots to {pdf_path} and {png_path}")
     if show:
         plt.show()
-    return fig, ax
+    return fig, history_ax
 
 
 def showPoincareDisk():

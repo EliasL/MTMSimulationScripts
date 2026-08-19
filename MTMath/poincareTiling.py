@@ -1506,6 +1506,7 @@ def plasticReductionBFS(
     return_paths: bool = False,
     show: bool = False,
     show_dead_ends=False,
+    allow_no_center=False,
     name="",
 ):
     """Explore unit-shear paths until they first enter the elastic center.
@@ -1690,11 +1691,15 @@ def plasticReductionBFS(
             }
         )
 
-    if not unique_candidates:
+    if not unique_candidates and not allow_no_center:
         raise RuntimeError(
             f"Plastic-reduction BFS did not reach the center within depth {max_depth}"
         )
-    candidate_Cs = np.stack(unique_candidates)
+    candidate_Cs = (
+        np.stack(unique_candidates)
+        if unique_candidates
+        else np.empty((0, 2, 2), dtype=float)
+    )
 
     result = (candidate_Cs, terminal_paths) if return_paths else candidate_Cs
     if not plot:
@@ -1703,7 +1708,12 @@ def plasticReductionBFS(
     # -------------------------
     # Plot
     # -------------------------
-    ax = drawPoincareGrid(grid_size=grid_size)
+    fig, ax = plt.subplots(figsize=(4, 4))
+    prepPoincareFig(
+        grid_size=grid_size,
+        ax=ax,
+        grid_color="lightgray",
+    )
 
     # Helper to plot a path as a polyline in the disk
     def plot_line(
@@ -1785,8 +1795,12 @@ def plasticReductionPlots():
     C1 = F1.T @ F1
 
     for C, name in zip([C0, C1], ["far", "close"]):
-        for depth in range(1, 6):
+        for depth in range(1, 5):
             showDeadEnds = depth < 3
             plasticReductionBFS(
-                C, max_depth=depth, show_dead_ends=showDeadEnds, name=name
+                C,
+                max_depth=depth,
+                show_dead_ends=showDeadEnds,
+                allow_no_center=True,
+                name=name,
             )

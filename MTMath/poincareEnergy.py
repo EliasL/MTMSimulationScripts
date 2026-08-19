@@ -1616,8 +1616,13 @@ def drawPoincareSymmetryPoints(
 
 
 def generateShearTransformations(depth, startingPoint=None, leftApplied=True):
-    # Generate all unique combinations of up, down, left, right moves up to the given depth
-    # Remove duplicate transformations using a set
+    """Generate unique shear transforms and their raw path labels.
+
+    Labels are returned as unformatted path strings. The empty string is the
+    identity transform; non-empty values contain only move letters, such as
+    ``"rld"``. Immediate inverse moves are not followed, so paths do not
+    backtrack. Plotting functions apply any mathtext formatting they need.
+    """
     transformation_keys = set()
     transformations = []
     labels = []
@@ -1627,24 +1632,24 @@ def generateShearTransformations(depth, startingPoint=None, leftApplied=True):
         if key not in transformation_keys:
             transformation_keys.add(key)
             transformations.append(F)
-            if current_label == "":
-                labels.append(r"$\mathbf{I}$")
-            else:
-                labels.append(current_label)
+            labels.append(current_label)
         if current_depth == 0:
             return
 
+        inverse = {"r": "l", "l": "r", "u": "d", "d": "u"}
+        previous_label = current_label[-1:] if current_label else None
         for label in ["r", "l", "u", "d"]:
+            if label == inverse.get(previous_label):
+                continue
             # SShear can take these string directions as an argument. Sorry if
             # that's a bit confusing
             if leftApplied:
                 recurse(
                     SShear(label) @ F,
                     current_depth - 1,
-                    current_label=current_label + rf"${label}$",
+                    current_label=current_label + label,
                 )
             else:
-                print("Warning, using right applied shears!")
                 recurse(
                     F @ SShear(label),
                     current_depth - 1,
@@ -1906,6 +1911,7 @@ def prepPoincareFig(
     ax=None,
     withCircle=True,
     withGrid=True,
+    grid_color="gray",
     grid_depth=6,
     minimalTicks=False,
     withYieldSurface=True,
@@ -1939,7 +1945,7 @@ def prepPoincareFig(
             grid_size=grid_size,
             zoom=zoom,
             depth=grid_depth,
-            c="gray",
+            c=grid_color,
             alpha=0.7,
             zorder=1,
             transformation=transformation,
@@ -2028,8 +2034,8 @@ def plot_reduction_history(
     show_legend=True,
     show_axes=True,
     colorbar_label=None,
-    lagrange_color="#00940F",
-    plastic_color="#9DFA9B",
+    lagrange_color="#9DFA9B",
+    plastic_color="#00940F",
     grid_color="#555555",
     linewidth=2.0,
     white_background=True,
@@ -2242,6 +2248,407 @@ def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation=
         plt.show()
 
 
+def transformed_fundamental_domain_inequalities(transformation):
+    """Return the three linear inequalities for a transformed C-domain.
+
+    The fundamental domain is defined by ``C12 > 0``,
+    ``C11 / 2 - C12 > 0``, and ``C22 - C11 >= 0``.  For the tile
+    ``M.T @ D @ M``, a metric ``C`` lies in the tile when
+    ``M^{-T} @ C @ M^{-1}`` satisfies those inequalities.  Each returned row
+    contains the coefficients of one inequality in the vector
+    ``(C11, C12, C22)``.
+    """
+    M = np.asarray(transformation, dtype=float)
+    if M.shape != (2, 2):
+        raise ValueError("transformation must have shape (2, 2)")
+    if abs(np.linalg.det(M)) <= 1e-12:
+        raise ValueError("transformation must be invertible")
+
+    inverse = np.linalg.inv(M)
+    first_column = inverse[:, 0]
+    second_column = inverse[:, 1]
+
+    def bilinear_coefficients(left, right):
+        return np.array(
+            [
+                left[0] * right[0],
+                left[0] * right[1] + left[1] * right[0],
+                left[1] * right[1],
+            ],
+            dtype=float,
+        )
+
+    C11 = bilinear_coefficients(first_column, first_column)
+    C12 = bilinear_coefficients(first_column, second_column)
+    C22 = bilinear_coefficients(second_column, second_column)
+    return np.stack((C12, C11 / 2 - C12, C22 - C11))
+
+
+def _fundamental_domain_inequality_mask(C, coefficients, tolerance=1e-12):
+    """Evaluate transformed fundamental-domain inequalities on ``C``."""
+    C11 = C[..., 0, 0]
+    C12 = C[..., 0, 1]
+    C22 = C[..., 1, 1]
+    first = (
+        coefficients[0, 0] * C11
+        + coefficients[0, 1] * C12
+        + coefficients[0, 2] * C22
+    )
+    second = (
+        coefficients[1, 0] * C11
+        + coefficients[1, 1] * C12
+        + coefficients[1, 2] * C22
+    )
+    third = (
+        coefficients[2, 0] * C11
+        + coefficients[2, 1] * C12
+        + coefficients[2, 2] * C22
+    )
+    return (first > tolerance) & (second > tolerance) & (third >= -tolerance)
+
+
+def _canonical_congruence_transform(transformation, decimals=12):
+    """Canonicalize ``M`` and ``-M``, which induce the same C-domain."""
+    canonical = np.round(np.asarray(transformation, dtype=float), decimals=decimals)
+    significant = np.flatnonzero(np.abs(canonical).ravel() > 10 ** (-decimals))
+    if significant.size == 0:
+        raise ValueError("transformation must be non-zero")
+    if canonical.ravel()[significant[0]] < 0:
+        canonical = -canonical
+    return tuple(canonical.ravel())
+
+
+def _generate_shear_transformation_path_counts(
+    depth,
+    leftApplied,
+    collect_labels=False,
+):
+    """Aggregate non-backtracking path words up to ``depth`` by their matrix."""
+    if depth < 0:
+        raise ValueError("depth must be non-negative")
+
+    entries = {}
+
+    def recurse(transform, remaining_depth, path):
+        key = tuple(np.round(transform.reshape(-1), 12))
+        if key not in entries:
+            entries[key] = {
+                "transform": transform.copy(),
+                "path_count": 0,
+                "path_labels": [path],
+            }
+        entry = entries[key]
+        if collect_labels and entry["path_count"] > 0:
+            entry["path_labels"].append(path)
+        entry["path_count"] += 1
+        if remaining_depth == 0:
+            return
+
+        inverse = {"r": "l", "l": "r", "u": "d", "d": "u"}
+        previous_move = path[-1:] if path else None
+        for move in "rlud":
+            if move == inverse.get(previous_move):
+                continue
+            shear = SShear(move)
+            next_transform = (
+                shear @ transform if leftApplied else transform @ shear
+            )
+            recurse(next_transform, remaining_depth - 1, path + move)
+
+    recurse(np.eye(2), depth, "")
+    return list(entries.values())
+
+
+def _poincare_tiling_specifications(
+    depth,
+    quadrants,
+    leftApplied,
+    deduplicate_domains=True,
+    count_paths=False,
+    collect_labels=False,
+):
+    valid_quadrants = set("abcd")
+    requested_quadrants = set(quadrants)
+    if not requested_quadrants or not requested_quadrants <= valid_quadrants:
+        raise ValueError("quadrants must be a non-empty subset of 'abcd'")
+
+    swap = np.array([[0, 1], [1, 0]], dtype=float)
+    flip = np.array([[-1, 0], [0, 1]], dtype=float)
+    quadrant_transforms = {
+        "a": np.eye(2),
+        "b": swap,
+        "c": flip,
+        "d": swap @ flip,
+    }
+    if count_paths:
+        path_entries = _generate_shear_transformation_path_counts(
+            depth=depth,
+            leftApplied=leftApplied,
+            collect_labels=collect_labels,
+        )
+    else:
+        transformations, labels = generateShearTransformations(
+            depth=depth,
+            leftApplied=leftApplied,
+        )
+        path_entries = [
+            {
+                "transform": transform,
+                "path_count": 1,
+                "path_labels": [label],
+            }
+            for transform, label in zip(transformations, labels)
+        ]
+
+    specifications = []
+    seen_domains = set()
+    for path_entry in path_entries:
+        transform = path_entry["transform"]
+        path_label = path_entry["path_labels"][0]
+        for quadrant in "abcd":
+            if quadrant not in requested_quadrants:
+                continue
+            tile_transform = transform @ quadrant_transforms[quadrant]
+            key = _canonical_congruence_transform(tile_transform)
+            if deduplicate_domains and key in seen_domains:
+                continue
+            seen_domains.add(key)
+            specifications.append(
+                {
+                    "quadrant": quadrant,
+                    "label": path_label,
+                    "path_count": path_entry["path_count"],
+                    "path_labels": path_entry["path_labels"],
+                    "transform": tile_transform,
+                    "inequalities": transformed_fundamental_domain_inequalities(
+                        tile_transform
+                    ),
+                }
+            )
+    return specifications
+
+
+def generatePoincareCTilingRegions(
+    depth=2,
+    quadrants="abcd",
+    leftApplied=False,
+    grid_size=500,
+    zoom=1,
+    tolerance=1e-12,
+):
+    """Classify Poincare-disk pixels into transformed fundamental domains.
+
+    Unlike :func:`plotPoincareCTiling`, this creates the disk grid only once.
+    It evaluates precomputed linear inequalities for each candidate tile and
+    returns an integer tile-id image together with tile metadata.
+    """
+    if grid_size < 2:
+        raise ValueError("grid_size must be at least 2")
+    if tolerance < 0:
+        raise ValueError("tolerance must be non-negative")
+
+    specifications = _poincare_tiling_specifications(
+        depth=depth,
+        quadrants=quadrants,
+        leftApplied=leftApplied,
+        deduplicate_domains=True,
+    )
+    C, outside_disk = generate_poincare_disk(
+        resolution=grid_size,
+        zoom=zoom,
+        returnMask=True,
+    )
+    C11 = C[..., 0, 0]
+    C12 = C[..., 0, 1]
+    C22 = C[..., 1, 1]
+    tile_ids = np.full(C11.shape, -1, dtype=int)
+    unassigned = (
+        ~outside_disk
+        & np.isfinite(C11)
+        & np.isfinite(C12)
+        & np.isfinite(C22)
+    )
+
+    for tile_id, specification in enumerate(specifications):
+        inside = _fundamental_domain_inequality_mask(
+            C,
+            specification["inequalities"],
+            tolerance=tolerance,
+        ) & unassigned
+        tile_ids[inside] = tile_id
+        unassigned[inside] = False
+
+    return tile_ids, specifications
+
+
+def generatePoincareCTilingMultiplicity(
+    depth=2,
+    quadrants="abcd",
+    leftApplied=False,
+    grid_size=500,
+    zoom=1,
+    tolerance=1e-12,
+    collect_labels=False,
+):
+    """Count how many generated labeled domains contain each disk pixel.
+
+    Every generated transformation is counted, including transformations that
+    induce the same C-domain (such as ``M`` and ``-M``), because each such
+    transformation corresponds to a separate path label in the tiling plot.
+    The returned centroids allow the caller to place those labels without
+    recomputing the domain masks.
+    """
+    if grid_size < 2:
+        raise ValueError("grid_size must be at least 2")
+    if tolerance < 0:
+        raise ValueError("tolerance must be non-negative")
+
+    specifications = _poincare_tiling_specifications(
+        depth=depth,
+        quadrants=quadrants,
+        leftApplied=leftApplied,
+        deduplicate_domains=False,
+        count_paths=True,
+        collect_labels=collect_labels,
+    )
+    C, outside_disk = generate_poincare_disk(
+        resolution=grid_size,
+        zoom=zoom,
+        returnMask=True,
+    )
+    valid_pixels = (
+        ~outside_disk
+        & np.isfinite(C[..., 0, 0])
+        & np.isfinite(C[..., 0, 1])
+        & np.isfinite(C[..., 1, 1])
+    )
+    total_counts = np.zeros(C.shape[:2], dtype=np.int32)
+    counts_by_quadrant = {
+        quadrant: np.zeros(C.shape[:2], dtype=np.int32)
+        for quadrant in "abcd"
+        if quadrant in set(quadrants)
+    }
+    centroids = []
+
+    for specification in specifications:
+        inside = _fundamental_domain_inequality_mask(
+            C,
+            specification["inequalities"],
+            tolerance=tolerance,
+        ) & valid_pixels
+        total_counts += specification["path_count"] * inside
+        counts_by_quadrant[specification["quadrant"]] += (
+            specification["path_count"] * inside
+        )
+        row_indices, column_indices = np.where(inside)
+        if row_indices.size:
+            centroids.append(
+                (
+                    column_indices.mean() + 0.5,
+                    row_indices.mean() + 0.5,
+                )
+            )
+        else:
+            centroids.append(None)
+
+    return total_counts, counts_by_quadrant, specifications, centroids
+
+
+def _draw_poincare_multiplicity(ax, counts, grid_size, color, base_alpha=0.3):
+    """Draw repeated-domain opacity equivalent to stacked alpha overlays."""
+    rgba = np.zeros(counts.shape + (4,), dtype=float)
+    red, green, blue, _ = colors.to_rgba(color)
+    positive = counts > 0
+    rgba[positive, :3] = (red, green, blue)
+    rgba[positive, 3] = 1.0 - (1.0 - base_alpha) ** counts[positive]
+    ax.imshow(
+        rgba,
+        origin="lower",
+        extent=(0, grid_size, 0, grid_size),
+        interpolation="nearest",
+        zorder=0,
+    )
+
+
+def plotPoincareCTilingInequalities(
+    ax=None,
+    save=True,
+    grid_size=1000,
+    depth=2,
+    quadrants="abcd",
+    show=False,
+    use_labels=True,
+    leftApplied=False,
+    withGrid=True,
+    grid_depth=6,
+    withYieldSurface=False,
+):
+    """Plot a C-space tiling using one final disk rasterization pass."""
+    if ax is None:
+        _, ax = prepPoincareFig(
+            grid_size=grid_size,
+            withGrid=withGrid,
+            grid_depth=grid_depth,
+            withYieldSurface=withYieldSurface,
+        )
+
+    _, counts_by_quadrant, specifications, centroids = generatePoincareCTilingMultiplicity(
+        depth=depth,
+        quadrants=quadrants,
+        leftApplied=leftApplied,
+        grid_size=grid_size,
+        collect_labels=use_labels,
+    )
+    quadrant_colors = {
+        "a": "green",
+        "b": "blue",
+        "c": "red",
+        "d": "purple",
+    }
+
+    for quadrant in "abcd":
+        if quadrant not in counts_by_quadrant:
+            continue
+        _draw_poincare_multiplicity(
+            ax,
+            counts=counts_by_quadrant[quadrant],
+            grid_size=grid_size,
+            color=quadrant_colors[quadrant],
+        )
+
+    if use_labels:
+        for specification, centroid in zip(specifications, centroids):
+            if centroid is None:
+                continue
+            quadrant = specification["quadrant"]
+            label_va = "center"
+            if quadrants == "abcd":
+                label_va = "bottom" if quadrant in "ab" else "top"
+            for path_label in specification["path_labels"]:
+                addLabel(
+                    ax,
+                    centroid[0],
+                    centroid[1],
+                    rf"${'abcd'.index(quadrant) + 1}{path_label}$",
+                    label_va=label_va,
+                )
+
+    if save:
+        import os
+
+        if not os.path.exists("Plots"):
+            os.makedirs("Plots")
+        path = (
+            f"Plots/poincareDisk_{'left' if leftApplied else 'right'}_"
+            f"{quadrants}_{depth}{'_lab' if use_labels else ''}.pdf"
+        )
+        plt.savefig(path, dpi=500, bbox_inches="tight")
+        print(f"Saved plot to {path}")
+    if show:
+        plt.show()
+    return ax
+
+
 def plotPoincareCTiling(
     ax=None,
     save=True,
@@ -2279,16 +2686,15 @@ def plotPoincareCTiling(
         )
 
     for t, L in zip(Fs, labels):
+        label_body = L
         if "a" in quadrants:
-            df("green", t, label=rf"$1{L}$", label_va="bottom")
-        if L == r"\mathbf{I}":
-            L = ""
+            df("green", t, label=rf"$1{label_body}$", label_va="bottom")
         if "b" in quadrants:
-            df("blue", t @ swap, label=rf"$2{L}$", label_va="bottom")
+            df("blue", t @ swap, label=rf"$2{label_body}$", label_va="bottom")
         if "c" in quadrants:
-            df("red", t @ flip, label=rf"$3{L}$", label_va="top")
+            df("red", t @ flip, label=rf"$3{label_body}$", label_va="top")
         if "d" in quadrants:
-            df("purple", t @ swap @ flip, label=rf"$4{L}$", label_va="top")
+            df("purple", t @ swap @ flip, label=rf"$4{label_body}$", label_va="top")
 
     if arrows and False:
         center_point = np.array([[0.86, 0.20], [0.20, 1.21]])  # Random central point
@@ -2342,6 +2748,10 @@ def plotPoincareFTiling(
 
     F = getFFundamental(grid_size=int(grid_size * extra_grid))
     for t, lab in zip(Fs, labels):
+        if lab == "":
+            lab = r"$\mathbf{I}$"
+        else:
+            lab = rf"${lab}$"
         drawF(
             ax,
             F,

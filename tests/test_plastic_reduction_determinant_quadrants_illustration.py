@@ -61,7 +61,7 @@ class PlasticReductionDeterminantQuadrantsIllustrationTests(unittest.TestCase):
         self.assertEqual(len(histories["lagrange"]["transforms"]), 3)
         self.assertEqual(
             _elastic_transform_label(histories["elastic"]["history"], 0),
-            r"$\mathbf{E}_{12}(1)$",
+            r"$\mathbf{M}$",
         )
 
 

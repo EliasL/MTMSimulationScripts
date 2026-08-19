@@ -96,7 +96,7 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
 
         # Div
         self.showHistory = False
-        self.showCircles = True
+        self.showCircles = False
         self.showRightOrth = False
 
         # Basic widget setup
@@ -1231,6 +1231,10 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         if self._handle_rotation_keys(event):
             return
 
+        # Relative-angle controls (J/K)
+        if self._handle_angle_keys(event):
+            return
+
         # Single reduction steps (1: m1, 2: m2, 3: m3, 4: plastic)
         if self._handle_reduction_step_keys(event):
             return
@@ -1311,6 +1315,55 @@ class LagrangeReductionVisualization(QtWidgets.QWidget):
         c, s = np.cos(angle), np.sin(angle)
         rot = np.array([[c, -s], [s, c]])
         self.applyTransformation(rot)
+        return True
+
+    def _handle_angle_keys(self, event):
+        """Rotate the last-selected vector while keeping the other vector fixed."""
+        if event.key() not in (Qt.Key_J, Qt.Key_K):
+            return False
+
+        if not hasattr(self, "VP"):
+            self.VP = self.LR_VP
+
+        moving = self.VP.lastDragged
+        fixed = self.VP.e2 if moving is self.VP.e1 else self.VP.e1
+
+        moving_pos = moving.head.pos()
+        fixed_pos = fixed.head.pos()
+        moving_vec = np.array([moving_pos.x(), moving_pos.y()], dtype=float)
+        fixed_vec = np.array([fixed_pos.x(), fixed_pos.y()], dtype=float)
+        moving_length = np.linalg.norm(moving_vec)
+        fixed_length = np.linalg.norm(fixed_vec)
+        if moving_length == 0 or fixed_length == 0:
+            return True
+
+        cos_angle = np.clip(
+            np.dot(fixed_vec, moving_vec) / (fixed_length * moving_length), -1, 1
+        )
+        angle = np.arccos(cos_angle)
+        step = (
+            self.rotation_step_large
+            if event.modifiers() & Qt.ShiftModifier
+            else self.rotation_step_small
+        )
+        target_angle = angle + (step if event.key() == Qt.Key_J else -step)
+
+        # Keep a non-degenerate basis, and preserve the current orientation.
+        target_angle = np.clip(target_angle, 1e-6, np.pi - 1e-6)
+        orientation = np.sign(
+            fixed_vec[0] * moving_vec[1] - fixed_vec[1] * moving_vec[0]
+        )
+        if orientation == 0:
+            orientation = 1
+        fixed_angle = np.arctan2(fixed_vec[1], fixed_vec[0])
+        new_angle = fixed_angle + orientation * target_angle
+        moving.head.setPos(
+            moving_length * np.cos(new_angle), moving_length * np.sin(new_angle)
+        )
+        self.VP.setPosForSquare(self.VP.pos1(), self.VP.pos2())
+        self.updateMarkers()
+        self.updateGVSpheres()
+        self.updateFEnergyBackground()
         return True
 
     def _handle_shear_shortcuts(self, event):
