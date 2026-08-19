@@ -31,5 +31,32 @@ all-event fit, an `Delta E_R` fit, an Otsu/slope split, or a coarse/local
 cutoff search is an alternative analysis and should be named and reported
 as such.
 
+## Python environment and headless plotting
+
+Use the project virtual environment rather than the system Python. Its
+interpreter is:
+
+```text
+/Users/elias/Work/PhD/Code/SimulationScripts/.venv/bin/python
+```
+
+From the repository root, set `MPLBACKEND=Agg` for non-interactive plot
+generation and `MPLCONFIGDIR=.matplotlib-cache` for a writable Matplotlib
+cache. Scripts under `Plotting/` that import top-level project packages also
+need `PYTHONPATH=.`. Working commands include:
+
+```bash
+MPLBACKEND=Agg MPLCONFIGDIR=.matplotlib-cache \
+  ./.venv/bin/python -c \
+  'from plot import plotReductionHistory; plotReductionHistory(show=False)'
+
+MPLBACKEND=Agg MPLCONFIGDIR=.matplotlib-cache PYTHONPATH=. \
+  ./.venv/bin/python Plotting/plasticReductionDeterminantQuadrantsIllustration.py
+
+MPLBACKEND=Agg MPLCONFIGDIR=.matplotlib-cache PYTHONPATH=. \
+  ./.venv/bin/python -m unittest \
+  tests.test_reduction_history_plot \
+  tests.test_plastic_reduction_determinant_quadrants_illustration
+```
 
 

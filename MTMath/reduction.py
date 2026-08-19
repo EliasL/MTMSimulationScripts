@@ -372,6 +372,38 @@ def plastic_reduction(C, loops=1000, compute_M=False):
     return C_out, M
 
 
+def plastic_reduction_step(C):
+    """Return the next unit integer shear used by plastic reduction.
+
+    The result is one of the four horizontal/vertical shears, or ``None``
+    when the metric is already in the elastic domain.
+    """
+    C_current = np.asarray(C, dtype=float)
+    if C_current.shape != (2, 2):
+        raise ValueError("C must have shape (2, 2)")
+    if not np.allclose(C_current, C_current.T):
+        raise ValueError("C must be symmetric")
+    if not np.all(np.isfinite(C_current)) or np.linalg.det(C_current) <= 0:
+        raise ValueError("C must be a finite positive-definite metric")
+
+    a = C_current[0, 0]
+    b = C_current[1, 1]
+    c = C_current[0, 1]
+    if min(a, b) >= 0 and abs(c) <= 0.5 * min(a, b):
+        return None
+
+    denominator = a if a <= b else b
+    if denominator == 0:
+        raise RuntimeError("Plastic reduction encountered a zero diagonal")
+    m = int(np.sign(-c / denominator))
+    if m == 0:
+        raise RuntimeError("Plastic reduction made no progress")
+
+    if a <= b:
+        return np.array([[1, m], [0, 1]], dtype=int)
+    return np.array([[1, 0], [m, 1]], dtype=int)
+
+
 def plastic_reduction_history(
     C,
     loops=1000,
@@ -403,29 +435,11 @@ def plastic_reduction_history(
         return history_array
 
     for _ in range(loops):
-        a = C_current[0, 0]
-        b = C_current[1, 1]
-        c = C_current[0, 1]
-        if min(a, b) >= 0 and abs(c) <= 0.5 * min(a, b):
+        shear = plastic_reduction_step(C_current)
+        if shear is None:
             return result()
 
-        denominator = a if a <= b else b
-        if denominator == 0:
-            raise RuntimeError("Plastic reduction encountered a zero diagonal")
-        m = int(np.sign(-c / denominator))
-        if m == 0:
-            raise RuntimeError("Plastic reduction made no progress")
-
-        if a <= b:
-            shear = np.array([[1, m], [0, 1]], dtype=int)
-            C_current[0, 1] = c + m * a
-            C_current[1, 0] = C_current[0, 1]
-            C_current[1, 1] = b + 2 * m * c + m * m * a
-        else:
-            shear = np.array([[1, 0], [m, 1]], dtype=int)
-            C_current[0, 1] = c + m * b
-            C_current[1, 0] = C_current[0, 1]
-            C_current[0, 0] = a + 2 * m * c + m * m * b
+        C_current = shear.T @ C_current @ shear
         M_total = M_total @ shear
         history.append(C_current.copy())
 

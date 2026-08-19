@@ -37,6 +37,10 @@ TEXT = "#20262E"
 MUTED = "#66717B"
 GRID = "#CBD2D8"
 CORRECT = "#2E7D32"
+LAGRANGE_M0_COLOR = "#9DFA9B"
+CORRECT_ARROW_LINEWIDTH = 2.5
+LAGRANGE_M0_ARROW_LINEWIDTH = 2.5
+LAGRANGE_M0_MUTATION_SCALE = 22
 
 
 def decomposition_data():
@@ -90,19 +94,26 @@ def decomposition_data_from_M(base_M):
         F_e = TOTAL_F @ reduction_M
         F_p = np.linalg.inv(reduction_M)
         quadrant = int(elastic_domain_quadrant(F_e.T @ F_e))
-        label = rf"$\mathbf{{M}}_{{{quadrant}}}={expression}$"
+        if index == 3:
+            label = r"$\mathbf{M}_0^{(c)}=\mathbf{M}\mathbf{m}_1\mathbf{m}_2$"
+            decomposition_superscript = "0,c"
+        else:
+            label = rf"$\mathbf{{M}}_{{{quadrant}}}={expression}$"
+            decomposition_superscript = str(quadrant)
         matches = np.allclose(F_e, known_F_e) and np.allclose(
             F_p, known_F_p
         )
         branches.append(
             {
                 "label": label,
+                "decomposition_superscript": decomposition_superscript,
                 "description": description,
                 "quadrant": quadrant,
                 "M": reduction_M,
                 "F_e": F_e,
                 "F_p": F_p,
                 "preferred": index == 0,
+                "lagrange": index == 3,
                 "matches": matches,
                 "elastic_error": np.linalg.norm(F_e - known_F_e),
                 "plastic_error": np.linalg.norm(F_p - known_F_p),
@@ -115,6 +126,29 @@ def decomposition_data_from_M(base_M):
         "known_F_p": known_F_p,
         "base_M": base_M,
         "branches": branches,
+    }
+
+
+def counterclockwise_branch(data):
+    """Return the extra counter-clockwise partner of the M0 branch."""
+
+    symmetry = M2 @ M1
+    reduction_M = data["base_M"] @ symmetry
+    F_e = data["F"] @ reduction_M
+    F_p = np.linalg.inv(reduction_M)
+    return {
+        "label": r"$\mathbf{M}_0^{(cc)}=\mathbf{M}\mathbf{m}_2\mathbf{m}_1$",
+        "decomposition_superscript": "0,cc",
+        "description": "counter-clockwise quarter-turn from M",
+        "quadrant": int(elastic_domain_quadrant(F_e.T @ F_e)),
+        "M": reduction_M,
+        "F_e": F_e,
+        "F_p": F_p,
+        "preferred": False,
+        "lagrange": False,
+        "matches": False,
+        "elastic_error": np.linalg.norm(F_e - data["known_F_e"]),
+        "plastic_error": np.linalg.norm(F_p - data["known_F_p"]),
     }
 
 
@@ -160,13 +194,15 @@ def make_figure(data=None, *, column_linestyles=COLUMN_LINESTYLES):
     fig = plt.figure(figsize=(11.2, 7.0))
     fig.text(
         0.365,
-        0.355,
-        r"$\mathbf{M}=(\mathbf{F}_p^\star)^{-1}$, "
+        0.33,
+        r"$\mathbf{M}=(\mathbf{F}_p^\star)^{-1}$"
+        "\n"
         r"$\mathbf{F}_e^{(q)}=\mathbf{F}\mathbf{M}_q$, "
         r"$\mathbf{F}_p^{(q)}=\mathbf{M}_q^{-1}$",
         ha="center",
         va="center",
         fontsize=11,
+        linespacing=1.2,
         color=TEXT,
     )
 
@@ -216,16 +252,22 @@ def make_figure(data=None, *, column_linestyles=COLUMN_LINESTYLES):
         )
     )
 
-    elastic_x = 0.60
-    plastic_x = 0.745
-    branch_width = 0.14
-    branch_height = 0.14
-    row_bottoms = (0.77, 0.58, 0.39, 0.20)
-    label_y_offsets = (0.0, 0.01, -0.008, -0.008)
+    elastic_x = 0.58
+    plastic_x = 0.695
+    branch_width = 0.11
+    branch_height = 0.11
+    row_bottoms = (0.80, 0.65, 0.50, 0.35, 0.20)
+    equation_x = elastic_x - 0.095
+    equation_arrow_x = equation_x - 0.01
     arrow_start = (product_box.x1, product_box.y0 + product_box.height / 2)
+    right_branches = (
+        list(data["branches"][:-1])
+        + [counterclockwise_branch(data), data["branches"][-1]]
+    )
+    curvatures = (-0.18, -0.09, 0.0, 0.09, 0.18)
 
     for index, (branch, row_bottom) in enumerate(
-        zip(data["branches"], row_bottoms)
+        zip(right_branches, row_bottoms)
     ):
         row_center = row_bottom + branch_height / 2
         _matrix_axis(
@@ -245,7 +287,7 @@ def make_figure(data=None, *, column_linestyles=COLUMN_LINESTYLES):
         fig.text(
             elastic_x + branch_width / 2,
             row_bottom + branch_height + 0.008,
-            rf"$\mathbf{{F}}_e^{{({branch['quadrant']})}}$",
+            rf"$\mathbf{{F}}_e^{{({branch['decomposition_superscript']})}}$",
             ha="center",
             va="bottom",
             fontsize=9,
@@ -254,15 +296,15 @@ def make_figure(data=None, *, column_linestyles=COLUMN_LINESTYLES):
         fig.text(
             plastic_x + branch_width / 2,
             row_bottom + branch_height + 0.008,
-            rf"$\mathbf{{F}}_p^{{({branch['quadrant']})}}$",
+            rf"$\mathbf{{F}}_p^{{({branch['decomposition_superscript']})}}$",
             ha="center",
             va="bottom",
             fontsize=9,
             color=TEXT,
         )
 
-        arrow_end = (0.575, row_center)
-        curvature = (-0.16, -0.07, 0.07, 0.16)[index]
+        arrow_end = (equation_arrow_x, row_center)
+        curvature = curvatures[index]
         connectionstyle = f"arc3,rad={curvature}"
         if branch["preferred"]:
             fig.add_artist(
@@ -272,22 +314,34 @@ def make_figure(data=None, *, column_linestyles=COLUMN_LINESTYLES):
                     transform=fig.transFigure,
                     arrowstyle="-|>",
                     mutation_scale=13,
-                    linewidth=1.8,
+                    linewidth=CORRECT_ARROW_LINEWIDTH,
                     color=CORRECT,
                     connectionstyle=connectionstyle,
                     zorder=-1,
                 )
             )
         else:
+            branch_is_lagrange = branch.get("lagrange", False)
+            branch_color = LAGRANGE_M0_COLOR if branch_is_lagrange else TEXT
+            branch_linewidth = (
+                LAGRANGE_M0_ARROW_LINEWIDTH
+                if branch_is_lagrange
+                else 1.25
+            )
+            branch_mutation_scale = (
+                LAGRANGE_M0_MUTATION_SCALE
+                if branch_is_lagrange
+                else 13
+            )
             fig.add_artist(
                 FancyArrowPatch(
                     arrow_start,
                     arrow_end,
                     transform=fig.transFigure,
                     arrowstyle="-",
-                    linewidth=1.25,
-                    linestyle=(0, (5, 3)),
-                    color=TEXT,
+                    linewidth=branch_linewidth,
+                    linestyle="-",
+                    color=branch_color,
                     connectionstyle=connectionstyle,
                     zorder=-1,
                 )
@@ -298,19 +352,19 @@ def make_figure(data=None, *, column_linestyles=COLUMN_LINESTYLES):
                     arrow_end,
                     transform=fig.transFigure,
                     arrowstyle="-|>",
-                    mutation_scale=13,
+                    mutation_scale=branch_mutation_scale,
                     linewidth=0,
-                    edgecolor=TEXT,
-                    facecolor=TEXT,
+                    edgecolor=branch_color,
+                    facecolor=branch_color,
                     connectionstyle=connectionstyle,
                     zorder=-1,
                 )
             )
         fig.text(
-            0.525,
-            row_center + label_y_offsets[index],
+            equation_x,
+            row_center,
             branch["label"],
-            ha="center",
+            ha="left",
             va="center",
             fontsize=9.5,
             color=TEXT,
