@@ -1,8 +1,14 @@
 import unittest
 
+import matplotlib.pyplot as plt
 import numpy as np
 
-from Plotting.pyplotFunctions import tile_periodic_mesh, wrap_periodic_mesh
+from Plotting.pyplotFunctions import (
+    draw_periodic_shear_box,
+    tile_periodic_mesh,
+    wrap_periodic_mesh,
+)
+from Plotting.meshEventPlotting import MeshState, calculate_periodic_energy_change_field
 
 
 class PeriodicMeshWrappingTests(unittest.TestCase):
@@ -65,6 +71,51 @@ class PeriodicMeshWrappingTests(unittest.TestCase):
                 self.load,
                 box_size=2.0,
             )
+
+    def test_periodic_energy_projection_is_square_and_image_invariant(self):
+        triangles = np.array([[0, 1, 2]])
+        local_fractional = np.array([[0.0, 0.0], [0.45, 0.0], [0.2, 0.4]])
+        box = np.array([[2.0, self.load * 2.0], [0.0, 2.0]])
+        points = local_fractional @ box.T
+
+        def state(path, point_coordinates):
+            return MeshState(
+                path=path,
+                points=point_coordinates,
+                triangles=triangles,
+                reference_indices=np.arange(3),
+                point_fields={},
+                cell_fields={"energy_field": np.array([3.0])},
+            )
+
+        first = state("first.vtu", points)
+        second = state("second.vtu", points + box[:, 0])
+        change, geometry = calculate_periodic_energy_change_field(
+            first,
+            second,
+            first_load=self.load,
+            second_load=self.load,
+            box_size=2.0,
+            common_grid_resolution=12,
+        )
+
+        self.assertEqual(geometry.kind, "grid")
+        np.testing.assert_allclose(geometry.x[[0, -1]], [0.0, 1.0])
+        np.testing.assert_allclose(geometry.y[[0, -1]], [0.0, 1.0])
+        np.testing.assert_allclose(change, 0.0)
+
+    def test_shear_box_outlines_the_deformed_reference_cell(self):
+        figure, axis = plt.subplots()
+        try:
+            corners = draw_periodic_shear_box(
+                axis, origin=(3.0, 4.0), load=0.5, box_size=2.0
+            )
+        finally:
+            plt.close(figure)
+        np.testing.assert_allclose(
+            corners,
+            [[3.0, 4.0], [5.0, 4.0], [6.0, 6.0], [4.0, 6.0], [3.0, 4.0]],
+        )
 
 
 if __name__ == "__main__":

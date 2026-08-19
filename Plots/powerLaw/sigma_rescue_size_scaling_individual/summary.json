@@ -1,0 +1,152 @@
+{
+  "snapshot_root": "/Users/eliaslundheim/work/PhD/SimulationScripts/sigma_rescue_interim/snapshots/20260819T100206Z",
+  "post_yield_window": [
+    0.7,
+    1.0
+  ],
+  "population": "Delta E_R simpleDrop irreversible event mask",
+  "simple_drop_selection": "largest coarse adjacent KS drop, then direct-neighbor descent over all observed Delta E_R candidates",
+  "xmin_selection": "global minimum after refined candidate scan",
+  "fits": {
+    "50": {
+      "post_yield_rows": 217485,
+      "delta_E_R_detection_threshold": 5.8588879881e-07,
+      "reversible_events": 217019,
+      "irreversible_events": 466,
+      "positive_delta_E_S_reversible_count": 895,
+      "positive_delta_E_S_irreversible_count": 454,
+      "protocols": {
+        "delta_E_I": {
+          "positive_data_count": 412,
+          "simple_drop_xmin": 0.0084130532437,
+          "global_min_xmin": 0.0096651584633,
+          "global_min_D": 0.027607872964038438
+        },
+        "delta_E_R": {
+          "positive_data_count": 466,
+          "simple_drop_xmin": 0.22241217711,
+          "global_min_xmin": 0.010497996992,
+          "global_min_D": 0.026226382893310918
+        },
+        "delta_E_S": {
+          "positive_data_count": 454,
+          "simple_drop_xmin": 0.3081599252223839,
+          "global_min_xmin": 0.0083504975639385,
+          "global_min_D": 0.025541611736366154
+        }
+      }
+    },
+    "100": {
+      "post_yield_rows": 216351,
+      "delta_E_R_detection_threshold": 1.1956449839e-06,
+      "reversible_events": 215365,
+      "irreversible_events": 978,
+      "positive_delta_E_S_reversible_count": 4180,
+      "positive_delta_E_S_irreversible_count": 936,
+      "protocols": {
+        "delta_E_I": {
+          "positive_data_count": 617,
+          "simple_drop_xmin": 1.1736444622,
+          "global_min_xmin": 0.24505014546,
+          "global_min_D": 0.023260374557619645
+        },
+        "delta_E_R": {
+          "positive_data_count": 978,
+          "simple_drop_xmin": 1.0274204223,
+          "global_min_xmin": 0.00030196410296,
+          "global_min_D": 0.020172384530838368
+        },
+        "delta_E_S": {
+          "positive_data_count": 936,
+          "simple_drop_xmin": 1.1838532604950842,
+          "global_min_xmin": 0.000396127768066333,
+          "global_min_D": 0.020028299341845312
+        }
+      }
+    },
+    "150": {
+      "post_yield_rows": 152453,
+      "delta_E_R_detection_threshold": 2.1056218884e-06,
+      "reversible_events": 150938,
+      "irreversible_events": 1508,
+      "positive_delta_E_S_reversible_count": 14209,
+      "positive_delta_E_S_irreversible_count": 1256,
+      "protocols": {
+        "delta_E_I": {
+          "positive_data_count": 862,
+          "simple_drop_xmin": 0.79473272291,
+          "global_min_xmin": 0.17962866989,
+          "global_min_D": 0.021284546811805527
+        },
+        "delta_E_R": {
+          "positive_data_count": 1508,
+          "simple_drop_xmin": 0.19480335898,
+          "global_min_xmin": 0.19907466140401214,
+          "global_min_D": 0.019637520182337165
+        },
+        "delta_E_S": {
+          "positive_data_count": 1256,
+          "simple_drop_xmin": 0.195131912506099,
+          "global_min_xmin": 0.195131912506099,
+          "global_min_D": 0.019770726311087783
+        }
+      }
+    },
+    "200": {
+      "post_yield_rows": 54110,
+      "delta_E_R_detection_threshold": 2.9716522931e-06,
+      "reversible_events": 53184,
+      "irreversible_events": 922,
+      "positive_delta_E_S_reversible_count": 9269,
+      "positive_delta_E_S_irreversible_count": 623,
+      "protocols": {
+        "delta_E_I": {
+          "positive_data_count": 419,
+          "simple_drop_xmin": 0.13012926547,
+          "global_min_xmin": 0.51665395894,
+          "global_min_D": 0.02517812803353081
+        },
+        "delta_E_R": {
+          "positive_data_count": 922,
+          "simple_drop_xmin": 0.00032992438503,
+          "global_min_xmin": 0.00095482573124,
+          "global_min_D": 0.018396557917575274
+        },
+        "delta_E_S": {
+          "positive_data_count": 623,
+          "simple_drop_xmin": 0.001579654013085,
+          "global_min_xmin": 0.0030283440592366903,
+          "global_min_D": 0.01710131135553017
+        }
+      }
+    },
+    "250": {
+      "post_yield_rows": 149993,
+      "delta_E_R_detection_threshold": 4.9477371249e-06,
+      "reversible_events": 146620,
+      "irreversible_events": 3354,
+      "positive_delta_E_S_reversible_count": 16548,
+      "positive_delta_E_S_irreversible_count": 2285,
+      "protocols": {
+        "delta_E_I": {
+          "positive_data_count": 1463,
+          "simple_drop_xmin": 0.78914177473,
+          "global_min_xmin": 0.78914177473,
+          "global_min_D": 0.016905794767492544
+        },
+        "delta_E_R": {
+          "positive_data_count": 3354,
+          "simple_drop_xmin": 7.6829761034,
+          "global_min_xmin": 0.01467449841,
+          "global_min_D": 0.015541492354541164
+        },
+        "delta_E_S": {
+          "positive_data_count": 2285,
+          "simple_drop_xmin": 7.671935551826664,
+          "global_min_xmin": 0.8324093012156482,
+          "global_min_D": 0.01624086039231276
+        }
+      }
+    }
+  }
+}

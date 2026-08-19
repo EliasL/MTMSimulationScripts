@@ -78,6 +78,10 @@ set to 2, then the processing would use (up to) 6 cores.
 """
 PARALLEL_UNUSED_CORES = 2
 
+EVALUATION_CACHE_VERSION = "v2"
+CLAUSET_EVALUATION_PROTOCOL = "clauset-semiparametric-refit-xmin"
+RAPID_BOOTSTRAP_NR_INITIAL = 20
+
 
 # Let me know if there is a simpler way to get the xmin_distribution with fit values
 _EDGE_WARN_RE = r"Fitted parameters are very close to the edge of parameter ranges.*"
@@ -195,6 +199,44 @@ def _fit_single_xmin_task(args):
         xmin_distribution=dist_name,
         verbose=0,
     )
+
+
+def _clauset_refit_xmin_task(args):
+    """Refit one semiparametric Clauset bootstrap sample.
+
+    This imports the high-level fit helper inside the worker to avoid a module
+    import cycle: ``Plotting.findXmin`` already imports this module.
+    """
+    if len(args) == 5:
+        # Compatibility with a parent process that was started before the
+        # bootstrap xmin-mode field was added.
+        sample, dist_type, xmax, selection_kwargs, parameter_names = args
+        xmin_search_mode = "full"
+    elif len(args) == 6:
+        (
+            sample,
+            dist_type,
+            xmax,
+            selection_kwargs,
+            parameter_names,
+            xmin_search_mode,
+        ) = args
+    else:
+        raise ValueError(f"Unexpected Clauset bootstrap task length: {len(args)}")
+    from Plotting.plotPowerLaw import make_fit
+
+    fit = make_fit(
+        sample,
+        distType=dist_type,
+        use_cache=False,
+        parallel_xmin=False,
+        xmin_selection="global",
+        xmin_search_kwargs=selection_kwargs,
+        xmin_search_mode=xmin_search_mode,
+    )
+    distribution = dist_from_fit(fit)
+    parameters = [getattr(distribution, name, nan) for name in parameter_names]
+    return float(fit.D), parameters, float(fit.xmin)
 
 
 def _upper_incomplete_gamma(a, x):
@@ -1031,19 +1073,32 @@ class Fit(powerlaw.Fit):
 
         return self.xmin
 
-    def _get_cache_path(self, cache_dir, data, nr_sets):
+    def _get_cache_path(
+        self,
+        cache_dir,
+        data,
+        nr_sets,
+        *,
+        evaluation_protocol="fixed-xmin",
+    ):
         import hashlib
         from numpy import asarray
 
-        # build a stable cache key from the *pre-fit* state + confidence
-        # include a hash of the data to invalidate if data changes
+        # Include an explicit protocol/version token in the data hash.  A cache
+        # created before a bootstrap-protocol change must never be reused.
         data_bytes = asarray(data).tobytes()
         h = hashlib.sha1()
+        h.update(EVALUATION_CACHE_VERSION.encode("utf-8"))
+        h.update(b"\0")
+        h.update(str(evaluation_protocol).encode("utf-8"))
+        h.update(b"\0")
         h.update(data_bytes)
         data_sig = h.hexdigest()
 
         cache_key = (
-            f"{self.xmin_distribution.name}"
+            f"evaluation={EVALUATION_CACHE_VERSION}"
+            f"_protocol={evaluation_protocol}"
+            f"_{self.xmin_distribution.name}"
             f"_len={len(data)}_data={data_sig}"
             f"_nr_sets={nr_sets}_xmin={self.xmin}_xmax={self.xmax}"
             f"_discrete={self.discrete}_fit_method={self.fit_method}"
@@ -1374,5 +1429,218 @@ class Fit(powerlaw.Fit):
                 # don't fail the computation if persistence fails
                 print(e)
                 pass
+
+        return self.p, self.alpha_mean, self.alpha_std
+
+    def evaluate_clauset_pvalue(
+        self,
+        data=None,
+        confidence=0.01,
+        parallel=True,
+        max_workers=None,
+        use_cache=True,
+        cache_dir=".eval_cache",
+        tqdmDesc="",
+        xmin_mode="full",
+    ):
+        """Evaluate the semiparametric Clauset p-value for a global-xmin fit.
+
+        Each bootstrap replicate contains an empirical resample below the
+        observed xmin and synthetic values from the fitted distribution above
+        it.  The full global-xmin procedure is then repeated for that sample,
+        matching the calculation used for the empirical fit.
+        """
+        import json
+        from concurrent.futures import ProcessPoolExecutor
+
+        if xmin_mode not in {"full", "rapid"}:
+            raise ValueError("xmin_mode must be either 'full' or 'rapid'.")
+        if getattr(self, "xmin_selection", None) != "global":
+            raise ValueError(
+                "Clauset p-value evaluation requires a fit made with "
+                "xmin_selection='global'."
+            )
+        analysis = getattr(self, "xmin_analysis", None)
+        if not isinstance(analysis, dict):
+            raise ValueError("Global xmin analysis is required for Clauset p-values.")
+        required = {"nr_initial", "min_tail_count", "max_xmin", "refinement"}
+        missing = sorted(required - analysis.keys())
+        if missing:
+            raise ValueError(
+                f"Global xmin analysis is missing required keys: {missing}."
+            )
+        if self.xmax is not None:
+            raise ValueError("Clauset p-value evaluation does not support xmax.")
+        if not 0.0 < confidence <= 0.5:
+            raise ValueError("confidence must be in the interval (0, 0.5].")
+
+        if data is None:
+            data = self.data_original
+        data = np.asarray(data, dtype=float)
+        data = data[np.isfinite(data) & (data > 0.0)]
+        if data.size < int(analysis["min_tail_count"]):
+            raise ValueError(
+                "The full data population is too small for its global xmin search."
+            )
+
+        tail_mask = data >= float(self.xmin)
+        tail_fraction = float(np.mean(tail_mask))
+        if not 0.0 < tail_fraction <= 1.0:
+            raise ValueError("Observed xmin does not split the full data population.")
+        below_xmin = data[~tail_mask]
+        if tail_fraction < 1.0 and below_xmin.size == 0:
+            raise RuntimeError("Missing empirical population below xmin.")
+
+        nr_sets = max(1, int(1 / (4 * confidence**2)))
+        nr_initial = int(analysis["nr_initial"])
+        if xmin_mode == "rapid":
+            nr_initial = min(nr_initial, RAPID_BOOTSTRAP_NR_INITIAL)
+        selection_kwargs = {
+            "nr_initial": nr_initial,
+            "min_tail_count": int(analysis["min_tail_count"]),
+            "max_xmin": analysis["max_xmin"],
+            "refine": analysis["refinement"] == "refined",
+            "progress": False,
+        }
+        protocol_mode = "" if xmin_mode == "full" else f"-{xmin_mode}"
+        evaluation_protocol = (
+            f"{CLAUSET_EVALUATION_PROTOCOL}-{EVALUATION_CACHE_VERSION}"
+            f"{protocol_mode}:{json.dumps(selection_kwargs, sort_keys=True)}"
+        )
+        cache_path = None
+        parameter_names = list(self.xmin_distribution.parameter_names)
+        if use_cache:
+            cache_path = self._get_cache_path(
+                cache_dir,
+                data,
+                nr_sets,
+                evaluation_protocol=evaluation_protocol,
+            )
+            if os.path.exists(cache_path):
+                with open(cache_path, "r", encoding="utf-8") as stream:
+                    payload = json.load(stream)
+                if payload.get("evaluation_protocol") != evaluation_protocol:
+                    raise RuntimeError(f"Unexpected cache protocol in {cache_path}.")
+                self.p = float(payload["p"])
+                self.p_std = float(payload["p_std"])
+                self.alpha_mean = float(payload["alpha_mean"])
+                self.alpha_std = float(payload["alpha_std"])
+                for name, value in payload.get("param_means", {}).items():
+                    setattr(self, f"{name}_mean", float(value))
+                for name, value in payload.get("param_stds", {}).items():
+                    setattr(self, f"{name}_std", float(value))
+                self.bootstrap_xmin_mean = float(payload.get("bootstrap_xmin_mean", nan))
+                self.bootstrap_xmin_std = float(payload.get("bootstrap_xmin_std", nan))
+                self.bootstrap_xmin_min = float(payload.get("bootstrap_xmin_min", nan))
+                self.bootstrap_xmin_max = float(payload.get("bootstrap_xmin_max", nan))
+                self.pvalue_xmin_mode = xmin_mode
+                self.pvalue_protocol = f"{CLAUSET_EVALUATION_PROTOCOL}-{xmin_mode}"
+                return self.p, self.alpha_mean, self.alpha_std
+
+        distribution = dist_from_fit(self)
+        rng = np.random.default_rng(0)
+
+        def tasks():
+            for _ in range(nr_sets):
+                synthetic_tail_mask = rng.random(data.size) < tail_fraction
+                synthetic = np.empty(data.size, dtype=float)
+                tail_count = int(np.count_nonzero(synthetic_tail_mask))
+                synthetic[synthetic_tail_mask] = distribution.generate_random(
+                    tail_count,
+                    rng=rng,
+                )
+                if tail_count < data.size:
+                    synthetic[~synthetic_tail_mask] = rng.choice(
+                        below_xmin,
+                        size=data.size - tail_count,
+                        replace=True,
+                    )
+                yield (
+                    synthetic,
+                    self.xmin_distribution,
+                    self.xmax,
+                    selection_kwargs,
+                    parameter_names,
+                    xmin_mode,
+                )
+
+        if parallel:
+            with ProcessPoolExecutor(max_workers=max_workers) as executor:
+                results = list(
+                    tqdm(
+                        executor.map(_clauset_refit_xmin_task, tasks()),
+                        total=nr_sets,
+                        desc=tqdmDesc,
+                    )
+                )
+        else:
+            results = list(
+                tqdm(
+                    (_clauset_refit_xmin_task(task) for task in tasks()),
+                    total=nr_sets,
+                    desc=tqdmDesc,
+                )
+            )
+
+        D_vals = np.asarray([result[0] for result in results], dtype=float)
+        if D_vals.size != nr_sets or not np.isfinite(D_vals).all():
+            raise RuntimeError("Clauset bootstrap did not produce finite KS distances.")
+        bootstrap_xmins = np.asarray([result[2] for result in results], dtype=float)
+        if bootstrap_xmins.size != nr_sets or not np.isfinite(bootstrap_xmins).all():
+            raise RuntimeError("Clauset bootstrap did not produce finite xmin values.")
+        self.bootstrap_xmin_mean = float(np.mean(bootstrap_xmins))
+        self.bootstrap_xmin_std = float(np.std(bootstrap_xmins))
+        self.bootstrap_xmin_min = float(np.min(bootstrap_xmins))
+        self.bootstrap_xmin_max = float(np.max(bootstrap_xmins))
+        self.p = float(np.mean(D_vals >= float(self.D)))
+        self.p_std = float(confidence)
+        param_means = {}
+        param_stds = {}
+        for index, name in enumerate(parameter_names):
+            values = np.asarray([result[1][index] for result in results], dtype=float)
+            values = values[np.isfinite(values)]
+            if values.size == 0:
+                raise RuntimeError(
+                    f"Clauset bootstrap produced no finite estimates for {name}."
+                )
+            param_means[name] = float(np.mean(values))
+            param_stds[name] = float(np.std(values))
+            setattr(self, f"{name}_mean", param_means[name])
+            setattr(self, f"{name}_std", param_stds[name])
+        self.alpha_mean = param_means.get("alpha", float("nan"))
+        self.alpha_std = param_stds.get("alpha", float("nan"))
+        self.pvalue_xmin_mode = xmin_mode
+        self.pvalue_protocol = f"{CLAUSET_EVALUATION_PROTOCOL}-{xmin_mode}"
+
+        if use_cache and cache_path is not None:
+            payload = {
+                "evaluation_protocol": evaluation_protocol,
+                "p": self.p,
+                "p_std": self.p_std,
+                "alpha_mean": self.alpha_mean,
+                "alpha_std": self.alpha_std,
+                "param_means": param_means,
+                "param_stds": param_stds,
+                "xmin_mode": xmin_mode,
+                "bootstrap_xmin_mean": self.bootstrap_xmin_mean,
+                "bootstrap_xmin_std": self.bootstrap_xmin_std,
+                "bootstrap_xmin_min": self.bootstrap_xmin_min,
+                "bootstrap_xmin_max": self.bootstrap_xmin_max,
+            }
+            directory = os.path.dirname(cache_path) or "."
+            os.makedirs(directory, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                delete=False,
+                dir=directory,
+                prefix=".tmp_",
+                suffix=".json",
+            ) as stream:
+                json.dump(payload, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+                temporary_path = stream.name
+            os.replace(temporary_path, cache_path)
 
         return self.p, self.alpha_mean, self.alpha_std

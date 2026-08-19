@@ -9,6 +9,7 @@ up to its size at open time, and its possibly incomplete final line is dropped.
 """
 
 import argparse
+import csv
 import io
 import os
 import re
@@ -118,8 +119,17 @@ class TopologyDecompositionError(ValueError):
     """Raised when a VTU pair is not a unique two-element edge flip."""
 
 
-def read_live_macro_snapshot(csv_path: Path) -> pd.DataFrame:
-    """Read a fixed, complete-line snapshot without locking or writing files."""
+def read_live_macro_snapshot(
+    csv_path: Path, *, columns: tuple[str, ...] = ("load", "avg_sigma12")
+) -> pd.DataFrame:
+    """Read selected columns from a fixed, complete-line macro-data snapshot.
+
+    Some live MTS2D runs append diagnostics after the original header without
+    rewriting that header.  Read only the declared leading columns, so those
+    trailing diagnostics cannot make pandas reinterpret the leading values as
+    an index.  This function intentionally ignores only *trailing* values;
+    a row missing a requested declared column is an error.
+    """
     csv_path = Path(csv_path)
     with csv_path.open("rb") as stream:
         snapshot_size = os.fstat(stream.fileno()).st_size
@@ -129,27 +139,38 @@ def read_live_macro_snapshot(csv_path: Path) -> pd.DataFrame:
         raise ValueError(f"The macro CSV has no complete lines: {csv_path}")
     complete = raw[: final_newline + 1]
 
-    wanted = {
-        "load",
-        "Load",
-        "avg_sigma12",
-        "avg_sigmaxy",
-    }
-    frame = pd.read_csv(
-        io.BytesIO(complete),
-        comment="#",
-        usecols=lambda column: column in wanted,
-        low_memory=False,
-    )
+    if not columns:
+        raise ValueError("At least one macro-data column must be requested.")
+    rows = csv.reader(io.StringIO(complete.decode("utf-8")))
+    header = next(rows, None)
+    if header is None:
+        raise ValueError(f"The macro CSV snapshot has no header: {csv_path}")
+    positions = {name: index for index, name in enumerate(header)}
+    missing = set(columns).difference(positions)
+    if missing:
+        raise KeyError(
+            f"Missing requested macro-data columns in {csv_path}: {sorted(missing)}"
+        )
+    selected_positions = [positions[name] for name in columns]
+    records = []
+    for line_number, row in enumerate(rows, start=2):
+        if not row:
+            continue
+        if len(row) <= max(selected_positions):
+            raise ValueError(
+                f"Macro-data row {line_number} in {csv_path} is missing a requested "
+                "declared column."
+            )
+        records.append([row[index] for index in selected_positions])
+    frame = pd.DataFrame(records, columns=columns)
     frame = update_df_header(frame, add_total_columns=False)
     if frame.empty:
         raise ValueError(f"The macro CSV snapshot contains no data rows: {csv_path}")
     if "load" not in frame:
         raise KeyError(f"No load column found in {csv_path}")
     frame["load"] = pd.to_numeric(frame["load"], errors="raise")
-    if "avg_sigma12" not in frame:
-        raise KeyError(f"No avg_sigma12 column found in {csv_path}")
-    frame["avg_sigma12"] = pd.to_numeric(frame["avg_sigma12"], errors="raise")
+    if "avg_sigma12" in frame:
+        frame["avg_sigma12"] = pd.to_numeric(frame["avg_sigma12"], errors="raise")
     return frame
 
 
@@ -389,7 +410,7 @@ def _reduce_vtu_state(
         matrices = data.get_C()
     elif matrix_name == "G":
         matrices = data.get_G()
-    elif matrix_name == "T_total":
+    elif matrix_name in {"T", "T_total"}:
         T_total = data.get_T_total()
         matrices = T_total.swapaxes(-1, -2) @ T_total
     else:
@@ -752,10 +773,8 @@ def plot_poincare_distributions(
     matrix_label = {
         "C": r"\mathbf{C}",
         "G": r"\mathbf{G}",
-        "T_total": (
-            r"\mathbf{T}_{\mathrm{total}}^\mathsf{T}"
-            r"\mathbf{T}_{\mathrm{total}}"
-        ),
+        "T": r"\mathbf{T}^\mathsf{T}\mathbf{T}",
+        "T_total": r"\mathbf{T}^\mathsf{T}\mathbf{T}",
     }[matrix_name]
     if yield_load is None:
         title = rf"Element ${matrix_label}$ distributions around reconnection; per-job yield loads"
@@ -1142,8 +1161,8 @@ def run_analysis_many(
 ) -> pd.DataFrame:
     if not jobs:
         raise ValueError("At least one simulation job is required.")
-    if matrix_name not in {"C", "G", "T_total"}:
-        raise ValueError("matrix_name must be 'C', 'G', or 'T_total'.")
+    if matrix_name not in {"C", "G", "T", "T_total"}:
+        raise ValueError("matrix_name must be 'C', 'G', or 'T' ('T_total' is a compatibility alias).")
     if bins < 10:
         raise ValueError("bins must be at least 10.")
     formats = ["pdf"] if formats is None else formats
@@ -1307,7 +1326,7 @@ def parse_args() -> argparse.Namespace:
         help="One-based reconnection within each event, or 'all' (default: all).",
     )
     parser.add_argument(
-        "--matrix", choices=("C", "G", "T_total"), default="C"
+        "--matrix", choices=("C", "G", "T", "T_total"), default="C"
     )
     parser.add_argument("--bins", type=int, default=180)
     parser.add_argument(

@@ -2099,11 +2099,18 @@ def find_best_xmin(
     memmap_min_size=5e4,
     memmap_dir=None,
     selected_fit=None,
+    plot_ax=None,
+    show_selected_xmin=True,
+    show_p_xmin=False,
 ):
     """
     We scan many possible xmin values. We try to identify a plateau region
     in the exponents. We make sure the p-value is larger than min_p. If the
     p-value is close to the min_p limit, we need to increaes the accuracy.
+
+    ``show_p_xmin`` controls the optional vertical marker selected from the
+    p-value scan.  It is disabled by default because this diagnostic selection
+    is distinct from the supplied/global KS cutoff.
     """
     if not 0 < max_accuracy <= start_accuracy:
         raise ValueError("Require 0 < max_accuracy <= start_accuracy.")
@@ -2231,7 +2238,11 @@ def find_best_xmin(
         test_fits.append(selected_fit)
 
     # Plot p and exponent
-    xmin_plot_path = f"{PLOTPATH}{extraPath}{path_name}_xMins.pdf"
+    xmin_plot_path = (
+        None
+        if plot_ax is not None
+        else f"{PLOTPATH}{extraPath}{path_name}_xMins.pdf"
+    )
     plot_data_info = dict(data_info or {})
     if selected_fit is not None:
         selected_analysis = getattr(selected_fit, "xmin_analysis", None)
@@ -2254,10 +2265,12 @@ def find_best_xmin(
         data_info=plot_data_info,
         xmin_results=xmin_results,
         fast_xmin=fast_xmin,
-        selected_xmin=selected_xmin,
+        selected_xmin=selected_xmin if show_selected_xmin else None,
         ks_xmin=global_xmin,
         global_xmin=global_xmin,
         global_distance=global_distance,
+        ax=plot_ax,
+        show_p_xmin=show_p_xmin,
     )
     setattr(best_fit, "p_value_local_max_found", p_selected_fit is not None)
     setattr(best_fit, "xmin_plot_path", xmin_plot_path)
@@ -2771,6 +2784,8 @@ def make_fit(
     parallel_xmin=False,
     xmin_search_kwargs=None,
     debug=False,
+    xmin_selection="simpleDrop",
+    xmin_search_mode="full",
 ) -> Fit:
     """Fit the supplied positive population at a fixed or searched xmin.
 
@@ -2786,6 +2801,13 @@ def make_fit(
         xmin_range = float(xmin_range)
         if not np.isfinite(xmin_range) or xmin_range <= 0:
             raise ValueError("A fixed xmin must be finite and positive.")
+    if xmin_selection not in {"simpleDrop", "global"}:
+        raise ValueError(
+            f"Unsupported xmin_selection: {xmin_selection!r}. "
+            "Use 'simpleDrop' or 'global'."
+        )
+    if xmin_search_mode not in {"full", "rapid"}:
+        raise ValueError("xmin_search_mode must be either 'full' or 'rapid'.")
     search_kwargs = dict(xmin_search_kwargs or {})
     progress = bool(search_kwargs.pop("progress", False))
     progress_label = str(search_kwargs.pop("progress_label", "xmin"))
@@ -2808,7 +2830,8 @@ def make_fit(
         cache_path = _get_cache_path(
             cache_dir,
             data,
-            f"canonical-simpleDrop-v10-raw-adjacent-tail100-search:{distType.name}:{xmin_range}:"
+            f"canonical-simpleDrop-v11-raw-adjacent-full-neighbor-tail100-search:{xmin_search_mode}:{distType.name}:{xmin_range}:"
+            f"{xmin_selection}:"
             f"{parallel_xmin}:{search_kwargs}",
         )
         # The cache key deliberately changes whenever the xmin-selection
@@ -2878,7 +2901,9 @@ def make_fit(
             parallel=parallel_xmin,
             **analysis_kwargs,
         )
-        xmin_range = xmin_analysis["simple_drop_xmin"]
+        xmin_range = xmin_analysis[
+            "global_min_xmin" if xmin_selection == "global" else "simple_drop_xmin"
+        ]
 
     fitObj = Fit(
         data,
@@ -2887,6 +2912,8 @@ def make_fit(
         verbose=0,
     )
     fitObj.xmin_analysis = xmin_analysis
+    fitObj.xmin_selection = xmin_selection
+    fitObj.xmin_search_mode = xmin_search_mode
     if xmin_analysis is not None:
         fitObj.xmin_fitting_results = xmin_analysis
 
@@ -2978,15 +3005,29 @@ def plot_fits_over_xmin(
     ks_xmin=None,
     global_xmin=None,
     global_distance=None,
+    ax=None,
+    show_p_xmin=False,
 ):
     """
     Plot KS distance/p-value, exponent alpha, and inverse cutoff 1/lambda versus xmin.
 
     ``selected_label`` and ``ks_label`` name the two optional vertical xmin
     markers in the legend.  The defaults match the canonical simpleDrop and
-    global-minimum choices used by the current analysis.
+    global-minimum choices used by the current analysis. ``show_p_xmin``
+    controls the separate p-scan-selected marker and defaults to ``False``.
+
+    If ``ax`` is supplied, draw the multi-axis plot into that existing Axes
+    object and leave figure layout, saving, and closing to the caller.
     """
     fits.sort(key=lambda f: f.xmin)
+    owns_figure = ax is None
+    if owns_figure:
+        fig, ax1 = plt.subplots(figsize=(12, 4))
+    else:
+        if not hasattr(ax, "figure"):
+            raise TypeError("ax must be a Matplotlib Axes object.")
+        fig = ax.figure
+        ax1 = ax
     tag = ks_tag(fits=fits, fast_xmin=fast_xmin)
     x = np.array([f.xmin for f in fits], dtype=float)
     pvals = np.array([f.p for f in fits], dtype=float)
@@ -3118,7 +3159,6 @@ def plot_fits_over_xmin(
     fine_alpha_x_plot = fine_alpha_x / xmin_scale
     fine_lambda_x_plot = fine_lambda_x / xmin_scale
 
-    fig, ax1 = plt.subplots(figsize=(12, 4))
     ax1.set_xscale("log")
 
     # --- Left-most axis: KS distance D ---
@@ -3332,7 +3372,7 @@ def plot_fits_over_xmin(
                 zorder=6,
                 label="_nolegend_",
             )
-    if best_fit and np.isfinite(best_fit.xmin):
+    if show_p_xmin and best_fit and np.isfinite(best_fit.xmin):
         ax1.axvline(
             best_fit.xmin / xmin_scale,
             color="tab:purple",
@@ -3372,7 +3412,8 @@ def plot_fits_over_xmin(
         ncol=2,
         frameon=True,
     )
-    fig.tight_layout(rect=[0.10, 0, 0.82, 1])
+    if owns_figure:
+        fig.tight_layout(rect=[0.10, 0, 0.82, 1])
     ax1.set_title(title)
 
     if savePath:
@@ -3381,7 +3422,8 @@ def plot_fits_over_xmin(
         setattr(fig, "path", savePath)
     else:
         setattr(fig, "path", None)
-    plt.close(fig)
+    if owns_figure:
+        plt.close(fig)
     return savePath
 
 
@@ -3713,6 +3755,7 @@ def plot_powerlaw_compare(
     addFit=True,
     parallel_xmin=False,
     xmin_search_kwargs=None,
+    xmin_selection="simpleDrop",
     csvPaths=None,
     useCDF=False,
     drop_type="energy",
@@ -3740,6 +3783,7 @@ def plot_powerlaw_compare(
             addFit=addFit,
             parallel_xmin=parallel_xmin,
             xmin_search_kwargs=xmin_search_kwargs,
+            xmin_selection=xmin_selection,
             useCDF=useCDF,
             drop_type=drop_type,
         )
@@ -3749,7 +3793,7 @@ def plot_powerlaw_compare(
     if not colors:
         colors = list(MINIMIZER_COLORS.values())
 
-    selected_tag = "simpleDrop"
+    selected_tag = "globalMin" if xmin_selection == "global" else "simpleDrop"
     compare_infos = []
     compare_fits = []
     legend_handles = []
@@ -3782,6 +3826,7 @@ def plot_powerlaw_compare(
             distType=distType,
             parallel_xmin=parallel_xmin,
             xmin_search_kwargs=xmin_search_kwargs,
+            xmin_selection=xmin_selection,
         )
         if evaluate:
             fit.evaluate_fit(**evaluate_kwargs)
@@ -3863,17 +3908,21 @@ def plot_powerlaw_compare(
         )
         xmin_analysis = getattr(fit, "xmin_analysis", None)
         if xmin_analysis is not None and xmin_global_differs(xmin_analysis):
+            comparison_key = (
+                "simple_drop_xmin" if xmin_selection == "global" else "global_min_xmin"
+            )
             ax.axvline(
-                xmin_analysis["global_min_xmin"],
+                xmin_analysis[comparison_key],
                 color=color,
                 linestyle="--",
                 linewidth=1.0,
                 alpha=0.55,
                 label="_nolegend_",
             )
-            legend_label += (
-                rf"; global $x_{{\min}}={xmin_analysis['global_min_xmin']:.1e}$"
-            )
+            if xmin_selection != "global":
+                legend_label += (
+                    rf"; global $x_{{\min}}={xmin_analysis['global_min_xmin']:.1e}$"
+                )
 
         print(f"{selected_tag} xmin ({group_name}): {fit.xmin}")
         legend_handles.append(
@@ -3952,6 +4001,7 @@ def plot_powerlaw(
     addFit=True,
     parallel_xmin=False,
     xmin_search_kwargs=None,
+    xmin_selection="simpleDrop",
     csvPaths=None,
     useCDF=False,
     drop_type="energy",
@@ -3980,6 +4030,7 @@ def plot_powerlaw(
             addFit=addFit,
             parallel_xmin=parallel_xmin,
             xmin_search_kwargs=xmin_search_kwargs,
+            xmin_selection=xmin_selection,
             useCDF=useCDF,
             drop_type=drop_type,
         )
@@ -4009,8 +4060,10 @@ def plot_powerlaw(
         distType=distType,
         parallel_xmin=parallel_xmin,
         xmin_search_kwargs=xmin_search_kwargs,
+        xmin_selection=xmin_selection,
     )
-    print("simpleDrop xmin:", reported_fit.xmin)
+    selected_tag = "globalMin" if xmin_selection == "global" else "simpleDrop"
+    print(f"{selected_tag} xmin:", reported_fit.xmin)
     xmin_analysis = getattr(reported_fit, "xmin_analysis", None)
     if xmin_analysis is not None:
         simple_details = xmin_analysis["simple_drop_details"]
@@ -4077,7 +4130,7 @@ def plot_powerlaw(
             all_drops,
             reported_fit.xmin,
             data_info=data_info,
-            name="simpleDrop-fit",
+            name=f"{selected_tag}-fit",
             save=save,
         )
     plot_data_and_fit(

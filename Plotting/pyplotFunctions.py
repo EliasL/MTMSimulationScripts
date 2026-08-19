@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
+import matplotlib.patheffects as path_effects
 from matplotlib.collections import PolyCollection
 from matplotlib.cm import ScalarMappable
 from tqdm import tqdm
@@ -703,7 +704,6 @@ def base_plot(
     delx=None,
     macroData=None,
     macroDataRowIndex=None,
-    equalAspect=True,
     remove_ticks=True,
     dpi=250,
     stress_label=None,
@@ -716,8 +716,10 @@ def base_plot(
     if not remove_ticks:
         height = 512
     fig, ax = plt.subplots(figsize=(width / dpi, height / dpi), dpi=dpi)
-    if equalAspect:
-        ax.set_aspect("equal")
+    # Geometry plots must not distort lengths when the figure or the axes
+    # rectangle changes.  Non-geometric plots explicitly opt into ``auto``
+    # after constructing this base axis.
+    ax.set_aspect("equal", adjustable="box")
 
     # Setting the axis limits
     if axis_limits:
@@ -882,12 +884,31 @@ def tile_periodic_mesh(polygons, values, xlim, ylim):
     return np.concatenate(plotted), np.concatenate(plotted_values)
 
 
+def draw_periodic_shear_box(ax, *, origin, load, box_size, **plot_kwargs):
+    """Draw one deformed square periodic cell as a dashed parallelogram."""
+
+    origin = np.asarray(origin, dtype=float)
+    if origin.shape != (2,) or not np.all(np.isfinite(origin)):
+        raise ValueError("origin must be one finite two-dimensional point.")
+    if not np.isfinite(load) or not np.isfinite(box_size) or box_size <= 0:
+        raise ValueError("load must be finite and box_size must be positive.")
+    a = np.array([box_size, 0.0])
+    b = np.array([load * box_size, box_size])
+    corners = np.array([origin, origin + a, origin + a + b, origin + b, origin])
+    style = {"color": "black", "linestyle": "--", "linewidth": 0.9, "zorder": 20}
+    style.update(plot_kwargs)
+    ax.plot(corners[:, 0], corners[:, 1], **style)
+    return corners
+
+
 def draw_rhombus(ax, vtuData):
-    N = vtuData.size[0]
     if vtuData.BC == "PBC":
-        rhombus_x = [0, N, N + vtuData.load * N, vtuData.load * N, 0]
-        rhombus_y = [0, 0, N, N, 0]
-        ax.plot(rhombus_x, rhombus_y, "k--")
+        return draw_periodic_shear_box(
+            ax,
+            origin=(0.0, 0.0),
+            load=vtuData.load,
+            box_size=vtuData.size[0],
+        )
 
 
 def round_to_nearest_16(x):
@@ -1070,6 +1091,12 @@ def plot_mesh(
     show_force=False,
     square_periodic_mesh=False,
     periodic_box_size=None,
+    periodic_load=None,
+    load_increment=None,
+    field_override=None,
+    field_cmap=None,
+    field_norm=None,
+    field_background_color=None,
     cartesian_viewport_culling=False,
     cartesian_viewport=None,
     **kwargs,
@@ -1088,33 +1115,73 @@ def plot_mesh(
         ax,
         square_periodic_mesh=square_periodic_mesh,
         cartesian_viewport=cartesian_viewport,
+        load_increment=load_increment,
         **kwargs,
     )
+    if periodic_load is not None:
+        if not np.isfinite(periodic_load):
+            raise ValueError("periodic_load must be finite.")
+        if periodic_box_size is None:
+            raise ValueError("periodic_load requires periodic_box_size.")
+        if not np.isfinite(periodic_box_size) or periodic_box_size <= 0:
+            raise ValueError("periodic_box_size must be finite and positive.")
+        # Reversibility-protocol VTUs live below the simulation directory, so
+        # their own path does not contain the periodic metadata.  Keep this
+        # override here so the normal animation tiler can render them exactly
+        # like an ordinary PBC frame.
+        data.BC = "PBC"
+        data.load = float(periodic_load)
+        data.size = (float(periodic_box_size), float(periodic_box_size))
     if cartesian_viewport is not None:
         ax.set_xlim(*cartesian_viewport[:2])
         ax.set_ylim(*cartesian_viewport[2:])
+    ax.set_aspect("equal", adjustable="box")
     nodes = data.get_nodes()
     connectivity = data.get_connectivity()
     x, y = nodes[:, 0], nodes[:, 1]
 
-    # Configure property-specific settings
-    (
-        field,
-        cmap,
-        norm,
-        boundaries,
-        backgroundColor,
-        state_indices,
-        tick_positions,
-        tick_labels,
-    ) = _configure_property_settings(
-        data,
-        mesh_property,
-        e_lims,
-        max_plastic,
-        max_plastic_change,
-        min_plastic_change,
-    )
+    if field_override is None:
+        # Configure property-specific settings
+        (
+            field,
+            cmap,
+            norm,
+            boundaries,
+            backgroundColor,
+            state_indices,
+            tick_positions,
+            tick_labels,
+        ) = _configure_property_settings(
+            data,
+            mesh_property,
+            e_lims,
+            max_plastic,
+            max_plastic_change,
+            min_plastic_change,
+        )
+    else:
+        field = np.asarray(field_override).ravel()
+        if field.shape != (len(connectivity),):
+            raise ValueError(
+                "field_override must contain one value per mesh element."
+            )
+        if not np.all(np.isfinite(field)):
+            raise ValueError("field_override must contain only finite values.")
+        cmap = "viridis" if field_cmap is None else field_cmap
+        norm = (
+            mcolors.Normalize(vmin=float(np.min(field)), vmax=float(np.max(field)))
+            if field_norm is None
+            else field_norm
+        )
+        boundaries = None
+        backgroundColor = (
+            (0.15, 0.15, 0.15, 0.35)
+            if field_background_color is None
+            else field_background_color
+        )
+        state_indices = None
+        tick_positions = None
+        tick_labels = None
 
     element_indices = _element_subset_indices(len(connectivity), kwargs.get("element_subset"))
     if element_indices is not None:
@@ -1411,7 +1478,7 @@ def plot_integer_shear_mesh(
     return axes[0]
 
 
-def _initialize_plot(vtu_file, ax, **kwargs):
+def _initialize_plot(vtu_file, ax, *, load_increment=None, **kwargs):
     """Initialize the plot and load VTU data."""
     if ax is None:
         if kwargs.pop("square_periodic_mesh", False):
@@ -1421,7 +1488,7 @@ def _initialize_plot(vtu_file, ax, **kwargs):
             if viewport is not None:
                 kwargs["axis_limits"] = viewport
         ax, fig = base_plot(vtu_file=vtu_file, **kwargs)
-    data = VTUData(vtu_file)
+    data = VTUData(vtu_file, load_increment=load_increment)
     return ax, data
 
 
@@ -1808,8 +1875,9 @@ def _add_additional_elements(
 
 def make_static_plot(fileName, **kwargs):
     ax, fig = base_plot(
-        add_title=False, equalAspect=False, remove_ticks=False, dpi=150, **kwargs
+        add_title=False, remove_ticks=False, dpi=150, **kwargs
     )
+    ax.set_aspect("auto")
 
     macro_data = kwargs["macro_data"]
     if fileName == "energy_plot":
@@ -1883,12 +1951,20 @@ def reset_energy_grid_cache():
         GRID = None
 
 
-def _bin_poincare_velocity_field(x, y, u, v, bins=40, zoom=1):
+def _bin_poincare_velocity_field(
+    x, y, u, v, bins=40, zoom=1, *, color_values=None, return_members=False
+):
     """Bin scattered velocities on the Poincare disk into a regular grid."""
     if bins is None or bins <= 0:
         raise ValueError(f"bins must be positive, got {bins}")
     r = 1.0 / zoom
     edges = np.linspace(-r, r, bins + 1)
+    if not isinstance(return_members, (bool, np.bool_)):
+        raise ValueError("return_members must be boolean.")
+    if color_values is not None:
+        color_values = np.asarray(color_values, dtype=float).reshape(-1)
+        if color_values.shape != np.asarray(x).reshape(-1).shape:
+            raise ValueError("color_values must match the Poincare displacement arrays.")
 
     ix = np.searchsorted(edges, x, side="right") - 1
     iy = np.searchsorted(edges, y, side="right") - 1
@@ -1898,26 +1974,462 @@ def _bin_poincare_velocity_field(x, y, u, v, bins=40, zoom=1):
         & (ix < bins)
         & (iy >= 0)
         & (iy < bins)
+        & (x * x + y * y <= r * r)
         & np.isfinite(u)
         & np.isfinite(v)
     )
+    if color_values is not None:
+        valid &= np.isfinite(color_values)
     if not np.any(valid):
         return None
 
     sum_u = np.zeros((bins, bins), dtype=float)
     sum_v = np.zeros((bins, bins), dtype=float)
+    sum_speed = np.zeros((bins, bins), dtype=float)
+    sum_color = np.zeros((bins, bins), dtype=float)
     count = np.zeros((bins, bins), dtype=int)
 
     np.add.at(sum_u, (iy[valid], ix[valid]), u[valid])
     np.add.at(sum_v, (iy[valid], ix[valid]), v[valid])
+    np.add.at(sum_speed, (iy[valid], ix[valid]), np.hypot(u[valid], v[valid]))
+    if color_values is None:
+        color_values = np.hypot(u, v)
+    np.add.at(sum_color, (iy[valid], ix[valid]), color_values[valid])
     np.add.at(count, (iy[valid], ix[valid]), 1)
 
     with np.errstate(invalid="ignore", divide="ignore"):
         mean_u = np.where(count > 0, sum_u / count, np.nan)
         mean_v = np.where(count > 0, sum_v / count, np.nan)
+        mean_speed = np.where(count > 0, sum_speed / count, np.nan)
+        mean_color = np.where(count > 0, sum_color / count, np.nan)
 
     centers = 0.5 * (edges[:-1] + edges[1:])
-    return centers, mean_u, mean_v, count
+    summary = centers, mean_u, mean_v, count, mean_speed, mean_color
+    if not return_members:
+        return summary
+    members = (
+        x[valid],
+        y[valid],
+        u[valid],
+        v[valid],
+        color_values[valid],
+        ix[valid],
+        iy[valid],
+        np.flatnonzero(valid),
+    )
+    return summary, members
+
+
+def _otsu_direction_labels(u, v, *, min_class_count=2):
+    """Return an Otsu split of circular displacement directions, if useful.
+
+    Angles are unwrapped after cutting at the largest circular gap, so a
+    population straddling the conventional ``-pi/pi`` boundary is not split
+    artificially.  The threshold is the exact two-class Otsu threshold for
+    the resulting scalar angles, evaluated at observed angle values.
+    """
+
+    u = np.asarray(u, dtype=float).reshape(-1)
+    v = np.asarray(v, dtype=float).reshape(-1)
+    if u.shape != v.shape:
+        raise ValueError("Direction components must have identical shapes.")
+    if not isinstance(min_class_count, int) or min_class_count < 1:
+        raise ValueError("min_class_count must be a positive integer.")
+    if u.size < 2 * min_class_count:
+        return None
+    angles = np.mod(np.arctan2(v, u), 2.0 * np.pi)
+    if not np.all(np.isfinite(angles)):
+        raise ValueError("Displacement directions must be finite.")
+    ordered_angles = np.sort(angles)
+    circular_gaps = np.diff(
+        np.concatenate((ordered_angles, ordered_angles[:1] + 2.0 * np.pi))
+    )
+    cut = ordered_angles[(int(np.argmax(circular_gaps)) + 1) % ordered_angles.size]
+    unwrapped = np.sort(np.mod(angles - cut, 2.0 * np.pi))
+
+    split_counts = np.arange(
+        min_class_count, unwrapped.size - min_class_count + 1, dtype=int
+    )
+    distinct = unwrapped[split_counts - 1] < unwrapped[split_counts]
+    if not np.any(distinct):
+        return None
+    cumulative = np.cumsum(unwrapped)
+    lower_mean = cumulative[split_counts - 1] / split_counts
+    upper_count = unwrapped.size - split_counts
+    upper_mean = (cumulative[-1] - cumulative[split_counts - 1]) / upper_count
+    fraction = split_counts / unwrapped.size
+    between_variance = fraction * (1.0 - fraction) * (lower_mean - upper_mean) ** 2
+    candidates = np.flatnonzero(distinct)
+    split_index = int(candidates[np.argmax(between_variance[candidates])])
+    split_count = int(split_counts[split_index])
+    threshold = 0.5 * (unwrapped[split_count - 1] + unwrapped[split_count])
+    labels = np.mod(angles - cut, 2.0 * np.pi) >= threshold
+    if np.count_nonzero(labels) < min_class_count:
+        return None
+    if np.count_nonzero(~labels) < min_class_count:
+        return None
+    return labels
+
+
+def _split_poincare_direction_bins(
+    members, centers, bins, *, min_count, return_membership=False
+):
+    """Aggregate each populated bin into one or two Otsu direction groups."""
+
+    x, y, u, v, color_values, ix, iy, source_indices = members
+    flat_bins = iy * bins + ix
+    unique_bins, bin_counts = np.unique(flat_bins, return_counts=True)
+    records = []
+    memberships = []
+    populated_bins = 0
+    minimum_group_count = 2
+    for flat_bin, total_count in zip(unique_bins, bin_counts):
+        if total_count < min_count:
+            continue
+        populated_bins += 1
+        point_mask = flat_bins == flat_bin
+        point_u, point_v = u[point_mask], v[point_mask]
+        labels = _otsu_direction_labels(
+            point_u, point_v, min_class_count=minimum_group_count
+        )
+        groups = [np.ones(point_u.size, dtype=bool)]
+        if labels is not None:
+            groups = [~labels, labels]
+
+        ix_bin, iy_bin = int(flat_bin % bins), int(flat_bin // bins)
+        for group_index, group in enumerate(groups):
+            group_u, group_v = point_u[group], point_v[group]
+            group_speed_values = np.hypot(group_u, group_v)
+            records.append(
+                (
+                    centers[ix_bin],
+                    centers[iy_bin],
+                    np.mean(group_u),
+                    np.mean(group_v),
+                    # ``min_count`` qualifies the spatial bin before Otsu;
+                    # it is not re-applied separately to the two branches.
+                    total_count,
+                    np.mean(group_speed_values),
+                    np.mean(color_values[point_mask][group]),
+                    group_index,
+                    flat_bin,
+                )
+            )
+            memberships.append(np.asarray(source_indices[point_mask][group], dtype=int))
+    if not records:
+        if return_membership:
+            return None, populated_bins, []
+        return None, populated_bins
+    result = np.asarray(records, dtype=float).T
+    if return_membership:
+        return result, populated_bins, memberships
+    return result, populated_bins
+
+
+def plot_binned_poincare_displacement_field(
+    ax,
+    x,
+    y,
+    u,
+    v,
+    *,
+    grid_size,
+    zoom,
+    bins=40,
+    min_count=10,
+    min_coherence=0.35,
+    cmap="viridis",
+    show_colorbar=True,
+    colorbar_axes=None,
+    color_values=None,
+    colorbar_label=r"mean $|\Delta z|$ in Poincare coordinates",
+    min_vector_length=0.0,
+    colorbar_log=False,
+    colorbar_max_quantile=None,
+    vector_length_from_color=False,
+    vector_length_scale=1.0,
+    direction_split_otsu=False,
+    require_direction_split=False,
+    draw_arrows=True,
+    return_metadata=False,
+):
+    """Draw coherence-filtered mean displacement vectors in every disk bin.
+
+    ``(x, y)`` are source Poincare coordinates and ``(u, v)`` are their
+    one-step coordinate displacements.  The routine deliberately draws a
+    binned vector field rather than streamlines: it does not invent continuous
+    trajectories from a single transition.  Directional coherence,
+    ``|mean(displacement)| / mean(|displacement|)``, is used to reject bins
+    whose mean direction is poorly defined; the visible arrows are opaque.
+    Arrow colour represents ``color_values`` when supplied, otherwise the
+    mean Poincare displacement length.  With ``vector_length_from_color``,
+    the arrow direction remains the mean displacement direction but its
+    un-clipped magnitude is proportional to the supplied colour scalar.  With
+    ``direction_split_otsu``, each populated bin is split into up to two
+    direction groups using a circularly unwrapped Otsu cut.  The displayed
+    arrow lengths are multiplied by ``vector_length_scale``.  With
+    ``require_direction_split``, only bins containing both Otsu branches are
+    shown; it requires ``direction_split_otsu``.
+    With ``return_metadata``, the fourth return value contains the source
+    element indices and rendered vector data for each visible arrow.  Set
+    ``draw_arrows=False`` to compute that metadata without drawing the field.
+    """
+
+    arrays = tuple(np.asarray(values, dtype=float).reshape(-1) for values in (x, y, u, v))
+    x, y, u, v = arrays
+    if not x.size:
+        raise ValueError("At least one Poincare displacement is required.")
+    if any(values.shape != x.shape for values in arrays[1:]):
+        raise ValueError("Poincare coordinates and displacements must have identical shapes.")
+    if not all(np.all(np.isfinite(values)) for values in arrays):
+        raise ValueError("Poincare coordinates and displacements must be finite.")
+    if not np.isfinite(grid_size) or grid_size <= 0:
+        raise ValueError("grid_size must be finite and positive.")
+    if not np.isfinite(zoom) or zoom < 1:
+        raise ValueError("zoom must be finite and at least one.")
+    if not isinstance(bins, int) or bins <= 0:
+        raise ValueError("bins must be a positive integer.")
+    if not isinstance(min_count, int) or min_count <= 0:
+        raise ValueError("min_count must be a positive integer.")
+    if not np.isfinite(min_coherence) or not 0 <= min_coherence <= 1:
+        raise ValueError("min_coherence must lie in [0, 1].")
+
+    if color_values is not None:
+        color_values = np.asarray(color_values, dtype=float).reshape(-1)
+        if color_values.shape != x.shape:
+            raise ValueError("color_values must match the Poincare displacement arrays.")
+        if not np.all(np.isfinite(color_values)):
+            raise ValueError("color_values must be finite.")
+    if not np.isfinite(min_vector_length) or min_vector_length < 0:
+        raise ValueError("min_vector_length must be finite and nonnegative.")
+    if not isinstance(colorbar_log, (bool, np.bool_)):
+        raise ValueError("colorbar_log must be boolean.")
+    if not isinstance(vector_length_from_color, (bool, np.bool_)):
+        raise ValueError("vector_length_from_color must be boolean.")
+    if not np.isfinite(vector_length_scale) or vector_length_scale <= 0:
+        raise ValueError("vector_length_scale must be finite and positive.")
+    if not isinstance(direction_split_otsu, (bool, np.bool_)):
+        raise ValueError("direction_split_otsu must be boolean.")
+    if not isinstance(require_direction_split, (bool, np.bool_)):
+        raise ValueError("require_direction_split must be boolean.")
+    if require_direction_split and not direction_split_otsu:
+        raise ValueError("require_direction_split requires direction_split_otsu.")
+    if not isinstance(return_metadata, (bool, np.bool_)):
+        raise ValueError("return_metadata must be boolean.")
+    if return_metadata and not direction_split_otsu:
+        raise ValueError("return_metadata requires direction_split_otsu.")
+    if not isinstance(draw_arrows, (bool, np.bool_)):
+        raise ValueError("draw_arrows must be boolean.")
+    if colorbar_max_quantile is not None:
+        if not np.isfinite(colorbar_max_quantile) or not 0 < colorbar_max_quantile <= 1:
+            raise ValueError("colorbar_max_quantile must lie in (0, 1].")
+
+    if direction_split_otsu:
+        binned_result = _bin_poincare_velocity_field(
+            x,
+            y,
+            u,
+            v,
+            bins=bins,
+            zoom=zoom,
+            color_values=color_values,
+            return_members=True,
+        )
+        if binned_result is None:
+            return None, 0, 0
+        (centers, mean_u, mean_v, count, mean_speed, mean_color), members = binned_result
+        split_result = _split_poincare_direction_bins(
+            members,
+            centers,
+            bins,
+            min_count=min_count,
+            return_membership=return_metadata,
+        )
+        if return_metadata:
+            split_records, populated_bin_count, branch_memberships = split_result
+        else:
+            split_records, populated_bin_count = split_result
+        if split_records is None:
+            result = (None, 0, populated_bin_count)
+            return (*result, []) if return_metadata else result
+        x_centres = split_records[0]
+        y_centres = split_records[1]
+        mean_u = split_records[2]
+        mean_v = split_records[3]
+        count = split_records[4]
+        mean_speed = split_records[5]
+        mean_color = split_records[6]
+        branch_index = split_records[7].astype(int)
+        bin_index = split_records[8].astype(int)
+        color_values_for_norm = mean_color[np.isfinite(mean_color)]
+    else:
+        binned = _bin_poincare_velocity_field(
+            x, y, u, v, bins=bins, zoom=zoom, color_values=color_values
+        )
+        if binned is None:
+            return None, 0, 0
+        centers, mean_u, mean_v, count, mean_speed, mean_color = binned
+        branch_index = np.zeros(mean_u.shape, dtype=int)
+        bin_index = np.arange(mean_u.size, dtype=int).reshape(mean_u.shape)
+        x_centres, y_centres = np.meshgrid(centers, centers)
+        color_values_for_norm = mean_color[(count > 0) & np.isfinite(mean_color)]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        coherence = np.hypot(mean_u, mean_v) / mean_speed
+    populated = count >= min_count
+    visible = (
+        populated
+        & np.isfinite(mean_u)
+        & np.isfinite(mean_v)
+        & np.isfinite(mean_speed)
+        & (mean_speed >= min_vector_length)
+        & np.isfinite(mean_color)
+        & np.isfinite(coherence)
+        & (coherence >= min_coherence)
+    )
+    if direction_split_otsu and require_direction_split:
+        # Count branches after all visibility filters.  This guarantees that
+        # every shown bin really has two displayed arrows, not merely two
+        # Otsu groups where one is later rejected by coherence or length.
+        visible_bins, visible_branch_counts = np.unique(
+            bin_index[visible], return_counts=True
+        )
+        double_visible_bins = visible_bins[visible_branch_counts >= 2]
+        visible &= np.isin(bin_index, double_visible_bins)
+    if not np.any(visible):
+        populated_count = (
+            int(populated_bin_count)
+            if direction_split_otsu
+            else int(np.count_nonzero(populated))
+        )
+        result = (None, 0, populated_count)
+        return (*result, []) if return_metadata else result
+
+    scale = float(zoom) * float(grid_size) / 2.0
+    center = float(grid_size) / 2.0
+    color_values_binned = mean_color[visible]
+    if not color_values_for_norm.size:
+        raise ValueError("No finite populated-bin colour values were found.")
+    color_limit = (
+        float(np.max(color_values_for_norm))
+        if colorbar_max_quantile is None
+        else float(np.quantile(color_values_for_norm, colorbar_max_quantile))
+    )
+    if not np.isfinite(color_limit) or color_limit <= 0:
+        raise ValueError("No positive finite binned Poincare displacement was found.")
+    if colorbar_log:
+        if np.any(color_values_for_norm <= 0):
+            raise ValueError("Logarithmic colour scaling requires positive colour values.")
+        color_floor = float(np.min(color_values_for_norm))
+        if color_limit <= color_floor:
+            raise ValueError("Logarithmic colour scaling requires varying colour values.")
+        norm = mcolors.LogNorm(vmin=color_floor, vmax=color_limit)
+    else:
+        color_floor = float(np.min(color_values_binned))
+        if color_limit < color_floor:
+            raise ValueError("Linear colour scaling requires the upper limit above the shown minimum.")
+        if color_limit == color_floor:
+            color_limit = float(np.nextafter(color_floor, np.inf))
+        norm = mcolors.Normalize(vmin=color_floor, vmax=color_limit)
+    colors = plt.get_cmap(cmap)(norm(color_values_binned))
+    colors[:, 3] = 1.0
+    visible_x_centres = x_centres[visible]
+    visible_y_centres = y_centres[visible]
+    visible_branch_index = branch_index[visible]
+    if vector_length_from_color:
+        direction_length = np.hypot(mean_u[visible], mean_v[visible])
+        with np.errstate(invalid="ignore", divide="ignore"):
+            length_calibration = np.nanmedian(
+                mean_speed[visible] / color_values_binned
+            )
+        if not np.isfinite(length_calibration) or length_calibration <= 0:
+            raise ValueError("Could not calibrate matrix-based vector lengths.")
+        arrow_lengths = color_values_binned * length_calibration * vector_length_scale
+        arrow_u = mean_u[visible] / direction_length * arrow_lengths
+        arrow_v = mean_v[visible] / direction_length * arrow_lengths
+    else:
+        arrow_u = mean_u[visible] * vector_length_scale
+        arrow_v = mean_v[visible] * vector_length_scale
+    quiver_artists = []
+    if draw_arrows:
+        for current_branch in sorted(np.unique(visible_branch_index)):
+            if direction_split_otsu:
+                branch_positions = np.flatnonzero(visible_branch_index == current_branch)
+                branch_u = arrow_u[branch_positions]
+                branch_v = arrow_v[branch_positions]
+                branch_colors = colors[branch_positions]
+                branch_x = visible_x_centres[branch_positions]
+                branch_y = visible_y_centres[branch_positions]
+            else:
+                branch_u = arrow_u
+                branch_v = arrow_v
+                branch_colors = colors
+                branch_x = visible_x_centres
+                branch_y = visible_y_centres
+            quiver = ax.quiver(
+                center + scale * branch_x,
+                center + scale * branch_y,
+                scale * branch_u,
+                scale * branch_v,
+                color=branch_colors,
+                angles="xy",
+                scale_units="xy",
+                scale=1.0,
+                pivot="tail",
+                width=0.006,
+                headwidth=4.0,
+                headlength=5.0,
+                headaxislength=4.2,
+                zorder=7,
+            )
+            quiver.set_path_effects(
+                [path_effects.withStroke(linewidth=0.8, foreground="white")]
+            )
+            quiver_artists.append(quiver)
+    if show_colorbar:
+        mappable = ScalarMappable(norm=norm, cmap=cmap)
+        mappable.set_array(color_values_for_norm)
+        colorbar_kwargs = {
+            "orientation": "horizontal",
+            "label": colorbar_label,
+        }
+        if colorbar_axes is None:
+            colorbar_kwargs.update({"ax": ax, "pad": 0.08, "fraction": 0.06})
+        else:
+            colorbar_kwargs["cax"] = colorbar_axes
+        ax.figure.colorbar(
+            mappable,
+            **colorbar_kwargs,
+        )
+    if direction_split_otsu:
+        quiver = quiver_artists
+        shown_count = int(np.count_nonzero(visible))
+        populated_count = int(populated_bin_count)
+    else:
+        quiver = quiver_artists[0] if quiver_artists else None
+        shown_count = int(np.count_nonzero(visible))
+        populated_count = int(np.count_nonzero(populated))
+    if not return_metadata:
+        return quiver, shown_count, populated_count
+    visible_indices = np.flatnonzero(visible)
+    metadata = []
+    for metadata_index, visible_index in enumerate(visible_indices):
+        metadata.append(
+            {
+                "x": float(visible_x_centres[metadata_index]),
+                "y": float(visible_y_centres[metadata_index]),
+                "u": float(arrow_u[metadata_index]),
+                "v": float(arrow_v[metadata_index]),
+                "length": float(np.hypot(arrow_u[metadata_index], arrow_v[metadata_index])),
+                "color_value": float(color_values_binned[metadata_index]),
+                "color": np.asarray(colors[metadata_index], dtype=float).copy(),
+                "branch_index": int(visible_branch_index[metadata_index]),
+                "bin_index": int(bin_index[visible_index]),
+                "source_indices": np.asarray(
+                    branch_memberships[visible_index], dtype=int
+                ).copy(),
+            }
+        )
+    return quiver, shown_count, populated_count, metadata
 
 
 def plot_in_poincare_disk(
@@ -1936,10 +2448,10 @@ def plot_in_poincare_disk(
     elif poincare_matrix == "G":
         disk_matrix = data.get_G()
         legend_label = r"$\mathbf{G}$"
-    elif poincare_matrix == "T_TOTAL":
+    elif poincare_matrix in {"T", "T_TOTAL"}:
         T_total = data.get_T_total()
         disk_matrix = np.swapaxes(T_total, -1, -2) @ T_total
-        legend_label = r"$\mathbf{T}_{\mathrm{total}}$"
+        legend_label = r"$\mathbf{T}$"
     elif poincare_matrix == "F_E":
         F_e = data.get_F_e()
         disk_matrix = np.swapaxes(F_e, -1, -2) @ F_e
@@ -2225,7 +2737,7 @@ def plot_velocity_field_in_poincare_disk(
         if binned is None:
             _ensure_colorbar(velocity_color_min, velocity_color_max)
             return ax
-        centers, mean_u, mean_v, count = binned
+        centers, mean_u, mean_v, count, _mean_speed, _mean_color = binned
 
         Xc, Yc = np.meshgrid(centers, centers)
         valid_bins = (
