@@ -35,10 +35,48 @@ def parse_args() -> argparse.Namespace:
         help="Energy quantity used for the paired comparisons.",
     )
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--fire-rerun-root",
+        type=Path,
+        help="Replace FIRE trajectory final/minimum energies with these uncapped reruns.",
+    )
     return parser.parse_args()
 
 
-def selected_rows(csv_path: Path, metric: str) -> list[dict[str, str]]:
+def fire_rerun_energies(rerun_root: Path | None) -> dict[str, tuple[float, float]]:
+    if rerun_root is None:
+        return {}
+    if not rerun_root.is_dir():
+        raise FileNotFoundError(rerun_root)
+    energies = {}
+    for manifest_path in rerun_root.rglob("rerun_manifest.json"):
+        event_id = str(manifest_path.parent.relative_to(rerun_root))
+        payload = json.loads(manifest_path.read_text())
+        result = payload.get("rerun_fire_result")
+        if not isinstance(result, dict) or result.get("algorithm") != "FIRE":
+            raise ValueError(f"Invalid FIRE rerun manifest: {manifest_path}")
+        directories = result.get("minimization_directories")
+        if not isinstance(directories, list) or len(directories) != 1:
+            raise ValueError(f"Expected one FIRE trajectory in {manifest_path}")
+        trajectory_path = Path(directories[0]) / "macroData.csv"
+        with trajectory_path.open(newline="") as stream:
+            trajectory = list(csv.DictReader(stream))
+        if not trajectory or "total_energy" not in trajectory[0]:
+            raise ValueError(f"Missing total-energy trajectory in {trajectory_path}")
+        values = np.asarray([float(row["total_energy"]) for row in trajectory])
+        if not np.all(np.isfinite(values)):
+            raise ValueError(f"Non-finite FIRE trajectory energy in {trajectory_path}")
+        if event_id in energies:
+            raise ValueError(f"Duplicate FIRE rerun for {event_id}")
+        energies[event_id] = (float(values[-1]), float(np.min(values)))
+    if not energies:
+        raise ValueError(f"No FIRE rerun manifests found in {rerun_root}")
+    return energies
+
+
+def selected_rows(
+    csv_path: Path, metric: str, fire_rerun_root: Path | None
+) -> tuple[list[dict[str, str]], int]:
     with csv_path.open(newline="") as stream:
         rows = list(csv.DictReader(stream))
     required = {
@@ -48,6 +86,20 @@ def selected_rows(csv_path: Path, metric: str) -> list[dict[str, str]]:
     }
     if not rows or not required <= set(rows[0]):
         raise ValueError(f"Missing required columns in {csv_path}")
+    reruns = fire_rerun_energies(fire_rerun_root)
+    updated = 0
+    for row in rows:
+        replacement = reruns.get(row["event_relative_path"])
+        if replacement is None:
+            continue
+        final, minimum = replacement
+        row["FIRE_trajectory_total_energy_final"] = repr(final)
+        row["FIRE_trajectory_total_energy_minimum"] = repr(minimum)
+        updated += 1
+    if reruns and updated != len(reruns):
+        raise ValueError(
+            f"Only matched {updated} of {len(reruns)} FIRE reruns to CSV rows"
+        )
     selected = [
         row
         for row in rows
@@ -55,7 +107,7 @@ def selected_rows(csv_path: Path, metric: str) -> list[dict[str, str]]:
     ]
     if len(selected) != 200:
         raise ValueError(f"Expected 200 synchronized-load events, got {len(selected)}")
-    return selected
+    return selected, updated
 
 
 def test_pair(
@@ -138,7 +190,7 @@ def seed_majority_check(
 
 def main() -> None:
     args = parse_args()
-    rows = selected_rows(args.csv_path, args.metric)
+    rows, reruns_applied = selected_rows(args.csv_path, args.metric, args.fire_rerun_root)
     pairs = [test_pair(rows, *pair, args.metric) for pair in PAIRS]
     for pair, pair_definition in zip(pairs, PAIRS):
         pair["bonferroni_adjusted_p_for_3_tests"] = min(
@@ -157,6 +209,10 @@ def main() -> None:
             "criterion": "all three algorithms have the same first_drop_load_step",
         },
         "metric": args.metric,
+        "fire_reruns": {
+            "applied": reruns_applied,
+            "root": None if args.fire_rerun_root is None else str(args.fire_rerun_root.resolve()),
+        },
         "method": {
             "name": "exact paired sign test",
             "null_hypothesis": "after excluding equal stored energies, either algorithm is lower with probability 0.5 on each event",

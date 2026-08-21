@@ -9,8 +9,8 @@ recipe:
 1. Restrict the data to the post-yield region.
 2. Extract $\Delta E_R$ and $\Delta E_S$ as paired values from the same
    event transitions, in the same order and with the same length.
-3. Use ``simpleDrop`` on the positive $\Delta E_R$ values to define the
-   detection/classification threshold $\Delta E_{R,\mathrm{det}}$.
+3. Compute $\kappa=\Delta E_R/(\rho V_0\Delta\gamma^2)$ with $\rho=1$ and
+   classify with the fixed detector $\kappa_{\mathrm{det}}=\mu/2$.
 4. Transfer that event classification to the paired $\Delta E_S$ values and
    keep only finite positive $\Delta E_S$ values from irreversible events.
 5. Evaluate the KS distance at every observed candidate in that irreversible
@@ -22,6 +22,5 @@ recipe:
 
 The event-pairing contract is represented by ``EventDrops`` in
 ``Plotting/standardPowerlaw.py``.  Do not independently sort, filter, or
-concatenate the two energy-drop arrays before the $\Delta E_R$ classification.
-
-
+concatenate the two energy-drop arrays before the event-level $\kappa$
+classification.

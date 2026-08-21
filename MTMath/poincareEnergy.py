@@ -183,6 +183,9 @@ def approximate_ellipticity_boundary(
     eulerian=True,
     return_all=False,
     eps=1e-9,
+    refine_axis_extrema=False,
+    refinement_n_angles=720,
+    refinement_iterations=60,
 ):
     """
     Approximate the ellipticity-loss boundary by contouring the continuous
@@ -190,6 +193,9 @@ def approximate_ellipticity_boundary(
     (x, y) points along the boundary curve (longest contour by default).
 
     If return_all=True, returns a list of curves, each a list of (x, y) points.
+    With ``refine_axis_extrema=True``, the four intersections of the longest
+    curve with the coordinate axes are refined by bisection of the acoustic
+    determinant.  This removes the grid-cell-flat tips of a raster contour.
     """
 
     def _hashable(value):
@@ -214,7 +220,10 @@ def approximate_ellipticity_boundary(
         "loops": int(loops),
         "eulerian": bool(eulerian),
         "eps": float(eps),
-        "boundary_mode": "min_det_contour_v1",
+        "refine_axis_extrema": bool(refine_axis_extrema),
+        "refinement_n_angles": int(refinement_n_angles),
+        "refinement_iterations": int(refinement_iterations),
+        "boundary_mode": "min_det_contour_v2",
     }
 
     cache_dir = Path(__file__).resolve().parents[1] / ".cache" / "ellipticity_boundary"
@@ -298,6 +307,73 @@ def approximate_ellipticity_boundary(
 
     if not curves:
         return [] if not return_all else []
+
+    if refine_axis_extrema:
+        if not isinstance(refinement_n_angles, int) or refinement_n_angles < 8:
+            raise ValueError("refinement_n_angles must be an integer of at least 8.")
+        if not isinstance(refinement_iterations, int) or refinement_iterations <= 0:
+            raise ValueError("refinement_iterations must be a positive integer.")
+
+        def _minimum_determinant_on_axis(axis: int, coordinate: float) -> float:
+            point = np.zeros(2, dtype=float)
+            point[axis] = coordinate
+            metric = poincareDisk2C(
+                point[0], point[1], transformation=transformation, eps=eps
+            )
+            F_point = F_from_C(metric)
+            theta_refined = np.linspace(
+                0, np.pi, refinement_n_angles, endpoint=False
+            )
+            normals = np.stack(
+                [np.cos(theta_refined), np.sin(theta_refined)], axis=-1
+            )
+            _, determinant = E_func.min_det_angle(
+                F_point,
+                normals,
+                beta=beta,
+                K=K,
+                loops=loops,
+                eulerian=eulerian,
+            )
+            if not np.isfinite(determinant):
+                raise ValueError("Axis refinement found a non-finite acoustic determinant.")
+            return float(determinant)
+
+        def _refined_axis_root(axis: int, sign: float, estimate: float) -> float:
+            inner = 0.0
+            outer = min(0.95 / zoom, 1.25 * abs(estimate))
+            inner_value = _minimum_determinant_on_axis(axis, inner)
+            outer_value = _minimum_determinant_on_axis(axis, sign * outer)
+            if inner_value == 0:
+                return inner
+            if outer_value == 0:
+                return sign * outer
+            if np.sign(inner_value) == np.sign(outer_value):
+                raise ValueError(
+                    "Could not bracket a loss-of-ellipticity axis intersection."
+                )
+            for _ in range(refinement_iterations):
+                middle = 0.5 * (inner + outer)
+                middle_value = _minimum_determinant_on_axis(axis, sign * middle)
+                if middle_value == 0:
+                    return sign * middle
+                if np.sign(middle_value) == np.sign(inner_value):
+                    inner, inner_value = middle, middle_value
+                else:
+                    outer, outer_value = middle, middle_value
+            return sign * 0.5 * (inner + outer)
+
+        longest_index = int(np.argmax([len(curve) for curve in curves]))
+        longest = curves[longest_index].copy()
+        for axis, sign in ((0, -1.0), (0, 1.0), (1, -1.0), (1, 1.0)):
+            coordinate = longest[:, axis]
+            point_index = int(np.argmin(coordinate) if sign < 0 else np.argmax(coordinate))
+            estimate = float(coordinate[point_index])
+            longest[point_index] = 0.0
+            longest[point_index, axis] = _refined_axis_root(
+                axis, sign, estimate
+            )
+        curves[longest_index] = longest
 
     try:
         tmp_path = cache_path.with_suffix(".tmp")

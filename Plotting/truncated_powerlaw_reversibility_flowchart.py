@@ -1,9 +1,10 @@
 """Build a reversibility-aware truncated-power-law flowchart.
 
 This is a separate version of the ordinary flowchart.  It uses the
-post-yield relaxation-energy drops ``Delta E_R`` to make the reversible /
-irreversible split, and then fits only the irreversible stress-corrected
-``Delta E_S`` drops.  The existing flowchart is not modified.
+post-yield relaxation-energy drops to form
+``kappa = Delta E_R/(rho V_0 Delta gamma^2)`` and makes the reversible /
+irreversible split at ``kappa_det = mu/2``.  It then fits only the
+irreversible stress-corrected ``Delta E_S`` drops.
 
 For the default small-data case, the final ``Delta E_S,min^KS`` is selected by
 evaluating every observed candidate in the irreversible ``Delta E_S``
@@ -71,6 +72,10 @@ from Plotting.plotPowerLaw import (
     plot_energy_drop_trace,
     plot_ks_distance,
 )
+from Plotting.standardPowerlaw import (
+    kappa_detection_threshold,
+    kappa_from_relaxation_energy,
+)
 
 
 # =============================================================================
@@ -107,13 +112,12 @@ XMIN_MAX_MARKERS = 250
 ALPHA_MAX_MARKERS = 250
 FIT_PDF_MAX_MARKERS = 400
 
-# Leave this as None to recompute the coarse drop-detection threshold.  Set a
-# number explicitly when the threshold should be frozen for a data release or
-# a layout comparison.
-ER_DET_OVERRIDE = None
+# Leave this as None to use the material threshold ``kappa_det = mu/2``.
+# Set a number explicitly only for a frozen data release or layout comparison.
+KAPPA_DET_OVERRIDE = None
 
-# The event split is deliberately based only on Delta E_R simpleDrop.
-ER_DROP_METHOD_LABEL = "simpleDrop on Delta E_R"
+# The event split is based on kappa = Delta E_R/(rho V_0 Delta gamma^2).
+KAPPA_DETECTION_METHOD_LABEL = "kappa_det = mu/2 with rho=1"
 REVERSIBLE_COLOR = "#b9dff2"       # light blue
 IRREVERSIBLE_COLOR = "#f6c28b"      # light orange
 ER_ALL_COLOR = "0.55"
@@ -190,7 +194,7 @@ PANEL_ZORDERS = {
 }
 PANEL_LABELS = {
     "energy": r"(a) Energy drops",
-    "reversibility_er": r"(b) Drop detection: $\Delta E_R$",
+    "reversibility_er": r"(b) Drop detection: $\kappa$",
     "reversibility_es": r"(c) Reversible / irreversible $\Delta E_S$",
     "ccdf_ks": r"(d) KS distance: irreversible $\Delta E_S$",
     "xmin_scan": r"(e) Global $\Delta E_{\min}$",
@@ -557,9 +561,19 @@ def _collect_analysis(csv_paths):
     # Keep the original panel-a trace, while collecting paired E_R/E_S rows
     # for the cross-quantity reversibility split.
     records = []
-    er_all = []
+    kappa_all = []
     for path in csv_paths:
         df = read_macrodata_csv(str(path), L=REQUESTED_SYSTEM_SIZE)
+        load = np.asarray(df["load"], dtype=float)
+        delta_e_r_rows = -np.asarray(
+            df["total_e_change_from_init"], dtype=float
+        )[1:]
+        kappa_rows = np.full(load.shape, np.nan, dtype=float)
+        kappa_rows[1:] = kappa_from_relaxation_energy(
+            delta_e_r_rows,
+            np.diff(load),
+            float(REQUESTED_SYSTEM_SIZE * REQUESTED_SYSTEM_SIZE),
+        )
         strain_lim = _resolve_strain_lim(STRAIN_LIMIT, df=df, postRegime=True)
         er_values, er_mask, er_signed, er_info = extract_energy_drops_from_dataframe(
             df,
@@ -584,12 +598,14 @@ def _collect_analysis(csv_paths):
             drop_sign="negative",
             min_drop=MIN_DROP,
         )
-        er_all.extend(er_values.tolist())
+        er_rows = np.asarray(er_mask, dtype=bool)
+        kappa_all.extend(kappa_rows[er_rows].tolist())
         records.append(
             {
                 "path": str(path),
                 "er_mask": np.asarray(er_mask, dtype=bool),
                 "er_signed": np.asarray(er_signed, dtype=float),
+                "kappa": kappa_rows,
                 "es_mask": np.asarray(es_mask, dtype=bool),
                 "es_signed": np.asarray(es_signed, dtype=float),
                 "er_info": er_info,
@@ -597,39 +613,26 @@ def _collect_analysis(csv_paths):
             }
         )
 
-    er_all = np.asarray(er_all, dtype=float)
-    er_all = er_all[np.isfinite(er_all) & (er_all > MIN_DROP)]
-    er_fit = None
-    er_analysis = None
-    if ER_DET_OVERRIDE is not None:
-        er_det = float(ER_DET_OVERRIDE)
-    else:
-        # Drop detection intentionally stops at the first coarse candidate
-        # after the largest adjacent KS decrease.  In particular, it does
-        # not perform the local-minimum search used by the global analysis.
-        er_fit = _fit(er_all, refine=False)
-        er_analysis = er_fit.xmin_analysis
-        interval = er_analysis["simple_drop_details"]["interval_coarse_xmins"]
-        if len(interval) < 2:
-            raise RuntimeError("The drop-detection scan did not produce an interval.")
-        er_det = float(interval[1])
-        # Keep the optional diagnostic fit consistent with the threshold that
-        # is actually used for the reversible/irreversible split.
-        er_fit = Fit(
-            data=er_all,
-            xmin=er_det,
-            xmin_distribution=Truncated_Power_Law.name,
-            verbose=0,
-        )
-
-    er_rev = er_all[er_all < er_det]
-    er_irrev = er_all[er_all >= er_det]
+    kappa_all = np.asarray(kappa_all, dtype=float)
+    kappa_all = kappa_all[np.isfinite(kappa_all) & (kappa_all > MIN_DROP)]
+    kappa_det = (
+        float(KAPPA_DET_OVERRIDE)
+        if KAPPA_DET_OVERRIDE is not None
+        else kappa_detection_threshold()
+    )
+    kappa_rev = kappa_all[kappa_all < kappa_det]
+    kappa_irrev = kappa_all[kappa_all >= kappa_det]
     es_rev = []
     es_irrev = []
     for record in records:
-        er_valid = record["er_mask"] & np.isfinite(record["er_signed"])
-        rev_rows = er_valid & (record["er_signed"] > -er_det)
-        irrev_rows = er_valid & (record["er_signed"] <= -er_det)
+        er_valid = (
+            record["er_mask"]
+            & np.isfinite(record["er_signed"])
+            & np.isfinite(record["kappa"])
+            & (record["kappa"] > MIN_DROP)
+        )
+        rev_rows = er_valid & (record["kappa"] < kappa_det)
+        irrev_rows = er_valid & (record["kappa"] >= kappa_det)
         es_rev_rows = record["es_mask"] & rev_rows
         es_irrev_rows = record["es_mask"] & irrev_rows
         es_rev.extend((-record["es_signed"][es_rev_rows]).tolist())
@@ -671,12 +674,10 @@ def _collect_analysis(csv_paths):
         "raw_steps": raw_steps,
         "raw_info": raw_info,
         "first_strain_limit": first_strain_limit,
-        "er_all": er_all,
-        "er_fit": er_fit,
-        "er_analysis": er_analysis,
-        "er_det": er_det,
-        "er_rev": er_rev,
-        "er_irrev": er_irrev,
+        "kappa_all": kappa_all,
+        "kappa_det": kappa_det,
+        "kappa_rev": kappa_rev,
+        "kappa_irrev": kappa_irrev,
         "es_rev": es_rev,
         "es_irrev": es_irrev,
         "es_fit": es_fit,
@@ -781,28 +782,28 @@ def _format_scientific_math(value, *, decimals=1):
 
 
 def _reversibility_er_panel(analysis):
-    """Show the raw Delta E_R PDF and its drop-detection threshold."""
+    """Show the kappa PDF and its material detection threshold."""
     fig, ax = _new_panel("reversibility_er")
-    er_all = analysis["er_all"]
-    er_det = analysis["er_det"]
+    kappa_all = analysis["kappa_all"]
+    kappa_det = analysis["kappa_det"]
     plot_data_pdf(
         ax,
-        er_all,
-        label="All $\u0394E_R$ events",
+        kappa_all,
+        label="All $\kappa$ events",
         color=ER_ALL_COLOR,
-        drop_label=r"\Delta E_R",
+        drop_label=r"\kappa",
         show_legend=False,
     )
-    _set_pdf_axes(ax, r"\Delta E_R")
+    _set_pdf_axes(ax, r"\kappa")
     lo, hi = ax.get_xlim()
-    ax.axvspan(lo, er_det, color=REVERSIBLE_COLOR, alpha=0.34, zorder=0)
-    ax.axvspan(er_det, hi, color=IRREVERSIBLE_COLOR, alpha=0.30, zorder=0)
+    ax.axvspan(lo, kappa_det, color=REVERSIBLE_COLOR, alpha=0.34, zorder=0)
+    ax.axvspan(kappa_det, hi, color=IRREVERSIBLE_COLOR, alpha=0.30, zorder=0)
     ax.axvline(
-        er_det,
+        kappa_det,
         color=DROP_DETECTION_LINE_COLOR,
         linestyle="--",
         linewidth=1.2,
-        label=rf"$\Delta E_{{R,\mathrm{{det}}}}={_format_scientific_math(er_det)}$",
+        label=rf"$\kappa_{{\det}}={_format_scientific_math(kappa_det)}$",
         zorder=4,
     )
     ax.legend(loc="best", fontsize=5.4)
@@ -810,7 +811,7 @@ def _reversibility_er_panel(analysis):
 
 
 def _reversibility_es_panel(analysis):
-    """Show reversible and irreversible PDFs after the Delta E_R split."""
+    """Show reversible and irreversible PDFs after the kappa split."""
     fig, ax = _new_panel("reversibility_es")
     reversible = analysis["es_rev"]
     irreversible = analysis["es_irrev"]
@@ -1041,10 +1042,11 @@ def _write_analysis_summary(analysis):
     summary = {
         "csv_paths": analysis["csv_paths"],
         "post_yield": True,
-        "number_of_delta_E_R_events": int(analysis["er_all"].size),
-        "delta_E_R_det": analysis["er_det"],
-        "reversible_delta_E_R_events": int(analysis["er_rev"].size),
-        "irreversible_delta_E_R_events": int(analysis["er_irrev"].size),
+        "number_of_kappa_events": int(analysis["kappa_all"].size),
+        "kappa_det": analysis["kappa_det"],
+        "mu": float(2.0 * analysis["kappa_det"]),
+        "reversible_kappa_events": int(analysis["kappa_rev"].size),
+        "irreversible_kappa_events": int(analysis["kappa_irrev"].size),
         "reversible_delta_E_S_events": int(analysis["es_rev"].size),
         "irreversible_delta_E_S_events": int(analysis["es_irrev"].size),
         "xmin_selection_mode": analysis["xmin_selection_mode"],
@@ -1053,7 +1055,7 @@ def _write_analysis_summary(analysis):
         ),
         "xmin_candidate_count": int(analysis["es_analysis"]["xmins"].size),
         "true_global_event_threshold": TRUE_GLOBAL_EVENT_THRESHOLD,
-        "drop_detection_method": ER_DROP_METHOD_LABEL,
+        "kappa_detection_method": KAPPA_DETECTION_METHOD_LABEL,
         "delta_E_S_xmin_ks": analysis["es_xmin_ks"],
         "delta_E_S_xmin_ks_distance": analysis["es_analysis"]["global_min_distance"],
         "delta_E_S_xmin_ks_alpha": float(es_fit_dist.alpha),
@@ -1061,10 +1063,6 @@ def _write_analysis_summary(analysis):
         "delta_E_S_xmin_ks_D": float(es_fit_dist.D),
         "fit_population": "irreversible_delta_E_S",
     }
-    if analysis["er_fit"] is not None:
-        summary["delta_E_R_drop_detection_alpha"] = float(
-            dist_from_fit(analysis["er_fit"]).alpha
-        )
     ANALYSIS_SUMMARY_PATH.write_text(json.dumps(summary, indent=2) + "\n")
     return summary
 

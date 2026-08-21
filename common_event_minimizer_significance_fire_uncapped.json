@@ -1,0 +1,221 @@
+{
+  "csv_path": "/Users/eliaslundheim/work/PhD/SimulationScripts/common_event_minimizer_comparison_all_events.csv",
+  "fire_reruns": {
+    "applied": 30,
+    "root": "/Volumes/data/MTS2D_output/common_event_minimizer_comparison/fire_maxIt_1000000_reruns"
+  },
+  "method": {
+    "multiple_comparisons": "Bonferroni correction across the three planned pairwise tests",
+    "name": "exact paired sign test",
+    "null_hypothesis": "after excluding equal stored energies, either algorithm is lower with probability 0.5 on each event",
+    "ties": "equal stored energies are excluded as unresolved at CSV precision"
+  },
+  "metric": "trajectory_total_energy_minimum",
+  "pairwise_results": [
+    {
+      "bonferroni_adjusted_p_for_3_tests": 7.2920938776156555e-06,
+      "claim": "CG lower than LBFGS",
+      "exact_one_sided_p_supporting_claim": 0.9999996304234147,
+      "exact_one_sided_p_supporting_opposite_order": 1.2153489796026092e-06,
+      "exact_two_sided_sign_test_p": 2.4306979592052185e-06,
+      "left_minus_right": "CG minus LBFGS",
+      "losses_opposing_claim": 63,
+      "resolved_events": 83,
+      "seed_majority_check": {
+        "bonferroni_adjusted_p_for_3_tests": 1.0,
+        "one_sided_p": 1.0,
+        "opposes": 9,
+        "outcomes": [
+          {
+            "outcome": "tie",
+            "seed": 0
+          },
+          {
+            "outcome": "opposes",
+            "seed": 1
+          },
+          {
+            "outcome": "opposes",
+            "seed": 2
+          },
+          {
+            "outcome": "opposes",
+            "seed": 3
+          },
+          {
+            "outcome": "opposes",
+            "seed": 4
+          },
+          {
+            "outcome": "opposes",
+            "seed": 5
+          },
+          {
+            "outcome": "opposes",
+            "seed": 6
+          },
+          {
+            "outcome": "opposes",
+            "seed": 7
+          },
+          {
+            "outcome": "opposes",
+            "seed": 8
+          },
+          {
+            "outcome": "opposes",
+            "seed": 9
+          }
+        ],
+        "resolved": 9,
+        "supports": 0,
+        "tied": 1
+      },
+      "ties_at_csv_precision": 117,
+      "win_fraction": 0.24096385542168675,
+      "win_fraction_wilson_ci_95": [
+        0.16174743841159034,
+        0.34309736055955287
+      ],
+      "wins_supporting_claim": 20
+    },
+    {
+      "bonferroni_adjusted_p_for_3_tests": 0.0009167919827797886,
+      "claim": "FIRE higher than CG",
+      "exact_one_sided_p_supporting_claim": 0.00015279866379663143,
+      "exact_one_sided_p_supporting_opposite_order": 0.9999338889007863,
+      "exact_two_sided_sign_test_p": 0.00030559732759326285,
+      "left_minus_right": "FIRE minus CG",
+      "losses_opposing_claim": 30,
+      "resolved_events": 96,
+      "seed_majority_check": {
+        "bonferroni_adjusted_p_for_3_tests": 0.515625,
+        "one_sided_p": 0.171875,
+        "opposes": 3,
+        "outcomes": [
+          {
+            "outcome": "supports",
+            "seed": 0
+          },
+          {
+            "outcome": "supports",
+            "seed": 1
+          },
+          {
+            "outcome": "supports",
+            "seed": 2
+          },
+          {
+            "outcome": "supports",
+            "seed": 3
+          },
+          {
+            "outcome": "opposes",
+            "seed": 4
+          },
+          {
+            "outcome": "supports",
+            "seed": 5
+          },
+          {
+            "outcome": "opposes",
+            "seed": 6
+          },
+          {
+            "outcome": "supports",
+            "seed": 7
+          },
+          {
+            "outcome": "supports",
+            "seed": 8
+          },
+          {
+            "outcome": "opposes",
+            "seed": 9
+          }
+        ],
+        "resolved": 10,
+        "supports": 7,
+        "tied": 0
+      },
+      "ties_at_csv_precision": 104,
+      "win_fraction": 0.6875,
+      "win_fraction_wilson_ci_95": [
+        0.5890812009308731,
+        0.7714904536224986
+      ],
+      "wins_supporting_claim": 66
+    },
+    {
+      "bonferroni_adjusted_p_for_3_tests": 7.677648922339757e-07,
+      "claim": "FIRE higher than LBFGS",
+      "exact_one_sided_p_supporting_claim": 1.2796081537232927e-07,
+      "exact_one_sided_p_supporting_opposite_order": 0.9999999530234139,
+      "exact_two_sided_sign_test_p": 2.5592163074465855e-07,
+      "left_minus_right": "FIRE minus LBFGS",
+      "losses_opposing_claim": 36,
+      "resolved_events": 131,
+      "seed_majority_check": {
+        "bonferroni_adjusted_p_for_3_tests": 0.0029296875,
+        "one_sided_p": 0.0009765625,
+        "opposes": 0,
+        "outcomes": [
+          {
+            "outcome": "supports",
+            "seed": 0
+          },
+          {
+            "outcome": "supports",
+            "seed": 1
+          },
+          {
+            "outcome": "supports",
+            "seed": 2
+          },
+          {
+            "outcome": "supports",
+            "seed": 3
+          },
+          {
+            "outcome": "supports",
+            "seed": 4
+          },
+          {
+            "outcome": "supports",
+            "seed": 5
+          },
+          {
+            "outcome": "supports",
+            "seed": 6
+          },
+          {
+            "outcome": "supports",
+            "seed": 7
+          },
+          {
+            "outcome": "supports",
+            "seed": 8
+          },
+          {
+            "outcome": "supports",
+            "seed": 9
+          }
+        ],
+        "resolved": 10,
+        "supports": 10,
+        "tied": 0
+      },
+      "ties_at_csv_precision": 69,
+      "win_fraction": 0.7251908396946565,
+      "win_fraction_wilson_ci_95": [
+        0.6431537162063814,
+        0.7943971714509188
+      ],
+      "wins_supporting_claim": 95
+    }
+  ],
+  "selection": {
+    "criterion": "all three algorithms have the same first_drop_load_step",
+    "n_selected": 200
+  }
+}

@@ -29,6 +29,7 @@ from Plotting.energyDropCalculations import (
     validate_sigma12_column,
 )
 from Plotting.plotPowerLaw import dist_from_fit, make_fit
+from Plotting.standardPowerlaw import kappa_from_relaxation_energy
 
 
 PROTOCOLS = (
@@ -47,7 +48,7 @@ PROTOCOL_DROP_SYMBOLS = {
     "initial_guess_energy": r"\Delta E_R",
 }
 REGIMES = {"pre": (0.15, 0.5), "post": (0.7, 1.0)}
-CACHE_VERSION = 2
+CACHE_VERSION = 3  # adds event-level kappa to the paired-drop cache
 COLLAPSE_CACHE_VERSION = 3
 EXPONENT_RANGE = (0.5, 2.5)
 DIMENSION_RANGE = (0.25, 2.25)
@@ -203,6 +204,11 @@ def _read_energy_step_values(path: Path, size: int):
             df["total_e_change_from_init"], dtype=float
         )[1:],
     }
+    values["kappa"] = kappa_from_relaxation_energy(
+        values["initial_guess_energy"],
+        np.asarray(steps["delta_gamma"], dtype=float),
+        float(size * size),
+    )
     invalid_rows = (
         df["avg_sigma12"].to_numpy(dtype=float) == SIGMA12_RESCUE_SENTINEL
     )
@@ -210,6 +216,8 @@ def _read_energy_step_values(path: Path, size: int):
     for protocol in ("previous_energy", "initial_guess_energy"):
         values[protocol] = values[protocol].copy()
         values[protocol][invalid_steps] = np.nan
+    values["kappa"] = values["kappa"].copy()
+    values["kappa"][invalid_steps] = np.nan
 
     for protocol, drops in values.items():
         if drops.shape != step_load.shape:
@@ -270,6 +278,7 @@ def extract_event_pairs(path: Path, size: int, regimes, cache_dir: Path, force=F
         )
         extracted[f"initial_guess_energy_{regime}"] = e_r[mask]
         extracted[f"second_order_{regime}"] = e_s[mask]
+        extracted[f"kappa_{regime}"] = values["kappa"][mask]
     np.savez_compressed(cache_path, **extracted)
     return extracted
 
@@ -277,7 +286,7 @@ def extract_event_pairs(path: Path, size: int, regimes, cache_dir: Path, force=F
 def pool_event_pairs(paths_by_size, regimes, cache_dir: Path, force=False):
     """Pool E_R/E_S event pairs by system size and strain regime."""
     pooled = {
-        regime: {size: {"initial_guess_energy": [], "second_order": []}
+        regime: {size: {"initial_guess_energy": [], "second_order": [], "kappa": []}
                  for size in paths_by_size}
         for regime in regimes
     }
@@ -296,11 +305,15 @@ def pool_event_pairs(paths_by_size, regimes, cache_dir: Path, force=False):
             for protocol in ("initial_guess_energy", "second_order"):
                 arrays = [run[f"{protocol}_{regime}"] for run in per_run]
                 pooled[regime][size][protocol] = np.concatenate(arrays)
+            pooled[regime][size]["kappa"] = np.concatenate(
+                [run[f"kappa_{regime}"] for run in per_run]
+            )
             e_r = pooled[regime][size]["initial_guess_energy"]
             e_s = pooled[regime][size]["second_order"]
-            if e_r.shape != e_s.shape:
+            kappa = pooled[regime][size]["kappa"]
+            if e_r.shape != e_s.shape or e_r.shape != kappa.shape:
                 raise RuntimeError(
-                    f"Aligned E_R/E_S shape mismatch for L={size}, {regime}."
+                    f"Aligned E_R/E_S/kappa shape mismatch for L={size}, {regime}."
                 )
     return pooled
 

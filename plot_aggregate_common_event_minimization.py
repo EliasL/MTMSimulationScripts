@@ -128,6 +128,18 @@ def load_trajectory_from_archive(
     return prepare_trajectory(calls, energy, label, use_running_minimum)
 
 
+def load_trajectory_from_archive_or_path(
+    result: dict,
+    archive: zipfile.ZipFile,
+    seed_name: str,
+    use_running_minimum: bool,
+) -> tuple[np.ndarray, np.ndarray]:
+    csv_path = Path(result["minimization_directories"][0]) / "macroData.csv"
+    if csv_path.is_file():
+        return load_trajectory_from_path(result, use_running_minimum)
+    return load_trajectory_from_archive(result, archive, seed_name, use_running_minimum)
+
+
 def normalized_event(
     results: dict,
     trajectory_loader,
@@ -186,11 +198,49 @@ def has_same_first_drop_load(results: dict) -> bool:
     return len(set(loads)) == 1
 
 
+def load_fire_reruns(rerun_root: Path | None) -> dict[str, dict]:
+    if rerun_root is None:
+        return {}
+    if not rerun_root.is_dir():
+        raise FileNotFoundError(rerun_root)
+    reruns = {}
+    for manifest_path in rerun_root.rglob("rerun_manifest.json"):
+        event_id = str(manifest_path.parent.relative_to(rerun_root))
+        payload = json.loads(manifest_path.read_text())
+        result = payload.get("rerun_fire_result")
+        if not isinstance(result, dict) or result.get("algorithm") != "FIRE":
+            raise ValueError(f"Invalid FIRE rerun manifest: {manifest_path}")
+        if event_id in reruns:
+            raise ValueError(f"Duplicate FIRE rerun for {event_id}")
+        reruns[event_id] = result
+    if not reruns:
+        raise ValueError(f"No FIRE rerun manifests found in {rerun_root}")
+    return reruns
+
+
+def replace_fire_result(results: dict, event_id: str, reruns: dict[str, dict]) -> dict:
+    rerun = reruns.get(event_id)
+    if rerun is None:
+        return results
+    original = results["FIRE"]
+    original_step = int(original["first_drop"]["load_step"])
+    rerun_step = int(rerun["first_drop"]["load_step"])
+    original_load = float(original["first_drop"]["load"])
+    rerun_load = float(rerun["first_drop"]["load"])
+    if original_step != rerun_step or original_load != rerun_load:
+        raise ValueError(
+            f"FIRE rerun changes the detected drop for {event_id}: "
+            f"step/load {original_step}/{original_load} -> {rerun_step}/{rerun_load}"
+        )
+    return {**results, "FIRE": rerun}
+
+
 def events_from_directory(
     seed_root: Path,
     use_running_minimum: bool,
     same_first_drop_load: bool,
     excluded_events: set[str],
+    fire_reruns: dict[str, dict],
 ) -> list[dict]:
     events = []
     for manifest_path in sorted(seed_root.glob("event_*/event_manifest.json")):
@@ -201,6 +251,7 @@ def events_from_directory(
         results = completed_results(payload, str(manifest_path))
         if results is None:
             continue
+        results = replace_fire_result(results, event_id, fire_reruns)
         if same_first_drop_load and not has_same_first_drop_load(results):
             continue
         events.append(
@@ -214,6 +265,7 @@ def events_from_archive(
     use_running_minimum: bool,
     same_first_drop_load: bool,
     excluded_events: set[str],
+    fire_reruns: dict[str, dict],
 ) -> list[dict]:
     seed_name = archive_path.stem
     events = []
@@ -232,9 +284,10 @@ def events_from_archive(
             results = completed_results(payload, f"{archive_path}:{member}")
             if results is None:
                 continue
+            results = replace_fire_result(results, event_id, fire_reruns)
             if same_first_drop_load and not has_same_first_drop_load(results):
                 continue
-            loader = lambda result, running: load_trajectory_from_archive(
+            loader = lambda result, running: load_trajectory_from_archive_or_path(
                 result, archive, seed_name, running
             )
             events.append(
@@ -248,6 +301,7 @@ def collect_events(
     use_running_minimum: bool,
     same_first_drop_load: bool = False,
     excluded_events: set[str] | None = None,
+    fire_rerun_root: Path | None = None,
 ) -> list[dict]:
     return collect_events_with_cache(
         data_root,
@@ -255,6 +309,7 @@ def collect_events(
         None,
         same_first_drop_load,
         excluded_events,
+        fire_rerun_root,
     )
 
 
@@ -263,6 +318,7 @@ def cache_source_signature(
     use_running_minimum: bool,
     same_first_drop_load: bool,
     excluded_events: set[str],
+    fire_rerun_root: Path | None,
 ) -> str:
     data_root = data_root.resolve()
     if data_root.name.startswith("seed_") and data_root.is_dir():
@@ -272,6 +328,10 @@ def cache_source_signature(
         source_paths.extend(data_root.glob("seed_*.zip"))
     else:
         raise ValueError(f"Expected a seed directory or comparison-data root: {data_root}")
+    if fire_rerun_root is not None:
+        if not fire_rerun_root.is_dir():
+            raise FileNotFoundError(fire_rerun_root)
+        source_paths.extend(path for path in fire_rerun_root.rglob("*") if path.is_file())
 
     files = []
     for path in sorted(source_paths, key=str):
@@ -284,7 +344,8 @@ def cache_source_signature(
             "use_running_minimum": use_running_minimum,
             "same_first_drop_load": same_first_drop_load,
             "excluded_events": sorted(excluded_events),
-            "version": 3,
+            "fire_rerun_root": None if fire_rerun_root is None else str(fire_rerun_root.resolve()),
+            "version": 4,
         },
         sort_keys=True,
     )
@@ -343,14 +404,17 @@ def collect_events_with_cache(
     cache_path: Path | None,
     same_first_drop_load: bool = False,
     excluded_events: set[str] | None = None,
+    fire_rerun_root: Path | None = None,
 ) -> list[dict]:
     excluded_events = set() if excluded_events is None else set(excluded_events)
+    fire_reruns = load_fire_reruns(fire_rerun_root)
     source_signature = (
         cache_source_signature(
             data_root,
             use_running_minimum,
             same_first_drop_load,
             excluded_events,
+            fire_rerun_root,
         )
         if cache_path is not None
         else None
@@ -367,6 +431,7 @@ def collect_events_with_cache(
             use_running_minimum,
             same_first_drop_load,
             excluded_events,
+            fire_reruns,
         )
     elif (data_root / "seed_0").is_dir():
         events = events_from_directory(
@@ -374,6 +439,7 @@ def collect_events_with_cache(
             use_running_minimum,
             same_first_drop_load,
             excluded_events,
+            fire_reruns,
         )
         for archive_path in sorted(data_root.glob("seed_*.zip")):
             events.extend(
@@ -382,6 +448,7 @@ def collect_events_with_cache(
                     use_running_minimum,
                     same_first_drop_load,
                     excluded_events,
+                    fire_reruns,
                 )
             )
     else:
@@ -521,6 +588,7 @@ def plot_seed(
     cache_path: Path | None = None,
     same_first_drop_load: bool = False,
     excluded_events: set[str] | None = None,
+    fire_rerun_root: Path | None = None,
 ) -> None:
     plot_events(
         collect_events_with_cache(
@@ -529,6 +597,7 @@ def plot_seed(
             cache_path,
             same_first_drop_load,
             excluded_events,
+            fire_rerun_root,
         ),
         output,
     )
@@ -566,6 +635,11 @@ def main() -> None:
         metavar="SEED/EVENT",
         help="Exclude a specific event identifier; may be repeated.",
     )
+    parser.add_argument(
+        "--fire-rerun-root",
+        type=Path,
+        help="Replace capped FIRE trajectories with reruns from this directory.",
+    )
     args = parser.parse_args()
     if args.no_cache and args.cache is not None:
         parser.error("--cache and --no-cache cannot be used together")
@@ -579,6 +653,7 @@ def main() -> None:
         cache_path=cache_path,
         same_first_drop_load=args.same_first_drop_load,
         excluded_events=set(args.exclude_event),
+        fire_rerun_root=args.fire_rerun_root,
     )
 
 

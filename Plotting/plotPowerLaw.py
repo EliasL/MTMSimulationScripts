@@ -5,7 +5,7 @@ xmin strategies.  ``plot_powerlaw`` and ``make_fit`` are low-level generic
 helpers: they fit the array supplied by the caller and do not classify
 reversible versus irreversible events.  For the standard simulation
 energy-drop result, callers must first use the post-yield
-:math:`\\Delta E_R` ``simpleDrop`` split, fit only the irreversible
+:math:`\\kappa` detector with ``kappa_det = mu/2``, fit only the irreversible
 :math:`\\Delta E_S` events, search every observed candidate for the global
 xmin, and then perform the maximum-likelihood fit.  The shared message is
 also summarized in the ``Standard power-law energy-drop workflow`` section
@@ -2789,7 +2789,7 @@ def make_fit(
 ) -> Fit:
     """Fit the supplied positive population at a fixed or searched xmin.
 
-    This helper does not perform the standard Delta E_R classification or
+    This helper does not perform the standard kappa classification or
     choose the irreversible Delta E_S population.
     """
     if xmin_range is not None:
@@ -2801,10 +2801,10 @@ def make_fit(
         xmin_range = float(xmin_range)
         if not np.isfinite(xmin_range) or xmin_range <= 0:
             raise ValueError("A fixed xmin must be finite and positive.")
-    if xmin_selection not in {"simpleDrop", "global"}:
+    if xmin_selection not in {"simpleDrop", "rapidGlobal", "global"}:
         raise ValueError(
             f"Unsupported xmin_selection: {xmin_selection!r}. "
-            "Use 'simpleDrop' or 'global'."
+            "Use 'simpleDrop', 'rapidGlobal', or 'global'."
         )
     if xmin_search_mode not in {"full", "rapid"}:
         raise ValueError("xmin_search_mode must be either 'full' or 'rapid'.")
@@ -2817,6 +2817,7 @@ def make_fit(
             f"xmin_search_kwargs must not override {sorted(forbidden)}."
         )
     parallel_xmin = bool(parallel_xmin)
+    global_mode = "global" if xmin_selection == "global" else "rapidGlobal"
 
     # --- try cache
     cache_path = None
@@ -2830,7 +2831,7 @@ def make_fit(
         cache_path = _get_cache_path(
             cache_dir,
             data,
-            f"canonical-simpleDrop-v11-raw-adjacent-full-neighbor-tail100-search:{xmin_search_mode}:{distType.name}:{xmin_range}:"
+            f"canonical-simpleDrop-v12-global-modes:{xmin_search_mode}:{distType.name}:{xmin_range}:"
             f"{xmin_selection}:"
             f"{parallel_xmin}:{search_kwargs}",
         )
@@ -2895,6 +2896,8 @@ def make_fit(
                 progress=True,
                 progress_label=progress_label,
             )
+        if xmin_selection in {"rapidGlobal", "global"}:
+            analysis_kwargs["global_mode"] = global_mode
         xmin_analysis = analyze_xmin(
             data,
             distType=distType,
@@ -2902,7 +2905,9 @@ def make_fit(
             **analysis_kwargs,
         )
         xmin_range = xmin_analysis[
-            "global_min_xmin" if xmin_selection == "global" else "simple_drop_xmin"
+            "global_min_xmin"
+            if xmin_selection in {"rapidGlobal", "global"}
+            else "simple_drop_xmin"
         ]
 
     fitObj = Fit(
@@ -3793,7 +3798,11 @@ def plot_powerlaw_compare(
     if not colors:
         colors = list(MINIMIZER_COLORS.values())
 
-    selected_tag = "globalMin" if xmin_selection == "global" else "simpleDrop"
+    selected_tag = (
+        xmin_selection
+        if xmin_selection in {"global", "rapidGlobal"}
+        else "simpleDrop"
+    )
     compare_infos = []
     compare_fits = []
     legend_handles = []
@@ -3909,7 +3918,9 @@ def plot_powerlaw_compare(
         xmin_analysis = getattr(fit, "xmin_analysis", None)
         if xmin_analysis is not None and xmin_global_differs(xmin_analysis):
             comparison_key = (
-                "simple_drop_xmin" if xmin_selection == "global" else "global_min_xmin"
+                "simple_drop_xmin"
+                if xmin_selection in {"global", "rapidGlobal"}
+                else "global_min_xmin"
             )
             ax.axvline(
                 xmin_analysis[comparison_key],
@@ -4062,7 +4073,11 @@ def plot_powerlaw(
         xmin_search_kwargs=xmin_search_kwargs,
         xmin_selection=xmin_selection,
     )
-    selected_tag = "globalMin" if xmin_selection == "global" else "simpleDrop"
+    selected_tag = (
+        xmin_selection
+        if xmin_selection in {"global", "rapidGlobal"}
+        else "simpleDrop"
+    )
     print(f"{selected_tag} xmin:", reported_fit.xmin)
     xmin_analysis = getattr(reported_fit, "xmin_analysis", None)
     if xmin_analysis is not None:

@@ -179,8 +179,21 @@ def align_periodic_states(
     return dict(states)
 
 
-def calculate_event_displacements(states: Mapping[str, MeshState]) -> EventDisplacements:
-    """Calculate x2-x1, x4-x3 and x4-x0 after removing mean translation."""
+def calculate_event_displacements(
+    states: Mapping[str, MeshState],
+    *,
+    periodic_vectors: tuple[np.ndarray, np.ndarray] | None = None,
+) -> EventDisplacements:
+    """Calculate protocol displacements after matching persistent point identities.
+
+    Reconnection can insert or remove periodic-image entries, so the point
+    arrays need not have identical lengths or ordering.  ``refIndex`` remains
+    the physical node identity; within one identity, periodic duplicate images
+    are paired by nearest Cartesian position.  Entries with no counterpart are
+    returned as ``NaN`` and are ignored by the arrow renderer.  When supplied,
+    ``periodic_vectors`` gives the two lattice vectors used to compare
+    periodic-image copies in different VTU files.
+    """
 
     required = {
         "state0_min_gamma",
@@ -197,18 +210,60 @@ def calculate_event_displacements(states: Mapping[str, MeshState]) -> EventDispl
     state2 = states["state2_relaxed_gamma_plus"]
     state3 = states["state3_affine_gamma_minus"]
     state4 = states["state4_relaxed_gamma"]
-    if not all(state.points.shape == state0.points.shape for state in states.values()):
-        raise ValueError("Event states have different point shapes.")
+    if periodic_vectors is None:
+        periodic_shifts = np.zeros((1, 2), dtype=float)
+    else:
+        vectors = np.asarray(periodic_vectors, dtype=float)
+        if vectors.shape != (2, 2) or not np.all(np.isfinite(vectors)):
+            raise ValueError("periodic_vectors must contain two finite 2D vectors.")
+        periodic_shifts = np.asarray(
+            [i * vectors[0] + j * vectors[1] for i in range(-2, 3) for j in range(-2, 3)],
+            dtype=float,
+        )
 
-    def centered(first, second):
-        difference = np.asarray(second - first, dtype=float)
-        difference -= np.mean(difference, axis=0, keepdims=True)
+    def matched_difference(first: MeshState, second: MeshState) -> np.ndarray:
+        if first.points.ndim != 2 or second.points.ndim != 2:
+            raise ValueError("Event-state point arrays must be two-dimensional.")
+        if first.points.shape[1] != 2 or second.points.shape[1] != 2:
+            raise ValueError("Event-state point arrays must contain 2D coordinates.")
+        if first.reference_indices.shape != (len(first.points),):
+            raise ValueError("The first event state has invalid refIndex data.")
+        if second.reference_indices.shape != (len(second.points),):
+            raise ValueError("The second event state has invalid refIndex data.")
+        difference = np.full(first.points.shape, np.nan, dtype=float)
+        second_by_reference: dict[int, list[int]] = {}
+        for index, reference in enumerate(second.reference_indices):
+            second_by_reference.setdefault(int(reference), []).append(index)
+        for reference in np.unique(first.reference_indices):
+            first_indices = np.flatnonzero(first.reference_indices == reference)
+            second_indices = np.asarray(
+                second_by_reference.get(int(reference), []), dtype=int
+            )
+            if second_indices.size == 0:
+                continue
+            # Periodic duplicate images share refIndex.  Pair the nearest
+            # unused image; each group has at most three entries in MTS2D.
+            for first_index in first_indices:
+                candidates = second.points[second_indices, None, :] + periodic_shifts[None, :, :]
+                distances = np.linalg.norm(
+                    candidates - first.points[first_index], axis=2
+                )
+                second_position, shift_position = np.unravel_index(
+                    int(np.argmin(distances)), distances.shape
+                )
+                difference[first_index] = (
+                    candidates[second_position, shift_position] - first.points[first_index]
+                )
+        valid = np.all(np.isfinite(difference), axis=1)
+        if not np.any(valid):
+            raise ValueError("No persistent point identities were found between event states.")
+        difference[valid] -= np.mean(difference[valid], axis=0, keepdims=True)
         return difference
 
     return EventDisplacements(
-        forward_relaxation=centered(state1.points, state2.points),
-        backward_relaxation=centered(state3.points, state4.points),
-        closure_residual=centered(state0.points, state4.points),
+        forward_relaxation=matched_difference(state1, state2),
+        backward_relaxation=matched_difference(state3, state4),
+        closure_residual=matched_difference(state0, state4),
     )
 
 
@@ -316,6 +371,18 @@ def _periodic_unit_cell_centres(
         polygons - polygons[:, :1] - np.round(polygons - polygons[:, :1])
     )
     return np.mod(np.mean(unwrapped, axis=1), 1.0)
+
+
+def periodic_triangle_centres(
+    state: MeshState, *, load: float, box_size: float
+) -> np.ndarray:
+    """Return triangle centres in one deformed physical periodic cell."""
+
+    unit_centres = _periodic_unit_cell_centres(state, load=load, box_size=box_size)
+    origin = _central_periodic_box_origin(state, load=load, box_size=box_size)
+    a = np.array([box_size, 0.0])
+    b = np.array([load * box_size, box_size])
+    return origin + unit_centres[:, :1] * a + unit_centres[:, 1:] * b
 
 
 def calculate_periodic_energy_change_field(
@@ -692,6 +759,79 @@ def choose_energy_density_zoom(
     )
 
 
+def _visible_displacement_vectors(
+    origins: np.ndarray,
+    displacement: np.ndarray,
+    zoom: ZoomRegion,
+    *,
+    periodic_vectors: tuple[np.ndarray, np.ndarray] | None = None,
+    reference_indices: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the same viewport-visible vectors used for scaling and drawing."""
+
+    origins = np.asarray(origins, dtype=float)
+    displacement = np.asarray(displacement, dtype=float)
+    if origins.shape != displacement.shape or origins.ndim != 2 or origins.shape[1] != 2:
+        raise ValueError("Origins and displacements must both have shape (N, 2).")
+    if reference_indices is not None:
+        reference_indices = np.asarray(reference_indices).reshape(-1)
+        if reference_indices.shape != (len(origins),):
+            raise ValueError("One reference index is required for every origin.")
+        _, unique_positions = np.unique(reference_indices, return_index=True)
+        unique_positions.sort()
+        origins = origins[unique_positions]
+        displacement = displacement[unique_positions]
+
+    if periodic_vectors is None:
+        candidate_origins = origins
+        candidate_displacements = displacement
+    else:
+        if len(periodic_vectors) != 2:
+            raise ValueError("Exactly two periodic vectors are required.")
+        a, b = (np.asarray(vector, dtype=float) for vector in periodic_vectors)
+        if a.shape != (2,) or b.shape != (2,):
+            raise ValueError("Periodic vectors must be two-dimensional.")
+        basis = np.column_stack((a, b))
+        if not np.all(np.isfinite(basis)) or abs(np.linalg.det(basis)) < 1e-12:
+            raise ValueError("Periodic vectors must form a finite nonsingular basis.")
+        center = np.asarray(zoom.center, dtype=float)
+        fractional = np.linalg.solve(basis, (origins - center).T).T
+        nearest = np.rint(fractional).astype(int)
+        tiled_origins = []
+        tiled_displacements = []
+        for di in range(-2, 3):
+            for dj in range(-2, 3):
+                shifted = (
+                    origins
+                    - (nearest[:, :1] + di) * a
+                    - (nearest[:, 1:] + dj) * b
+                )
+                inside = (
+                    (shifted[:, 0] >= zoom.xlim[0])
+                    & (shifted[:, 0] <= zoom.xlim[1])
+                    & (shifted[:, 1] >= zoom.ylim[0])
+                    & (shifted[:, 1] <= zoom.ylim[1])
+                )
+                if np.any(inside):
+                    tiled_origins.append(shifted[inside])
+                    tiled_displacements.append(displacement[inside])
+        if not tiled_origins:
+            return np.empty((0, 2)), np.empty((0, 2))
+        candidate_origins = np.concatenate(tiled_origins)
+        candidate_displacements = np.concatenate(tiled_displacements)
+
+    finite = np.all(np.isfinite(candidate_origins), axis=1) & np.all(
+        np.isfinite(candidate_displacements), axis=1
+    )
+    inside = finite & (
+        (candidate_origins[:, 0] >= zoom.xlim[0])
+        & (candidate_origins[:, 0] <= zoom.xlim[1])
+        & (candidate_origins[:, 1] >= zoom.ylim[0])
+        & (candidate_origins[:, 1] <= zoom.ylim[1])
+    )
+    return candidate_origins[inside], candidate_displacements[inside]
+
+
 def choose_arrow_scale(
     displacement: np.ndarray,
     *,
@@ -711,6 +851,34 @@ def choose_arrow_scale(
     rounded_mantissa = min((1.0, 2.0, 5.0, 10.0), key=lambda value: abs(value - mantissa))
     amplification = float(rounded_mantissa * 10**exponent)
     return ArrowScale(amplification, q95, target_element_fraction)
+
+
+def choose_zoom_arrow_scale(
+    origins: np.ndarray,
+    displacement: np.ndarray,
+    *,
+    zoom: ZoomRegion,
+    element_length: float,
+    target_element_fraction: float = 1.0 / 3.0,
+    periodic_vectors: tuple[np.ndarray, np.ndarray] | None = None,
+    reference_indices: np.ndarray | None = None,
+) -> ArrowScale:
+    """Choose a displacement scale from only the vectors visible in ``zoom``."""
+
+    _visible_origins, visible_displacement = _visible_displacement_vectors(
+        origins,
+        displacement,
+        zoom,
+        periodic_vectors=periodic_vectors,
+        reference_indices=reference_indices,
+    )
+    if not len(visible_displacement):
+        raise ValueError("No finite displacement origins lie inside the local window.")
+    return choose_arrow_scale(
+        visible_displacement,
+        element_length=element_length,
+        target_element_fraction=target_element_fraction,
+    )
 
 
 def plot_energy_change_background(
@@ -793,25 +961,24 @@ def plot_displacement_arrows(
     key_label: str | None = None,
     key_position: tuple[float, float] = (0.05, 0.90),
     rasterized: bool = False,
+    periodic_vectors: tuple[np.ndarray, np.ndarray] | None = None,
+    reference_indices: np.ndarray | None = None,
 ):
     """Overlay amplified arrows and optionally an unscaled physical key."""
 
-    origins = np.asarray(origins, dtype=float)
-    displacement = np.asarray(displacement, dtype=float)
-    if origins.shape != displacement.shape or origins.ndim != 2 or origins.shape[1] != 2:
-        raise ValueError("Origins and displacements must both have shape (N, 2).")
-    inside = (
-        (origins[:, 0] >= zoom.xlim[0])
-        & (origins[:, 0] <= zoom.xlim[1])
-        & (origins[:, 1] >= zoom.ylim[0])
-        & (origins[:, 1] <= zoom.ylim[1])
+    origins, displacement = _visible_displacement_vectors(
+        origins,
+        displacement,
+        zoom,
+        periodic_vectors=periodic_vectors,
+        reference_indices=reference_indices,
     )
     vectors = displacement * arrow_scale.amplification
     quiver = ax.quiver(
-        origins[inside, 0],
-        origins[inside, 1],
-        vectors[inside, 0],
-        vectors[inside, 1],
+        origins[:, 0],
+        origins[:, 1],
+        vectors[:, 0],
+        vectors[:, 1],
         color="black",
         angles="xy",
         scale_units="xy",

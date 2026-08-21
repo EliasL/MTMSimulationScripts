@@ -80,7 +80,6 @@ PARALLEL_UNUSED_CORES = 2
 
 EVALUATION_CACHE_VERSION = "v2"
 CLAUSET_EVALUATION_PROTOCOL = "clauset-semiparametric-refit-xmin"
-RAPID_BOOTSTRAP_NR_INITIAL = 20
 
 
 # Let me know if there is a simpler way to get the xmin_distribution with fit values
@@ -211,7 +210,8 @@ def _clauset_refit_xmin_task(args):
         # Compatibility with a parent process that was started before the
         # bootstrap xmin-mode field was added.
         sample, dist_type, xmax, selection_kwargs, parameter_names = args
-        xmin_search_mode = "full"
+        xmin_search_mode = "rapid"
+        xmin_selection = "rapidGlobal"
     elif len(args) == 6:
         (
             sample,
@@ -221,6 +221,15 @@ def _clauset_refit_xmin_task(args):
             parameter_names,
             xmin_search_mode,
         ) = args
+        requested_mode = xmin_search_mode
+        if requested_mode in {"full", "global"}:
+            xmin_search_mode = "full"
+            xmin_selection = "global"
+        elif requested_mode in {"rapid", "rapidGlobal"}:
+            xmin_search_mode = "rapid"
+            xmin_selection = "rapidGlobal"
+        else:
+            raise ValueError(f"Unexpected bootstrap xmin mode: {requested_mode!r}")
     else:
         raise ValueError(f"Unexpected Clauset bootstrap task length: {len(args)}")
     from Plotting.plotPowerLaw import make_fit
@@ -230,7 +239,7 @@ def _clauset_refit_xmin_task(args):
         distType=dist_type,
         use_cache=False,
         parallel_xmin=False,
-        xmin_selection="global",
+        xmin_selection=xmin_selection,
         xmin_search_kwargs=selection_kwargs,
         xmin_search_mode=xmin_search_mode,
     )
@@ -1441,7 +1450,7 @@ class Fit(powerlaw.Fit):
         use_cache=True,
         cache_dir=".eval_cache",
         tqdmDesc="",
-        xmin_mode="full",
+        xmin_mode="global",
     ):
         """Evaluate the semiparametric Clauset p-value for a global-xmin fit.
 
@@ -1453,12 +1462,14 @@ class Fit(powerlaw.Fit):
         import json
         from concurrent.futures import ProcessPoolExecutor
 
-        if xmin_mode not in {"full", "rapid"}:
-            raise ValueError("xmin_mode must be either 'full' or 'rapid'.")
-        if getattr(self, "xmin_selection", None) != "global":
+        if xmin_mode in {"full", "rapid"}:
+            xmin_mode = {"full": "global", "rapid": "rapidGlobal"}[xmin_mode]
+        if xmin_mode not in {"global", "rapidGlobal"}:
+            raise ValueError("xmin_mode must be either 'global' or 'rapidGlobal'.")
+        if getattr(self, "xmin_selection", None) not in {"global", "rapidGlobal"}:
             raise ValueError(
                 "Clauset p-value evaluation requires a fit made with "
-                "xmin_selection='global'."
+                "xmin_selection='global' or 'rapidGlobal'."
             )
         analysis = getattr(self, "xmin_analysis", None)
         if not isinstance(analysis, dict):
@@ -1493,8 +1504,6 @@ class Fit(powerlaw.Fit):
 
         nr_sets = max(1, int(1 / (4 * confidence**2)))
         nr_initial = int(analysis["nr_initial"])
-        if xmin_mode == "rapid":
-            nr_initial = min(nr_initial, RAPID_BOOTSTRAP_NR_INITIAL)
         selection_kwargs = {
             "nr_initial": nr_initial,
             "min_tail_count": int(analysis["min_tail_count"]),
@@ -1502,7 +1511,9 @@ class Fit(powerlaw.Fit):
             "refine": analysis["refinement"] == "refined",
             "progress": False,
         }
-        protocol_mode = "" if xmin_mode == "full" else f"-{xmin_mode}"
+        protocol_mode = (
+            "-global" if xmin_mode == "global" else "-rapidGlobal"
+        )
         evaluation_protocol = (
             f"{CLAUSET_EVALUATION_PROTOCOL}-{EVALUATION_CACHE_VERSION}"
             f"{protocol_mode}:{json.dumps(selection_kwargs, sort_keys=True)}"

@@ -2,7 +2,7 @@
 
 The functions are intentionally general and expose several alternative
 selection strategies.  The standard simulation workflow is to split paired
-post-yield events with ``Delta E_R`` ``simpleDrop``, fit only irreversible
+post-yield events with ``kappa_det = mu/2``, fit only irreversible
 ``Delta E_S`` events, evaluate every observed candidate for the global xmin,
 and then perform the maximum-likelihood fit.  Callers using another strategy
 or population should state that choice explicitly.
@@ -3098,6 +3098,68 @@ def find_xmin_refined_global_min_from_results(
     return float(selected_xmin), details
 
 
+def find_xmin_exhaustive_global_min(
+    drops,
+    *,
+    min_tail_count=100,
+    distType=Truncated_Power_Law,
+    parallel=False,
+    max_xmin=None,
+    progress=False,
+    progress_label="global xmin",
+):
+    """Evaluate every eligible observed xmin and select the smallest KS D."""
+    drops = np.asarray(drops, dtype=float)
+    drops = drops[np.isfinite(drops) & (drops > 0)]
+    min_tail_count = int(min_tail_count)
+    if min_tail_count < 3:
+        raise ValueError("min_tail_count must be at least three.")
+    fine_xmins = _fine_xmin_candidates(drops, min_tail_count)
+    if max_xmin is not None:
+        max_xmin = float(max_xmin)
+        if not np.isfinite(max_xmin) or max_xmin <= 0:
+            raise ValueError("max_xmin must be finite and positive.")
+        fine_xmins = fine_xmins[fine_xmins <= max_xmin]
+    if fine_xmins.size < 2:
+        raise RuntimeError("Need at least two eligible observed xmin candidates.")
+
+    distances, param_vals, valid_fits = evaluate_xmin_distances(
+        drops,
+        fine_xmins,
+        distType=distType,
+        parallel=parallel,
+        progress=progress,
+        progress_label=progress_label,
+    )
+    distances = np.asarray(distances, dtype=float)
+    valid_fits = np.asarray(valid_fits, dtype=bool)
+    search_mask = np.isfinite(distances) & valid_fits
+    if not np.any(search_mask):
+        raise RuntimeError("No finite valid KS distances were found.")
+    selected_index = int(np.flatnonzero(search_mask)[np.argmin(distances[search_mask])])
+    details = {
+        "xmins": fine_xmins,
+        "distances": distances,
+        "param_vals": param_vals,
+        "valid_fits": valid_fits,
+        "search_mask": search_mask,
+        "tail_counts": np.asarray(
+            [np.count_nonzero(drops >= xmin) for xmin in fine_xmins],
+            dtype=int,
+        ),
+        "selected_distance": float(distances[selected_index]),
+        "initial_measurement_count": int(fine_xmins.size),
+        "fine_candidate_source": "sorted_unique_observed_drops",
+        "fine_candidate_count": int(fine_xmins.size),
+        "fine_step": "exhaustive_observed_candidates",
+        "evaluated_xmins": fine_xmins[search_mask].tolist(),
+        "evaluated_distances": distances[search_mask].tolist(),
+        "selection_max_xmin": max_xmin,
+        "refinement": "exhaustive",
+    }
+    return float(fine_xmins[selected_index]), details
+
+
 def select_global_min_from_search_details(*search_details):
     """Choose the smallest KS result after all supplied searches have run."""
     all_evaluations = {}
@@ -3137,8 +3199,9 @@ def analyze_xmin(
     refine=True,
     progress=False,
     progress_label="xmin",
+    global_mode="rapidGlobal",
 ):
-    """Run the canonical raw-adjacent simpleDrop and global-min analysis."""
+    """Run simpleDrop and either rapidGlobal or exhaustive global analysis."""
     drops = np.asarray(drops, dtype=float)
     drops = drops[np.isfinite(drops) & (drops > 0)]
     if int(nr_initial) != nr_initial or nr_initial < 2:
@@ -3149,6 +3212,8 @@ def analyze_xmin(
         raise ValueError(
             f"Need at least {min_tail_count} finite positive drops; got {drops.size}."
         )
+    if global_mode not in {"rapidGlobal", "global"}:
+        raise ValueError("global_mode must be 'rapidGlobal' or 'global'.")
     if max_xmin is not None:
         max_xmin = float(max_xmin)
         if not np.isfinite(max_xmin) or max_xmin <= 0:
@@ -3204,7 +3269,17 @@ def analyze_xmin(
         refine=refine,
         **fit_search_kwargs,
     )
-    if refine:
+    if global_mode == "global":
+        _, global_search_details = find_xmin_exhaustive_global_min(
+            drops,
+            min_tail_count=min_tail_count,
+            distType=distType,
+            parallel=parallel,
+            max_xmin=max_xmin,
+            progress=progress,
+            progress_label=f"{progress_label} (global)",
+        )
+    elif refine:
         _, global_search_details = find_xmin_refined_global_min_from_results(
             drops,
             xmins,
@@ -3258,6 +3333,7 @@ def analyze_xmin(
         "global_min_xmin": global_xmin,
         "global_min_distance": global_distance,
         "global_search_details": global_search_details,
+        "global_mode": global_mode,
         "all_evaluations": all_evaluations,
         "nr_initial": int(nr_initial),
         "min_tail_count": int(min_tail_count),

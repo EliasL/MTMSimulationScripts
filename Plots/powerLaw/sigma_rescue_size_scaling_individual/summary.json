@@ -4,15 +4,21 @@
     0.7,
     1.0
   ],
-  "population": "Delta E_R simpleDrop irreversible event mask",
-  "simple_drop_selection": "largest coarse adjacent KS drop, then direct-neighbor descent over all observed Delta E_R candidates",
-  "xmin_selection": "global minimum after refined candidate scan",
+  "population": "kappa_det = mu/2 irreversible event mask",
+  "kappa_detection": "kappa = Delta E_R/(V_0 Delta gamma^2), rho=1",
+  "xmin_selection": "global minimum after exhaustive observed-candidate scan",
+  "selected_fit_pvalue": "Clauset semiparametric bootstrap v2: empirical resampling below the observed xmin and global-xmin refitting for every synthetic set",
+  "bootstrap_xmin_mode": "rapidGlobal",
+  "bootstrap_xmin_strategy": "100-point coarse KS grid plus local-minimum refinement for every synthetic set",
+  "xmin_scan_pvalues": "fixed-xmin diagnostic values",
+  "pvalue_confidence": 0.05,
+  "pvalue_bootstrap_replicates": 99,
   "fits": {
     "50": {
       "post_yield_rows": 217485,
-      "delta_E_R_detection_threshold": 5.8588879881e-07,
-      "reversible_events": 217019,
-      "irreversible_events": 466,
+      "kappa_det": 3.037878787878814,
+      "reversible_events": 217025,
+      "irreversible_events": 460,
       "positive_delta_E_S_reversible_count": 895,
       "positive_delta_E_S_irreversible_count": 454,
       "protocols": {
@@ -20,131 +26,146 @@
           "positive_data_count": 412,
           "simple_drop_xmin": 0.0084130532437,
           "global_min_xmin": 0.0096651584633,
-          "global_min_D": 0.027607872964038438
+          "global_min_D": 0.027607872964038438,
+          "clauset_pvalue_v2": 0.2222222222222222
         },
         "delta_E_R": {
-          "positive_data_count": 466,
-          "simple_drop_xmin": 0.22241217711,
-          "global_min_xmin": 0.010497996992,
-          "global_min_D": 0.026226382893310918
+          "positive_data_count": 460,
+          "simple_drop_xmin": 0.21754998829,
+          "global_min_xmin": 0.0083723844471,
+          "global_min_D": 0.02548865160975966,
+          "clauset_pvalue_v2": 0.37373737373737376
         },
         "delta_E_S": {
           "positive_data_count": 454,
           "simple_drop_xmin": 0.3081599252223839,
           "global_min_xmin": 0.0083504975639385,
-          "global_min_D": 0.025541611736366154
+          "global_min_D": 0.025541611736366154,
+          "clauset_pvalue_v2": 0.36363636363636365
         }
       }
     },
     "100": {
       "post_yield_rows": 216351,
-      "delta_E_R_detection_threshold": 1.1956449839e-06,
-      "reversible_events": 215365,
-      "irreversible_events": 978,
+      "kappa_det": 3.037878787878814,
+      "reversible_events": 215384,
+      "irreversible_events": 959,
       "positive_delta_E_S_reversible_count": 4180,
       "positive_delta_E_S_irreversible_count": 936,
       "protocols": {
         "delta_E_I": {
           "positive_data_count": 617,
           "simple_drop_xmin": 1.1736444622,
-          "global_min_xmin": 0.24505014546,
-          "global_min_D": 0.023260374557619645
+          "global_min_xmin": 0.22806457128,
+          "global_min_D": 0.022270539848164517,
+          "clauset_pvalue_v2": 0.7070707070707071
         },
         "delta_E_R": {
-          "positive_data_count": 978,
-          "simple_drop_xmin": 1.0274204223,
-          "global_min_xmin": 0.00030196410296,
-          "global_min_D": 0.020172384530838368
+          "positive_data_count": 959,
+          "simple_drop_xmin": 0.17080421875,
+          "global_min_xmin": 0.00034644968343,
+          "global_min_D": 0.019598616975604832,
+          "clauset_pvalue_v2": 0.20202020202020202
         },
         "delta_E_S": {
           "positive_data_count": 936,
           "simple_drop_xmin": 1.1838532604950842,
           "global_min_xmin": 0.000396127768066333,
-          "global_min_D": 0.020028299341845312
+          "global_min_D": 0.020028299341845312,
+          "clauset_pvalue_v2": 0.13131313131313133
         }
       }
     },
     "150": {
       "post_yield_rows": 152453,
-      "delta_E_R_detection_threshold": 2.1056218884e-06,
-      "reversible_events": 150938,
-      "irreversible_events": 1508,
-      "positive_delta_E_S_reversible_count": 14209,
-      "positive_delta_E_S_irreversible_count": 1256,
+      "kappa_det": 3.037878787878814,
+      "reversible_events": 151022,
+      "irreversible_events": 1424,
+      "positive_delta_E_S_reversible_count": 14252,
+      "positive_delta_E_S_irreversible_count": 1213,
       "protocols": {
         "delta_E_I": {
           "positive_data_count": 862,
           "simple_drop_xmin": 0.79473272291,
-          "global_min_xmin": 0.17962866989,
-          "global_min_D": 0.021284546811805527
+          "global_min_xmin": 0.17356014213,
+          "global_min_D": 0.020839795937810157,
+          "clauset_pvalue_v2": 0.5151515151515151
         },
         "delta_E_R": {
-          "positive_data_count": 1508,
-          "simple_drop_xmin": 0.19480335898,
-          "global_min_xmin": 0.19907466140401214,
-          "global_min_D": 0.019637520182337165
+          "positive_data_count": 1424,
+          "simple_drop_xmin": 0.82613047182,
+          "global_min_xmin": 0.19480335898,
+          "global_min_D": 0.019867352536181812,
+          "clauset_pvalue_v2": 0.35353535353535354
         },
         "delta_E_S": {
-          "positive_data_count": 1256,
-          "simple_drop_xmin": 0.195131912506099,
+          "positive_data_count": 1213,
+          "simple_drop_xmin": 0.7633957980477817,
           "global_min_xmin": 0.195131912506099,
-          "global_min_D": 0.019770726311087783
+          "global_min_D": 0.019770726311087783,
+          "clauset_pvalue_v2": 0.40404040404040403
         }
       }
     },
     "200": {
       "post_yield_rows": 54110,
-      "delta_E_R_detection_threshold": 2.9716522931e-06,
-      "reversible_events": 53184,
-      "irreversible_events": 922,
-      "positive_delta_E_S_reversible_count": 9269,
-      "positive_delta_E_S_irreversible_count": 623,
+      "kappa_det": 3.037878787878814,
+      "reversible_events": 53262,
+      "irreversible_events": 844,
+      "positive_delta_E_S_reversible_count": 9275,
+      "positive_delta_E_S_irreversible_count": 617,
       "protocols": {
         "delta_E_I": {
           "positive_data_count": 419,
           "simple_drop_xmin": 0.13012926547,
-          "global_min_xmin": 0.51665395894,
-          "global_min_D": 0.02517812803353081
+          "global_min_xmin": 0.53793411759,
+          "global_min_D": 0.025053349060941157,
+          "clauset_pvalue_v2": 0.6666666666666666
         },
         "delta_E_R": {
-          "positive_data_count": 922,
-          "simple_drop_xmin": 0.00032992438503,
-          "global_min_xmin": 0.00095482573124,
-          "global_min_D": 0.018396557917575274
+          "positive_data_count": 844,
+          "simple_drop_xmin": 0.17534501999,
+          "global_min_xmin": 0.0010401879504,
+          "global_min_D": 0.018368000726355804,
+          "clauset_pvalue_v2": 0.43434343434343436
         },
         "delta_E_S": {
-          "positive_data_count": 623,
-          "simple_drop_xmin": 0.001579654013085,
-          "global_min_xmin": 0.0030283440592366903,
-          "global_min_D": 0.01710131135553017
+          "positive_data_count": 617,
+          "simple_drop_xmin": 0.0030035330694317,
+          "global_min_xmin": 0.0030035330694317,
+          "global_min_D": 0.016935530406195,
+          "clauset_pvalue_v2": 0.8383838383838383
         }
       }
     },
     "250": {
       "post_yield_rows": 149993,
-      "delta_E_R_detection_threshold": 4.9477371249e-06,
-      "reversible_events": 146620,
-      "irreversible_events": 3354,
-      "positive_delta_E_S_reversible_count": 16548,
-      "positive_delta_E_S_irreversible_count": 2285,
+      "kappa_det": 3.037878787878814,
+      "reversible_events": 146876,
+      "irreversible_events": 3098,
+      "positive_delta_E_S_reversible_count": 16603,
+      "positive_delta_E_S_irreversible_count": 2230,
       "protocols": {
         "delta_E_I": {
           "positive_data_count": 1463,
           "simple_drop_xmin": 0.78914177473,
-          "global_min_xmin": 0.78914177473,
-          "global_min_D": 0.016905794767492544
+          "global_min_xmin": 0.70389938747,
+          "global_min_D": 0.016402635059166615,
+          "clauset_pvalue_v2": 0.6161616161616161
         },
         "delta_E_R": {
-          "positive_data_count": 3354,
+          "positive_data_count": 3098,
           "simple_drop_xmin": 7.6829761034,
-          "global_min_xmin": 0.01467449841,
-          "global_min_D": 0.015541492354541164
+          "global_min_xmin": 0.016770166817,
+          "global_min_D": 0.015275778905119886,
+          "clauset_pvalue_v2": 0.030303030303030304
         },
         "delta_E_S": {
-          "positive_data_count": 2285,
+          "positive_data_count": 2230,
           "simple_drop_xmin": 7.671935551826664,
-          "global_min_xmin": 0.8324093012156482,
-          "global_min_D": 0.01624086039231276
+          "global_min_xmin": 0.7706284619716826,
+          "global_min_D": 0.01601955834626606,
+          "clauset_pvalue_v2": 0.5858585858585859
         }
       }
     }

@@ -6,7 +6,7 @@ nothing.  At ``epsilon_x=1e-5`` and ``1e-4`` only, the specified left island
 is removed before a final Otsu split separates reversible and irreversible events.
 
 This is an exploratory alternative to the standard simulation workflow.  The
-standard result uses a post-yield ``Delta E_R`` ``simpleDrop`` split, fits
+standard result uses a post-yield ``kappa_det = mu/2`` split, fits
 only irreversible ``Delta E_S`` events, searches all observed xmin candidates,
 and then performs the maximum-likelihood fit.
 

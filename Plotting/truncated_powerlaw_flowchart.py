@@ -5,7 +5,7 @@ and caches five plot panels.  The fast mode only recomposes those cached panels,
 which makes layout iteration nearly instantaneous.
 
 This is the generic/original flowchart.  It does not itself perform the
-standard reversibility workflow (post-yield :math:`\\Delta E_R` ``simpleDrop``
+standard reversibility workflow (post-yield :math:`\\kappa` ``kappa_det = mu/2``
 split, irreversible-only :math:`\\Delta E_S` fit, exhaustive global xmin, and
 maximum-likelihood fitting); use the reversibility-aware flowchart or configure
 the analysis explicitly when that is the intended result.

@@ -1,7 +1,7 @@
 """Compare evenly sampled reversible and irreversible energy drops.
 
-The event classes are assigned from the existing post-yield ``Delta E_R``
-simpleDrop threshold.  The paired ``Delta E_S`` values are restricted to the
+The event classes are assigned from the default post-yield ``kappa_det``
+threshold.  The paired ``Delta E_S`` values are restricted to the
 intersection of the finite-positive Delta E_S ranges of the two classes.
 Twenty target sizes are then sampled evenly in log(Delta E_S) across that
 shared interval.  Each page of the final PDF contains the reversible plot on
@@ -255,7 +255,7 @@ def generate_plots(
     )
 
     print(
-        f"Delta E_R detection threshold={pool.er_det:.8g}; "
+        f"kappa_det={pool.kappa_det:.8g}; "
         f"shared Delta E_S region=[{pool.shared_es_region[0]:.8g}, "
         f"{pool.shared_es_region[1]:.8g}]"
     )

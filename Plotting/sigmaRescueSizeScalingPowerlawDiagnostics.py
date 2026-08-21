@@ -2,7 +2,7 @@
 
 This is deliberately a diagnostic stage, not a scaling fit.  It uses the
 standard event pairing contract: post-yield positive ``Delta E_R`` values are
-classified with ``simpleDrop``; that event mask is transferred to paired
+classified with ``kappa_det = mu/2``; that event mask is transferred to paired
 ``Delta E_I``/``Delta E_S`` values before positive filtering.  Each size then
 gets one figure containing fitted PDFs and xmin/KS scans for the three drop
 measures, plus a separate PDF showing the reversible/irreversible split.
@@ -36,7 +36,12 @@ from Plotting.plotPowerLaw import (
     plot_data_pdf,
     plot_fit_pdf,
 )
-from Plotting.standardPowerlaw import EventDrops, positive_es, split_by_er
+from Plotting.standardPowerlaw import (
+    EventDrops,
+    kappa_detection_threshold,
+    positive_es,
+    split_by_kappa,
+)
 
 
 DEFAULT_SNAPSHOT = Path(
@@ -78,7 +83,7 @@ def _load_post_yield(snapshot_root: Path) -> pd.DataFrame:
     table_path = Path(snapshot_root).resolve() / "tables" / "drops_usable.csv.gz"
     if not table_path.is_file():
         raise FileNotFoundError(f"Missing combined usable table: {table_path}")
-    columns = ["size", "load_ip1", *PROTOCOLS]
+    columns = ["size", "load_ip1", "delta_gamma", "reference_volume", *PROTOCOLS]
     frame = pd.read_csv(table_path, usecols=columns)
     if frame.empty:
         raise ValueError(f"The usable drop table is empty: {table_path}")
@@ -88,6 +93,9 @@ def _load_post_yield(snapshot_root: Path) -> pd.DataFrame:
     frame = frame.loc[mask].copy()
     if frame.empty:
         raise ValueError(f"No post-yield rows found in {table_path}")
+    frame["kappa"] = frame["delta_E_R"] / (
+        frame["reference_volume"] * frame["delta_gamma"] ** 2
+    )
     return frame
 
 
@@ -186,15 +194,15 @@ def _set_pdf_axes(ax, quantity: str) -> None:
 
 def _save_separation_figure(
     size: int,
-    er_all: np.ndarray,
-    er_det: float,
+    kappa_all: np.ndarray,
+    kappa_det: float,
     es_rev: np.ndarray,
     es_irrev: np.ndarray,
     output_dir: Path,
 ) -> None:
-    """Save the Delta E_R classification and paired Delta E_S PDFs."""
-    if er_all.size == 0:
-        raise ValueError(f"L={size} has no positive Delta E_R values to plot.")
+    """Save the kappa classification and paired Delta E_S PDFs."""
+    if kappa_all.size == 0:
+        raise ValueError(f"L={size} has no positive kappa values to plot.")
     if es_rev.size == 0 or es_irrev.size == 0:
         raise ValueError(
             f"L={size} needs positive Delta E_S values in both split classes; "
@@ -202,30 +210,30 @@ def _save_separation_figure(
         )
 
     fig, axes = plt.subplots(1, 2, figsize=(8.6, 3.8), squeeze=False)
-    er_ax, es_ax = axes[0]
+    kappa_ax, es_ax = axes[0]
     plot_data_pdf(
-        er_ax,
-        er_all,
-        label=rf"all $\Delta E_R$ events ($n={er_all.size}$)",
+        kappa_ax,
+        kappa_all,
+        label=rf"all $\kappa$ events ($n={kappa_all.size}$)",
         color=ER_ALL_COLOR,
-        drop_label=r"E_R",
+        drop_label=r"\kappa",
         drop_sign="positive",
         show_legend=False,
     )
-    _set_pdf_axes(er_ax, r"\Delta E_R")
-    lo, hi = er_ax.get_xlim()
-    er_ax.axvspan(lo, er_det, color=REVERSIBLE_COLOR, alpha=0.34, zorder=0)
-    er_ax.axvspan(er_det, hi, color=IRREVERSIBLE_COLOR, alpha=0.30, zorder=0)
-    er_ax.axvline(
-        er_det,
+    _set_pdf_axes(kappa_ax, r"\kappa")
+    lo, hi = kappa_ax.get_xlim()
+    kappa_ax.axvspan(lo, kappa_det, color=REVERSIBLE_COLOR, alpha=0.34, zorder=0)
+    kappa_ax.axvspan(kappa_det, hi, color=IRREVERSIBLE_COLOR, alpha=0.30, zorder=0)
+    kappa_ax.axvline(
+        kappa_det,
         color=DROP_DETECTION_LINE_COLOR,
         linestyle="--",
         linewidth=1.2,
-        label=rf"$\Delta E_{{R,\det}}={er_det:.2e}$",
+        label=rf"$\kappa_{{\det}}={kappa_det:.2e}$",
         zorder=4,
     )
-    er_ax.set_title(r"$\Delta E_R$ split")
-    er_ax.legend(loc="best", fontsize="x-small")
+    kappa_ax.set_title(r"$\kappa$ split")
+    kappa_ax.legend(loc="best", fontsize="x-small")
 
     plot_data_pdf(
         es_ax,
@@ -268,15 +276,17 @@ def _draw_full_xmin_scan(
     output_dir: Path,
     pvalue_workers: int,
     bootstrap_xmin_mode: str,
+    pvalue_confidence: float,
 ) -> None:
     """Draw the established bootstrapped four-trace xmin diagnostic."""
     if fit.xmin_fitting_results is None:
         raise RuntimeError(f"Missing xmin results for L={size}, {protocol}.")
+    parallel = int(pvalue_workers) > 1
     eval_cache_dir = output_dir / "cache" / "xmin_bootstrap" / protocol / f"L{size}"
     fit.evaluate_clauset_pvalue(
         data=data,
-        confidence=PVALUE_CONFIDENCE,
-        parallel=True,
+        confidence=pvalue_confidence,
+        parallel=parallel,
         max_workers=pvalue_workers,
         use_cache=True,
         cache_dir=str(eval_cache_dir),
@@ -299,7 +309,7 @@ def _draw_full_xmin_scan(
         DistType=Truncated_Power_Law,
         data_info=data_info,
         xmin_results=fit.xmin_fitting_results,
-        parallel=True,
+        parallel=parallel,
         max_workers=pvalue_workers,
         use_memmap=True,
         memmap_dir=str(output_dir / "pvalue_memmap"),
@@ -316,6 +326,7 @@ def _save_size_figure(
     output_dir: Path,
     pvalue_workers: int,
     bootstrap_xmin_mode: str,
+    pvalue_confidence: float,
 ) -> None:
     fig, axes = plt.subplots(2, 3, figsize=(18.0, 8.8), squeeze=False)
     for column, protocol in enumerate(PROTOCOLS):
@@ -329,6 +340,7 @@ def _save_size_figure(
             output_dir=output_dir,
             pvalue_workers=pvalue_workers,
             bootstrap_xmin_mode=bootstrap_xmin_mode,
+            pvalue_confidence=pvalue_confidence,
         )
 
     handles = [
@@ -346,7 +358,7 @@ def _save_size_figure(
     )
     fig.suptitle(
         rf"Post-yield, $L={size}$; irreversible population from "
-        rf"$\Delta E_R$ split",
+        rf"$\kappa_{{\det}}$ split",
         y=1.02,
     )
     fig.subplots_adjust(
@@ -373,10 +385,17 @@ def run(
     force: bool = False,
     sizes: tuple[int, ...] | None = None,
     pvalue_workers: int = DEFAULT_PVALUE_WORKERS,
-    bootstrap_xmin_mode: str = "full",
+    bootstrap_xmin_mode: str = "global",
+    pvalue_confidence: float = PVALUE_CONFIDENCE,
 ) -> dict:
-    if bootstrap_xmin_mode not in {"full", "rapid"}:
-        raise ValueError("bootstrap_xmin_mode must be either 'full' or 'rapid'.")
+    if bootstrap_xmin_mode in {"full", "rapid"}:
+        bootstrap_xmin_mode = {"full": "global", "rapid": "rapidGlobal"}[
+            bootstrap_xmin_mode
+        ]
+    if bootstrap_xmin_mode not in {"global", "rapidGlobal"}:
+        raise ValueError(
+            "bootstrap_xmin_mode must be either 'global' or 'rapidGlobal'."
+        )
     frame = _load_post_yield(snapshot_root)
     if sizes is not None:
         requested = {int(size) for size in sizes}
@@ -393,52 +412,45 @@ def run(
     if int(pvalue_workers) != pvalue_workers or pvalue_workers < 1:
         raise ValueError("pvalue_workers must be a positive integer.")
     pvalue_workers = int(pvalue_workers)
+    if not 0.0 < pvalue_confidence <= 0.5:
+        raise ValueError("pvalue_confidence must lie in (0, 0.5].")
 
     summary = {
         "snapshot_root": str(Path(snapshot_root).resolve()),
         "post_yield_window": list(POST_YIELD),
-        "population": "Delta E_R simpleDrop irreversible event mask",
-        "simple_drop_selection": (
-            "largest coarse adjacent KS drop, then direct-neighbor descent over "
-            "all observed Delta E_R candidates"
-        ),
-        "xmin_selection": "global minimum after refined candidate scan",
+        "population": "kappa_det = mu/2 irreversible event mask",
+        "kappa_detection": "kappa = Delta E_R/(V_0 Delta gamma^2), rho=1",
+        "xmin_selection": "global minimum after exhaustive observed-candidate scan",
         "selected_fit_pvalue": (
             "Clauset semiparametric bootstrap v2: empirical resampling below "
             "the observed xmin and global-xmin refitting for every synthetic set"
         ),
         "bootstrap_xmin_mode": bootstrap_xmin_mode,
         "bootstrap_xmin_strategy": (
-            "observed coarse KS grid plus local-minimum refinement for every "
-            "synthetic set; rapid mode uses at most 20 coarse candidates"
-            if bootstrap_xmin_mode == "rapid"
-            else "observed global xmin search settings for every synthetic set"
+            "exhaustive observed-candidate global search for every synthetic set"
+            if bootstrap_xmin_mode == "global"
+            else "100-point coarse KS grid plus local-minimum refinement for "
+            "every synthetic set"
         ),
         "xmin_scan_pvalues": "fixed-xmin diagnostic values",
+        "pvalue_confidence": float(pvalue_confidence),
+        "pvalue_bootstrap_replicates": max(
+            1, int(1 / (4 * pvalue_confidence**2))
+        ),
         "fits": {},
     }
     for size in sorted(frame["size"].unique()):
         size_frame = frame.loc[frame["size"] == size].reset_index(drop=True)
-        er_all = _positive(size_frame["delta_E_R"].to_numpy(dtype=float))
-        if er_all.size < 3:
-            raise ValueError(f"L={size} has fewer than 3 positive Delta E_R events.")
-        er_detection_fit = make_fit(
-            er_all,
-            cache_dir=str(output_dir / "cache" / "classification" / f"L{size}"),
-            parallel_xmin=parallel_xmin,
-            xmin_selection="simpleDrop",
-            xmin_search_kwargs={
-                "progress": True,
-                "progress_label": f"Delta E_R simpleDrop classification, post-yield, L={size}",
-                "refine": True,
-            },
-        )
-        er_det = float(er_detection_fit.xmin)
+        kappa_all = _positive(size_frame["kappa"].to_numpy(dtype=float))
+        if kappa_all.size < 3:
+            raise ValueError(f"L={size} has fewer than 3 positive kappa events.")
+        kappa_det = kappa_detection_threshold()
         paired = EventDrops(
             er=size_frame["delta_E_R"].to_numpy(dtype=float),
             es=size_frame["delta_E_S"].to_numpy(dtype=float),
+            kappa=size_frame["kappa"].to_numpy(dtype=float),
         )
-        split = split_by_er(paired, er_det)
+        split = split_by_kappa(paired, kappa_det)
         data = {
             "delta_E_I": _positive(
                 size_frame.loc[split.is_irrev, "delta_E_I"].to_numpy(dtype=float)
@@ -449,8 +461,8 @@ def run(
         es_rev = positive_es(paired, split.is_rev)
         _save_separation_figure(
             int(size),
-            er_all,
-            er_det,
+            kappa_all,
+            kappa_det,
             es_rev,
             data["delta_E_S"],
             output_dir,
@@ -472,10 +484,11 @@ def run(
             output_dir,
             pvalue_workers,
             bootstrap_xmin_mode,
+            pvalue_confidence,
         )
         summary["fits"][str(int(size))] = {
             "post_yield_rows": int(len(size_frame)),
-            "delta_E_R_detection_threshold": er_det,
+            "kappa_det": kappa_det,
             "reversible_events": int(np.count_nonzero(split.is_rev)),
             "irreversible_events": int(np.count_nonzero(split.is_irrev)),
             "positive_delta_E_S_reversible_count": int(es_rev.size),
@@ -512,9 +525,21 @@ def main() -> None:
     )
     parser.add_argument(
         "--bootstrap-xmin-mode",
-        choices=("full", "rapid"),
-        default="full",
-        help="xmin search used while refitting bootstrap samples (default: full).",
+        choices=("global", "rapidGlobal"),
+        default="global",
+        help=(
+            "xmin search used while refitting bootstrap samples: exhaustive "
+            "global or 100-point rapidGlobal (default: global)."
+        ),
+    )
+    parser.add_argument(
+        "--pvalue-confidence",
+        type=float,
+        default=PVALUE_CONFIDENCE,
+        help=(
+            "Bootstrap confidence parameter; 0.01 gives 2500 replicates, "
+            "larger values are faster diagnostics (default: 0.01)."
+        ),
     )
     args = parser.parse_args()
     run(
@@ -525,6 +550,7 @@ def main() -> None:
         sizes=None if args.sizes is None else tuple(args.sizes),
         pvalue_workers=args.pvalue_workers,
         bootstrap_xmin_mode=args.bootstrap_xmin_mode,
+        pvalue_confidence=args.pvalue_confidence,
     )
 
 

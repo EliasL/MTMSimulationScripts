@@ -8,9 +8,9 @@ sequence unless the request explicitly specifies another analysis:
 1. Restrict extraction to the post-yield region by default.
 2. Extract `Delta E_R` and `Delta E_S` as paired values from the same event
    transitions, in the same order and with the same length.
-3. Apply `simpleDrop` to the positive `Delta E_R` population. Call its
-   classification threshold `er_det` and label it in plots as
-   `Delta E_{R,\det}`. It is a detection/classification threshold, not an
+3. Compute `kappa = Delta E_R / (rho V_0 Delta gamma^2)` with `rho=1` and
+   use the fixed classification threshold `kappa_det = mu / 2`. Label it in
+   plots as `kappa_det`. It is a detection/classification threshold, not an
    energy minimum used for the final power-law fit.
 4. Apply the resulting reversible/irreversible labels to the paired
    `Delta E_S` values. Filter for finite positive `Delta E_S` only after the
@@ -58,5 +58,4 @@ MPLBACKEND=Agg MPLCONFIGDIR=.matplotlib-cache PYTHONPATH=. \
   tests.test_reduction_history_plot \
   tests.test_plastic_reduction_determinant_quadrants_illustration
 ```
-
 

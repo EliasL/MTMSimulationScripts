@@ -32,6 +32,7 @@ from Plotting.findXmin import (
     annotate_xmin_choices,
     compare_xmin_strategies,
     find_xmin_dks_from_results,
+    find_xmin_exhaustive_global_min,
     find_xmin_global_min,
     find_xmin_refined_global_min_from_results,
     find_xmin_simple_drop,
@@ -434,6 +435,35 @@ class XminCleanupTests(unittest.TestCase):
             simple_details["local_minimum"]["start_xmin"],
         )
 
+    def test_exhaustive_global_search_uses_all_eligible_observed_candidates(self):
+        calls = []
+
+        def fake_evaluate_xmin(_drops, candidates, **_kwargs):
+            candidates = np.asarray(candidates, dtype=float)
+            calls.append(candidates.copy())
+            distances = np.abs(np.log10(candidates) - 1.5)
+            return (
+                distances,
+                [[] for _ in candidates],
+                np.ones(candidates.size, dtype=bool),
+            )
+
+        with mock.patch(
+            "Plotting.findXmin.evaluate_xmin_distances",
+            side_effect=fake_evaluate_xmin,
+        ):
+            xmin, details = find_xmin_exhaustive_global_min(
+                np.geomspace(1.0, 1000.0, 500),
+                min_tail_count=100,
+            )
+
+        self.assertEqual(calls[0].size, 401)
+        self.assertEqual(details["fine_candidate_count"], 401)
+        self.assertEqual(details["refinement"], "exhaustive")
+        self.assertEqual(
+            xmin,
+            calls[0][int(np.argmin(np.abs(np.log10(calls[0]) - 1.5)))],
+        )
     def test_simple_drop_fine_search_only_evaluates_observed_xmins(self):
         drops = np.arange(1.0, 13.0)
         coarse_xmins = np.asarray(
@@ -732,6 +762,36 @@ class XminCleanupTests(unittest.TestCase):
             distType=Truncated_Power_Law,
             parallel=True,
             nr_initial=100,
+        )
+
+    def test_make_fit_global_selects_exhaustive_analysis_mode(self):
+        class FakeFit:
+            def __init__(self, data, xmin=None, **kwargs):
+                self.xmin = xmin
+
+        analysis = {
+            "simple_drop_xmin": 2.0,
+            "global_min_xmin": 3.0,
+        }
+        with mock.patch(
+            "Plotting.plotPowerLaw.analyze_xmin",
+            return_value=analysis,
+        ) as analyze, mock.patch("Plotting.plotPowerLaw.Fit", FakeFit):
+            fit = make_fit(
+                [1.0, 2.0, 3.0],
+                distType=Truncated_Power_Law,
+                use_cache=False,
+                xmin_selection="global",
+                xmin_search_kwargs={"nr_initial": 100},
+            )
+
+        self.assertEqual(fit.xmin, 3.0)
+        analyze.assert_called_once_with(
+            [1.0, 2.0, 3.0],
+            distType=Truncated_Power_Law,
+            parallel=False,
+            nr_initial=100,
+            global_mode="global",
         )
 
     def test_fixed_xmin_cache_does_not_require_search_diagnostics(self):

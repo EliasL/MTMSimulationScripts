@@ -46,9 +46,14 @@ from Plotting.energyDropCalculations import (
     calculate_energy_step_data,
     extract_energy_drops_from_dataframe,
 )
-from Plotting.findXmin import find_xmin_simple_drop
 from Plotting.plotPowerLaw import findPrePostSplit
-from Plotting.standardPowerlaw import EventDrops, EventSplit, split_by_er
+from Plotting.standardPowerlaw import (
+    EventDrops,
+    KappaEventSplit,
+    kappa_detection_threshold,
+    kappa_from_relaxation_energy,
+    split_by_kappa,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -76,14 +81,14 @@ class DropTrace:
     drop_number: int | None
     drop_order: str
     event_class: str | None = None
-    er_det: float | None = None
+    kappa_det: float | None = None
     shared_es_region: tuple[float, float] | None = None
     selection_label: str | None = None
 
 
 @dataclass(frozen=True)
 class ClassifiedDropPool:
-    """Paired post-yield events classified from ``Delta E_R``.
+    """Paired post-yield events classified from the event-level ``kappa``.
 
     ``transition_indices`` maps each paired event back to the corresponding
     row in ``calculate_energy_step_data``.  The ``Delta E_S`` region is the
@@ -93,9 +98,9 @@ class ClassifiedDropPool:
 
     csv_path: Path
     event_drops: EventDrops
-    split: EventSplit
+    split: KappaEventSplit
     transition_indices: np.ndarray
-    er_det: float
+    kappa_det: float
     shared_es_region: tuple[float, float]
     yield_load: float
 
@@ -170,13 +175,19 @@ def _load_drop_inputs(csv_path_string: str):
     csv_path = Path(csv_path_string)
     df = read_macrodata_csv(csv_path)
     metadata = get_metadata(str(csv_path))
-    step_df, _ = calculate_energy_step_data(
+    step_df, info = calculate_energy_step_data(
         csv_path,
         df=df,
         metadata=metadata,
         average_energy=False,
     )
     energy, delta_E_S, delta_E_R = _aligned_drop_series(df, step_df)
+    kappa = np.full(len(df), np.nan, dtype=float)
+    kappa[1:] = kappa_from_relaxation_energy(
+        delta_E_R[1:],
+        np.asarray(step_df["delta_gamma"], dtype=float),
+        info["reference_volume"],
+    )
     er_positive_mask = _positive_relaxation_drop_mask(df, csv_path=csv_path)
     yield_load = float(findPrePostSplit(df=df))
     return (
@@ -185,6 +196,7 @@ def _load_drop_inputs(csv_path_string: str):
         energy,
         delta_E_S,
         delta_E_R,
+        kappa,
         er_positive_mask,
         yield_load,
     )
@@ -192,7 +204,7 @@ def _load_drop_inputs(csv_path_string: str):
 
 @lru_cache(maxsize=4)
 def _classify_drop_inputs(csv_path_string: str) -> ClassifiedDropPool:
-    """Classify paired post-yield events using the existing simpleDrop path."""
+    """Classify paired post-yield events with the default kappa detector."""
 
     csv_path = Path(csv_path_string)
     (
@@ -201,6 +213,7 @@ def _classify_drop_inputs(csv_path_string: str) -> ClassifiedDropPool:
         _,
         delta_E_S,
         delta_E_R,
+        kappa,
         er_positive_mask,
         yield_load,
     ) = _load_drop_inputs(csv_path_string)
@@ -216,18 +229,16 @@ def _classify_drop_inputs(csv_path_string: str) -> ClassifiedDropPool:
     if transition_indices.size < 100:
         raise ValueError(
             "At least 100 positive post-yield Delta E_R events are required "
-            f"for simpleDrop; found {transition_indices.size}."
+            f"for kappa classification; found {transition_indices.size}."
         )
 
     event_drops = EventDrops(
         er=delta_E_R[1:][transition_mask],
         es=delta_E_S[1:][transition_mask],
+        kappa=kappa[1:][transition_mask],
     )
-    er_det, _ = find_xmin_simple_drop(
-        event_drops.er,
-        progress=False,
-    )
-    split = split_by_er(event_drops, er_det)
+    kappa_det = kappa_detection_threshold()
+    split = split_by_kappa(event_drops, kappa_det)
 
     rev_es = _finite_positive(event_drops.es[split.is_rev])
     irrev_es = _finite_positive(event_drops.es[split.is_irrev])
@@ -249,14 +260,14 @@ def _classify_drop_inputs(csv_path_string: str) -> ClassifiedDropPool:
         event_drops=event_drops,
         split=split,
         transition_indices=transition_indices,
-        er_det=float(er_det),
+        kappa_det=float(kappa_det),
         shared_es_region=(shared_lo, shared_hi),
         yield_load=float(yield_load),
     )
 
 
 def load_classified_drop_pool(csv_path: str | Path = DEFAULT_CSV) -> ClassifiedDropPool:
-    """Return the cached Delta E_R classification and shared Delta E_S range."""
+    """Return the kappa classification and shared Delta E_S range."""
 
     csv_path = Path(csv_path).expanduser().resolve()
     if not csv_path.is_file():
@@ -444,6 +455,7 @@ def load_drop_trace(
         energy,
         delta_E_S,
         delta_E_R,
+        kappa,
         er_positive_mask,
         yield_load,
     ) = _load_drop_inputs(str(csv_path))
@@ -512,7 +524,7 @@ def load_drop_trace(
         drop_number=None if (drop_row is not None or drop_load is not None) else drop_number,
         drop_order=drop_order,
         event_class=event_class,
-        er_det=None if classified_pool is None else classified_pool.er_det,
+        kappa_det=None if classified_pool is None else classified_pool.kappa_det,
         shared_es_region=(
             None
             if classified_pool is None
@@ -660,7 +672,7 @@ def plot_drop_trace(
         title += (
             "\n"
             rf"shared $\Delta E_S\in[{region_lo:.3g},\ {region_hi:.3g}]$, "
-            rf"$\Delta E_{{R,\mathrm{{det}}}}$={trace.er_det:.3g}"
+            rf"$\kappa_{{\det}}$={trace.kappa_det:.3g}"
         )
     fig.suptitle(
         title,

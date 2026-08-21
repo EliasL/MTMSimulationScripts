@@ -1,8 +1,8 @@
-"""E_R-based reversible/irreversible decomposition for size-scaling drops.
+"""Kappa-based reversible/irreversible decomposition for size-scaling drops.
 
 The non-reconnecting size-scaling runs are classified independently for each
-system size and strain regime.  A canonical ``simpleDrop`` xmin is found from
-the positive :math:`\\Delta E_R` values.  Events below that threshold are
+system size and strain regime.  The default detector is ``kappa_det = mu / 2``
+with ``rho=1``.  Events below that threshold are
 reversible; events at or above it are irreversible.  The labels are then
 applied to the paired :math:`\\Delta E_S` values from the same events.  The
 standard reported fit is the irreversible-only :math:`\\Delta E_S` fit,
@@ -44,11 +44,15 @@ from Plotting.plotPowerLaw import (
 from Plotting.sizeScalingCollapse import (
     REGIMES,
     completed_size_scaling_paths,
-    fit_xmins,
     pool_event_pairs,
 )
 from Plotting.plotPowerLaw import make_fit
-from Plotting.standardPowerlaw import EventDrops, positive_es, split_by_er
+from Plotting.standardPowerlaw import (
+    EventDrops,
+    kappa_detection_threshold,
+    positive_es,
+    split_by_kappa,
+)
 
 
 DEFAULT_DATA_ROOT = Path("/Volumes/data/remoteData/macro")
@@ -77,12 +81,13 @@ def _save_figure(fig, path: Path) -> None:
     plt.close(fig)
 
 
-def _classified_population(events, er_det):
+def _classified_population(events, kappa_det):
     drops = EventDrops(
         er=events["initial_guess_energy"],
         es=events["second_order"],
+        kappa=events["kappa"],
     )
-    split = split_by_er(drops, er_det)
+    split = split_by_kappa(drops, kappa_det)
     valid_er = split.is_rev | split.is_irrev
     return {
         "es_all": _positive(drops.es[valid_er]),
@@ -91,7 +96,7 @@ def _classified_population(events, er_det):
         "er_all": drops.er[valid_er],
         "er_rev": drops.er[split.is_rev],
         "er_irrev": drops.er[split.is_irrev],
-        "er_det": split.er_det,
+        "kappa_det": split.kappa_det,
         "reversible_count": int(np.count_nonzero(split.is_rev)),
         "irreversible_count": int(np.count_nonzero(split.is_irrev)),
         "labeled_count": int(np.count_nonzero(valid_er)),
@@ -167,7 +172,7 @@ def _plot_decomposition(regime, populations, output_dir):
         fontsize="small",
     )
     fig.suptitle(
-        r"$\Delta E_R$ classification applied to $\Delta E_S$ events; "
+        r"$\kappa_{\det}$ classification applied to $\Delta E_S$ events; "
         + ("pre-yield" if regime == "pre" else "post-yield"),
         y=1.10,
         fontsize="medium",
@@ -559,6 +564,7 @@ def run(
         output_dir / "cache" / "event_pairs",
         force=force,
     )
+    kappa_det = kappa_detection_threshold()
     classification_rows = []
     fit_rows = []
     summary = {
@@ -567,11 +573,12 @@ def run(
         "seeds_per_size": seeds_per_size,
         "population_mode": population_mode,
         "selection": (
-            "E_R SimpleDrop classification"
+            "kappa_det = mu/2 classification"
             if population_mode == "classified"
             else "all paired events; no initial E_R split"
         ),
-        "E_R_detection_threshold": "simpleDrop -> delta_E_R_det",
+        "kappa_detection_threshold": "kappa_det = mu/2 with rho=1",
+        "mu": float(2.0 * kappa_det),
         "E_S_fit_population": (
             "irreversible delta_E_S"
             if population_mode == "classified"
@@ -597,31 +604,15 @@ def run(
     for regime in REGIMES:
         events = events_by_regime[regime]
         if population_mode == "classified":
-            er_all = {
-                size: _positive(event["initial_guess_energy"])
-                for size, event in events.items()
-            }
-            er_det_fits = fit_xmins(
-                er_all,
-                parallel=parallel_xmin,
-                cache_dir=output_dir / "cache" / "xmin" / "initial_guess_energy" / regime,
-                description=f"E_R {regime}-yield simpleDrop",
-                refine=False,
-            )
-            er_det_by_size = {
-                size: float(fit.xmin) for size, fit in er_det_fits.items()
-            }
             populations = {
-                size: _classified_population(event, er_det_by_size[size])
+                size: _classified_population(event, kappa_det)
                 for size, event in events.items()
             }
             _plot_decomposition(regime, populations, output_dir)
-            fit_title = r"Irreversible tails after $\Delta E_R$ classification"
+            fit_title = r"Irreversible tails after $\kappa_{\det}$ classification"
             fit_filename_prefix = "irreversible_truncated_powerlaw_fits"
             fit_data_label = "irreversible data"
         else:
-            er_det_fits = None
-            er_det_by_size = {}
             populations = {
                 size: _all_event_data(event)
                 for size, event in events.items()
@@ -636,9 +627,9 @@ def run(
         for size in sorted(events):
             population = populations[size]
             if population_mode == "classified":
-                er_det = er_det_by_size[size]
+                size_kappa_det = population["kappa_det"]
                 summary["classification"][regime][str(size)] = {
-                    "delta_E_R_det": er_det,
+                    "kappa_det": size_kappa_det,
                     "labeled_count": population["labeled_count"],
                     "reversible_count": population["reversible_count"],
                     "irreversible_count": population["irreversible_count"],
@@ -650,7 +641,7 @@ def run(
                     {
                         "regime": regime,
                         "size": size,
-                        "delta_E_R_det": er_det,
+                        "kappa_det": size_kappa_det,
                         "labeled_count": population["labeled_count"],
                         "reversible_count": population["reversible_count"],
                         "irreversible_count": population["irreversible_count"],
@@ -661,11 +652,11 @@ def run(
                 )
                 er_data = population["er_irrev"]
                 es_data = population["es_irrev"]
-                classification_er_det = er_det
+                classification_kappa_det = size_kappa_det
             else:
                 er_data = population["er_all"]
                 es_data = population["es_all"]
-                classification_er_det = None
+                classification_kappa_det = None
             if er_data.size < 3 or es_data.size < 3:
                 raise ValueError(
                     f"Too few fit events for L={size}, {regime}: "
@@ -722,7 +713,7 @@ def run(
                         "size": size,
                         "field": field,
                         "data_count": record["data"].size,
-                        "classification_delta_E_R_det": classification_er_det,
+                        "classification_kappa_det": classification_kappa_det,
                         "population_mode": population_mode,
                         **{
                             key: value
@@ -735,11 +726,6 @@ def run(
                 er_fit,
                 output_dir / "D_plots" / regime / f"L{size}_delta_E_R_xmin_search.pdf",
             )
-            if population_mode == "classified":
-                _save_ks_plot(
-                    er_det_fits[size],
-                    output_dir / "D_plots" / regime / f"L{size}_delta_E_R_det_simpleDrop_search.pdf",
-                )
             es_diagnostic_name = (
                 "irreversible" if population_mode == "classified" else "all_events"
             )

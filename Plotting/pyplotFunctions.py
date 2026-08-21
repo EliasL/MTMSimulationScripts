@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.tri as mtri
 import matplotlib.colors as mcolors
 import matplotlib.patheffects as path_effects
-from matplotlib.collections import PolyCollection
+from matplotlib.collections import LineCollection, PolyCollection
 from matplotlib.cm import ScalarMappable
 from tqdm import tqdm
 import os
@@ -884,6 +884,201 @@ def tile_periodic_mesh(polygons, values, xlim, ylim):
     return np.concatenate(plotted), np.concatenate(plotted_values)
 
 
+def _periodic_physical_triangle_polygons(
+    points, triangles, reference_indices, load, box_size, *, source_path
+):
+    """Return locally unwrapped triangle polygons in physical coordinates.
+
+    A reconnecting VTU can contain triangles whose stored node coordinates lie
+    on opposite sides of the periodic cell.  Raw ``Triangulation`` therefore
+    draws an artificial long edge across the cell.  Reuse the established
+    wrapped-PBC transform, unwrap each triangle locally, and map it back to a
+    deformed physical cell before any viewport tiling.
+    """
+
+    points = np.asarray(points, dtype=float)
+    triangles = np.asarray(triangles, dtype=int)
+    reference_indices = np.asarray(reference_indices).reshape(-1)
+    if points.ndim != 2 or points.shape[1] < 2:
+        raise ValueError("points must have shape (number of points, at least 2).")
+    if triangles.ndim != 2 or triangles.shape[1] != 3:
+        raise ValueError("triangles must have shape (number of triangles, 3).")
+    if reference_indices.shape != (len(points),):
+        raise ValueError("One reference index is required for every point.")
+    if not np.isfinite(load) or not np.isfinite(box_size) or box_size <= 0:
+        raise ValueError("load must be finite and box_size must be positive.")
+
+    _, _, wrapped_points = wrap_periodic_mesh(
+        points,
+        triangles,
+        np.zeros(len(triangles), dtype=float),
+        reference_indices,
+        load,
+        box_size,
+        source_path=source_path,
+    )
+    wrapped_polygons = wrapped_points[triangles]
+    deltas = wrapped_polygons - wrapped_polygons[:, :1]
+    unwrapped = wrapped_polygons[:, :1] + deltas - np.round(deltas)
+    unwrapped -= np.floor(unwrapped.mean(axis=1))[:, None, :]
+
+    origins = points[reference_indices == 0, :2]
+    if origins.size == 0:
+        raise ValueError(f"No refIndex=0 periodic origin found in {source_path}.")
+    a = np.array([box_size, 0.0])
+    b = np.array([load * box_size, box_size])
+    target = np.mean(points[:, :2], axis=0)
+    origin = origins[np.argmin(np.sum((origins + 0.5 * (a + b) - target) ** 2, axis=1))]
+    return origin + unwrapped[:, :, 0, None] * a + unwrapped[:, :, 1, None] * b
+
+
+def draw_periodic_element_outlines(
+    ax,
+    state,
+    element_indices,
+    *,
+    load,
+    box_size,
+    viewport,
+    color,
+    linewidth=0.9,
+    linestyle=(0, (3, 2)),
+    zorder=19,
+):
+    """Outline selected periodic elements visible in a Cartesian viewport.
+
+    The selected elements are unwrapped with the same ``refIndex``-based
+    geometry used by :func:`plot_mesh`, then tiled over the sheared cell.  This
+    keeps highlighted elements continuous when they cross a periodic boundary
+    and makes the helper useful for local before/after views.
+    """
+
+    if len(viewport) != 4:
+        raise ValueError("viewport must be (xmin, xmax, ymin, ymax).")
+    xmin, xmax, ymin, ymax = map(float, viewport)
+    if not (xmax > xmin and ymax > ymin):
+        raise ValueError("viewport limits must be increasing.")
+    element_indices = np.asarray(element_indices, dtype=int).reshape(-1)
+    if element_indices.size == 0:
+        return None
+    triangles = np.asarray(state.triangles, dtype=int)
+    if np.any(element_indices < 0) or np.any(element_indices >= len(triangles)):
+        raise IndexError("Selected element index is outside the mesh connectivity.")
+    polygons = _periodic_physical_triangle_polygons(
+        np.asarray(state.points, dtype=float),
+        triangles,
+        np.asarray(state.reference_indices),
+        float(load),
+        float(box_size),
+        source_path=str(state.path),
+    )[np.unique(element_indices)]
+    a = np.array([float(box_size), 0.0])
+    b = np.array([float(load) * float(box_size), float(box_size)])
+
+    # y translations are controlled only by the second lattice vector.  For
+    # each such translation, derive the necessary x-shift range from the
+    # viewport, including one polygon-width of padding for edge crossings.
+    poly_x_min = float(np.min(polygons[:, :, 0]))
+    poly_x_max = float(np.max(polygons[:, :, 0]))
+    poly_y_min = float(np.min(polygons[:, :, 1]))
+    poly_y_max = float(np.max(polygons[:, :, 1]))
+    j_min = int(np.floor((ymin - poly_y_max) / b[1])) - 1
+    j_max = int(np.ceil((ymax - poly_y_min) / b[1])) + 1
+    segments = []
+    for j in range(j_min, j_max + 1):
+        shifted_x_min = xmin - j * b[0] - poly_x_max
+        shifted_x_max = xmax - j * b[0] - poly_x_min
+        i_min = int(np.floor(shifted_x_min / a[0])) - 1
+        i_max = int(np.ceil(shifted_x_max / a[0])) + 1
+        for i in range(i_min, i_max + 1):
+            shifted = polygons + i * a + j * b
+            lower = shifted.min(axis=1)
+            upper = shifted.max(axis=1)
+            visible = (
+                (upper[:, 0] >= xmin)
+                & (lower[:, 0] <= xmax)
+                & (upper[:, 1] >= ymin)
+                & (lower[:, 1] <= ymax)
+            )
+            for polygon in shifted[visible]:
+                segments.append(np.vstack((polygon, polygon[0])))
+    if not segments:
+        return None
+    collection = LineCollection(
+        segments,
+        colors=[color],
+        linewidths=float(linewidth),
+        linestyles=linestyle,
+        zorder=zorder,
+    )
+    ax.add_collection(collection)
+    return collection
+
+
+def _plot_periodic_unwrapped_mesh_elements(
+    ax,
+    nodes,
+    connectivity,
+    field,
+    norm,
+    cmap,
+    data,
+    background_color,
+    *,
+    cull_to_view,
+):
+    """Draw a viewport-aware periodic mesh after local triangle unwrapping."""
+
+    if "refIndex" not in data.mesh.point_data:
+        raise KeyError("Periodic triangle unwrapping requires the refIndex point field.")
+    box_size = float(data.size[0])
+    if not np.isclose(float(data.size[1]), box_size):
+        raise ValueError("Periodic triangle unwrapping requires a square cell.")
+    polygons = _periodic_physical_triangle_polygons(
+        nodes[:, :2],
+        connectivity,
+        data.mesh.point_data["refIndex"],
+        float(data.load),
+        box_size,
+        source_path=data.vtu_file_path,
+    )
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    plotted_polygons = []
+    plotted_fields = []
+    a = np.array([box_size, 0.0])
+    b = np.array([float(data.load) * box_size, box_size])
+    for i in range(-4, 5):
+        for j in range(-4, 5):
+            shifted = polygons + i * a + j * b
+            lower = shifted.min(axis=1)
+            upper = shifted.max(axis=1)
+            visible = (
+                (upper[:, 0] >= xlim[0])
+                & (lower[:, 0] <= xlim[1])
+                & (upper[:, 1] >= ylim[0])
+                & (lower[:, 1] <= ylim[1])
+            )
+            if not cull_to_view:
+                visible = np.ones(len(shifted), dtype=bool)
+            if np.any(visible):
+                plotted_polygons.append(shifted[visible])
+                plotted_fields.append(field[visible])
+    if not plotted_polygons:
+        raise RuntimeError("Periodic triangle tiling produced no visible polygons.")
+    mappable = PolyCollection(
+        np.concatenate(plotted_polygons),
+        array=np.concatenate(plotted_fields),
+        cmap=cmap,
+        norm=norm,
+        edgecolors=background_color,
+        linewidths=0.1,
+        antialiaseds=False,
+    )
+    ax.add_collection(mappable)
+    return mappable
+
+
 def draw_periodic_shear_box(ax, *, origin, load, box_size, **plot_kwargs):
     """Draw one deformed square periodic cell as a dashed parallelogram."""
 
@@ -1097,6 +1292,7 @@ def plot_mesh(
     field_cmap=None,
     field_norm=None,
     field_background_color=None,
+    unwrap_periodic_triangles=False,
     cartesian_viewport_culling=False,
     cartesian_viewport=None,
     **kwargs,
@@ -1235,23 +1431,40 @@ def plot_mesh(
         ax.set_xlim(0, view_aspect)
         ax.set_ylim(0, 1)
     else:
-        mappable = _plot_mesh_elements(
-            ax,
-            x,
-            y,
-            connectivity,
-            field,
-            norm,
-            cmap,
-            data,
-            mesh_property,
-            backgroundColor,
-            add_m12_marks,
-            state_indices,
-            show_force,
-            force_contributions,
-            cull_to_view=cartesian_viewport_culling,
-        )
+        if unwrap_periodic_triangles and getattr(data, "BC", None) == "PBC":
+            if add_m12_marks or show_force:
+                raise NotImplementedError(
+                    "Periodic triangle unwrapping does not support markers or forces."
+                )
+            mappable = _plot_periodic_unwrapped_mesh_elements(
+                ax,
+                np.column_stack((x, y)),
+                connectivity,
+                field,
+                norm,
+                cmap,
+                data,
+                backgroundColor,
+                cull_to_view=cartesian_viewport_culling,
+            )
+        else:
+            mappable = _plot_mesh_elements(
+                ax,
+                x,
+                y,
+                connectivity,
+                field,
+                norm,
+                cmap,
+                data,
+                mesh_property,
+                backgroundColor,
+                add_m12_marks,
+                state_indices,
+                show_force,
+                force_contributions,
+                cull_to_view=cartesian_viewport_culling,
+            )
 
     # Add additional elements
     _add_additional_elements(
@@ -2148,6 +2361,9 @@ def plot_binned_poincare_displacement_field(
     colorbar_max_quantile=None,
     vector_length_from_color=False,
     vector_length_scale=1.0,
+    arrow_width=0.006,
+    arrow_headwidth=4.0,
+    arrow_headlength=5.0,
     direction_split_otsu=False,
     require_direction_split=False,
     draw_arrows=True,
@@ -2208,6 +2424,12 @@ def plot_binned_poincare_displacement_field(
         raise ValueError("vector_length_from_color must be boolean.")
     if not np.isfinite(vector_length_scale) or vector_length_scale <= 0:
         raise ValueError("vector_length_scale must be finite and positive.")
+    if not np.isfinite(arrow_width) or arrow_width <= 0:
+        raise ValueError("arrow_width must be finite and positive.")
+    if not np.isfinite(arrow_headwidth) or arrow_headwidth <= 0:
+        raise ValueError("arrow_headwidth must be finite and positive.")
+    if not np.isfinite(arrow_headlength) or arrow_headlength <= 0:
+        raise ValueError("arrow_headlength must be finite and positive.")
     if not isinstance(direction_split_otsu, (bool, np.bool_)):
         raise ValueError("direction_split_otsu must be boolean.")
     if not isinstance(require_direction_split, (bool, np.bool_)):
@@ -2375,16 +2597,43 @@ def plot_binned_poincare_displacement_field(
                 scale_units="xy",
                 scale=1.0,
                 pivot="tail",
-                width=0.006,
-                headwidth=4.0,
-                headlength=5.0,
-                headaxislength=4.2,
+                width=arrow_width,
+                headwidth=arrow_headwidth,
+                headlength=arrow_headlength,
+                headaxislength=0.84 * arrow_headlength,
                 zorder=7,
             )
             quiver.set_path_effects(
                 [path_effects.withStroke(linewidth=0.8, foreground="white")]
             )
             quiver_artists.append(quiver)
+        # Keep the branch collections above as the public return value, but
+        # redraw each visible arrow in ascending length order.  Collections
+        # from the two Otsu branches otherwise have no guaranteed ordering
+        # where they overlap; the final longest arrow must be on top.
+        draw_order = np.argsort(
+            np.hypot(arrow_u, arrow_v), kind="stable"
+        )
+        for arrow_index in draw_order:
+            overlay = ax.quiver(
+                [center + scale * visible_x_centres[arrow_index]],
+                [center + scale * visible_y_centres[arrow_index]],
+                [scale * arrow_u[arrow_index]],
+                [scale * arrow_v[arrow_index]],
+                color=[colors[arrow_index]],
+                angles="xy",
+                scale_units="xy",
+                scale=1.0,
+                pivot="tail",
+                width=arrow_width,
+                headwidth=arrow_headwidth,
+                headlength=arrow_headlength,
+                headaxislength=0.84 * arrow_headlength,
+                zorder=8,
+            )
+            overlay.set_path_effects(
+                [path_effects.withStroke(linewidth=0.8, foreground="white")]
+            )
     if show_colorbar:
         mappable = ScalarMappable(norm=norm, cmap=cmap)
         mappable.set_array(color_values_for_norm)
