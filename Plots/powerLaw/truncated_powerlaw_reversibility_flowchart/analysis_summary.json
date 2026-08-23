@@ -13,21 +13,52 @@
   ],
   "post_yield": true,
   "number_of_kappa_events": 275075,
-  "kappa_det": 3.037878787878814,
+  "rho": 2.0,
+  "rho_definition": "N/V_0 = (2 L^2)/(L^2) = 2",
+  "kappa_det": 1.518939393939407,
   "mu": 6.075757575757628,
   "reversible_kappa_events": 269348,
   "irreversible_kappa_events": 5727,
   "reversible_delta_E_S_events": 81536,
   "irreversible_delta_E_S_events": 4475,
+  "reversible_positive_delta_E_S_fraction": 0.3027161887223963,
+  "reversible_nonpositive_delta_E_S_events": 187812,
   "xmin_selection_mode": "exhaustive",
   "xmin_selection_is_approximate": false,
   "xmin_candidate_count": 4451,
   "true_global_event_threshold": 10000,
-  "kappa_detection_method": "kappa_det = mu/2 with rho=1",
+  "kappa_detection_method": "kappa_det = a_1212/(2 rho), rho=N/V_0=2",
   "delta_E_S_xmin_ks": 0.008655920137243811,
   "delta_E_S_xmin_ks_distance": 0.015597445500885931,
   "delta_E_S_xmin_ks_alpha": 1.0405734653540053,
   "delta_E_S_xmin_ks_lambda": 0.026064710826711388,
   "delta_E_S_xmin_ks_D": 0.015597445500885931,
+  "bootstrap_ci_level": 0.95,
+  "bootstrap_replicates": 6,
+  "bootstrap_xmin_mode": "global",
+  "delta_E_S_xmin_ks_ci": [
+    0.007854456412616173,
+    0.05516099362700315
+  ],
+  "delta_E_S_xmin_ks_minmax": [
+    0.0078024845715845,
+    0.060703182256558914
+  ],
+  "delta_E_S_xmin_ks_alpha_ci": [
+    1.03023195224704,
+    1.0543984521887075
+  ],
+  "delta_E_S_xmin_ks_alpha_minmax": [
+    1.0298756518358099,
+    1.05584200318314
+  ],
+  "delta_E_S_xmin_ks_lambda_ci": [
+    0.023833259274572544,
+    0.028654217152622792
+  ],
+  "delta_E_S_xmin_ks_lambda_minmax": [
+    0.023575203720262096,
+    0.028789741376215833
+  ],
   "fit_population": "irreversible_delta_E_S"
 }

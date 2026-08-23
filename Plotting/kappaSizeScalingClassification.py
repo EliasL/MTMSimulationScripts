@@ -36,7 +36,10 @@ from Plotting.kappaEventClassification import (
     kappa_from_relaxation_energy,
     mu_kappa_threshold,
 )
-from Plotting.standardPowerlaw import kappa_detection_threshold
+from Plotting.standardPowerlaw import (
+    DEFAULT_KAPPA_RHO,
+    kappa_detection_threshold,
+)
 from Plotting.sizeScalingCollapse import _read_mixed_selected
 
 
@@ -53,7 +56,9 @@ _TARGET_RE = re.compile(
 
 
 def _reference_mu():
-    return float(2.0 * kappa_detection_threshold())
+    return float(
+        2.0 * DEFAULT_KAPPA_RHO * kappa_detection_threshold()
+    )
 
 
 def _read_required_columns(path):
@@ -90,7 +95,7 @@ def _read_required_columns(path):
     }
 
 
-def _constant_kappa_data(csv_paths, size, *, rho=1.0):
+def _constant_kappa_data(csv_paths, size, *, rho=DEFAULT_KAPPA_RHO):
     """Read aligned post-yield kappa values without local Born moduli."""
 
     kappa_parts = []
@@ -229,7 +234,12 @@ def _summary_for_size(data, size, simple_drop_er_det=None, *, rho, reference_thr
     return summary
 
 
-def make_size_diagnostic(data_by_size, simple_drop_er_det=None, *, rho=1.0):
+def make_size_diagnostic(
+    data_by_size,
+    simple_drop_er_det=None,
+    *,
+    rho=DEFAULT_KAPPA_RHO,
+):
     """Create the multi-page size-scaling diagnostic and return its summary."""
 
     sizes = sorted(data_by_size)
@@ -287,12 +297,12 @@ def make_size_diagnostic(data_by_size, simple_drop_er_det=None, *, rho=1.0):
                 reference_threshold,
                 color="tab:red",
                 linestyle=":",
-                label=r"fixed $\mu/2$",
+                label=r"fixed $\mu/(2\rho)$",
             )
             ax.set(
                 xscale="log",
                 yscale="log",
-                xlabel=r"$\kappa=\Delta E_R/(V_0\Delta\gamma^2)$",
+                xlabel=r"$\kappa=\Delta E_R/(\rho V_0\Delta\gamma^2)$",
                 ylabel=r"PDF $p(\kappa)$",
                 title=f"L={size}",
             )
@@ -301,7 +311,7 @@ def make_size_diagnostic(data_by_size, simple_drop_er_det=None, *, rho=1.0):
         for ax in axes_flat[len(sizes) :]:
             ax.axis("off")
         fig.suptitle(
-            "Kappa distributions: fixed $\mu/2$"
+            "Kappa distributions: fixed $\mu/(2\rho)$"
             + (" versus historical simpleDrop" if has_simple else ""),
             fontsize=14,
         )
@@ -324,7 +334,7 @@ def make_size_diagnostic(data_by_size, simple_drop_er_det=None, *, rho=1.0):
                 color="tab:purple",
                 label="historical simpleDrop",
             )
-        ax.axhline(reference_threshold, color="tab:red", linestyle=":", label=r"fixed $\mu/2$")
+        ax.axhline(reference_threshold, color="tab:red", linestyle=":", label=r"fixed $\mu/(2\rho)$")
         ax.set_xticks(x, labels)
         ax.set(xlabel="system size L", ylabel=r"$\kappa$ threshold", title="Threshold versus size")
         ax.legend()
@@ -404,7 +414,7 @@ def main(argv=None):
     parser.add_argument("--seeds-per-size", type=int, default=6)
     parser.add_argument("--size-summary", type=Path, default=DEFAULT_SIZE_SUMMARY)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--rho", type=float, default=1.0)
+    parser.add_argument("--rho", type=float, default=DEFAULT_KAPPA_RHO)
     parser.add_argument("--sizes", type=int, nargs="+", default=[50, 100, 150, 200, 250])
     args = parser.parse_args(argv)
 

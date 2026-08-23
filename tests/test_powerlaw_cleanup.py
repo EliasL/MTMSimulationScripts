@@ -56,6 +56,33 @@ from Plotting.plotPowerLaw import (
 
 
 class PValueXminTests(unittest.TestCase):
+    def test_global_selected_fit_cannot_use_fixed_xmin_bootstrap(self):
+        data = np.asarray([1.0, 1.5, 2.0, 2.5, 3.0, 4.0])
+        fit = Fit(
+            data=data,
+            xmin=2.0,
+            xmin_distribution=Truncated_Power_Law.name,
+            verbose=0,
+        )
+        fit.xmin_selection = "global"
+        fit.xmin_analysis = {"global_min_xmin": 2.0}
+
+        with mock.patch.object(
+            fit,
+            "evaluate_clauset_pvalue",
+            return_value=(0.2, 1.1, 0.1),
+        ) as evaluate:
+            result = fit.evaluate_fit(
+                data=data,
+                confidence=0.5,
+                parallel=False,
+                use_cache=False,
+            )
+
+        self.assertEqual(result, (0.2, 1.1, 0.1))
+        evaluate.assert_called_once()
+        self.assertEqual(evaluate.call_args.kwargs["xmin_mode"], "global")
+
     def test_clauset_pvalue_uses_v2_semiparametric_cache(self):
         data = np.asarray([1.0, 1.5, 2.0, 2.5, 3.0, 4.0])
         fit = Fit(

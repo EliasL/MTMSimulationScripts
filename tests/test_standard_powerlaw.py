@@ -53,8 +53,8 @@ class StandardPowerLawProtocolTests(unittest.TestCase):
         np.testing.assert_array_equal(split.is_irrev, [False, True, True, False])
         np.testing.assert_array_equal(positive_es(drops, split.is_irrev), [4.0])
 
-    def test_default_kappa_detector_is_mu_over_two(self):
-        self.assertAlmostEqual(kappa_detection_threshold(mu=6.0), 3.0)
+    def test_default_kappa_detector_uses_mesh_density_two(self):
+        self.assertAlmostEqual(kappa_detection_threshold(mu=6.0), 1.5)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,11 @@ from dataclasses import dataclass
 import numpy as np
 
 
+# MTS2D's structured triangular mesh has two elements per unit reference
+# cell, so N/V_0 = (2 L^2)/(L^2) = 2 for the macrodata convention.
+DEFAULT_KAPPA_RHO = 2.0
+
+
 @dataclass(frozen=True)
 class EventDrops:
     """Paired event-level drops and optional ``kappa`` values.
@@ -140,7 +145,7 @@ def kappa_from_relaxation_energy(
     delta_gamma,
     reference_volume,
     *,
-    rho=1.0,
+    rho=DEFAULT_KAPPA_RHO,
 ):
     """Return ``Delta E_R / (rho V_0 Delta gamma**2)`` without filtering."""
 
@@ -159,8 +164,8 @@ def kappa_from_relaxation_energy(
     return delta_e_r / (rho * reference_volume * delta_gamma**2)
 
 
-def kappa_detection_threshold(mu=None):
-    """Return the default ``kappa_det = mu / 2`` threshold for ``rho=1``.
+def kappa_detection_threshold(mu=None, *, rho=DEFAULT_KAPPA_RHO):
+    """Return ``kappa_det = mu / (2 rho)`` for the material shear modulus.
 
     The cited articles denote this affine/Born shear modulus by ``G_B``;
     project code and plot labels use ``mu`` instead.
@@ -173,7 +178,10 @@ def kappa_detection_threshold(mu=None):
     mu = float(np.asarray(mu, dtype=float).reshape(-1)[0])
     if not np.isfinite(mu) or mu <= 0:
         raise ValueError("mu must be finite and positive.")
-    return mu / 2.0
+    rho = float(rho)
+    if not np.isfinite(rho) or rho <= 0:
+        raise ValueError("rho must be finite and positive.")
+    return mu / (2.0 * rho)
 
 
 def positive_es(drops: EventDrops, mask: np.ndarray) -> np.ndarray:

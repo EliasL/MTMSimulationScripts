@@ -71,11 +71,10 @@ The raw source job and its dumps are read only.  The output manifest records
 the dump, target load, event directory, and verified forward m3 count.
 
 `replay_selected_real_space_event.py` can instead target one known plastic
-event with `--expected-event-kind plastic`.  Its private configuration enables
-`saveFinalReversibilityState`, disables dumps and ordinary mesh VTUs, and
-suppresses the normal sparse reversibility-snapshot cadence.  Thus a run with
-`--maximum-elastic-events 2` can write at most fifteen VTUs: five for the final
-plastic target and five for each of two elastic examples.
+event with `--expected-event-kind plastic`.  Its private configuration disables
+dumps and ordinary mesh VTUs.  Elastic examples remain controlled by
+`saveElasticReversibilityStates` and
+`maximumSavedElasticReversibilityStates`.
 
 ## Post-yield xmin collection scaffold
 

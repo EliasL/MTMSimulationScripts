@@ -73,7 +73,11 @@ class SimulationConfig:
         # if npe > ne*t:
         #   save frame
         self.logDuringMinimization = 0  # 0=False, 1=True
+        self.fullMinimizationLogging = 0  # 0=False, 1=True
         self.writeDumps = 1  # 0=False, 1=True
+        self.writeMeshVTUs = 1  # 0=False, 1=True
+        self.saveElasticReversibilityStates = 0  # 0=False, 1=True
+        self.maximumSavedElasticReversibilityStates = 0
         self.nrVTUFrames = 200
         self.writeDebugVTUs = 1  # 0=False, 1=True
         self.plasticityEventThreshold = 0.05

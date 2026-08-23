@@ -1336,6 +1336,23 @@ def plot_mesh(
     connectivity = data.get_connectivity()
     x, y = nodes[:, 0], nodes[:, 1]
 
+    # Periodic copies only fill the viewport; they must never determine it.
+    # If no global or user-supplied limits were set, freeze the view from the
+    # original, untiled mesh before adding any shifted copies to the axes.
+    if (
+        not square_periodic_mesh
+        and getattr(data, "BC", None) == "PBC"
+        and cartesian_viewport is None
+        and ax.get_autoscalex_on()
+        and ax.get_autoscaley_on()
+    ):
+        original_limits = add_padding(
+            (float(np.min(x)), float(np.max(x)), float(np.min(y)), float(np.max(y))),
+            0.03,
+        )
+        ax.set_xlim(*original_limits[:2])
+        ax.set_ylim(*original_limits[2:])
+
     if field_override is None:
         # Configure property-specific settings
         (
@@ -2708,9 +2725,17 @@ def plot_in_poincare_disk(
     else:
         raise ValueError(f"Unsupported Poincare disk matrix: {poincare_matrix!r}")
 
-    element_indices = _element_subset_indices(
-        len(disk_matrix), kwargs.get("element_subset")
-    )
+    requested_indices = kwargs.get("element_indices")
+    if requested_indices is None:
+        element_indices = _element_subset_indices(
+            len(disk_matrix), kwargs.get("element_subset")
+        )
+    else:
+        element_indices = np.asarray(requested_indices, dtype=int).reshape(-1)
+        if element_indices.size == 0:
+            raise ValueError("element_indices must contain at least one element.")
+        if np.any(element_indices < 0) or np.any(element_indices >= len(disk_matrix)):
+            raise IndexError("element_indices contains an out-of-range element.")
     if element_indices is not None:
         disk_matrix = disk_matrix[element_indices]
     if do_plastic_reduction:
@@ -3359,7 +3384,7 @@ def get_previous_energy_and_rss(
         return np.array(prev_x), np.array(prev_energies), np.array(prev_rss)
 
 
-def make_images(vtu_files, num_processes=-2, use_tqdm=True, X="load", **kwargs):
+def make_images(vtu_files, num_processes=2, use_tqdm=True, X="load", **kwargs):
     print(f"Processing {kwargs['fileName']} video meta data...")
     if not vtu_files:
         raise ValueError("No VTU files provided to make_images().")
@@ -3463,7 +3488,10 @@ def make_images(vtu_files, num_processes=-2, use_tqdm=True, X="load", **kwargs):
         import multiprocessing
 
         num_processes = multiprocessing.cpu_count() + num_processes
-    max_processes = 1 if L > 300 else 2 if L > 200 else num_processes
+    # Rendering a large VTU duplicates substantial mesh and Matplotlib state in
+    # every worker.  Keep the automatic/default path conservative; callers can
+    # still request fewer workers explicitly.
+    max_processes = 1 if L >= 200 else 2
     num_processes = max(1, min(num_processes, max_processes))
     print(f"Using {num_processes} rendering process(es) for L={L}.")
 

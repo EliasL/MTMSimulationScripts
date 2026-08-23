@@ -2,7 +2,7 @@
 
 The functions are intentionally general and expose several alternative
 selection strategies.  The standard simulation workflow is to split paired
-post-yield events with ``kappa_det = mu/2``, fit only irreversible
+post-yield events with ``kappa_det = mu/(2 rho)`` for ``rho=N/V_0=2``, fit only irreversible
 ``Delta E_S`` events, evaluate every observed candidate for the global xmin,
 and then perform the maximum-likelihood fit.  Callers using another strategy
 or population should state that choice explicitly.

@@ -49,6 +49,10 @@ Recommended simulation energy-drop workflow
    exhaustive search is fine.
 6. With ``es_xmin_ks`` fixed, perform the maximum-likelihood fit for
    alpha and lambda.
+7. For a selected global xmin, evaluate the goodness-of-fit p-value with the
+   semiparametric Clauset bootstrap and re-select xmin by the same global
+   procedure for every bootstrap replicate.  A selected-xmin fit must not use
+   the fixed-xmin bootstrap evaluator.
 
 The low-level ``Fit`` and xmin functions remain deliberately flexible and do
 not enforce this sequence.  If a script fits Delta E_R, includes reversible
@@ -78,7 +82,7 @@ set to 2, then the processing would use (up to) 6 cores.
 """
 PARALLEL_UNUSED_CORES = 2
 
-EVALUATION_CACHE_VERSION = "v2"
+EVALUATION_CACHE_VERSION = "v3"
 CLAUSET_EVALUATION_PROTOCOL = "clauset-semiparametric-refit-xmin"
 
 
@@ -168,23 +172,36 @@ def _fit_xmin_batch_worker(args):
     with warnings.catch_warnings():
         _suppress_powerlaw_warnings()
         for xmin in xmin_values:
-            pl = dist_cls(
-                xmin=xmin,
-                xmax=xmax,
-                discrete=discrete,
-                fit_method=fit_method,
-                data=data,
-                parameters=initial_params,
-                parameter_ranges=parameter_ranges,
-                parameter_constraints=parameter_constraints,
-                parent_Fit=None,
-                estimate_discrete=estimate_discrete,
-                verbose=0,
-            )
-            param_vals = [getattr(pl, p, nan) for p in parameter_names]
-            distances.append(getattr(pl, xmin_distance))
-            params_out.append(param_vals)
-            valid_out.append(pl.in_range() and not pl.noise_flag)
+            try:
+                pl = dist_cls(
+                    xmin=xmin,
+                    xmax=xmax,
+                    discrete=discrete,
+                    fit_method=fit_method,
+                    data=data,
+                    parameters=initial_params,
+                    parameter_ranges=parameter_ranges,
+                    parameter_constraints=parameter_constraints,
+                    parent_Fit=None,
+                    estimate_discrete=estimate_discrete,
+                    verbose=0,
+                )
+                param_vals = [getattr(pl, p, nan) for p in parameter_names]
+                distances.append(getattr(pl, xmin_distance))
+                params_out.append(param_vals)
+                valid_out.append(pl.in_range() and not pl.noise_flag)
+            except Exception as exc:
+                # A few synthetic samples can place one trial xmin in a
+                # numerically singular truncated-power-law fit.  That trial
+                # is an invalid candidate, not a reason to abandon the whole
+                # Clauset replicate; the remaining valid candidates still
+                # determine its re-estimated xmin.  Unexpected exceptions
+                # must remain visible.
+                if exc.__class__.__name__ != "NoConvergence":
+                    raise
+                distances.append(nan)
+                params_out.append([nan] * len(parameter_names))
+                valid_out.append(False)
 
     return distances, params_out, valid_out
 
@@ -1263,6 +1280,7 @@ class Fit(powerlaw.Fit):
         self,
         data=None,
         confidence=0.01,
+        ci_level=0.95,
         parallel=True,
         max_workers=None,
         use_cache=True,
@@ -1277,10 +1295,34 @@ class Fit(powerlaw.Fit):
         -----
         - If `use_cache` is True and a cache hit occurs, this loads cached values and
           updates *only* the computed attributes in-place:
-          `p`, `p_std`, `alpha_mean`, `alpha_std`, plus any cached parameter means/stds.
+            `p`, `p_std`, `alpha_mean`, `alpha_std`, plus any cached parameter means/stds.
         - The cache key depends on key params and a SHA-1 hash of the (trimmed) data.
+        - Fits created with ``xmin_selection='global'`` or
+          ``xmin_selection='rapidGlobal'`` are evaluated with the corresponding
+          semiparametric Clauset bootstrap.  Every bootstrap replicate therefore
+          re-estimates ``xmin``; fixed-xmin bootstrap p-values are not allowed for
+          selected-xmin fits.
         """
         from numpy import mean, std, asarray
+
+        selected_xmin_mode = getattr(self, "xmin_selection", None)
+        if selected_xmin_mode in {"global", "rapidGlobal"}:
+            if max_synthetic_samples != 5e6:
+                raise ValueError(
+                    "max_synthetic_samples is not supported by the selected-xmin "
+                    "bootstrap evaluator."
+                )
+            return self.evaluate_clauset_pvalue(
+                data=data,
+                confidence=confidence,
+                ci_level=ci_level,
+                parallel=parallel,
+                max_workers=max_workers,
+                use_cache=use_cache,
+                cache_dir=cache_dir,
+                tqdmDesc=tqdmDesc,
+                xmin_mode=selected_xmin_mode,
+            )
 
         if data is None:
             data = self.data
@@ -1445,6 +1487,7 @@ class Fit(powerlaw.Fit):
         self,
         data=None,
         confidence=0.01,
+        ci_level=0.95,
         parallel=True,
         max_workers=None,
         use_cache=True,
@@ -1461,6 +1504,10 @@ class Fit(powerlaw.Fit):
         """
         import json
         from concurrent.futures import ProcessPoolExecutor
+
+        ci_level = float(ci_level)
+        if not 0.0 < ci_level < 1.0:
+            raise ValueError("ci_level must be strictly between 0 and 1.")
 
         if xmin_mode in {"full", "rapid"}:
             xmin_mode = {"full": "global", "rapid": "rapidGlobal"}[xmin_mode]
@@ -1516,7 +1563,8 @@ class Fit(powerlaw.Fit):
         )
         evaluation_protocol = (
             f"{CLAUSET_EVALUATION_PROTOCOL}-{EVALUATION_CACHE_VERSION}"
-            f"{protocol_mode}:{json.dumps(selection_kwargs, sort_keys=True)}"
+            f"{protocol_mode}:ci={ci_level:.12g}:"
+            f"{json.dumps(selection_kwargs, sort_keys=True)}"
         )
         cache_path = None
         parameter_names = list(self.xmin_distribution.parameter_names)
@@ -1540,10 +1588,21 @@ class Fit(powerlaw.Fit):
                     setattr(self, f"{name}_mean", float(value))
                 for name, value in payload.get("param_stds", {}).items():
                     setattr(self, f"{name}_std", float(value))
-                self.bootstrap_xmin_mean = float(payload.get("bootstrap_xmin_mean", nan))
-                self.bootstrap_xmin_std = float(payload.get("bootstrap_xmin_std", nan))
-                self.bootstrap_xmin_min = float(payload.get("bootstrap_xmin_min", nan))
-                self.bootstrap_xmin_max = float(payload.get("bootstrap_xmin_max", nan))
+                for name, value in payload.get("param_mins", {}).items():
+                    setattr(self, f"{name}_min", float(value))
+                for name, value in payload.get("param_maxs", {}).items():
+                    setattr(self, f"{name}_max", float(value))
+                for name, value in payload["param_ci_low"].items():
+                    setattr(self, f"{name}_ci_low", float(value))
+                for name, value in payload["param_ci_high"].items():
+                    setattr(self, f"{name}_ci_high", float(value))
+                self.bootstrap_ci_level = float(payload["bootstrap_ci_level"])
+                self.bootstrap_xmin_mean = float(payload["bootstrap_xmin_mean"])
+                self.bootstrap_xmin_std = float(payload["bootstrap_xmin_std"])
+                self.bootstrap_xmin_min = float(payload["bootstrap_xmin_min"])
+                self.bootstrap_xmin_max = float(payload["bootstrap_xmin_max"])
+                self.bootstrap_xmin_ci_low = float(payload["bootstrap_xmin_ci_low"])
+                self.bootstrap_xmin_ci_high = float(payload["bootstrap_xmin_ci_high"])
                 self.pvalue_xmin_mode = xmin_mode
                 self.pvalue_protocol = f"{CLAUSET_EVALUATION_PROTOCOL}-{xmin_mode}"
                 return self.p, self.alpha_mean, self.alpha_std
@@ -1599,14 +1658,27 @@ class Fit(powerlaw.Fit):
         bootstrap_xmins = np.asarray([result[2] for result in results], dtype=float)
         if bootstrap_xmins.size != nr_sets or not np.isfinite(bootstrap_xmins).all():
             raise RuntimeError("Clauset bootstrap did not produce finite xmin values.")
+        ci_low_quantile = 0.5 * (1.0 - ci_level)
+        ci_high_quantile = 1.0 - ci_low_quantile
         self.bootstrap_xmin_mean = float(np.mean(bootstrap_xmins))
         self.bootstrap_xmin_std = float(np.std(bootstrap_xmins))
         self.bootstrap_xmin_min = float(np.min(bootstrap_xmins))
         self.bootstrap_xmin_max = float(np.max(bootstrap_xmins))
+        self.bootstrap_ci_level = ci_level
+        self.bootstrap_xmin_ci_low = float(
+            np.quantile(bootstrap_xmins, ci_low_quantile)
+        )
+        self.bootstrap_xmin_ci_high = float(
+            np.quantile(bootstrap_xmins, ci_high_quantile)
+        )
         self.p = float(np.mean(D_vals >= float(self.D)))
         self.p_std = float(confidence)
         param_means = {}
         param_stds = {}
+        param_mins = {}
+        param_maxs = {}
+        param_ci_low = {}
+        param_ci_high = {}
         for index, name in enumerate(parameter_names):
             values = np.asarray([result[1][index] for result in results], dtype=float)
             values = values[np.isfinite(values)]
@@ -1616,8 +1688,16 @@ class Fit(powerlaw.Fit):
                 )
             param_means[name] = float(np.mean(values))
             param_stds[name] = float(np.std(values))
+            param_mins[name] = float(np.min(values))
+            param_maxs[name] = float(np.max(values))
+            param_ci_low[name] = float(np.quantile(values, ci_low_quantile))
+            param_ci_high[name] = float(np.quantile(values, ci_high_quantile))
             setattr(self, f"{name}_mean", param_means[name])
             setattr(self, f"{name}_std", param_stds[name])
+            setattr(self, f"{name}_min", param_mins[name])
+            setattr(self, f"{name}_max", param_maxs[name])
+            setattr(self, f"{name}_ci_low", param_ci_low[name])
+            setattr(self, f"{name}_ci_high", param_ci_high[name])
         self.alpha_mean = param_means.get("alpha", float("nan"))
         self.alpha_std = param_stds.get("alpha", float("nan"))
         self.pvalue_xmin_mode = xmin_mode
@@ -1632,11 +1712,18 @@ class Fit(powerlaw.Fit):
                 "alpha_std": self.alpha_std,
                 "param_means": param_means,
                 "param_stds": param_stds,
+                "param_mins": param_mins,
+                "param_maxs": param_maxs,
+                "param_ci_low": param_ci_low,
+                "param_ci_high": param_ci_high,
+                "bootstrap_ci_level": self.bootstrap_ci_level,
                 "xmin_mode": xmin_mode,
                 "bootstrap_xmin_mean": self.bootstrap_xmin_mean,
                 "bootstrap_xmin_std": self.bootstrap_xmin_std,
                 "bootstrap_xmin_min": self.bootstrap_xmin_min,
                 "bootstrap_xmin_max": self.bootstrap_xmin_max,
+                "bootstrap_xmin_ci_low": self.bootstrap_xmin_ci_low,
+                "bootstrap_xmin_ci_high": self.bootstrap_xmin_ci_high,
             }
             directory = os.path.dirname(cache_path) or "."
             os.makedirs(directory, exist_ok=True)

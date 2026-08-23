@@ -1,8 +1,8 @@
 """Kappa-based reversible/irreversible decomposition for size-scaling drops.
 
 The non-reconnecting size-scaling runs are classified independently for each
-system size and strain regime.  The default detector is ``kappa_det = mu / 2``
-with ``rho=1``.  Events below that threshold are
+system size and strain regime.  The default detector is ``kappa_det = mu / (2 rho)``
+with ``rho=N/V_0=2``.  Events below that threshold are
 reversible; events at or above it are irreversible.  The labels are then
 applied to the paired :math:`\\Delta E_S` values from the same events.  The
 standard reported fit is the irreversible-only :math:`\\Delta E_S` fit,
@@ -39,7 +39,7 @@ from Plotting.plotPowerLaw import (
     dist_from_fit,
     plot_data_pdf,
     plot_fit_pdf,
-    plot_KS_fitting,
+    plot_xmin_analysis,
 )
 from Plotting.sizeScalingCollapse import (
     REGIMES,
@@ -48,6 +48,7 @@ from Plotting.sizeScalingCollapse import (
 )
 from Plotting.plotPowerLaw import make_fit
 from Plotting.standardPowerlaw import (
+    DEFAULT_KAPPA_RHO,
     EventDrops,
     kappa_detection_threshold,
     positive_es,
@@ -358,63 +359,12 @@ def _plot_fit_grid(
 
 
 def _save_ks_plot(fit, path: Path):
-    result = plot_KS_fitting(fit, save=False, show=False)
-    if result is None:
-        raise RuntimeError(f"No valid KS xmin trace for {path}.")
-    fig, (ax1, ax2) = result
     analysis = getattr(fit, "xmin_fitting_results", None)
     if analysis is None:
         raise RuntimeError(f"No xmin analysis available for {path}.")
-    simple_xmin = float(analysis["simple_drop_xmin"])
-    global_xmin = float(analysis["global_min_xmin"])
-    simple_distance = float(analysis["simple_drop_distance"])
-    global_distance = float(analysis["global_min_distance"])
-    ax1.axvline(
-        simple_xmin,
-        color="tab:purple",
-        linestyle="--",
-        linewidth=1.2,
-        label=f"simpleDrop xmin: {simple_xmin:.2e}",
-        alpha=0.9,
-    )
-    ax1.scatter(
-        [simple_xmin],
-        [simple_distance],
-        marker="D",
-        color="tab:purple",
-        s=34,
-        zorder=6,
-    )
-    ax1.scatter(
-        [global_xmin],
-        [global_distance],
-        marker="X",
-        facecolor="white",
-        edgecolor="0.15",
-        linewidth=0.9,
-        s=48,
-        zorder=7,
-    )
-    lines1, labels1 = ax1.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax2.legend(lines1 + lines2, labels1 + labels2, loc="upper right", ncol=2)
+    fig, ax = plot_xmin_analysis(analysis)
+    ax.set_title("xmin analysis")
     _save_figure(fig, path)
-
-
-def _ks_curve_data(fit):
-    analysis = getattr(fit, "xmin_fitting_results", None)
-    if analysis is None:
-        raise RuntimeError("Missing xmin fitting results for D plot.")
-    xmins = np.asarray(analysis["xmins"], dtype=float)
-    distances = np.asarray(analysis["distances"], dtype=float)
-    valid_fits = np.asarray(analysis.get("valid_fits", True), dtype=bool)
-    if valid_fits.shape != xmins.shape:
-        raise RuntimeError("xmin validity mask does not match xmin candidates.")
-    mask = np.isfinite(xmins) & np.isfinite(distances) & valid_fits & (xmins > 0)
-    if not np.any(mask):
-        raise RuntimeError("No valid KS distances are available for D plot.")
-    order = np.argsort(xmins[mask])
-    return xmins[mask][order], distances[mask][order]
 
 
 def _plot_ks_grid(
@@ -438,64 +388,14 @@ def _plot_ks_grid(
             result = fit_results[size][field]
             fit = result["fit"]
             ax = axes[row, column]
-            xmins, distances = _ks_curve_data(fit)
-            ax.plot(
-                xmins,
-                distances,
-                color="tab:blue",
-                marker="o",
-                markersize=2.5,
-                markerfacecolor="none",
-                linewidth=0.9,
-            )
             analysis = fit.xmin_fitting_results
-            simple_xmin = float(analysis["simple_drop_xmin"])
-            global_xmin = float(analysis["global_min_xmin"])
-            simple_distance = float(analysis["simple_drop_distance"])
-            global_distance = float(analysis["global_min_distance"])
-            ax.axvline(
-                simple_xmin,
-                color="tab:purple",
-                linestyle="--",
-                linewidth=1.0,
-            )
-            ax.axvline(
-                global_xmin,
-                color="0.15",
-                linestyle=":",
-                linewidth=1.2,
-            )
-            ax.scatter(
-                [simple_xmin],
-                [simple_distance],
-                marker="D",
-                color="tab:purple",
-                s=25,
-                zorder=5,
-            )
-            ax.scatter(
-                [global_xmin],
-                [global_distance],
-                marker="X",
-                facecolor="white",
-                edgecolor="0.15",
-                linewidth=0.8,
-                s=36,
-                zorder=6,
-            )
-            ax.set_xscale("log")
+            if analysis is None:
+                raise RuntimeError(f"Missing xmin analysis for L={size}, {field}.")
+            plot_xmin_analysis(analysis, ax=ax)
+            legend = ax.get_legend()
+            if legend is not None:
+                legend.remove()
             ax.set_title(f"L={size}")
-            ax.grid(alpha=0.18)
-            ax.text(
-                0.04,
-                0.04,
-                rf"$x_{{min}}^{{SD}}={simple_xmin:.2e}$" "\n"
-                rf"$x_{{min}}^{{global}}={global_xmin:.2e}$",
-                transform=ax.transAxes,
-                va="bottom",
-                fontsize="x-small",
-                bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "none"},
-            )
             if column == 0:
                 ax.set_ylabel(r"KS distance $D$")
             else:
@@ -505,9 +405,9 @@ def _plot_ks_grid(
             else:
                 ax.set_xlabel("")
     handles = [
-        Line2D([], [], color="tab:blue", marker="o", markerfacecolor="none", label=r"$D(x_{min})$"),
-        Line2D([], [], color="tab:purple", linestyle="--", marker="D", label="simpleDrop"),
-        Line2D([], [], color="0.15", linestyle=":", marker="X", label="global minimum"),
+        Line2D([], [], color="tab:red", marker="o", label=r"Eligible raw $D(x_{min})$"),
+        Line2D([], [], color="tab:blue", linestyle="-", marker="D", label="simpleDrop"),
+        Line2D([], [], color="0.25", linestyle="-", marker="X", label="global minimum"),
     ]
     fig.legend(
         handles=handles,
@@ -573,12 +473,12 @@ def run(
         "seeds_per_size": seeds_per_size,
         "population_mode": population_mode,
         "selection": (
-            "kappa_det = mu/2 classification"
+            "kappa_det = mu/(2 rho) classification with rho=N/V_0=2"
             if population_mode == "classified"
             else "all paired events; no initial E_R split"
         ),
-        "kappa_detection_threshold": "kappa_det = mu/2 with rho=1",
-        "mu": float(2.0 * kappa_det),
+        "kappa_detection_threshold": "kappa_det = mu/(2 rho) with rho=N/V_0=2",
+        "mu": float(2.0 * DEFAULT_KAPPA_RHO * kappa_det),
         "E_S_fit_population": (
             "irreversible delta_E_S"
             if population_mode == "classified"

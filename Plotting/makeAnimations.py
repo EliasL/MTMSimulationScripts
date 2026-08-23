@@ -321,7 +321,7 @@ def makeAnimations(
     matrix_name="T",
     videoNames=None,
     xlim=None,
-    num_processes=-2,
+    num_processes=2,
     useMetadata=True,
     reconnecting=None,
     square_periodic_mesh=False,

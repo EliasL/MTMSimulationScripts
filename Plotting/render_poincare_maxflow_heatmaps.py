@@ -21,6 +21,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, Normalize
+import cmocean
 
 from Plotting.render_largest_reconnecting_events import (
     DEFAULT_JOB,
@@ -32,13 +33,17 @@ from Plotting.render_largest_reconnecting_events import (
     _single_element_poincare_transition,
     select_events,
 )
+from Plotting.heatmap_cache import (
+    heatmap_cache_path,
+    load_heatmap_cache,
+    save_heatmap_cache,
+)
 from MTMath.reduction import plastic_reduction
 
 
 DEFAULT_OUTPUT_DIRECTORY = ROOT / "Plots/reconnecting_largest_energy_events_preview"
-# Match the 200x200 Poincare density histogram used by the aggregate event
-# plots.  The zoomed view below covers the central radius 1/2 of the disk.
-SPATIAL_BINS = 200
+# Use a finer spatial grid for the pooled heatmaps.
+SPATIAL_BINS = 300
 MIN_CELL_COUNT = 1
 ZOOMED_DISK_ZOOM = 2.0
 PREVIOUS_MESH_ZOOM = 3.5
@@ -192,11 +197,14 @@ def _max_abs_projection_direction(u: np.ndarray, v: np.ndarray) -> tuple[np.ndar
 
 
 def _cell_metrics(u: np.ndarray, v: np.ndarray) -> tuple[float, float, float, float]:
-    direction, total_magnitude = _max_abs_projection_direction(u, v)
-    vectors = np.column_stack((u.astype(float), v.astype(float)))
-    nonzero = np.linalg.norm(vectors, axis=1) > 1e-15
-    vectors = vectors[nonzero]
-    projection_magnitudes = np.abs(vectors @ direction)
+    direction, _ = _max_abs_projection_direction(u, v)
+    all_vectors = np.column_stack((u.astype(float), v.astype(float)))
+    nonzero = np.linalg.norm(all_vectors, axis=1) > 1e-15
+    vectors = all_vectors[nonzero]
+    # Include zero transitions in the cell average; they are real events and
+    # should contribute zero projected magnitude rather than being discarded.
+    projection_magnitudes = np.abs(all_vectors @ direction)
+    average_magnitude = float(np.mean(projection_magnitudes))
     angle = float(np.mod(np.arctan2(direction[1], direction[0]), np.pi))
     # Axial circular standard deviation: directions separated by pi are
     # equivalent, so the doubled-angle resultant is the appropriate measure.
@@ -205,7 +213,7 @@ def _cell_metrics(u: np.ndarray, v: np.ndarray) -> tuple[float, float, float, fl
     resultant = float(np.clip(resultant, 1e-15, 1.0))
     angle_std = float(np.sqrt(-0.5 * np.log(resultant)))
     magnitude_std = float(np.std(projection_magnitudes))
-    return angle, total_magnitude, angle_std, magnitude_std
+    return angle, average_magnitude, angle_std, magnitude_std
 
 
 def _compute_heatmaps(
@@ -263,7 +271,7 @@ def _write_manifest(path: Path, count: np.ndarray, metrics: tuple[np.ndarray, ..
     centers = 0.5 * (edges[:-1] + edges[1:])
     with path.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
-        writer.writerow(("cell_ix", "cell_iy", "x_center", "y_center", "count", "flow_angle_mod_pi", "total_projected_magnitude", "angle_std_rad", "projected_magnitude_std"))
+        writer.writerow(("cell_ix", "cell_iy", "x_center", "y_center", "count", "flow_angle_mod_pi", "average_projected_magnitude", "angle_std_rad", "projected_magnitude_std"))
         for iy_bin, ix_bin in np.argwhere(np.isfinite(metrics[0])):
             writer.writerow((ix_bin, iy_bin, centers[ix_bin], centers[iy_bin], count[iy_bin, ix_bin], *(metric[iy_bin, ix_bin] for metric in metrics)))
 
@@ -277,16 +285,37 @@ def render_maxflow_heatmaps(
     min_count: int = MIN_CELL_COUNT,
     zoom: float = 1.0,
     coordinate_source: str = "after",
+    force_recompute: bool = False,
 ) -> tuple[Path, Path]:
-    u, v, ix, iy, count, total_elements = _collect_vectors(
+    cache_path = heatmap_cache_path(
+        output_path.parent / "cache" / "heatmaps",
+        "poincare",
         events,
-        bins=bins,
-        zoom=zoom,
-        coordinate_source=coordinate_source,
+        parameters={
+            "bins": bins,
+            "min_count": min_count,
+            "zoom": zoom,
+            "coordinate_source": coordinate_source,
+            "metric_algorithm": "max_abs_projection_v1",
+        },
     )
-    metrics = _compute_heatmaps(u, v, ix, iy, count, min_count=min_count)
+    cached = None if force_recompute else load_heatmap_cache(cache_path)
+    if cached is None:
+        u, v, ix, iy, count, _ = _collect_vectors(
+            events,
+            bins=bins,
+            zoom=zoom,
+            coordinate_source=coordinate_source,
+        )
+        metrics = _compute_heatmaps(u, v, ix, iy, count, min_count=min_count)
+        edges = np.linspace(-1.0 / zoom, 1.0 / zoom, bins + 1)
+        save_heatmap_cache(cache_path, metrics, count, edges)
+        print(f"Saved Poincare heatmap cache: {cache_path}")
+    else:
+        *metrics, count, edges = cached
+        metrics = tuple(metrics)
+        print(f"Loaded Poincare heatmap cache: {cache_path}")
     angle, magnitude, angle_std, magnitude_std = metrics
-    edges = np.linspace(-1.0 / zoom, 1.0 / zoom, bins + 1)
     boundary = _loss_of_ellipticity_boundary()
 
     figure, axes = plt.subplots(2, 2, figsize=(13.0, 12.0), constrained_layout=True)
@@ -294,8 +323,8 @@ def render_maxflow_heatmaps(
     if positive_magnitude.size == 0:
         raise RuntimeError("The projected-flow heatmap has no positive values.")
     panels = (
-        (angle, "twilight", Normalize(0.0, np.pi), "flow angle (mod $\\pi$)", (0.0, np.pi / 2.0, np.pi), (r"$0$", r"$\\pi/2$", r"$\\pi$")),
-        (magnitude, "viridis", LogNorm(float(np.min(positive_magnitude)), float(np.max(positive_magnitude))), "total projected magnitude", None, None),
+        (angle, cmocean.cm.phase, Normalize(0.0, np.pi), "flow angle (mod $\\pi$)", (0.0, np.pi / 2.0, np.pi), (r"$0$", r"$\\pi/2$", r"$\\pi$")),
+        (magnitude, "viridis", LogNorm(float(np.min(positive_magnitude)), float(np.max(positive_magnitude))), "average projected magnitude", None, None),
         (angle_std, "magma", Normalize(0.0, float(np.nanmax(angle_std))), "axial angle std (rad)", None, None),
         (magnitude_std, "plasma", Normalize(0.0, float(np.nanmax(magnitude_std))), "projected-magnitude std", None, None),
     )
@@ -330,6 +359,16 @@ def main() -> None:
     parser.add_argument("--min-count", type=int, default=MIN_CELL_COUNT)
     parser.add_argument("--zoom", type=float, default=ZOOMED_DISK_ZOOM)
     parser.add_argument("--previous-zoom", type=float, default=PREVIOUS_MESH_ZOOM)
+    parser.add_argument(
+        "--force-recompute",
+        action="store_true",
+        help="Ignore a matching heatmap cache and rebuild it.",
+    )
+    parser.add_argument(
+        "--include-other-views",
+        action="store_true",
+        help="Also render the current and previous-coordinate comparison views.",
+    )
     args = parser.parse_args()
     if (
         args.dpi <= 0
@@ -344,24 +383,6 @@ def main() -> None:
     if args.top is not None and args.top <= 0:
         raise ValueError("--top must be positive.")
     events = select_events(args.job, number=args.top, saved_only=True)
-    output, manifest = render_maxflow_heatmaps(
-        events,
-        args.output_directory / "aggregate_maxflow_heatmaps.png",
-        dpi=args.dpi,
-        bins=args.bins,
-        min_count=args.min_count,
-        zoom=args.zoom,
-        coordinate_source="after",
-    )
-    previous_output, previous_manifest = render_maxflow_heatmaps(
-        events,
-        args.output_directory / "aggregate_maxflow_heatmaps_previous.png",
-        dpi=args.dpi,
-        bins=args.bins,
-        min_count=args.min_count,
-        zoom=args.previous_zoom,
-        coordinate_source="before",
-    )
     reduced_after_output, reduced_after_manifest = render_maxflow_heatmaps(
         events,
         args.output_directory / "aggregate_maxflow_heatmaps_after_reduced.png",
@@ -370,13 +391,35 @@ def main() -> None:
         min_count=args.min_count,
         zoom=args.previous_zoom,
         coordinate_source="after_reduced",
+        force_recompute=args.force_recompute,
     )
-    print(output)
-    print(manifest)
-    print(previous_output)
-    print(previous_manifest)
     print(reduced_after_output)
     print(reduced_after_manifest)
+    if args.include_other_views:
+        output, manifest = render_maxflow_heatmaps(
+            events,
+            args.output_directory / "aggregate_maxflow_heatmaps.png",
+            dpi=args.dpi,
+            bins=args.bins,
+            min_count=args.min_count,
+            zoom=args.zoom,
+            coordinate_source="after",
+            force_recompute=args.force_recompute,
+        )
+        previous_output, previous_manifest = render_maxflow_heatmaps(
+            events,
+            args.output_directory / "aggregate_maxflow_heatmaps_previous.png",
+            dpi=args.dpi,
+            bins=args.bins,
+            min_count=args.min_count,
+            zoom=args.previous_zoom,
+            coordinate_source="before",
+            force_recompute=args.force_recompute,
+        )
+        print(output)
+        print(manifest)
+        print(previous_output)
+        print(previous_manifest)
 
 
 if __name__ == "__main__":

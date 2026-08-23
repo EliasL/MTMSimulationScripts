@@ -108,6 +108,16 @@ class PoincareTransition:
     delta_T_frobenius: np.ndarray
 
 
+@dataclass(frozen=True)
+class TotalTTransition:
+    """Corresponding total-``T`` matrices and their one-step increment."""
+
+    before_T: np.ndarray
+    after_T: np.ndarray
+    increment: np.ndarray
+    delta_T_frobenius: np.ndarray
+
+
 def _macro_events(job_directory: Path) -> tuple[pd.DataFrame, float]:
     """Return recorded negative equilibrium-energy changes and the step size."""
 
@@ -336,6 +346,43 @@ def _total_T(path: Path, *, load_increment: float) -> np.ndarray:
     return T
 
 
+def _total_T_transition(
+    before_path: Path,
+    after_path: Path,
+    *,
+    load_increment: float,
+) -> TotalTTransition:
+    """Return the total-``T`` endpoint matrices for persistent edge-flip slots.
+
+    ``increment`` is ``T_after @ inv(T_before)``.  The transposed solve avoids
+    forming a matrix inverse explicitly.
+    """
+
+    before_T = _total_T(before_path, load_increment=load_increment)
+    after_T = _total_T(after_path, load_increment=load_increment)
+    if before_T.shape != after_T.shape:
+        raise ValueError(
+            "Edge-flip slot correspondence requires the same number of elements "
+            "before and after reconnection."
+        )
+    try:
+        increment = np.linalg.solve(
+            np.swapaxes(before_T, -1, -2), np.swapaxes(after_T, -1, -2)
+        )
+        increment = np.swapaxes(increment, -1, -2)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError("Could not solve for the total-T increment.") from exc
+    delta_T_frobenius = np.linalg.norm(increment - np.eye(2), axis=(-2, -1))
+    if not np.all(np.isfinite(delta_T_frobenius)):
+        raise ValueError("The total-T transformation has non-finite Frobenius norms.")
+    return TotalTTransition(
+        before_T=before_T,
+        after_T=after_T,
+        increment=increment,
+        delta_T_frobenius=delta_T_frobenius,
+    )
+
+
 def _metric_from_total_T(T: np.ndarray, *, source: Path) -> np.ndarray:
     """Return and validate the positive-definite metric induced by total ``T``."""
 
@@ -464,6 +511,53 @@ def _stress_coordinates_from_vtu(path: Path, *, load_increment: float) -> tuple[
     return sigma12, normal_difference
 
 
+def _stress_coordinates_from_metric(
+    metric: np.ndarray, *, source: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return symmetric-gauge stresses for a theoretical metric-only curve.
+
+    Do not use this helper for reconnecting VTU data: reconstructing ``F``
+    from a metric loses the rotation needed for fixed-coordinate Cauchy stress.
+    """
+
+    metric = np.asarray(metric, dtype=float)
+    if metric.ndim != 3 or metric.shape[1:] != (2, 2):
+        raise ValueError(f"Expected (..., 2, 2) metrics in {source}, got {metric.shape}.")
+    if not np.all(np.isfinite(metric)):
+        raise ValueError(f"Metric contains non-finite values in {source}.")
+    sigma = np.asarray(ContiEnergy.cauchy_from_F(F_from_C(metric)), dtype=float)
+    if sigma.shape != metric.shape or not np.all(np.isfinite(sigma)):
+        raise ValueError(f"Could not compute finite Cauchy stress in {source}.")
+    sigma_xy = sigma[:, 0, 1]
+    normal_difference = 0.5 * (sigma[:, 1, 1] - sigma[:, 0, 0])
+    if not np.all(np.isfinite(sigma_xy)) or not np.all(np.isfinite(normal_difference)):
+        raise ValueError(f"Stress coordinates are non-finite in {source}.")
+    return sigma_xy, normal_difference
+
+
+def _stress_coordinates_from_T(
+    T: np.ndarray, *, source: str
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return Cauchy-stress coordinates from full reconnection-invariant ``T``."""
+
+    T = np.asarray(T, dtype=float)
+    if T.ndim != 3 or T.shape[1:] != (2, 2):
+        raise ValueError(f"Expected (..., 2, 2) total T matrices in {source}, got {T.shape}.")
+    if not np.all(np.isfinite(T)):
+        raise ValueError(f"Total T contains non-finite values in {source}.")
+    determinant = np.linalg.det(T)
+    if not np.all(np.isfinite(determinant) & (determinant > 0.0)):
+        raise ValueError(f"Total T is not orientation-preserving in {source}.")
+    sigma = np.asarray(ContiEnergy.cauchy_from_F(T), dtype=float)
+    if sigma.shape != T.shape or not np.all(np.isfinite(sigma)):
+        raise ValueError(f"Could not compute finite Cauchy stress from total T in {source}.")
+    sigma_xy = sigma[:, 0, 1]
+    normal_difference = 0.5 * (sigma[:, 1, 1] - sigma[:, 0, 0])
+    if not np.all(np.isfinite(sigma_xy)) or not np.all(np.isfinite(normal_difference)):
+        raise ValueError(f"Stress coordinates are non-finite in {source}.")
+    return sigma_xy, normal_difference
+
+
 def _resample_closed_curve(curve: np.ndarray, sample_count: int) -> np.ndarray:
     """Resample a 2-D closed curve at uniformly spaced arc-length positions."""
 
@@ -505,16 +599,11 @@ def _stress_loss_of_ellipticity_limit(
 
     disk_samples = _resample_closed_curve(boundary, ELLIPTICITY_STRESS_SAMPLES)
     C_boundary = poincareDisk2C(disk_samples[:, 0], disk_samples[:, 1])
-    F_boundary = F_from_C(C_boundary)
-    sigma = np.asarray(ContiEnergy.cauchy_from_F(F_boundary), dtype=float)
-    if sigma.shape != (ELLIPTICITY_STRESS_SAMPLES, 2, 2):
-        raise ValueError(
-            "The sampled ellipticity boundary produced an unexpected stress shape."
-        )
-    stress_x = 0.5 * (sigma[:, 1, 1] - sigma[:, 0, 0])
-    stress_y = sigma[:, 0, 1]
-    if not np.all(np.isfinite(stress_x)) or not np.all(np.isfinite(stress_y)):
-        raise ValueError("The sampled stress-space ellipticity limit is non-finite.")
+    stress_y, stress_x = _stress_coordinates_from_metric(
+        C_boundary, source="sampled ellipticity boundary"
+    )
+    if len(stress_x) != ELLIPTICITY_STRESS_SAMPLES:
+        raise ValueError("The sampled ellipticity boundary has an unexpected length.")
     return stress_x, stress_y
 
 
@@ -542,20 +631,31 @@ def _accumulate_poincare_density_histogram(
 
 
 def _draw_poincare_density_histogram(
-    axis: plt.Axes, histogram: np.ndarray, *, zoom: float
+    axis: plt.Axes,
+    histogram: np.ndarray,
+    *,
+    zoom: float,
+    norm: LogNorm | None = None,
 ) -> object:
     """Draw a logarithmic, all-event density image in Poincare plot coordinates."""
 
     if not np.any(histogram > 0):
         raise RuntimeError("The pooled new-equilibrium total-T cloud is empty.")
 
+    cmap = plt.get_cmap("inferno").copy()
+    # Leave empty bins transparent so the Poincare grid drawn underneath is
+    # visible.  The stress-density renderer intentionally keeps its empty
+    # bins white and is not changed here.
+    cmap.set_bad((1.0, 1.0, 1.0, 0.0))
+    if norm is None:
+        norm = LogNorm(vmin=1, vmax=max(2, int(np.max(histogram))))
     return _draw_poincare_grid_image(
         axis,
         np.ma.masked_equal(histogram, 0),
         zoom=zoom,
-        cmap="inferno",
-        norm=LogNorm(vmin=1, vmax=max(2, int(np.max(histogram)))),
-        alpha=0.70,
+        cmap=cmap,
+        norm=norm,
+        alpha=1.0,
         zorder=4,
     )
 
@@ -657,6 +757,7 @@ def _render_pooled_poincare_flow(
     boundary: np.ndarray,
     dpi: int,
     direction_split_otsu: bool = False,
+    show_arrows: bool = False,
 ) -> Path:
     """Render one pooled Poincare flow view at a requested zoom.
 
@@ -666,47 +767,122 @@ def _render_pooled_poincare_flow(
 
     flow_figure = plt.figure(figsize=(10.0, 9.4))
     flow_axis = flow_figure.add_axes((0.08, 0.17, 0.84, 0.76))
-    density_colorbar_axis = flow_figure.add_axes((0.10, 0.095, 0.38, 0.022))
-    vector_colorbar_axis = flow_figure.add_axes((0.54, 0.095, 0.38, 0.022))
+    density_colorbar_axis = flow_figure.add_axes(
+        (0.30, 0.095, 0.40, 0.022) if not show_arrows else (0.10, 0.095, 0.38, 0.022)
+    )
+    vector_colorbar_axis = (
+        flow_figure.add_axes((0.54, 0.095, 0.38, 0.022))
+        if show_arrows
+        else None
+    )
     _prepare_poincare_axis(flow_axis, zoom=zoom)
     density_image = _draw_poincare_density_histogram(
         flow_axis, density_histogram, zoom=zoom
     )
     _draw_poincare_loss_of_ellipticity_limit(flow_axis, boundary, zoom=zoom)
-    plot_binned_poincare_displacement_field(
-        flow_axis,
-        before_x,
-        before_y,
-        after_x - before_x,
-        after_y - before_y,
-        grid_size=DISK_GRID_SIZE,
-        zoom=zoom,
-        bins=30,
-        min_count=50,
-        min_coherence=0.0,
-        color_values=delta_T_frobenius,
-        colorbar_axes=vector_colorbar_axis,
-        colorbar_label=r"mean $\|\Delta\mathbf{T}\|_F$",
-        min_vector_length=0.0,
-        colorbar_log=direction_split_otsu,
-        vector_length_from_color=False,
-        vector_length_scale=2.5 if direction_split_otsu else 5.0,
-        arrow_width=0.003,
-        arrow_headwidth=2.8,
-        arrow_headlength=3.4,
-        direction_split_otsu=direction_split_otsu,
-    )
+    if show_arrows:
+        if vector_colorbar_axis is None:
+            raise RuntimeError("The vector colorbar axis was not created.")
+        plot_binned_poincare_displacement_field(
+            flow_axis,
+            before_x,
+            before_y,
+            after_x - before_x,
+            after_y - before_y,
+            grid_size=DISK_GRID_SIZE,
+            zoom=zoom,
+            bins=30,
+            min_count=50,
+            min_coherence=0.0,
+            color_values=delta_T_frobenius,
+            colorbar_axes=vector_colorbar_axis,
+            colorbar_label=r"mean $\|\Delta\mathbf{T}\|_F$",
+            min_vector_length=0.0,
+            colorbar_log=direction_split_otsu,
+            vector_length_from_color=False,
+            vector_length_scale=2.5 if direction_split_otsu else 5.0,
+            arrow_width=0.003,
+            arrow_headwidth=2.8,
+            arrow_headlength=3.4,
+            direction_split_otsu=direction_split_otsu,
+        )
     density_colorbar = flow_figure.colorbar(
         density_image, cax=density_colorbar_axis, orientation="horizontal"
     )
-    density_colorbar.set_label(
-        "Bin counts "
-        f"(N={total_element_count}; N_{{visible}}={visible_density_count}; "
-        f"{DENSITY_GRID_SIZE}x{DENSITY_GRID_SIZE})"
-    )
+    if visible_density_count == total_element_count:
+        density_label = f"Bin counts (N={total_element_count})"
+    else:
+        density_label = (
+            "Bin counts "
+            f"(N={total_element_count}; N_{{visible}}={visible_density_count})"
+        )
+    density_colorbar.set_label(density_label)
     flow_axis.legend(loc="upper left", frameon=True)
     flow_figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
     plt.close(flow_figure)
+    return output_path
+
+
+def _render_pooled_stress_density(
+    output_path: Path,
+    *,
+    sigma_xy: np.ndarray,
+    normal_difference: np.ndarray,
+    stress_limit_x: np.ndarray,
+    stress_limit_y: np.ndarray,
+    total_element_count: int,
+    dpi: int,
+) -> Path:
+    """Render one pooled direct-VTU stress-density heatmap."""
+
+    sigma_xy = np.asarray(sigma_xy, dtype=float).reshape(-1)
+    normal_difference = np.asarray(normal_difference, dtype=float).reshape(-1)
+    if sigma_xy.shape != normal_difference.shape:
+        raise ValueError("Stress-density coordinates must have matching shapes.")
+    if not np.all(np.isfinite(sigma_xy)) or not np.all(np.isfinite(normal_difference)):
+        raise ValueError("Stress-density coordinates must be finite.")
+    if total_element_count != len(sigma_xy):
+        raise ValueError("Stress-density element count does not match the data.")
+
+    stress_figure, stress_axis = plt.subplots(figsize=(9.5, 8.2))
+    scatter_extent = max(
+        float(np.max(np.abs(normal_difference))),
+        float(np.max(np.abs(sigma_xy))),
+    )
+    if not np.isfinite(scatter_extent) or scatter_extent <= 0:
+        raise ValueError("The stress density has no finite nonzero extent.")
+    scatter_extent *= 1.02
+    stress_extent = (-scatter_extent, scatter_extent, -scatter_extent, scatter_extent)
+    stress_density, _ = _draw_stress_density_histogram(
+        stress_axis,
+        normal_difference,
+        sigma_xy,
+        extent=stress_extent,
+    )
+    stress_axis.plot(
+        stress_limit_x,
+        stress_limit_y,
+        color="#d62728",
+        linewidth=1.5,
+        label="loss of ellipticity",
+        zorder=4,
+    )
+    stress_axis.set_xlabel(r"$(\sigma_{22}-\sigma_{11})/2$")
+    stress_axis.set_ylabel(r"$\sigma_{12}$")
+    stress_axis.set_xlim(-scatter_extent, scatter_extent)
+    stress_axis.set_ylim(-scatter_extent, scatter_extent)
+    stress_axis.set_aspect("equal", adjustable="box")
+    stress_colorbar_axis = stress_figure.add_axes((0.30, 0.095, 0.40, 0.022))
+    stress_colorbar = stress_figure.colorbar(
+        stress_density,
+        cax=stress_colorbar_axis,
+        orientation="horizontal",
+    )
+    stress_colorbar.set_label(f"Bin counts (N={total_element_count})")
+    stress_axis.legend(loc="best", frameon=True)
+    stress_figure.subplots_adjust(left=0.13, right=0.95, top=0.95, bottom=0.20)
+    stress_figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    plt.close(stress_figure)
     return output_path
 
 
@@ -716,8 +892,10 @@ def render_aggregate_largest_event_summary(
     *,
     dpi: int,
     direction_split_otsu: bool = False,
-) -> tuple[Path, Path, Path]:
-    """Pool saved events into Poincare-flow and stress-space figures."""
+    fully_reduce_after: bool = True,
+    show_arrows: bool = False,
+) -> tuple[Path, Path, Path, Path, Path, Path]:
+    """Pool saved events into before/after Poincare and stress figures."""
 
     if not events:
         raise ValueError("At least one saved event is required for an aggregate plot.")
@@ -726,11 +904,20 @@ def render_aggregate_largest_event_summary(
     number = len(events)
     stress_limit_x, stress_limit_y = _stress_loss_of_ellipticity_limit(boundary)
     full_disk_zoom = 1.0
-    zoomed_disk_zoom = 2.0
+    # Once the endpoint is plastically reduced, every point is inside the
+    # fundamental elastic well, so the earlier conservative zoom can be
+    # tightened without clipping the reduced cloud.
+    zoomed_disk_zoom = 3.5
     full_density_histogram = np.zeros(
         (DENSITY_GRID_SIZE, DENSITY_GRID_SIZE), dtype=int
     )
     zoomed_density_histogram = np.zeros(
+        (DENSITY_GRID_SIZE, DENSITY_GRID_SIZE), dtype=int
+    )
+    before_full_density_histogram = np.zeros(
+        (DENSITY_GRID_SIZE, DENSITY_GRID_SIZE), dtype=int
+    )
+    before_zoomed_density_histogram = np.zeros(
         (DENSITY_GRID_SIZE, DENSITY_GRID_SIZE), dtype=int
     )
     before_x_parts = []
@@ -738,11 +925,15 @@ def render_aggregate_largest_event_summary(
     after_x_parts = []
     after_y_parts = []
     delta_T_parts = []
+    before_sigma_xy_parts = []
+    before_normal_difference_parts = []
     sigma_xy_parts = []
     normal_difference_parts = []
     total_element_count = 0
     full_visible_density_count = 0
     zoomed_visible_density_count = 0
+    before_full_visible_density_count = 0
+    before_zoomed_visible_density_count = 0
     for event_index, event in enumerate(events):
         transition = _single_element_poincare_transition(
             event.state_paths.state0_min_gamma,
@@ -753,30 +944,62 @@ def render_aggregate_largest_event_summary(
             event.state_paths.state2_relaxed_gamma_plus,
             load_increment=event.load_increment,
         )
+        before_sigma_xy, before_normal_difference = _stress_coordinates_from_vtu(
+            event.state_paths.state0_min_gamma,
+            load_increment=event.load_increment,
+        )
         if len(sigma_xy) != len(transition.after_metric):
             raise ValueError(
                 "The new-equilibrium stress and total-T arrays do not have the same "
                 f"number of elements for {event.state_directory}."
             )
+        if len(before_sigma_xy) != len(transition.before_x):
+            raise ValueError(
+                "The previous-equilibrium stress and total-T arrays do not have the "
+                f"same number of elements for {event.state_directory}."
+            )
         total_element_count += len(transition.after_metric)
+        before_full_visible_density_count += _accumulate_poincare_density_histogram(
+            before_full_density_histogram,
+            transition.before_x,
+            transition.before_y,
+            zoom=full_disk_zoom,
+        )
+        before_zoomed_visible_density_count += _accumulate_poincare_density_histogram(
+            before_zoomed_density_histogram,
+            transition.before_x,
+            transition.before_y,
+            zoom=zoomed_disk_zoom,
+        )
+        after_x = transition.after_x
+        after_y = transition.after_y
+        if fully_reduce_after:
+            reduced_after_metric, _ = plastic_reduction(
+                transition.after_metric, compute_M=False
+            )
+            after_x, after_y = _disk_coordinates(reduced_after_metric)
         full_visible_density_count += _accumulate_poincare_density_histogram(
             full_density_histogram,
-            transition.after_x,
-            transition.after_y,
+            after_x,
+            after_y,
             zoom=full_disk_zoom,
         )
         zoomed_visible_density_count += _accumulate_poincare_density_histogram(
             zoomed_density_histogram,
-            transition.after_x,
-            transition.after_y,
+            after_x,
+            after_y,
             zoom=zoomed_disk_zoom,
         )
         before_x_parts.append(np.asarray(transition.before_x, dtype=np.float32))
         before_y_parts.append(np.asarray(transition.before_y, dtype=np.float32))
-        after_x_parts.append(np.asarray(transition.after_x, dtype=np.float32))
-        after_y_parts.append(np.asarray(transition.after_y, dtype=np.float32))
+        after_x_parts.append(np.asarray(after_x, dtype=np.float32))
+        after_y_parts.append(np.asarray(after_y, dtype=np.float32))
         delta_T_parts.append(
             np.asarray(transition.delta_T_frobenius, dtype=np.float32)
+        )
+        before_sigma_xy_parts.append(np.asarray(before_sigma_xy, dtype=np.float32))
+        before_normal_difference_parts.append(
+            np.asarray(before_normal_difference, dtype=np.float32)
         )
         sigma_xy_parts.append(np.asarray(sigma_xy, dtype=np.float32))
         normal_difference_parts.append(np.asarray(normal_difference, dtype=np.float32))
@@ -785,6 +1008,8 @@ def render_aggregate_largest_event_summary(
     after_x = np.concatenate(after_x_parts)
     after_y = np.concatenate(after_y_parts)
     delta_T_frobenius = np.concatenate(delta_T_parts)
+    before_sigma_xy = np.concatenate(before_sigma_xy_parts)
+    before_normal_difference = np.concatenate(before_normal_difference_parts)
     sigma_xy = np.concatenate(sigma_xy_parts)
     normal_difference = np.concatenate(normal_difference_parts)
     del (
@@ -793,6 +1018,8 @@ def render_aggregate_largest_event_summary(
         after_x_parts,
         after_y_parts,
         delta_T_parts,
+        before_sigma_xy_parts,
+        before_normal_difference_parts,
         sigma_xy_parts,
         normal_difference_parts,
     )
@@ -801,6 +1028,8 @@ def render_aggregate_largest_event_summary(
         == len(after_x)
         == len(delta_T_frobenius)
         == total_element_count
+        == len(before_sigma_xy)
+        == len(before_normal_difference)
         == len(sigma_xy)
         == len(normal_difference)
     ):
@@ -821,6 +1050,7 @@ def render_aggregate_largest_event_summary(
         boundary=boundary,
         dpi=dpi,
         direction_split_otsu=direction_split_otsu,
+        show_arrows=show_arrows,
     )
     zoomed_flow_png = _render_pooled_poincare_flow(
         output_directory / f"aggregate_all{number:03d}_{flow_label}_zoomed.png",
@@ -836,47 +1066,66 @@ def render_aggregate_largest_event_summary(
         boundary=boundary,
         dpi=dpi,
         direction_split_otsu=direction_split_otsu,
+        show_arrows=show_arrows,
     )
-
-    stress_figure, stress_axis = plt.subplots(figsize=(9.5, 8.2))
-    scatter_extent = max(
-        float(np.max(np.abs(normal_difference))),
-        float(np.max(np.abs(sigma_xy))),
+    before_flow_png = _render_pooled_poincare_flow(
+        output_directory / f"aggregate_all{number:03d}_{flow_label}_before.png",
+        zoom=full_disk_zoom,
+        density_histogram=before_full_density_histogram,
+        visible_density_count=before_full_visible_density_count,
+        total_element_count=total_element_count,
+        before_x=before_x,
+        before_y=before_y,
+        after_x=before_x,
+        after_y=before_y,
+        delta_T_frobenius=delta_T_frobenius,
+        boundary=boundary,
+        dpi=dpi,
+        direction_split_otsu=False,
+        show_arrows=False,
     )
-    if not np.isfinite(scatter_extent) or scatter_extent <= 0:
-        raise ValueError("The stress scatter has no finite nonzero extent.")
-    scatter_extent *= 1.02
-    stress_extent = (-scatter_extent, scatter_extent, -scatter_extent, scatter_extent)
-    stress_density, visible_stress_bins = _draw_stress_density_histogram(
-        stress_axis,
-        normal_difference,
-        sigma_xy,
-        extent=stress_extent,
+    before_zoomed_flow_png = _render_pooled_poincare_flow(
+        output_directory / f"aggregate_all{number:03d}_{flow_label}_before_zoomed.png",
+        zoom=zoomed_disk_zoom,
+        density_histogram=before_zoomed_density_histogram,
+        visible_density_count=before_zoomed_visible_density_count,
+        total_element_count=total_element_count,
+        before_x=before_x,
+        before_y=before_y,
+        after_x=before_x,
+        after_y=before_y,
+        delta_T_frobenius=delta_T_frobenius,
+        boundary=boundary,
+        dpi=dpi,
+        direction_split_otsu=False,
+        show_arrows=False,
     )
-    stress_axis.plot(
-        stress_limit_x,
-        stress_limit_y,
-        color="#d62728",
-        linewidth=1.5,
-        label="loss of ellipticity",
-        zorder=4,
+    stress_png = _render_pooled_stress_density(
+        output_directory / f"aggregate_all{number:03d}_stress_scatter.png",
+        sigma_xy=sigma_xy,
+        normal_difference=normal_difference,
+        stress_limit_x=stress_limit_x,
+        stress_limit_y=stress_limit_y,
+        total_element_count=total_element_count,
+        dpi=dpi,
     )
-    stress_axis.set_xlabel(r"$(\sigma_{22}-\sigma_{11})/2$")
-    stress_axis.set_ylabel(r"$\sigma_{xy}$")
-    stress_axis.set_xlim(-scatter_extent, scatter_extent)
-    stress_axis.set_ylim(-scatter_extent, scatter_extent)
-    stress_axis.set_aspect("equal", adjustable="box")
-    stress_colorbar = stress_figure.colorbar(stress_density, ax=stress_axis)
-    stress_colorbar.set_label(
-        f"Bin counts (N={total_element_count}; "
-        f"nonzero bins={visible_stress_bins}; {DENSITY_GRID_SIZE}x{DENSITY_GRID_SIZE})"
+    before_stress_png = _render_pooled_stress_density(
+        output_directory / f"aggregate_all{number:03d}_stress_scatter_before.png",
+        sigma_xy=before_sigma_xy,
+        normal_difference=before_normal_difference,
+        stress_limit_x=stress_limit_x,
+        stress_limit_y=stress_limit_y,
+        total_element_count=total_element_count,
+        dpi=dpi,
     )
-    stress_axis.legend(loc="best", frameon=True)
-    stress_figure.tight_layout()
-    stress_png = output_directory / f"aggregate_all{number:03d}_stress_scatter.png"
-    stress_figure.savefig(stress_png, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
-    plt.close(stress_figure)
-    return flow_png, zoomed_flow_png, stress_png
+    return (
+        flow_png,
+        zoomed_flow_png,
+        stress_png,
+        before_flow_png,
+        before_zoomed_flow_png,
+        before_stress_png,
+    )
 
 
 def _single_element_poincare_transition(
@@ -893,32 +1142,16 @@ def _single_element_poincare_transition(
     the advanced point is deliberately not reduced again.
     """
 
-    before_T = _total_T(before_path, load_increment=load_increment)
-    after_T = _total_T(after_path, load_increment=load_increment)
-    if before_T.shape != after_T.shape:
-        raise ValueError(
-            "Edge-flip slot correspondence requires the same number of elements "
-            "before and after reconnection."
-        )
+    total_transition = _total_T_transition(
+        before_path, after_path, load_increment=load_increment
+    )
+    before_T = total_transition.before_T
+    after_T = total_transition.after_T
     before_metric = _metric_from_total_T(before_T, source=before_path)
     element_indices = np.arange(len(before_T), dtype=int)
     reduced_before_metric, reduction_M = plastic_reduction(
         before_metric[element_indices], compute_M=True
     )
-    # Delta T = T_after @ inv(T_before) - I.  Solving the transposed system
-    # evaluates the right multiplication without explicitly inverting T_before.
-    try:
-        before_transpose = np.swapaxes(before_T[element_indices], -1, -2)
-        after_transpose = np.swapaxes(after_T[element_indices], -1, -2)
-        total_T_increment = np.linalg.solve(before_transpose, after_transpose)
-        total_T_increment = np.swapaxes(total_T_increment, -1, -2)
-    except np.linalg.LinAlgError as exc:
-        raise ValueError("Could not solve for the total-T increment.") from exc
-    delta_T_frobenius = np.linalg.norm(
-        total_T_increment - np.eye(2), axis=(-2, -1)
-    )
-    if not np.all(np.isfinite(delta_T_frobenius)):
-        raise ValueError("The total-T transformation has non-finite Frobenius norms.")
     advanced_after_metric = _metric_from_total_T(
         after_T[element_indices] @ reduction_M, source=after_path
     )
@@ -930,7 +1163,7 @@ def _single_element_poincare_transition(
         before_y=before_y,
         after_x=after_x,
         after_y=after_y,
-        delta_T_frobenius=delta_T_frobenius,
+        delta_T_frobenius=total_transition.delta_T_frobenius,
     )
 
 
@@ -1752,7 +1985,7 @@ def main() -> None:
         action="store_true",
         help=(
             "Pool the selected saved events into a mean Poincare-flow figure and "
-            "a sigma_xy versus (sigma22-sigma11)/2 scatter, without mesh plots."
+            "a sigma_12 versus (sigma22-sigma11)/2 scatter, without mesh plots."
         ),
     )
     parser.add_argument(
@@ -1760,8 +1993,14 @@ def main() -> None:
         action="store_true",
         help=(
             "Split directions in each pooled Poincare bin with the circular "
-            "Otsu cut, allowing up to two branch-mean quivers per bin."
+            "Otsu cut, allowing up to two branch-mean quivers per bin when "
+            "--show-arrows is also supplied."
         ),
+    )
+    parser.add_argument(
+        "--show-arrows",
+        action="store_true",
+        help="Show the pooled displacement arrows; omitted for density-only plots.",
     )
     parser.add_argument(
         "--all-saved",
@@ -1790,15 +2029,26 @@ def main() -> None:
         saved_only=args.saved_only,
     )
     if args.aggregate_only:
-        flow_output, zoomed_flow_output, stress_output = render_aggregate_largest_event_summary(
+        (
+            flow_output,
+            zoomed_flow_output,
+            stress_output,
+            before_flow_output,
+            before_zoomed_flow_output,
+            before_stress_output,
+        ) = render_aggregate_largest_event_summary(
             events,
             args.output_directory,
             dpi=args.dpi,
             direction_split_otsu=args.aggregate_otsu,
+            show_arrows=args.show_arrows,
         )
         print(flow_output)
         print(zoomed_flow_output)
         print(stress_output)
+        print(before_flow_output)
+        print(before_zoomed_flow_output)
+        print(before_stress_output)
         return
     manifest_rows = []
     for event in events:

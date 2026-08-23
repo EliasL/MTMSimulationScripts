@@ -265,6 +265,16 @@ def handle_args_and_plot():
         help="Video seconds per unit strain (default: 15).",
     )
     parser.add_argument(
+        "--numProcesses",
+        dest="num_processes",
+        type=int,
+        default=2,
+        help=(
+            "Maximum rendering workers (default: 2; large L>=200 meshes are "
+            "automatically restricted to 1)."
+        ),
+    )
+    parser.add_argument(
         "--elementSubset",
         dest="element_subset",
         choices=["odd", "even", "none"],

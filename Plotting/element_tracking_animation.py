@@ -515,10 +515,16 @@ def render_poincare_animation(
     dpi: int = 120,
     grid_depth: int = 5,
     grid_samples: int = 50,
+    grid_mode: str = "integer",
+    timeline_label: str = r"\gamma",
 ) -> Path:
     """Render T and the reconstructed path with a smoothed moving camera."""
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if grid_mode not in {"integer", "fixed"}:
+        raise ValueError("grid_mode must be 'integer' or 'fixed'.")
+    if not timeline_label:
+        raise ValueError("timeline_label must not be empty.")
     if reconstructed_history is not None:
         if reconstructed_history.paths != history.paths:
             raise ValueError("The T and reconstructed histories must use identical paths.")
@@ -526,24 +532,32 @@ def render_poincare_animation(
             raise ValueError("The T and reconstructed histories must track one element.")
     grid_cache: dict[tuple[int, int, int, int], tuple[np.ndarray, ...]] = {}
     node_grids: list[tuple[np.ndarray, ...]] = []
-    for history_index in timeline.node_history_indices:
-        matrix = history.matrices[int(history_index)]
-        rounded = np.rint(matrix).astype(int)
-        if not np.allclose(matrix, rounded, atol=1e-12, rtol=0):
-            raise ValueError(f"T is not integer-valued at history index {history_index}.")
-        determinant = rounded[0, 0] * rounded[1, 1] - rounded[0, 1] * rounded[1, 0]
-        if determinant != 1:
-            raise ValueError(
-                f"T is not in SL(2,Z) at history index {history_index}: det={determinant}."
-            )
-        key = tuple(int(value) for value in rounded.reshape(-1))
-        if key not in grid_cache:
-            grid_cache[key] = extract_poincare_grid_segments(
-                depth=grid_depth,
-                samples_per_line=grid_samples,
-                transformation=rounded,
-            )
-        node_grids.append(grid_cache[key])
+    if grid_mode == "fixed":
+        fixed_grid = extract_poincare_grid_segments(
+            depth=grid_depth,
+            samples_per_line=grid_samples,
+            transformation=None,
+        )
+        node_grids = [fixed_grid] * len(timeline.node_history_indices)
+    else:
+        for history_index in timeline.node_history_indices:
+            matrix = history.matrices[int(history_index)]
+            rounded = np.rint(matrix).astype(int)
+            if not np.allclose(matrix, rounded, atol=1e-12, rtol=0):
+                raise ValueError(f"T is not integer-valued at history index {history_index}.")
+            determinant = rounded[0, 0] * rounded[1, 1] - rounded[0, 1] * rounded[1, 0]
+            if determinant != 1:
+                raise ValueError(
+                    f"T is not in SL(2,Z) at history index {history_index}: det={determinant}."
+                )
+            key = tuple(int(value) for value in rounded.reshape(-1))
+            if key not in grid_cache:
+                grid_cache[key] = extract_poincare_grid_segments(
+                    depth=grid_depth,
+                    samples_per_line=grid_samples,
+                    transformation=rounded,
+                )
+            node_grids.append(grid_cache[key])
     print(
         f"local Poincare grids: {len(grid_cache)} unique wells at depth {grid_depth}",
         flush=True,
@@ -671,7 +685,9 @@ def render_poincare_animation(
                 reconstructed_current.set_offsets(
                     complex_to_xy(mobius_to_origin(current, center))
                 )
-            gamma_label.set_text(rf"$\gamma = {timeline.frame_loads[frame]:.2f}$")
+            gamma_label.set_text(
+                rf"${timeline_label} = {timeline.frame_loads[frame]:.2f}$"
+            )
             writer.grab_frame(facecolor="white", transparent=False)
             if (frame + 1) % 30 == 0:
                 print(f"Poincare frames: {frame + 1}/{timeline.frame_count}", flush=True)
@@ -833,17 +849,24 @@ def render_periodic_mesh_animation(
 
 def compose_picture_in_picture(
     poincare_video: str | Path,
-    mesh_video: str | Path,
-    periodic_mesh_video: str | Path,
-    output_path: str | Path,
     *,
+    local_neighborhood_video: str | Path,
+    periodic_overview_video: str | Path,
+    output_path: str | Path,
     ffmpeg_executable: str | Path,
     inset_fraction: float = 0.34,
     periodic_inset_fraction: float = 0.60,
     local_margin: int = 130,
     periodic_margin: int = 130,
 ) -> Path:
-    """Place local and full periodic mesh videos along the right edge."""
+    """Place the tracking-specific mesh views along the Poincare disk edge.
+
+    ``local_neighborhood_video`` must be the transparent close-up produced by
+    :func:`render_mesh_animation`. ``periodic_overview_video`` must be the
+    tracking overview produced by :func:`render_periodic_mesh_animation`.
+    A standalone mesh animation from ``plotAll.py`` is a separate deliverable
+    and is not an input to this compositor.
+    """
     invalid_inset = not 0.1 <= inset_fraction <= 0.6
     invalid_periodic_inset = not 0.1 <= periodic_inset_fraction <= 0.6
     if invalid_inset or invalid_periodic_inset:
@@ -867,9 +890,9 @@ def compose_picture_in_picture(
         "-i",
         str(poincare_video),
         "-i",
-        str(mesh_video),
+        str(local_neighborhood_video),
         "-i",
-        str(periodic_mesh_video),
+        str(periodic_overview_video),
         "-filter_complex",
         scale_expression,
         "-map",

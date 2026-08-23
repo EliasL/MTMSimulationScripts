@@ -3,7 +3,7 @@
 This is a separate version of the ordinary flowchart.  It uses the
 post-yield relaxation-energy drops to form
 ``kappa = Delta E_R/(rho V_0 Delta gamma^2)`` and makes the reversible /
-irreversible split at ``kappa_det = mu/2``.  It then fits only the
+irreversible split at ``kappa_det = a_1212/(2 rho)`` with ``rho=N/V_0=2``.  It then fits only the
 irreversible stress-corrected ``Delta E_S`` drops.
 
 For the default small-data case, the final ``Delta E_S,min^KS`` is selected by
@@ -29,6 +29,7 @@ import argparse
 import copy
 import hashlib
 import json
+import locale
 import sys
 import warnings
 from pathlib import Path
@@ -73,6 +74,7 @@ from Plotting.plotPowerLaw import (
     plot_ks_distance,
 )
 from Plotting.standardPowerlaw import (
+    DEFAULT_KAPPA_RHO,
     kappa_detection_threshold,
     kappa_from_relaxation_energy,
 )
@@ -112,12 +114,25 @@ XMIN_MAX_MARKERS = 250
 ALPHA_MAX_MARKERS = 250
 FIT_PDF_MAX_MARKERS = 400
 
-# Leave this as None to use the material threshold ``kappa_det = mu/2``.
+# Bootstrap settings for the selected global xmin fit.  ``confidence`` is the
+# existing evaluator's replicate-accuracy parameter: 0.05 requests about 100
+# replicates.  The plot reports the observed bootstrap min/max range.
+BOOTSTRAP_ACCURACY = 0.05
+BOOTSTRAP_CI_LEVEL = 0.95
+BOOTSTRAP_MAX_WORKERS = 1
+# Do not use ``rapidGlobal`` for final results: it is a diagnostic shortcut
+# that can miss the true global xmin.  The full observed candidate search is
+# required for the reported bootstrap uncertainty.
+BOOTSTRAP_XMIN_MODE = "global"
+
+# Leave this as None to use the material threshold
+# ``kappa_det = a_1212/(2 rho)``.
 # Set a number explicitly only for a frozen data release or layout comparison.
 KAPPA_DET_OVERRIDE = None
 
 # The event split is based on kappa = Delta E_R/(rho V_0 Delta gamma^2).
-KAPPA_DETECTION_METHOD_LABEL = "kappa_det = mu/2 with rho=1"
+KAPPA_RHO = DEFAULT_KAPPA_RHO
+KAPPA_DETECTION_METHOD_LABEL = "kappa_det = a_1212/(2 rho), rho=N/V_0=2"
 REVERSIBLE_COLOR = "#b9dff2"       # light blue
 IRREVERSIBLE_COLOR = "#f6c28b"      # light orange
 ER_ALL_COLOR = "0.55"
@@ -194,7 +209,7 @@ PANEL_ZORDERS = {
 }
 PANEL_LABELS = {
     "energy": r"(a) Energy drops",
-    "reversibility_er": r"(b) Drop detection: $\kappa$",
+    "reversibility_er": r"(b) Plasticity selection: $\kappa$",
     "reversibility_es": r"(c) Reversible / irreversible $\Delta E_S$",
     "ccdf_ks": r"(d) KS distance: irreversible $\Delta E_S$",
     "xmin_scan": r"(e) Global $\Delta E_{\min}$",
@@ -237,11 +252,16 @@ EQUATION_BOXES = {
     },
     "split_eq": {
         "center": (0.6, eqh),
-        "size": (0.17, 0.065),
+        "size": (0.18, 0.10),
         "text": (
-            r"$\Delta E_R<\Delta E_{R,\min}:\ \mathrm{reversible}$"
+            r"$\kappa=\frac{\Delta E_R}{\rho V_0\Delta\gamma^2},\quad"
+            r"\rho=\frac{N}{V_0}=2$"
             "\n"
-            r"$\Delta E_R\geq\Delta E_{R,\min}:\ \mathrm{irreversible}$"
+            r"$\kappa_{\det}=\frac{\mathfrak{a}_{1212}}{2\rho}$"
+            "\n"
+            r"$\kappa<\kappa_{\det}:\ \mathrm{reversible}$"
+            "\n"
+            r"$\kappa\geq\kappa_{\det}:\ \mathrm{irreversible}$"
         ),
         "color": "C4",
     },
@@ -316,6 +336,7 @@ OUTPUT_DIR = REPO_ROOT / "Plots" / "powerLaw" / "truncated_powerlaw_reversibilit
 PANEL_CACHE_DIR = OUTPUT_DIR / "panels"
 XMIN_FIT_CACHE_DIR = OUTPUT_DIR / "xmin_fit_cache"
 EXHAUSTIVE_XMIN_CACHE_DIR = OUTPUT_DIR / "exhaustive_xmin_cache"
+BOOTSTRAP_EVALUATION_CACHE_DIR = OUTPUT_DIR / "bootstrap_evaluation_cache"
 ANALYSIS_SUMMARY_PATH = OUTPUT_DIR / "analysis_summary.json"
 FINAL_PNG = OUTPUT_DIR / "truncated_powerlaw_reversibility_flowchart.png"
 FINAL_PDF = OUTPUT_DIR / "truncated_powerlaw_reversibility_flowchart.pdf"
@@ -573,6 +594,7 @@ def _collect_analysis(csv_paths):
             delta_e_r_rows,
             np.diff(load),
             float(REQUESTED_SYSTEM_SIZE * REQUESTED_SYSTEM_SIZE),
+            rho=KAPPA_RHO,
         )
         strain_lim = _resolve_strain_lim(STRAIN_LIMIT, df=df, postRegime=True)
         er_values, er_mask, er_signed, er_info = extract_energy_drops_from_dataframe(
@@ -618,7 +640,7 @@ def _collect_analysis(csv_paths):
     kappa_det = (
         float(KAPPA_DET_OVERRIDE)
         if KAPPA_DET_OVERRIDE is not None
-        else kappa_detection_threshold()
+        else kappa_detection_threshold(rho=KAPPA_RHO)
     )
     kappa_rev = kappa_all[kappa_all < kappa_det]
     kappa_irrev = kappa_all[kappa_all >= kappa_det]
@@ -667,6 +689,22 @@ def _collect_analysis(csv_paths):
         xmin_distribution=Truncated_Power_Law.name,
         verbose=0,
     )
+    bootstrap_analysis = dict(es_analysis)
+    bootstrap_analysis["nr_initial"] = XMIN_CANDIDATE_COUNT
+    bootstrap_analysis["refinement"] = "refined"
+    es_fit_fixed.xmin_analysis = bootstrap_analysis
+    es_fit_fixed.xmin_fitting_results = bootstrap_analysis
+    es_fit_fixed.xmin_selection = BOOTSTRAP_XMIN_MODE
+    es_fit_fixed.xmin_search_mode = "rapid"
+    es_fit_fixed.evaluate_fit(
+        data=es_irrev,
+        confidence=BOOTSTRAP_ACCURACY,
+        ci_level=BOOTSTRAP_CI_LEVEL,
+        parallel=BOOTSTRAP_MAX_WORKERS > 1,
+        max_workers=BOOTSTRAP_MAX_WORKERS,
+        cache_dir=str(BOOTSTRAP_EVALUATION_CACHE_DIR),
+        tqdmDesc="irreversible Delta E_S bootstrap",
+    )
 
     return {
         "csv_paths": [str(path) for path in csv_paths],
@@ -688,6 +726,11 @@ def _collect_analysis(csv_paths):
         "xmin_selection_is_approximate": not use_true_global,
         "es_xmin_ks": es_xmin_ks,
         "es_fit_fixed": es_fit_fixed,
+        "bootstrap_ci_level": float(es_fit_fixed.bootstrap_ci_level),
+        "bootstrap_replicates": int(
+            max(1, int(1 / (4 * BOOTSTRAP_ACCURACY**2)))
+        ),
+        "bootstrap_xmin_mode": BOOTSTRAP_XMIN_MODE,
     }
 
 
@@ -778,32 +821,77 @@ def _set_pdf_axes(ax, quantity):
 def _format_scientific_math(value, *, decimals=1):
     """Format a number as compact MathText, e.g. ``4.9\times10^{-6}``."""
     mantissa, exponent = f"{float(value):.{decimals}e}".split("e")
+    if int(exponent) == 0:
+        return f"{float(value):.{decimals}f}"
     return rf"{mantissa}\times 10^{{{int(exponent)}}}"
 
 
+def _format_event_count(value):
+    """Use locale-aware grouping only for counts of at least 10,000."""
+    value = int(value)
+    if abs(value) < 10_000:
+        return format(value, "d")
+    previous_locale = locale.setlocale(locale.LC_NUMERIC)
+    try:
+        locale.setlocale(locale.LC_NUMERIC, "fr_FR.UTF-8")
+        # The locale supplies the grouping; normalize its narrow space to a
+        # regular space because the embedded PDF fonts do not contain U+202F.
+        return format(value, "n").replace("\u202f", " ")
+    finally:
+        locale.setlocale(locale.LC_NUMERIC, previous_locale)
+
+
 def _reversibility_er_panel(analysis):
-    """Show the kappa PDF and its material detection threshold."""
+    """Show the kappa PDF and its material plasticity-selection threshold."""
     fig, ax = _new_panel("reversibility_er")
     kappa_all = analysis["kappa_all"]
+    kappa_reversible = analysis["kappa_rev"]
+    kappa_irreversible = analysis["kappa_irrev"]
     kappa_det = analysis["kappa_det"]
     plot_data_pdf(
         ax,
         kappa_all,
-        label="All $\kappa$ events",
+        label=(
+            rf"All $\Delta E_R>0$ events "
+            rf"(n={_format_event_count(kappa_all.size)})"
+        ),
         color=ER_ALL_COLOR,
         drop_label=r"\kappa",
         show_legend=False,
     )
     _set_pdf_axes(ax, r"\kappa")
     lo, hi = ax.get_xlim()
-    ax.axvspan(lo, kappa_det, color=REVERSIBLE_COLOR, alpha=0.34, zorder=0)
-    ax.axvspan(kappa_det, hi, color=IRREVERSIBLE_COLOR, alpha=0.30, zorder=0)
+    ax.axvspan(
+        lo,
+        kappa_det,
+        color=REVERSIBLE_COLOR,
+        alpha=0.34,
+        label=(
+            rf"reversible "
+            rf"(n={_format_event_count(kappa_reversible.size)})"
+        ),
+        zorder=0,
+    )
+    ax.axvspan(
+        kappa_det,
+        hi,
+        color=IRREVERSIBLE_COLOR,
+        alpha=0.30,
+        label=(
+            rf"irreversible "
+            rf"(n={_format_event_count(kappa_irreversible.size)})"
+        ),
+        zorder=0,
+    )
     ax.axvline(
         kappa_det,
         color=DROP_DETECTION_LINE_COLOR,
         linestyle="--",
         linewidth=1.2,
-        label=rf"$\kappa_{{\det}}={_format_scientific_math(kappa_det)}$",
+        label=(
+            rf"$\kappa_{{\det}}=\frac{{\mathfrak{{a}}_{{1212}}}}{{2\rho}}="
+            rf"{_format_scientific_math(kappa_det, decimals=2)}$"
+        ),
         zorder=4,
     )
     ax.legend(loc="best", fontsize=5.4)
@@ -818,7 +906,7 @@ def _reversibility_es_panel(analysis):
     plot_data_pdf(
         ax,
         reversible,
-        label=rf"reversible ($n={reversible.size}$)",
+        label=rf"reversible (n={_format_event_count(reversible.size)})",
         color=REVERSIBLE_COLOR,
         drop_label=r"\Delta E_S",
         show_legend=False,
@@ -827,7 +915,7 @@ def _reversibility_es_panel(analysis):
     plot_data_pdf(
         ax,
         irreversible,
-        label=rf"irreversible ($n={irreversible.size}$)",
+        label=rf"irreversible (n={_format_event_count(irreversible.size)})",
         color=IRREVERSIBLE_COLOR,
         drop_label=r"\Delta E_S",
         show_legend=False,
@@ -946,6 +1034,21 @@ def _fit_panel(analysis):
     fig, ax1 = _new_panel("mle_fit")
     fit = analysis["es_fit_fixed"]
     alpha_fit = dist_from_fit(fit)
+    uncertainty_values = {
+        "alpha_std": getattr(fit, "alpha_std", np.nan),
+        "lambda_std": getattr(fit, "Lambda_std", np.nan),
+        "alpha_min": getattr(fit, "alpha_min", np.nan),
+        "alpha_max": getattr(fit, "alpha_max", np.nan),
+        "lambda_min": getattr(fit, "Lambda_min", np.nan),
+        "lambda_max": getattr(fit, "Lambda_max", np.nan),
+        "xmin_min": getattr(fit, "bootstrap_xmin_min", np.nan),
+        "xmin_max": getattr(fit, "bootstrap_xmin_max", np.nan),
+    }
+    if not all(np.isfinite(value) for value in uncertainty_values.values()):
+        raise RuntimeError(
+            "Selected irreversible Delta E_S fit is missing finite bootstrap "
+            "uncertainties."
+        )
     plot_data_and_fit(
         fit,
         ax=ax1,
@@ -969,8 +1072,10 @@ def _fit_panel(analysis):
     )
     if len(ax1.lines) > 1:
         ax1.lines[1].set_label(
-            rf"MLE: $\hat{{\alpha}}={alpha_fit.alpha:.2f}$, "
-            rf"$\hat{{\lambda}}={alpha_fit.Lambda:.1e}$"
+            rf"$\hat{{\alpha}}={alpha_fit.alpha:.2f}"
+            rf"\pm{uncertainty_values['alpha_std']:.2f}$, "
+            rf"$\hat{{\lambda}}={alpha_fit.Lambda:.1e}"
+            rf"\pm{uncertainty_values['lambda_std']:.1e}$"
         )
     # Keep the gray fit-region shading, but omit its verbose label from the
     # combined legend.
@@ -981,8 +1086,10 @@ def _fit_panel(analysis):
     ax1.grid(False, which="both")
 
     ax2 = ax1.twinx()
-    # The secondary-axis curves should remain visible over the combined
-    # legend.  A transparent patch lets them draw above ax1's legend.
+    # Keep the primary axis (and its combined legend) above the twin axis.
+    ax2.set_zorder(0)
+    ax1.set_zorder(1)
+    ax1.patch.set_visible(False)
     ax2.patch.set_visible(False)
     scan = analysis["es_analysis"]
     x = np.asarray(scan["xmins"], dtype=float)
@@ -992,6 +1099,22 @@ def _fit_panel(analysis):
     order = np.argsort(x[valid])
     x_valid = x[valid][order]
     alpha_valid = alpha[valid][order]
+    ax2.axvspan(
+        uncertainty_values["xmin_min"],
+        uncertainty_values["xmin_max"],
+        color="0.45",
+        alpha=0.16,
+        label="_nolegend_",
+        zorder=0,
+    )
+    ax2.axhspan(
+        uncertainty_values["alpha_min"],
+        uncertainty_values["alpha_max"],
+        color=ES_COLOR,
+        alpha=0.16,
+        label="_nolegend_",
+        zorder=1,
+    )
     ax2.plot(
         x_valid,
         alpha_valid,
@@ -1013,7 +1136,9 @@ def _fit_panel(analysis):
             rf"$\Delta E_{{S,\min}}^{{KS,*}}={es_xmin_ks:.2e}$"
             if analysis.get("xmin_selection_is_approximate", False)
             else rf"$\Delta E_{{S,\min}}^{{KS}}={es_xmin_ks:.2e}$"
-        ),
+        )
+        + rf" $[{uncertainty_values['xmin_min']:.2e},"
+        + rf"\ {uncertainty_values['xmin_max']:.2e}]$",
         zorder=3,
     )
     ax2.set_xscale("log")
@@ -1033,7 +1158,8 @@ def _fit_panel(analysis):
         fontsize=4.2,
         framealpha=0.82,
     )
-    legend.set_zorder(1.0)
+    legend.set_zorder(1000.0)
+    legend.set_clip_on(False)
     _save_panel(fig, "mle_fit")
 
 
@@ -1043,12 +1169,20 @@ def _write_analysis_summary(analysis):
         "csv_paths": analysis["csv_paths"],
         "post_yield": True,
         "number_of_kappa_events": int(analysis["kappa_all"].size),
+        "rho": float(KAPPA_RHO),
+        "rho_definition": "N/V_0 = (2 L^2)/(L^2) = 2",
         "kappa_det": analysis["kappa_det"],
-        "mu": float(2.0 * analysis["kappa_det"]),
+        "mu": float(2.0 * KAPPA_RHO * analysis["kappa_det"]),
         "reversible_kappa_events": int(analysis["kappa_rev"].size),
         "irreversible_kappa_events": int(analysis["kappa_irrev"].size),
         "reversible_delta_E_S_events": int(analysis["es_rev"].size),
         "irreversible_delta_E_S_events": int(analysis["es_irrev"].size),
+        "reversible_positive_delta_E_S_fraction": float(
+            analysis["es_rev"].size / analysis["kappa_rev"].size
+        ),
+        "reversible_nonpositive_delta_E_S_events": int(
+            analysis["kappa_rev"].size - analysis["es_rev"].size
+        ),
         "xmin_selection_mode": analysis["xmin_selection_mode"],
         "xmin_selection_is_approximate": bool(
             analysis["xmin_selection_is_approximate"]
@@ -1061,6 +1195,33 @@ def _write_analysis_summary(analysis):
         "delta_E_S_xmin_ks_alpha": float(es_fit_dist.alpha),
         "delta_E_S_xmin_ks_lambda": float(es_fit_dist.Lambda),
         "delta_E_S_xmin_ks_D": float(es_fit_dist.D),
+        "bootstrap_ci_level": analysis["bootstrap_ci_level"],
+        "bootstrap_replicates": analysis["bootstrap_replicates"],
+        "bootstrap_xmin_mode": analysis["bootstrap_xmin_mode"],
+        "delta_E_S_xmin_ks_ci": [
+            analysis["es_fit_fixed"].bootstrap_xmin_ci_low,
+            analysis["es_fit_fixed"].bootstrap_xmin_ci_high,
+        ],
+        "delta_E_S_xmin_ks_minmax": [
+            analysis["es_fit_fixed"].bootstrap_xmin_min,
+            analysis["es_fit_fixed"].bootstrap_xmin_max,
+        ],
+        "delta_E_S_xmin_ks_alpha_ci": [
+            analysis["es_fit_fixed"].alpha_ci_low,
+            analysis["es_fit_fixed"].alpha_ci_high,
+        ],
+        "delta_E_S_xmin_ks_alpha_minmax": [
+            analysis["es_fit_fixed"].alpha_min,
+            analysis["es_fit_fixed"].alpha_max,
+        ],
+        "delta_E_S_xmin_ks_lambda_ci": [
+            analysis["es_fit_fixed"].Lambda_ci_low,
+            analysis["es_fit_fixed"].Lambda_ci_high,
+        ],
+        "delta_E_S_xmin_ks_lambda_minmax": [
+            analysis["es_fit_fixed"].Lambda_min,
+            analysis["es_fit_fixed"].Lambda_max,
+        ],
         "fit_population": "irreversible_delta_E_S",
     }
     ANALYSIS_SUMMARY_PATH.write_text(json.dumps(summary, indent=2) + "\n")
@@ -1272,13 +1433,13 @@ def compose_flowchart(summary):
         )
 
     crop_bbox_inches = _flowchart_crop_bbox(fig)
-    # fig.savefig(
-    #     FINAL_PNG,
-    #     dpi=FINAL_DPI,
-    #     facecolor="white",
-    #     bbox_inches=crop_bbox_inches,
-    #     pad_inches=0.0,
-    # )
+    fig.savefig(
+        FINAL_PNG,
+        dpi=FINAL_DPI,
+        facecolor="white",
+        bbox_inches=crop_bbox_inches,
+        pad_inches=0.0,
+    )
     _write_vector_pdf(fig, panel_axes, panel_positions, crop_bbox_inches)
     return fig
 

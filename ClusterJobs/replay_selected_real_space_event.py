@@ -136,9 +136,6 @@ def prepare_replay_configuration(args: ReplayArguments) -> Path:
         "maximumSavedElasticReversibilityStates": str(
             args.maximum_elastic_events
         ),
-        "saveFinalReversibilityState": str(
-            args.expected_event_kind == "plastic"
-        ).lower(),
         "showProgress": "-1",
         "forceReRun": "true",
     }

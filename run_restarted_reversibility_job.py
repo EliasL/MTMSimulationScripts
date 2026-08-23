@@ -54,8 +54,6 @@ def main():
         maxWorkers=2,
         build=True,
         outputPath=str(OUTPUT_ROOT),
-        newOutput=True,
-        overwriteSettings=True,
     )
 
 

@@ -5,7 +5,7 @@ xmin strategies.  ``plot_powerlaw`` and ``make_fit`` are low-level generic
 helpers: they fit the array supplied by the caller and do not classify
 reversible versus irreversible events.  For the standard simulation
 energy-drop result, callers must first use the post-yield
-:math:`\\kappa` detector with ``kappa_det = mu/2``, fit only the irreversible
+:math:`\\kappa` detector with ``kappa_det = mu/(2 rho)`` for ``rho=N/V_0=2``, fit only the irreversible
 :math:`\\Delta E_S` events, search every observed candidate for the global
 xmin, and then perform the maximum-likelihood fit.  The shared message is
 also summarized in the ``Standard power-law energy-drop workflow`` section

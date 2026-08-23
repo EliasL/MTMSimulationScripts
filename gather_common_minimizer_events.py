@@ -124,7 +124,6 @@ writeMeshVTUs = false
 dumpPreEventAfterReversibility = true
 saveElasticReversibilityStates = false
 maximumSavedElasticReversibilityStates = 0
-saveFinalReversibilityState = false
 nrVTUFrames = 1
 plasticityEventThreshold = {config_value(source_config, 'plasticityEventThreshold', '0.05')}
 energyDropThreshold = {threshold:.17g}

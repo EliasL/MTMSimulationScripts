@@ -4,7 +4,7 @@ For an AQS transition, ``Delta E_R = U_aff - U_0`` and
 
     kappa = Delta E_R / (rho * V_0 * Delta gamma**2).
 
-The default detector is ``kappa_det = mu/2`` for ``rho=1``.  This module
+The default detector is ``kappa_det = mu/(2 rho)`` for ``rho=N/V_0=2``.  This module
 compares it with the historical ``simpleDrop`` split and the recorded
 element-level plastic-change indicator.  It is deliberately diagnostic; the
 standard protocol is implemented elsewhere.
@@ -33,6 +33,7 @@ from Plotting.energyDropCalculations import (
     infer_plastic_event_column,
 )
 from Plotting.standardPowerlaw import (
+    DEFAULT_KAPPA_RHO,
     kappa_detection_threshold,
     kappa_from_relaxation_energy,
 )
@@ -48,7 +49,7 @@ DEFAULT_ANALYSIS_SUMMARY = (
 DEFAULT_OUTPUT = _REPO_ROOT / "output/pdf/kappa_event_classification_diagnostics.pdf"
 
 
-def mu_kappa_threshold(mu, *, rho=1.0):
+def mu_kappa_threshold(mu, *, rho=DEFAULT_KAPPA_RHO):
     """Return ``mu / (2 rho)`` for a scalar or array of moduli."""
 
     mu = np.asarray(mu, dtype=float)
@@ -88,7 +89,9 @@ def classification_metrics(predicted, recorded_plastic):
 
 
 def _reference_mu():
-    return float(2.0 * kappa_detection_threshold())
+    return float(
+        2.0 * DEFAULT_KAPPA_RHO * kappa_detection_threshold()
+    )
 
 
 def _discover_csv_paths(data_dir):
@@ -116,7 +119,7 @@ def _simple_drop_er_threshold(summary_path):
     return threshold
 
 
-def collect_kappa_data(csv_paths, *, rho=1.0):
+def collect_kappa_data(csv_paths, *, rho=DEFAULT_KAPPA_RHO):
     """Collect aligned post-yield kappa and recorded event labels."""
 
     fields = {
@@ -192,7 +195,9 @@ def _metric_curve(kappa, recorded_plastic, thresholds):
     }
 
 
-def make_diagnostic_figure(data, *, simple_drop_er_det=None, rho=1.0):
+def make_diagnostic_figure(
+    data, *, simple_drop_er_det=None, rho=DEFAULT_KAPPA_RHO
+):
     """Create the four-panel kappa diagnostic figure and return its summary."""
 
     kappa = data["kappa"]
@@ -204,7 +209,7 @@ def make_diagnostic_figure(data, *, simple_drop_er_det=None, rho=1.0):
     mu_reference = _reference_mu()
     reference_threshold = float(mu_kappa_threshold(mu_reference, rho=rho))
     classifiers = {
-        r"$\kappa_{\det}=\mu/2$": (
+        r"$\kappa_{\det}=\mu/(2\rho)$": (
             kappa >= reference_threshold,
             np.ones(kappa.shape, dtype=bool),
         ),
@@ -245,8 +250,8 @@ def make_diagnostic_figure(data, *, simple_drop_er_det=None, rho=1.0):
         ax.plot(x, y, label=f"{label} (n={values.size:,})", color=color)
     if simple_threshold is not None:
         ax.axvline(simple_threshold, color="tab:purple", linestyle="--", label="historical simpleDrop")
-    ax.axvline(reference_threshold, color="tab:red", linestyle=":", label=r"$\kappa_{\det}=\mu/2$")
-    ax.set(xscale="log", yscale="log", xlabel=r"$\kappa=\Delta E_R/(V_0\Delta\gamma^2)$", ylabel=r"PDF $p(\kappa)$", title="Post-yield kappa distribution")
+    ax.axvline(reference_threshold, color="tab:red", linestyle=":", label=r"$\kappa_{\det}=\mu/(2\rho)$")
+    ax.set(xscale="log", yscale="log", xlabel=r"$\kappa=\Delta E_R/(\rho V_0\Delta\gamma^2)$", ylabel=r"PDF $p(\kappa)$", title="Post-yield kappa distribution")
     ax.legend(fontsize=7)
 
     ax = axes[0, 1]
@@ -338,7 +343,7 @@ def main(argv=None):
         "--analysis-summary", type=Path, default=DEFAULT_ANALYSIS_SUMMARY
     )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--rho", type=float, default=1.0)
+    parser.add_argument("--rho", type=float, default=DEFAULT_KAPPA_RHO)
     args = parser.parse_args(argv)
 
     csv_paths = _discover_csv_paths(args.data_dir)

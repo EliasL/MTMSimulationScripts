@@ -90,11 +90,10 @@ files should normally include every setting needed for a reproducible run.
 - `scenario` — Is a legacy alias for `experiment` and should be replaced with `experiment` in new files.
 - `FullMinimizationLogging` — Is a legacy capitalized alias for `fullMinimizationLogging` and should be replaced with the lowercase spelling in new files.
 - `forceReRun` — Has no effect as a configuration-file line in the current executable, so reruns must be requested with the executable's `-r` command-line option.
-- `writeMeshVTUs` — Appears in older replay configurations but is not read by the current MTS2D parser and therefore cannot disable ordinary mesh output.
+- `writeMeshVTUs` — Enables ordinary sparse mesh VTU output; setting it to `false` disables those regular mesh frames.
 - `dumpPreEventAfterReversibility` — Appears in older replay configurations but is not read by the current MTS2D parser and therefore has no runtime effect.
-- `saveElasticReversibilityStates` — Appears in older replay configurations but is not read by the current MTS2D parser and therefore has no runtime effect.
-- `maximumSavedElasticReversibilityStates` — Appears in older replay configurations but is not read by the current MTS2D parser and therefore has no runtime effect.
-- `saveFinalReversibilityState` — Appears in older replay configurations but is not read by the current MTS2D parser and therefore has no runtime effect.
+- `saveElasticReversibilityStates` — Enables targeted backward tests and five-state VTU saves for selected elastic steps in the reversibility protocol.
+- `maximumSavedElasticReversibilityStates` — Caps the number of elastic reversibility states saved when `saveElasticReversibilityStates` is enabled; it must be positive in that case.
 
 `configPath` and `forceReRun` are serialized inside restart dumps, but neither
 is a normal configuration-file input setting.  Likewise, the `large`,

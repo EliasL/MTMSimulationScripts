@@ -7,7 +7,7 @@ minimum.  The search uses probability mass per bin, not density.  A
 zero-count plateau is represented by its middle bin.
 
 This is not the standard power-law workflow.  For the standard result, use
-post-yield ``kappa_det = mu/2`` for the reversible/irreversible split,
+post-yield ``kappa_det = mu/(2 rho)`` with ``rho=N/V_0=2`` for the reversible/irreversible split,
 fit only irreversible ``Delta E_S`` events, search all observed xmin
 candidates, and then perform the maximum-likelihood fit.
 
