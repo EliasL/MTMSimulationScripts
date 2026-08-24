@@ -38,28 +38,71 @@ class MeshFiguresTests(unittest.TestCase):
 
         np.testing.assert_allclose(
             initial.deformation_gradients,
-            np.broadcast_to(np.eye(2), (2, 2, 2)),
+            np.array(
+                [
+                    [[1.0, 1.0], [0.0, 1.0]],
+                    [[1.0, 0.0], [1.0, 1.0]],
+                ]
+            ),
         )
         np.testing.assert_allclose(
             loaded.deformation_gradients,
-            np.broadcast_to(example.applied_deformation_gradient, (2, 2, 2)),
+            np.array(
+                [
+                    [[1.0, 1.75], [0.0, 1.0]],
+                    [[1.75, 0.75], [1.0, 1.0]],
+                ]
+            ),
         )
         np.testing.assert_allclose(
             flipped.deformation_gradients,
-            np.broadcast_to(
-                np.array([[1.0, -0.25], [0.0, 1.0]]),
-                (2, 2, 2),
+            np.array(
+                [
+                    [[1.0, 0.75], [0.0, 1.0]],
+                    [[0.75, -0.25], [1.0, 1.0]],
+                ]
             ),
+        )
+        np.testing.assert_allclose(
+            example.F,
+            np.array([[1.0, 1.75], [0.0, 1.0]]),
+        )
+        np.testing.assert_allclose(loaded.deformation_gradients[0], example.F)
+        np.testing.assert_allclose(
+            loaded.deformation_gradients[1], example.F @ example.Q
+        )
+        for state in (loaded, flipped):
+            np.testing.assert_allclose(
+                state.deformation_gradients[1],
+                state.deformation_gradients[0] @ example.Q,
+            )
+        self.assertAlmostEqual(np.linalg.det(example.Q), 1.0)
+        self.assertFalse(
+            np.allclose(
+                flipped.deformation_gradients[0],
+                example.F @ np.linalg.inv(example.Q),
+            )
+        )
+        self.assertFalse(
+            np.allclose(
+                loaded.deformation_gradients,
+                flipped.deformation_gradients,
+            )
         )
         self.assertEqual(_shared_edge(initial.connectivity), (0, 3))
         self.assertEqual(_shared_edge(flipped.connectivity), (1, 2))
         self.assertEqual(len(unique_mesh_edges(initial.connectivity)), 5)
         self.assertEqual(len(unique_mesh_edges(flipped.connectivity)), 5)
 
-    def test_post_flip_references_remain_at_their_stored_coordinates(self):
+    def test_post_flip_elements_share_one_canonical_reference(self):
         flipped = build_edge_flip_example(shear=0.75).states[-1]
-        self.assertAlmostEqual(flipped.reference_elements.min(), 0.0)
-        self.assertAlmostEqual(flipped.reference_elements.max(), 1.0)
+        np.testing.assert_allclose(
+            flipped.canonical_reference_element,
+            np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]),
+        )
+        np.testing.assert_allclose(
+            flipped.reference_elements[0], flipped.reference_elements[1]
+        )
         self.assertFalse(
             np.allclose(
                 flipped.reference_elements.mean(axis=1),
