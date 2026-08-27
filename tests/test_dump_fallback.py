@@ -93,6 +93,23 @@ class DumpFallbackTests(unittest.TestCase):
         self.assertNotIn("#SBATCH --nice=", normal)
         self.assertIn("#SBATCH --nice=10000", low_priority)
 
+    def test_slurm_profile_and_logs_can_be_set_for_jean_zay(self):
+        script = get_batch_script(
+            "true",
+            "test",
+            2,
+            "/tmp",
+            time_limit="20:00:00",
+            account="bph@cpu",
+            qos="qos_cpu-t3",
+        )
+        self.assertIn("#SBATCH --time=20:00:00", script)
+        self.assertIn("#SBATCH --account=bph@cpu", script)
+        self.assertIn("#SBATCH --qos=qos_cpu-t3", script)
+        self.assertIn("#SBATCH --cpus-per-task=2", script)
+        self.assertIn("log-test-%j.out", script)
+        self.assertNotIn(".tmp", script)
+
     def test_edge_locking_is_disabled_by_default(self):
         self.assertEqual(SimulationConfig().reconnectEdgeLocking, 0)
 

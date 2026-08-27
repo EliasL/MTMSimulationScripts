@@ -59,6 +59,11 @@ from Management.jobs import (
 )
 
 
+JEAN_ZAY_ACCOUNT = "bph@cpu"
+JEAN_ZAY_STANDARD_QOS = "qos_cpu-t3"
+JEAN_ZAY_STANDARD_TIME = "20:00:00"
+
+
 def benchmark():
     configs, labels = basicJob(nrThreads=3, nrSeeds=1, size=50)
     run_locally(configs[0], resume=False)
@@ -575,6 +580,113 @@ def configsByThreads(cluster_groups):
     for config in (config for group in cluster_groups for config in group):
         configs_by_threads.setdefault(config.nrThreads, []).append(config)
     return configs_by_threads
+
+
+def jeanZaySizeScalingPlan(nrSeeds=10):
+    size_groups, _ = size_scaling_job(
+        reconnection="edgeFlip",
+        reconnectRevert=1,
+        reconnectEdgeLocking=0,
+        nrSeeds=nrSeeds,
+    )
+    configs = [config for group in size_groups for config in group]
+    if len(configs) != 5 * nrSeeds:
+        raise RuntimeError(f"Unexpected number of size-scaling jobs: {len(configs)}")
+    if any(
+        config.reconnectionMethod != "edgeFlip"
+        or config.reconnectRevert != 1
+        or config.reconnectEdgeLocking != 0
+        for config in configs
+    ):
+        raise RuntimeError("Unexpected reconnection settings in Jean Zay campaign.")
+    if len({config.name for config in configs}) != len(configs):
+        raise RuntimeError("Duplicate configuration names in Jean Zay campaign.")
+    return configs
+
+
+def queueJeanZaySizeScalingJobs(submit=False, jobCopies=100, nrSeeds=10, nice=0):
+    """Queue the edge-flip size-scaling campaign directly on Jean Zay."""
+    configs = jeanZaySizeScalingPlan(nrSeeds=nrSeeds)
+    print(
+        f"{'SUBMITTING' if submit else 'DRY RUN'} {len(configs)} Jean Zay "
+        f"size-scaling jobs ({jobCopies} copies each)"
+    )
+    for config in configs:
+        print(f"  {config.name}")
+    if submit:
+        queueJobs(
+            Servers.jeanZay,
+            configs,
+            build=False,
+            resume=True,
+            jobCopies=jobCopies,
+            nice=nice,
+            time_limit=JEAN_ZAY_STANDARD_TIME,
+            account=JEAN_ZAY_ACCOUNT,
+            qos=JEAN_ZAY_STANDARD_QOS,
+        )
+    else:
+        print("DRY RUN COMPLETE: no jobs were submitted")
+
+
+def jeanZaySmokeConfig(maxLoad, size=10):
+    return SimulationConfig(
+        rows=size,
+        cols=size,
+        startLoad=0.15,
+        maxLoad=maxLoad,
+        loadIncrement=1e-5,
+        nrThreads=2,
+        minimizer="LBFGS",
+        LBFGSEpsx=1e-6,
+        reconnectionMethod="edgeFlip",
+        reconnectRevert=1,
+        reconnectEdgeLocking=0,
+        experiment="simpleShear",
+    )
+
+
+def queueJeanZaySmokeTest(submit=False):
+    """Queue one small edge-flip run using Jean Zay's development QoS."""
+    config = jeanZaySmokeConfig(maxLoad=0.2)
+    print(f"{'SUBMITTING' if submit else 'DRY RUN'} Jean Zay smoke test: {config.name}")
+    if submit:
+        queueJobs(
+            Servers.jeanZay,
+            [config],
+            build=False,
+            resume=False,
+            jobCopies=1,
+            time_limit="00:30:00",
+            account=JEAN_ZAY_ACCOUNT,
+            qos="qos_cpu-dev",
+        )
+    else:
+        print("DRY RUN COMPLETE: no job was submitted")
+    return config
+
+
+def queueJeanZayResumeSmokeTest(submit=False, jobCopies=10):
+    """Queue short singleton copies to test timeout recovery and completion checks."""
+    config = jeanZaySmokeConfig(maxLoad=0.3, size=20)
+    print(
+        f"{'SUBMITTING' if submit else 'DRY RUN'} {jobCopies} Jean Zay resume "
+        f"smoke copies: {config.name}"
+    )
+    if submit:
+        queueJobs(
+            Servers.jeanZay,
+            [config],
+            build=False,
+            resume=True,
+            jobCopies=jobCopies,
+            time_limit="00:01:00",
+            account=JEAN_ZAY_ACCOUNT,
+            qos="qos_cpu-dev",
+        )
+    else:
+        print("DRY RUN COMPLETE: no jobs were submitted")
+    return config
 
 
 def startJobs(

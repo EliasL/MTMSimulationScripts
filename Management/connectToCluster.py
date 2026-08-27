@@ -40,8 +40,8 @@ class Servers:
         legendre,
         duchemin,
         cauchy,  # richard wants cauchy
+        jeanZay,
         # mesopsl,
-        # jeanZay,
     ]
     run_servers = [
         galois,
@@ -126,7 +126,9 @@ def sync_folders(
     def build_rsync_command(source_path):
         rsync_command = [
             "rsync",
-            "-avz",
+            # Apple's openrsync has an incompatible compressed stream with the
+            # rsync service currently installed on Jean Zay.
+            "-av",
             "-e",
             "ssh -T",
             # "--protocol=31",
@@ -139,16 +141,21 @@ def sync_folders(
         rsync_command.extend([source_path, f"{cluster_address}:{cluster_base_path}"])
         return rsync_command
 
-    output_options = None if verbose else subprocess.DEVNULL
+    output_options = None if verbose else subprocess.PIPE
 
     # Execute rsync commands for each local path
     for local_path in local_paths:
         rsync_command = build_rsync_command(local_path)
         if verbose:
             print(f"Executing rsync: {' '.join(rsync_command)}")
-        subprocess.run(
-            rsync_command, check=True, stdout=output_options, stderr=output_options
+        result = subprocess.run(
+            rsync_command, check=False, stdout=output_options, stderr=output_options
         )
+        if result.returncode != 0:
+            error = result.stderr.decode() if result.stderr else ""
+            raise RuntimeError(
+                f"rsync failed with exit code {result.returncode}: {error.strip()}"
+            )
 
     if verbose:
         print("Folders successfully synced.")
@@ -172,8 +179,11 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         "build",
         "build-benchmark",
         "build-release",
+        "build-cgal-debug",
+        "test_data",
         "libs/**-build",
         "libs/**-subbuild",
+        "libs/cgal/Maintenance/release_building/",
         "Visuals/",
         "Plots/",
         "venv/",
@@ -183,6 +193,24 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         "profiling",
         "MTMath",
         "tmp/",
+        ".cache/",
+        ".eval_cache/",
+        ".tmp*/",
+        ".uv-cache/",
+        ".vscode/",
+        "__pycache__/",
+        "tools/.venv/",
+        ".tmp_powerlaw_data_run/",
+        ".tmp_sigma_rescue_local/",
+        ".tmp_sigma_rescue_test/",
+        "MTS2D_reversibility_dump/",
+        "sigma_rescue_interim/",
+        "_double_dislocation_jobs/",
+        "_no_minimization_ss_jobs/",
+        "_stiffness_matrix_jobs/",
+        "_tmp_direct_vtu_fields_output/",
+        "output/",
+        "*.pyc",
     ]
 
     # Step 1: Create directories on the cluster
@@ -249,14 +277,16 @@ def download_folders(cluster_address, configs, destination):
     # Connect to the server
     ssh = connectToCluster(cluster_address, False)
 
-    # Check if /data2 exists, otherwise use /data
-    stdin, stdout, stderr = ssh.exec_command(
-        "if [ -d /data2 ]; then echo '/data2'; else echo '/data'; fi"
-    )
-    base_dir = stdout.read().strip().decode()
-
     user = getServerUserName(cluster_address)
-    data_path = os.path.join(base_dir, user)
+    if cluster_address == Servers.jeanZay:
+        data_path = "/lustre/fswork/projects/rech/bph/uog82gz"
+    else:
+        # Check if /data2 exists, otherwise use /data
+        stdin, stdout, stderr = ssh.exec_command(
+            "if [ -d /data2 ]; then echo '/data2'; else echo '/data'; fi"
+        )
+        base_dir = stdout.read().strip().decode()
+        data_path = os.path.join(base_dir, user)
 
     remote_folder_name = "MTS2D_output"
     remote_folder_path = f"/{data_path}/{remote_folder_name}"

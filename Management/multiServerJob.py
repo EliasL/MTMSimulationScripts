@@ -145,6 +145,9 @@ def queueJobs(
     stopExsistingJobs=False,
     jobCopies=1,
     nice=0,
+    time_limit=None,
+    account=None,
+    qos=None,
     **kwargs,
 ):
     """
@@ -181,6 +184,12 @@ def queueJobs(
     }
     if nice:
         queue_payload['"nice"'] = nice
+    if time_limit:
+        queue_payload['"time_limit"'] = repr(time_limit)
+    if account:
+        queue_payload['"account"'] = repr(account)
+    if qos:
+        queue_payload['"qos"'] = repr(qos)
     full_pre_command = pre_command + " " + str(queue_payload)
 
     run_remote_command(server, full_pre_command)
