@@ -3,25 +3,42 @@ import textwrap
 import subprocess
 
 
-def get_batch_script(command, job_name, nrThreads, outPath, nice=0):
+def get_batch_script(
+    command,
+    job_name,
+    nrThreads,
+    outPath,
+    nice=0,
+    time_limit="1-00:05:00",
+    account=None,
+    qos=None,
+):
     assert len(job_name) < 256, "Job name cannot be longer than 256 characters!"
     if not isinstance(nice, int) or nice < 0:
         raise ValueError("nice must be a non-negative integer")
+    output_file = os.path.join(outPath, f"log-{job_name}-%j.out")
+    error_file = os.path.join(outPath, f"err-{job_name}-%j.err")
 
-    output_file = os.path.join(outPath, f"log-{job_name}.out")
-    error_file = os.path.join(outPath, f"err-{job_name}.err")
-
+    optional_directives = "\n        ".join(
+        directive
+        for directive in (
+            f"#SBATCH --account={account}" if account else "",
+            f"#SBATCH --qos={qos}" if qos else "",
+            f"#SBATCH --nice={nice}" if nice else "",
+        )
+        if directive
+    )
     # Create a batch script content
     batch_script = textwrap.dedent(f"""
         #!/bin/bash
         #SBATCH --job-name={job_name}
-        #SBATCH --time=1-00:05:00
+        #SBATCH --time={time_limit}
         #SBATCH --nodes=1
         #SBATCH --ntasks=1
         #SBATCH --cpus-per-task={nrThreads}
-        {f"#SBATCH --nice={nice}" if nice else ""}
-        #SBATCH --output={output_file}.tmp
-        #SBATCH --error={error_file}.tmp
+        {optional_directives}
+        #SBATCH --output={output_file}
+        #SBATCH --error={error_file}
 
         # Load Modules (Comment out if not needed)
         # module load cmake 
@@ -33,11 +50,6 @@ def get_batch_script(command, job_name, nrThreads, outPath, nice=0):
 
         # Command to run, bound to cores by SLURM
         srun --cpu-bind=cores --distribution=block:block {command}
-
-        # Append SLURM output to persistent log files
-        cat {output_file}.tmp >> {output_file}
-        cat {error_file}.tmp >> {error_file}
-        rm -f {output_file}.tmp {error_file}.tmp
     """).strip()
     return batch_script
 
@@ -59,7 +71,15 @@ def queue_local_jobs(
     useQueueSystem=True,
     jobCopies=1,
     nice=0,
+    time_limit="1-00:05:00",
+    account=None,
+    qos=None,
 ):
+    if len(commands) != len(job_names):
+        raise ValueError("commands and job_names must have the same length")
+    if not isinstance(jobCopies, int) or not 1 <= jobCopies <= 1000:
+        raise ValueError("jobCopies must be an integer between 1 and 1000")
+
     base_path = "~/simulation/MTS2D/"
     # Expand the user's home directory and check if the path exists
     base_path = os.path.expanduser(base_path)
@@ -76,7 +96,16 @@ def queue_local_jobs(
         os.makedirs(outPath, exist_ok=True)
 
         nrThreads = get_threads_from_command(command)
-        batch_script = get_batch_script(command, job_name, nrThreads, outPath, nice=nice)
+        batch_script = get_batch_script(
+            command,
+            job_name,
+            nrThreads,
+            outPath,
+            nice=nice,
+            time_limit=time_limit,
+            account=account,
+            qos=qos,
+        )
 
         # Write the batch script to a file
         with open(batch_script_path, "w") as f:
@@ -89,27 +118,15 @@ def queue_local_jobs(
                 cmd.append("--dependency=singleton")
             cmd.append(batch_script_path)
 
-            assert jobCopies < 1001, "That's too many jobs..."
-
-            # First submission: show output normally
-            result = subprocess.run(cmd)
-            if result.returncode != 0:
-                print("Batch script execution failed")
-                return None
-
-            # Remaining submissions: suppress output
-            for _ in range(jobCopies - 1):
-                result = subprocess.run(
-                    cmd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
+            for copy_index in range(jobCopies):
+                result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode != 0:
-                    print("Batch script execution failed during duplicate submission")
-                    return None
+                    raise RuntimeError(
+                        f"sbatch failed for {job_name}, copy {copy_index + 1}/"
+                        f"{jobCopies}: {result.stderr.strip()}"
+                    )
 
-            if jobCopies > 1:
-                print(f"Submitted {jobCopies - 1} duplicates.")
+            print(f"Submitted {jobCopies} copy/copies of {job_name}.")
 
         else:
             print("Warning! Running processes outside of the SLURM queue system!")
@@ -156,7 +173,7 @@ if __name__ == "__main__":
     import ast
 
     # install_editable_package()
-    if len(sys.argv) >= 1:
+    if len(sys.argv) > 1:
         kwargs_string = "".join(sys.argv[1:])
         kwargs_string = kwargs_string.replace("\u203d", '"')
         kwargs = ast.literal_eval(kwargs_string)

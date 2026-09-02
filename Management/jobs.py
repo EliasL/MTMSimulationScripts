@@ -922,7 +922,7 @@ def size_scaling_job(
     if not isinstance(nrSeeds, int) or nrSeeds <= 0:
         raise ValueError("nrSeeds must be a positive integer")
     nr_samples = [nrSeeds] * len(sizes)
-    nr_threads = [2, 3, 4, 8, 8]  # , 8]
+    nr_threads = [1, 2, 3, 4, 4]  # , 8]
     sizes.reverse()
     nr_samples.reverse()
     nr_threads.reverse()

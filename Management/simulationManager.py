@@ -7,6 +7,7 @@ import sys
 import platform
 import glob
 import re
+from typing import Optional
 
 
 # Add Management to sys.path (used to import files)
@@ -274,7 +275,7 @@ class SimulationManager:
         else:
             raise NotImplementedError(f"Unsupported OS: {system}")
 
-    def matchCommandToSimulation(self, cmd: str, target_cmd: str | None = None) -> bool:
+    def matchCommandToSimulation(self, cmd: str, target_cmd: Optional[str] = None) -> bool:
         """Return True if `cmd` looks like an MTS2D process for this SimulationManager.
 
         Matching strategy:
