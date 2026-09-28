@@ -653,6 +653,8 @@ def plotStressFromRealF(
     stability_theta_max=np.pi,
     stability_agg="max",
     stability_cmap=None,
+    grid_depth=6,
+    grid_alpha=1.0,
 ):
     theta = np.linspace(0, 1 * np.pi, nr_theta + 1)[:-1]
     nr_theta = len(theta)
@@ -709,6 +711,7 @@ def plotStressFromRealF(
             "cmap": cmap,
             "agg": "max",
             "cbarLims": [limits[0] - 0.5, limits[1] + 0.5],
+            "cbarTicks": np.arange(limits[0], limits[1] + 1, dtype=int),
         }
     elif stress_type == "stability":
         # Angle map for the minimum-determinant direction.
@@ -787,7 +790,13 @@ def plotStressFromRealF(
 
     for val, quantity in val_q:
         val = np.clip(val, *limits)
-        ax = drawPoincareGrid(grid_size=grid_size)
+        _, ax = prepPoincareFig(grid_size=grid_size, withGrid=False)
+        drawPoincareGrid(
+            ax=ax,
+            grid_size=grid_size,
+            depth=grid_depth,
+            alpha=grid_alpha,
+        )
         drawF(ax, F, shade=True, shade_values=val, grid_size=grid_size, **kwargs)
         if stress_type == "stability":
             # Overlay det(q)=0 contour for the minimum determinant field.

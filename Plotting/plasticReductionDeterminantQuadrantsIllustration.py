@@ -44,6 +44,16 @@ HISTORY_F = np.array([[-0.43, 1.21], [-1.19, 1.02]], dtype=float)
 LAGRANGE_PATH_COLOR = "#69D86E"
 PLASTIC_PATH_COLOR = "#008A27"
 INITIAL_MARKER_COLOR = "#C62828"
+DISPLAY_EXPRESSIONS = (
+    r"$\mathbf{M}_4=\mathbf{M}_p$",
+    r"$\mathbf{M}_1=\mathbf{M}_p\mathbf{M}_R$",
+    r"$\mathbf{M}_4'=\mathbf{M}_p\mathbf{M}_R^{2}$",
+    r"$\mathbf{M}_1'=\mathbf{M}_p\mathbf{M}_R^{3}$",
+    r"$\mathbf{M}_3=\mathbf{M}_p\mathbf{M}^{(1)}$",
+    r"$\mathbf{M}_2=\mathbf{M}_p\mathbf{M}_R\mathbf{M}^{(1)}$",
+    r"$\mathbf{M}_3'=\mathbf{M}_p\mathbf{M}_R^{2}\mathbf{M}^{(1)}$",
+    r"$\mathbf{M}_2'=\mathbf{M}_p\mathbf{M}_R^{3}\mathbf{M}^{(1)}$",
+)
 
 
 def quadrant_palette(determinant):
@@ -177,7 +187,7 @@ def _draw_quadrant_disk(ax, quadrant_grid, determinant):
         )
     )
 
-    sign = "+" if determinant > 0 else "-"
+    determinant_label = "1" if determinant > 0 else "-1"
     title_y = (
         y_offset + DISK_RESOLUTION + 9
         if determinant > 0
@@ -186,7 +196,7 @@ def _draw_quadrant_disk(ax, quadrant_grid, determinant):
     ax.text(
         circle_center[0],
         title_y,
-        rf"$\det\mathbf{{M}}={sign}1$",
+        rf"$\det\mathbf{{C}}={determinant_label}$",
         ha="center",
         va="bottom" if determinant > 0 else "top",
         color=TEXT,
@@ -324,9 +334,9 @@ def _draw_history_arrow(ax, start, end, color, linewidth=2.0):
 def _transform_label(transform):
     matrix = np.asarray(transform, dtype=float)
     candidates = (
-        (np.array([[1, 0], [0, -1]], dtype=float), r"$\mathbf{m}_1$"),
-        (np.array([[0, 1], [1, 0]], dtype=float), r"$\mathbf{m}_2$"),
-        (np.array([[1, -1], [0, 1]], dtype=float), r"$\mathbf{m}_3$"),
+        (np.array([[1, 0], [0, -1]], dtype=float), r"$\mathbf{M}^{(1)}$"),
+        (np.array([[0, 1], [1, 0]], dtype=float), r"$\mathbf{M}^{(2)}$"),
+        (np.array([[1, -1], [0, 1]], dtype=float), r"$\mathbf{M}^{(3)}$"),
     )
     for candidate, label in candidates:
         if np.array_equal(matrix, candidate):
@@ -342,7 +352,7 @@ def _elastic_transform_label(history, step):
     if a <= b:
         n = int(round((after[0, 1] - c) / a))
         if n == 1:
-            return r"$\mathbf{M}$"
+            return r"$\mathbf{M}_p$"
         return rf"$\mathbf{{E}}_{{12}}({n})$"
     n = int(round((after[0, 1] - c) / b))
     return rf"$\mathbf{{E}}_{{21}}({n})$"
@@ -391,7 +401,7 @@ def _draw_history_paths(ax, F=HISTORY_F):
                         "facecolor": "white",
                         "edgecolor": "none",
                         "alpha": 0.82,
-                        "pad": 0.7,
+                        "pad": 2.0,
                     },
                     zorder=11,
                 )
@@ -448,7 +458,7 @@ def _draw_history_paths(ax, F=HISTORY_F):
             markerfacecolor=INITIAL_MARKER_COLOR,
             markeredgecolor="white",
             markeredgewidth=0.8,
-            label="Initial",
+            label=r"Initial $\mathbf{F}^{\mathsf{T}}\mathbf{F}$",
         ),
     ]
     legend = ax.legend(
@@ -527,46 +537,8 @@ def make_figure(data=None, history_F=HISTORY_F):
             background_color,
             label_position=label_position,
         )
-        titles.append((elastic_ax, plastic_ax, decomposition["expression"]))
+        titles.append((elastic_ax, plastic_ax, DISPLAY_EXPRESSIONS[index]))
 
-    fig.canvas.draw()
-    m_pair = titles[0]
-    mr_pair = titles[1]
-    ms_pair = titles[4]
-    mrs_pair = titles[5]
-
-    def _between_title_positions(left_pair, right_pair):
-        left_box = left_pair[0].get_position(), left_pair[1].get_position()
-        right_box = right_pair[0].get_position(), right_pair[1].get_position()
-        center = (left_box[0].x0 + right_box[1].x1) / 2
-        y = max(
-            left_box[0].y1,
-            left_box[1].y1,
-            right_box[0].y1,
-            right_box[1].y1,
-        ) + 0.009
-        return center, y
-
-    r_x, r_y = _between_title_positions(m_pair, mr_pair)
-    fig.text(
-        r_x,
-        r_y,
-        r"$\mathbf{r}=\mathbf{m}_1\mathbf{m}_2$",
-        ha="center",
-        va="bottom",
-        fontsize=10.2,
-        color=TEXT,
-    )
-    s_x, s_y = _between_title_positions(ms_pair, mrs_pair)
-    fig.text(
-        s_x,
-        s_y,
-        r"$\mathbf{s}=\mathbf{m}_1$",
-        ha="center",
-        va="bottom",
-        fontsize=10.2,
-        color=TEXT,
-    )
     for elastic_ax, plastic_ax, expression in titles:
         elastic_box = elastic_ax.get_position()
         plastic_box = plastic_ax.get_position()

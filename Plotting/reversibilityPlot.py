@@ -69,7 +69,6 @@ def _collect_reversibility_data(csv_paths, strainLim="auto", postRegime=True):
             postRegime=postRegime,
             stress_corrected=True,
             stress_correction_order=2,
-            stress_tangent="current",
         )
         mesh_volume = volume_from_metadata(get_metadata(csv_path))
         if mesh_volume is None or not np.isfinite(mesh_volume) or mesh_volume <= 0:

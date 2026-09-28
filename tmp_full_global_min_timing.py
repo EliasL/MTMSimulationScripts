@@ -43,7 +43,7 @@ def main() -> None:
         averageEnergy=flow.AVERAGE_ENERGY,
         stress_corrected=True,
         stress_correction_order=2,
-        stress_tangent="current",
+        stress_tangent="gamma0",
         min_drop=flow.MIN_DROP,
     )
     drops = np.asarray(drops, dtype=float)

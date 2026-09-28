@@ -10,19 +10,24 @@ Pedagogical notes:
   via a Cayley transform, and then to a metric C(u,v) s.t. det C = 1.
 - Lattice symmetries act by congruence: C -> W^T C W, with W in PSL(2,Z).
 - A BFS over generators finds the minimal word length (depth) that lands a given C
-  in one of four central quadrants (an expanded fundamental region). The multiplicity
-  at that minimal depth counts how many distinct quadrants are reached by words
-  of the same minimal length.
+  in the union of four central quadrants (an expanded fundamental region). The
+  multiplicity at that depth counts distinct shortest generator words, independent
+  of how many quadrant labels contain their endpoints.
 """
 
 import argparse
 from collections import deque
-from typing import Tuple, List, Set
+from functools import lru_cache
+from typing import Iterator, Tuple, List, Set
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.patches import Circle
+from matplotlib.collections import LineCollection
+from matplotlib.colors import to_rgba
+from matplotlib.patches import Circle, Patch
 from matplotlib.ticker import MaxNLocator
+
+from MTMath.poincareEnergy import drawPoincareGrid
 
 # ---------- Small linear algebra helpers ----------
 
@@ -85,6 +90,122 @@ def psl_bfs_words_with_depth(depth_max: int, gens: List[np.ndarray]) -> List[Tup
             words.append((h, d + 1))
             Q.append((h, d + 1))
     return words
+
+
+def iter_shear_paths_by_depth(
+    depth_max: int,
+    gens: List[np.ndarray],
+) -> Iterator[np.ndarray]:
+    """Yield every potentially shortest generator word, one depth at a time.
+
+    Immediate generator/inverse pairs are omitted because a word containing
+    one cannot be shortest.  Matrices are deliberately not deduplicated:
+    different words are the distinct paths whose multiplicity we want.
+    """
+    identity_key = canonicalize_psl(np.eye(2, dtype=int))
+    inverse_indices = []
+    for generator in gens:
+        matches = [
+            index
+            for index, candidate in enumerate(gens)
+            if canonicalize_psl(matmul_int(generator, candidate)) == identity_key
+        ]
+        if len(matches) != 1:
+            raise ValueError("Generators must have exactly one inverse in the set.")
+        inverse_indices.append(matches[0])
+
+    generators = np.asarray(gens, dtype=int)
+    matrices = np.eye(2, dtype=int)[None, ...]
+    previous_indices = np.full(1, -1, dtype=int)
+    generator_indices = np.arange(len(generators))
+    for depth in range(depth_max + 1):
+        yield matrices
+        if depth == depth_max:
+            break
+        products = matrices[:, None, ...] @ generators[None, ...]
+        allowed = generator_indices[None, :] != np.asarray(inverse_indices)[
+            previous_indices, None
+        ]
+        if depth == 0:
+            allowed[:] = True
+        matrices = products[allowed]
+        previous_indices = np.broadcast_to(
+            generator_indices,
+            allowed.shape,
+        )[allowed]
+
+
+def shortest_path_fields(
+    XY: np.ndarray,
+    depth_max: int,
+    gens: List[np.ndarray],
+    *,
+    batch_size: int = 256,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Classify pixels and count distinct shortest unit-generator words.
+
+    Each word is counted once if its transformed metric lies anywhere in the
+    union of the four central quadrants at the first successful BFS depth.
+    Quadrant overlaps therefore do not inflate the path multiplicity.
+    """
+    n_points = len(XY)
+    labels = np.full(n_points, -1, dtype=int)
+    depths = np.full(n_points, -1, dtype=int)
+    multiplicities = np.full(n_points, -1, dtype=int)
+    valid = np.sum(XY * XY, axis=1) < 1.0 - 1e-12
+    multiplicities[valid] = 0
+
+    z = XY[valid, 0] + 1j * XY[valid, 1]
+    w = 1j * (1.0 + z) / (1.0 - z)
+    c22 = 1.0 / w.imag
+    c12 = w.real * c22
+    c11 = (1.0 + c12 * c12) / c22
+    valid_indices = np.flatnonzero(valid)
+
+    for depth, matrices in enumerate(iter_shear_paths_by_depth(depth_max, gens)):
+        unresolved = np.flatnonzero(depths[valid_indices] < 0)
+        if unresolved.size == 0:
+            break
+        matrices = matrices.astype(float)
+        depth_batch_size = min(
+            batch_size,
+            max(1, 2_000_000 // len(matrices)),
+        )
+        p, q = matrices[:, 0, 0], matrices[:, 0, 1]
+        r, s = matrices[:, 1, 0], matrices[:, 1, 1]
+
+        for start in range(0, unresolved.size, depth_batch_size):
+            local = unresolved[start : start + depth_batch_size]
+            a = c11[local, None]
+            b = c12[local, None]
+            c = c22[local, None]
+            transformed_11 = a * p * p + 2.0 * b * p * r + c * r * r
+            transformed_22 = a * q * q + 2.0 * b * q * s + c * s * s
+            transformed_12 = a * p * q + b * (p * s + q * r) + c * r * s
+            hits = (
+                np.abs(transformed_12)
+                <= 0.5 * np.minimum(transformed_11, transformed_22) + 1e-12
+            )
+            reached = np.any(hits, axis=1)
+            if not np.any(reached):
+                continue
+
+            reached_local = local[reached]
+            reached_global = valid_indices[reached_local]
+            first_columns = np.argmax(hits[reached], axis=1)
+            rows = np.flatnonzero(reached)
+            first_11 = transformed_11[rows, first_columns]
+            first_22 = transformed_22[rows, first_columns]
+            first_12 = transformed_12[rows, first_columns]
+            labels[reached_global] = np.where(
+                first_11 <= first_22,
+                np.where(first_12 >= 0.0, 0, 1),
+                np.where(first_12 >= 0.0, 2, 3),
+            )
+            depths[reached_global] = depth
+            multiplicities[reached_global] = np.sum(hits[reached], axis=1)
+
+    return labels, depths, multiplicities
 
 # ---------- Geometry of the four central quadrants ----------
 
@@ -206,8 +327,24 @@ def F_pure(gamma: float, theta: float) -> np.ndarray:
 
 # ---------- Plotting utilities ----------
 
-def render_disk_map(XY: np.ndarray, A: np.ndarray, nx: int, out: Path, title: str,
-                    add_colorbar: bool=False, cbar_label: str=""):
+@lru_cache(maxsize=None)
+def poincare_grid_segments(depth: int):
+    """Build a Poincare grid once and return it as compact line segments."""
+    fig, ax = plt.subplots()
+    drawPoincareGrid(ax=ax, grid_size=2, depth=depth)
+    segments = tuple(
+        np.column_stack((line.get_xdata() - 1, line.get_ydata() - 1))
+        for line in ax.lines
+    )
+    linestyles = tuple(line.get_linestyle() for line in ax.lines)
+    plt.close(fig)
+    return segments, linestyles
+
+def render_disk_map(XY: np.ndarray, A: np.ndarray, nx: int, out: Path,
+                    add_colorbar: bool=False, cbar_label: str="",
+                    unresolved_label: str | None=None,
+                    cap_at: int | None=None,
+                    grid_depth: int=7):
     """
     Render a field A defined on a regular grid inside the unit disk (mask outside).
     """
@@ -218,20 +355,67 @@ def render_disk_map(XY: np.ndarray, A: np.ndarray, nx: int, out: Path, title: st
     Z[mask] = np.nan
     if add_colorbar:
         Z[Z < 0] = np.nan
+    unresolved = (Z == 0) if unresolved_label is not None else np.zeros_like(Z, dtype=bool)
+    if unresolved_label is not None:
+        Z[unresolved] = np.nan
+    if cap_at is not None:
+        Z = np.minimum(Z, cap_at)
 
     fig, ax = plt.subplots(figsize=(6,6))
-    im = ax.imshow(Z, origin="lower", extent=(-1,1,-1,1), interpolation="nearest")
+    im = ax.imshow(
+        Z,
+        origin="lower",
+        extent=(-1,1,-1,1),
+        interpolation="nearest",
+        vmin=1 if unresolved_label is not None else None,
+        vmax=cap_at,
+    )
+    if unresolved_label is not None:
+        unresolved_overlay = np.zeros((*Z.shape, 4))
+        unresolved_overlay[unresolved] = to_rgba("#e6e6e6")
+        ax.imshow(
+            unresolved_overlay,
+            origin="lower",
+            extent=(-1,1,-1,1),
+            interpolation="nearest",
+        )
+        ax.legend(
+            handles=[Patch(facecolor="#e6e6e6", label=unresolved_label)],
+            loc="lower right",
+            fontsize=7,
+            framealpha=0.95,
+        )
+    grid_segments, grid_linestyles = poincare_grid_segments(grid_depth)
+    ax.add_collection(
+        LineCollection(
+            grid_segments,
+            colors="#d0d0d0",
+            alpha=0.32,
+            linewidths=0.18,
+            linestyles=grid_linestyles,
+            zorder=2,
+        )
+    )
     ax.add_artist(Circle((0,0), 1.0, fill=False))
-    ax.set_title(title); ax.set_xlabel("x (disk)"); ax.set_ylabel("y (disk)")
+    ax.set_xlim(-1, 1); ax.set_ylim(-1, 1)
+    ax.set_xlabel(r"$x_p$"); ax.set_ylabel(r"$y_p$")
     ax.set_aspect("equal", adjustable="box")
 
     if add_colorbar:
         cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-        cb.ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        if cap_at is None:
+            cb.ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        else:
+            first_tick = 1 if unresolved_label is not None else 0
+            ticks = list(range(first_tick, cap_at + 1))
+            cb.set_ticks(ticks)
+            cb.set_ticklabels([str(tick) for tick in ticks])
         if cbar_label:
             cb.set_label(cbar_label)
 
-    fig.tight_layout(); fig.savefig(out, dpi=150); plt.close(fig)
+    fig.tight_layout()
+    fig.savefig(out, dpi=300)
+    plt.close(fig)
     print(f"Saved figure to {out}")
 
 def render_scatter_map(XY: np.ndarray, A: np.ndarray, out: Path, title: str,
@@ -255,7 +439,9 @@ def render_scatter_map(XY: np.ndarray, A: np.ndarray, out: Path, title: str,
         if cbar_label:
             cb.set_label(cbar_label)
 
-    fig.tight_layout(); fig.savefig(out, dpi=150); plt.close(fig)
+    fig.tight_layout()
+    fig.savefig(out, dpi=300)
+    plt.close(fig)
     print(f"Saved figure to {out}")
 
 # ---------- Driver ----------
@@ -271,14 +457,12 @@ def main():
     ap.add_argument("--gamma-n", type=int, default=361, help="number of shear values in [gmin,gmax]")
     ap.add_argument("--gamma-min", type=float, default=-6.0, help="min shear gamma")
     ap.add_argument("--gamma-max", type=float, default= 6.0, help="max shear gamma")
-    ap.add_argument("--class-depth", type=int, default=6, help="BFS max word length")
+    ap.add_argument("--class-depth", type=int, default=12, help="BFS max word length")
     ap.add_argument("--out", type=str, default="Plots/poincare_direct_psl.png",
                     help="base output file; depth map gets *_depth.png, multiplicity gets *_mult.png")
     args = ap.parse_args()
 
     gens = pick_generators(args.gens)
-    words_with_depth = psl_bfs_words_with_depth(args.class_depth, gens)
-
     out = Path(args.out)
     out_depth = out.with_name(out.stem + "_depth.png")
     out_mult  = out.with_name(out.stem + "_mult.png")
@@ -290,31 +474,33 @@ def main():
         X, Y = np.meshgrid(xs, ys, indexing="xy")
         XY = np.vstack([X.ravel(), Y.ravel()]).T
 
-        labels = np.full(XY.shape[0], -1, dtype=int)
-        depths = np.full(XY.shape[0], -1, dtype=int)
-        mults  = np.full(XY.shape[0], -1, dtype=int)
+        labels, depths, mults = shortest_path_fields(
+            XY,
+            args.class_depth,
+            gens,
+        )
 
-        for k, (x, y) in enumerate(XY):
-            if x*x + y*y >= 1.0 - 1e-12:
-                continue
-            # Disk → upper half-plane → metric C with det C = 1
-            u, v = disk_to_upper(x, y)
-            C = upper_to_C(u, v)
-
-            # Minimal-depth classification and multiplicity
-            lab, d = label_and_depth_direct_psl(C, words_with_depth)
-            #lab, d = label_and_depth_elias(C)
-            labels[k] = lab; depths[k] = d
-
-            md, m = multiplicity_at_min_depth(C, words_with_depth)
-            mults[k] = m
-
-        ttl_lbl = f"DIRECT PSL (depth={args.class_depth}, gens={args.gens}) — disk"
-        ttl_dep = f"Word length (BFS depth) — gens={args.gens}"
-        ttl_mul = f"Multiplicity at minimal depth — gens={args.gens}"
-        render_disk_map(XY, labels, args.nx, out, ttl_lbl, add_colorbar=False)
-        render_disk_map(XY, depths, args.nx, out_depth, ttl_dep, add_colorbar=True, cbar_label="BFS word length")
-        render_disk_map(XY, mults, args.nx, out_mult, ttl_mul, add_colorbar=True, cbar_label="Multiplicity")
+        render_disk_map(
+            XY, labels, args.nx, out,
+            add_colorbar=False,
+            grid_depth=args.class_depth,
+        )
+        render_disk_map(
+            XY, depths, args.nx, out_depth,
+            add_colorbar=True,
+            cbar_label="Depth",
+            grid_depth=args.class_depth,
+        )
+        render_disk_map(
+            XY,
+            mults,
+            args.nx,
+            out_mult,
+            add_colorbar=True,
+            cbar_label="Shortest-path multiplicity",
+            cap_at=2,
+            grid_depth=args.class_depth,
+        )
 
 
 if __name__ == "__main__":

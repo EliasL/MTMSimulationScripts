@@ -31,10 +31,10 @@ class PlasticReductionCorrectnessIllustrationTests(unittest.TestCase):
         self.assertEqual(
             [branch["label"] for branch in data["branches"]],
             [
-                r"$\mathbf{M}_{3}=\mathbf{M}$",
-                r"$\mathbf{M}_{2}=\mathbf{M}\mathbf{m}_1$",
-                r"$\mathbf{M}_{1}=\mathbf{M}\mathbf{m}_2$",
-                r"$\mathbf{M}_0^{(c)}=\mathbf{M}\mathbf{m}_1\mathbf{m}_2$",
+                r"$\mathbf{M}_{4}=\mathbf{M}_p$",
+                r"$\mathbf{M}_{3}=\mathbf{M}_p\mathbf{M}^{(1)}$",
+                r"$\mathbf{M}_{2}=\mathbf{M}_p\mathbf{M}^{(2)}$",
+                r"$\mathbf{M}_1=\mathbf{M}_p\mathbf{M}^{(1)}\mathbf{M}^{(2)}$",
             ],
         )
         self.assertEqual(
@@ -42,7 +42,7 @@ class PlasticReductionCorrectnessIllustrationTests(unittest.TestCase):
                 branch["decomposition_superscript"]
                 for branch in data["branches"]
             ],
-            ["3", "2", "1", "0,c"],
+            ["4", "3", "2", "1"],
         )
 
         for branch in data["branches"]:
@@ -53,7 +53,7 @@ class PlasticReductionCorrectnessIllustrationTests(unittest.TestCase):
         counterclockwise = counterclockwise_branch(data)
         clockwise = data["branches"][-1]
 
-        self.assertEqual(counterclockwise["decomposition_superscript"], "0,cc")
+        self.assertEqual(counterclockwise["decomposition_superscript"], "1'")
 
         np.testing.assert_allclose(
             counterclockwise["M"], data["base_M"] @ M2 @ M1

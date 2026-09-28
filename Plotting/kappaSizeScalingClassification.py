@@ -67,6 +67,7 @@ def _read_required_columns(path):
     wanted = {
         "load",
         "total_e_change_from_init",
+        "avg_sigma12",
         "nr_elements_with_m3_fix_change",
         "nr_elements_with_m3_change",
     }
@@ -84,13 +85,14 @@ def _read_required_columns(path):
     )
     if plastic_name is None:
         raise KeyError(f"Missing plastic-event column in {path}.")
-    required = ("load", "total_e_change_from_init")
+    required = ("load", "total_e_change_from_init", "avg_sigma12")
     missing = [name for name in required if name not in df]
     if missing:
         raise KeyError(f"Missing columns {missing} in {path}.")
     return {
         "load": df["load"].to_numpy(dtype=float),
         "total_e_change_from_init": df["total_e_change_from_init"].to_numpy(dtype=float),
+        "avg_sigma12": df["avg_sigma12"].to_numpy(dtype=float),
         "plastic": df[plastic_name].to_numpy(dtype=float),
     }
 
@@ -117,8 +119,16 @@ def _constant_kappa_data(csv_paths, size, *, rho=DEFAULT_KAPPA_RHO):
             rho=rho,
         )
         load_ip1 = load[1:]
-        # Match the size-scaling power-law protocol's post-yield window.
-        post_yield = (load_ip1 > 0.7) & (load_ip1 < float(load.max()))
+        stress = columns["avg_sigma12"]
+        valid_stress = np.isfinite(stress) & (stress != -1)
+        if not np.any(valid_stress):
+            raise ValueError(f"No valid avg_sigma12 in {path}.")
+        valid_indices = np.flatnonzero(valid_stress)
+        peak_index = valid_indices[np.argmax(stress[valid_stress])]
+        yield_load = float(load[peak_index])
+        if peak_index == valid_indices[-1]:
+            raise ValueError(f"Stress peak is at the last valid point in {path}.")
+        post_yield = (load_ip1 > yield_load + 0.01) & (load_ip1 < float(load.max()))
         recorded_plastic = columns["plastic"][1:] >= 1
         valid = post_yield & np.isfinite(kappa) & (kappa > 0)
 
@@ -384,7 +394,7 @@ def make_size_diagnostic(
         note = (
             f"rho={rho:g}; mu(F=I)={mu_reference:.6g}; fixed threshold={reference_threshold:.6g}\n"
             "Fixed classifier is kappa >= mu/(2 rho); no a_1212,i classifier is used.\n"
-            "Post-yield is 0.7 < load < max(load); "
+            "Post-yield starts 0.01 after each run's valid avg_sigma12 peak; "
             + (
                 "historical simpleDrop thresholds are shown when available."
                 if has_simple

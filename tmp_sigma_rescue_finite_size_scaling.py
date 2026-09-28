@@ -30,15 +30,18 @@ from MTMath.finiteSizeScaling import (
 )
 from Plotting.plotPowerLaw import make_fit
 from Plotting.standardPowerlaw import (
+    DEFAULT_KAPPA_RHO,
     EventDrops,
     kappa_detection_threshold,
+    kappa_from_relaxation_energy,
+    load_sigma_rescue_post_yield,
+    require_gamma0_snapshot,
     split_by_kappa,
 )
 
 
-DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/snapshots/20260819T100206Z")
+DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0")
 DEFAULT_OUTPUT = Path("Plots/powerLaw/sigma_rescue_finite_size_scaling_L150_L250")
-POST_YIELD = (0.7, 1.0)
 DEFAULT_SIZES = (150, 200, 250)
 OBSERVABLES = ("delta_E_S", "delta_E_R", "delta_E_I")
 OBSERVABLE_LABELS = {
@@ -56,6 +59,7 @@ def _save(fig, path: Path) -> None:
 
 
 def _load_and_classify(snapshot_root: Path) -> tuple[pd.DataFrame, float]:
+    require_gamma0_snapshot(snapshot_root)
     table = Path(snapshot_root).resolve() / "tables" / "drops_usable.csv.gz"
     if not table.is_file():
         raise FileNotFoundError(f"Missing usable drop table: {table}")
@@ -69,14 +73,9 @@ def _load_and_classify(snapshot_root: Path) -> tuple[pd.DataFrame, float]:
         "delta_E_R",
         "delta_E_S",
     ]
-    frame = pd.read_csv(table, usecols=columns, low_memory=False)
-    if set(frame.columns) != set(columns):
-        raise RuntimeError(f"Unexpected columns in {table}: {sorted(frame.columns)}")
-    frame = frame.loc[
-        (frame["load_ip1"] > POST_YIELD[0]) & (frame["load_ip1"] < POST_YIELD[1])
-    ].copy()
+    frame = load_sigma_rescue_post_yield(snapshot_root, columns)
     if frame.empty:
-        raise ValueError(f"No rows in the post-yield window {POST_YIELD}.")
+        raise ValueError("No rows after validated stress peaks.")
     for column in columns:
         if not np.isfinite(frame[column].to_numpy(dtype=float)).all():
             raise ValueError(f"Non-finite values found in required column {column}.")
@@ -85,8 +84,11 @@ def _load_and_classify(snapshot_root: Path) -> tuple[pd.DataFrame, float]:
     if np.any(frame["reference_volume"].to_numpy(dtype=float) <= 0):
         raise ValueError("reference_volume must be finite and positive.")
 
-    frame["kappa"] = frame["delta_E_R"] / (
-        frame["reference_volume"] * frame["delta_gamma"] ** 2
+    frame["kappa"] = kappa_from_relaxation_energy(
+        frame["delta_E_R"].to_numpy(dtype=float),
+        frame["delta_gamma"].to_numpy(dtype=float),
+        frame["reference_volume"].to_numpy(dtype=float),
+        rho=DEFAULT_KAPPA_RHO,
     )
     frame["is_reversible"] = False
     frame["is_irreversible"] = False
@@ -276,8 +278,8 @@ def _plot_collapse(
     residual_ax.set_title("Residual spread across sizes")
     residual_ax.grid(alpha=0.2)
     fig.suptitle(
-        rf"Finite-size scaling of {label}; $0.7<\gamma<1.0$, "
-        rf"$\kappa_{{det}}=\mu/2$"
+        rf"Finite-size scaling of {label}; post-yield $\gamma>\gamma_{{peak}}+0.01$, "
+        rf"$\kappa_{{det}}=\mu/(2\rho)$"
     )
     fig.tight_layout()
     _save(fig, output)
@@ -426,8 +428,9 @@ def run(
     pd.DataFrame(xmin_rows).to_csv(output_dir / "xmin_selection.csv", index=False)
     summary = {
         "snapshot_root": str(Path(snapshot_root).resolve()),
-        "post_yield_window": list(POST_YIELD),
-        "classification": "kappa_det = mu/2; kappa = Delta E_R/(V0 Delta gamma^2), rho=1",
+        "delta_E_S_tangent": "gamma0",
+        "post_yield_window": "per-run validated sigma12 peak + 0.01, load < 1.0",
+        "classification": "kappa_det = mu/(2 rho); kappa = Delta E_R/(rho V0 Delta gamma^2), rho=2",
         "kappa_det": float(kappa_det),
         "population": "finite positive irreversible observable values, after paired event classification",
         "bins_per_decade": int(bins_per_decade),

@@ -481,12 +481,14 @@ def fix_mixed_macrodata_csv(
             return None
         return list(candidates[0])
 
-    def _validate_header_transition(source_header, target_header):
+    def _validate_header_transition(source_header, target_header, *, inferred):
         source = [rename_map.get(name, name) for name in source_header]
         target = [rename_map.get(name, name) for name in target_header]
         if len(target) != len(set(target)):
             raise ValueError(f"Duplicate columns in inferred schema for {csv_path}.")
-        if source != target[: len(source)]:
+        # Explicit #HEADER names permit inserted columns; inferred names must
+        # preserve the old positional prefix to avoid silently relabeling rows.
+        if inferred and source != target[: len(source)]:
             raise ValueError(
                 f"Inferred schema for {csv_path} does not preserve the original "
                 "column order. Refusing to relabel the data."
@@ -635,7 +637,9 @@ def fix_mixed_macrodata_csv(
     new_header = new_header or header_line
     source_header = old_header or first_header or []
     if schema_was_inferred or rows_before:
-        _validate_header_transition(source_header, new_header)
+        _validate_header_transition(
+            source_header, new_header, inferred=schema_was_inferred
+        )
     old_header = new_header if not rows_before else source_header
 
     def _rename_headers(headers: list[str]) -> list[str]:

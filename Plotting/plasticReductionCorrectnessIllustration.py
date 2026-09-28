@@ -41,6 +41,7 @@ LAGRANGE_M0_COLOR = "#9DFA9B"
 CORRECT_ARROW_LINEWIDTH = 2.5
 LAGRANGE_M0_ARROW_LINEWIDTH = 2.5
 LAGRANGE_M0_MUTATION_SCALE = 22
+EQUATION_LEFT_SHIFT = 0.02
 
 
 def decomposition_data():
@@ -70,19 +71,19 @@ def decomposition_data_from_M(base_M):
         raise RuntimeError("Known elastic-plastic factors do not reconstruct F")
 
     symmetry_branches = (
-        (r"\mathbf{M}", np.eye(2), "recovers the known factors"),
+        (r"\mathbf{M}_p", np.eye(2), "recovers the known factors"),
         (
-            r"\mathbf{M}\mathbf{m}_1",
+            r"\mathbf{M}_p\mathbf{M}^{(1)}",
             M1,
             "elastic column 2 changes sign",
         ),
         (
-            r"\mathbf{M}\mathbf{m}_2",
+            r"\mathbf{M}_p\mathbf{M}^{(2)}",
             M2,
             "elastic columns 1 and 2 are exchanged",
         ),
         (
-            r"\mathbf{M}\mathbf{m}_1\mathbf{m}_2",
+            r"\mathbf{M}_p\mathbf{M}^{(1)}\mathbf{M}^{(2)}",
             M1 @ M2,
             "elastic columns are exchanged with a sign change",
         ),
@@ -95,11 +96,11 @@ def decomposition_data_from_M(base_M):
         F_p = np.linalg.inv(reduction_M)
         quadrant = int(elastic_domain_quadrant(F_e.T @ F_e))
         if index == 3:
-            label = r"$\mathbf{M}_0^{(c)}=\mathbf{M}\mathbf{m}_1\mathbf{m}_2$"
-            decomposition_superscript = "0,c"
+            label = rf"$\mathbf{{M}}_1={expression}$"
+            decomposition_superscript = "1"
         else:
-            label = rf"$\mathbf{{M}}_{{{quadrant}}}={expression}$"
-            decomposition_superscript = str(quadrant)
+            label = rf"$\mathbf{{M}}_{{{quadrant + 1}}}={expression}$"
+            decomposition_superscript = str(quadrant + 1)
         matches = np.allclose(F_e, known_F_e) and np.allclose(
             F_p, known_F_p
         )
@@ -137,8 +138,11 @@ def counterclockwise_branch(data):
     F_e = data["F"] @ reduction_M
     F_p = np.linalg.inv(reduction_M)
     return {
-        "label": r"$\mathbf{M}_0^{(cc)}=\mathbf{M}\mathbf{m}_2\mathbf{m}_1$",
-        "decomposition_superscript": "0,cc",
+        "label": (
+            r"$\mathbf{M}_1'="
+            r"\mathbf{M}_p\mathbf{M}^{(2)}\mathbf{M}^{(1)}$"
+        ),
+        "decomposition_superscript": "1'",
         "description": "counter-clockwise quarter-turn from M",
         "quadrant": int(elastic_domain_quadrant(F_e.T @ F_e)),
         "M": reduction_M,
@@ -193,12 +197,14 @@ def make_figure(data=None, *, column_linestyles=COLUMN_LINESTYLES):
 
     fig = plt.figure(figsize=(11.2, 7.0))
     fig.text(
-        0.365,
+        0.365 - EQUATION_LEFT_SHIFT,
         0.33,
-        r"$\mathbf{M}=(\mathbf{F}_p^\star)^{-1}$"
+        r"$\mathbf{M}_p=(\mathbf{F}_p^\star)^{-1}$"
         "\n"
         r"$\mathbf{F}_e^{(q)}=\mathbf{F}\mathbf{M}_q$, "
-        r"$\mathbf{F}_p^{(q)}=\mathbf{M}_q^{-1}$",
+        r"$\mathbf{F}_p^{(q)}=\mathbf{M}_q^{-1}$"
+        "\n"
+        r"$q\in\{1,2,3,4\}$",
         ha="center",
         va="center",
         fontsize=11,
@@ -257,7 +263,7 @@ def make_figure(data=None, *, column_linestyles=COLUMN_LINESTYLES):
     branch_width = 0.11
     branch_height = 0.11
     row_bottoms = (0.80, 0.65, 0.50, 0.35, 0.20)
-    equation_x = elastic_x - 0.095
+    equation_x = elastic_x - 0.095 - EQUATION_LEFT_SHIFT
     equation_arrow_x = equation_x - 0.01
     arrow_start = (product_box.x1, product_box.y0 + product_box.height / 2)
     right_branches = (

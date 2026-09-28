@@ -1,0 +1,12 @@
+#!/bin/zsh
+# Make Homebrew's dvisvgm use the matching TeX Live font maps for Manim.
+export TEXMFCNF=/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/web2c
+export TEXMFROOT=/opt/homebrew/Cellar/texlive/20260301/share
+export TEXMFDIST=/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist
+export TEXMFMAIN=/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist
+export TEXPSHEADERS=/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/dvips//
+export TEXFONTMAPS=/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/map//
+export T1FONTS=/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/type1//
+exec /opt/homebrew/Cellar/dvisvgm/3.6/bin/dvisvgm \
+  --fontmap=/opt/homebrew/Cellar/texlive/20260301/share/texmf-dist/fonts/map/pdftex/updmap/pdftex.map \
+  "$@"

@@ -3199,9 +3199,9 @@ def analyze_xmin(
     refine=True,
     progress=False,
     progress_label="xmin",
-    global_mode="rapidGlobal",
+    global_mode="global",
 ):
-    """Run simpleDrop and either rapidGlobal or exhaustive global analysis."""
+    """Run the diagnostic simpleDrop analysis and the full global analysis."""
     drops = np.asarray(drops, dtype=float)
     drops = drops[np.isfinite(drops) & (drops > 0)]
     if int(nr_initial) != nr_initial or nr_initial < 2:
@@ -3639,7 +3639,10 @@ class XminStrategyResult:
 XMIN_STRATEGIES = {
     "min_ks": find_xmin_ks,
     "ks": find_xmin_ks,
-    "global_min": find_xmin_global_min,
+    # ``global_min`` is the public full-fidelity strategy.  The older
+    # strided selector remains available through its function for explicitly
+    # requested legacy comparisons.
+    "global_min": find_xmin_exhaustive_global_min,
     "dip": find_xmin_dip,
     "max_p": find_xmin_max_p,
     "simpleDrop": find_xmin_simple_drop,
@@ -3652,14 +3655,12 @@ XMIN_STRATEGIES = {
     "sylvain": find_xmin_sylvain,
 }
 DEFAULT_XMIN_COMPARISON_STRATEGIES = (
-    "simpleDrop",
-    "slope",
     "global_min",
 )
 
 
-def select_xmin_with_details(drops, strategy="simpleDrop", **kwargs):
-    """Run one named xmin strategy and retain any diagnostic search results."""
+def select_xmin_with_details(drops, strategy="global_min", **kwargs):
+    """Run one named xmin strategy; full global KS search is the default."""
     try:
         selector = XMIN_STRATEGIES[strategy]
     except KeyError as exc:
@@ -3673,7 +3674,7 @@ def select_xmin_with_details(drops, strategy="simpleDrop", **kwargs):
     return float(result), None
 
 
-def select_xmin(drops, strategy="simpleDrop", **kwargs):
+def select_xmin(drops, strategy="global_min", **kwargs):
     """Run one named xmin strategy while preserving its public API."""
     return select_xmin_with_details(drops, strategy=strategy, **kwargs)[0]
 

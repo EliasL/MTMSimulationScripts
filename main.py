@@ -46,7 +46,8 @@ from Management.jobs import (
     singleDislocationTest,
     longJob,
     longJobStatic,
-    size_scaling_job,
+    nonreconnecting_size_scaling_job,
+    reconnecting_size_scaling_job,
     reversibility_size_scaling_job,
     reconnectionJob,
     reconnectTest,
@@ -340,7 +341,7 @@ def plotPropperJob():
 
 
 def plotSizeScaling():
-    configs, labels = size_scaling_job()
+    configs, labels = nonreconnecting_size_scaling_job()
 
     for (
         c,
@@ -375,7 +376,7 @@ def plotSizeScaling():
 
 
 def plotSizeJob():
-    configs, labels = size_scaling_job()
+    configs, labels = nonreconnecting_size_scaling_job()
     # Energy
     # for c, lab in zip(configs, labels):
     #     plotEnergy(c, lab, f"{lab[0]}-Energy", plot_average=True)
@@ -515,7 +516,7 @@ def edgeFlipJobPlan(reconnectRevert=None, reconnectEdgeLocking=None):
         }.items()
         if value is not None
     }
-    size_groups, _ = size_scaling_job(
+    size_groups, _ = reconnecting_size_scaling_job(
         reconnection="edgeFlip", **reconnection_settings
     )
     cluster_groups = list(size_groups)
@@ -583,7 +584,7 @@ def configsByThreads(cluster_groups):
 
 
 def jeanZaySizeScalingPlan(nrSeeds=10):
-    size_groups, _ = size_scaling_job(
+    size_groups, _ = reconnecting_size_scaling_job(
         reconnection="edgeFlip",
         reconnectRevert=1,
         reconnectEdgeLocking=0,
@@ -660,6 +661,44 @@ def queueJeanZaySmokeTest(submit=False):
             time_limit="00:30:00",
             account=JEAN_ZAY_ACCOUNT,
             qos="qos_cpu-dev",
+        )
+    else:
+        print("DRY RUN COMPLETE: no job was submitted")
+    return config
+
+
+def magiFireEpsxSmokeConfig():
+    return SimulationConfig(
+        rows=10,
+        cols=10,
+        startLoad=0.0,
+        maxLoad=0.1,
+        loadIncrement=1e-5,
+        nrThreads=2,
+        minimizer="FIRE",
+        eps=1e-15,
+        FIREEpsx=1e-6,
+        maxIt=1_000_000,
+        reconnectionMethod="edgeFlip",
+        reconnectRevert=1,
+        reconnectEdgeLocking=0,
+        writeDebugVTUs=0,
+        experiment="simpleShear",
+    )
+
+
+def queueMagiFireEpsxSmokeTest(submit=False):
+    """Queue the 10x10, load 0--0.1 FIRE EpsX validation on Magi."""
+    config = magiFireEpsxSmokeConfig()
+    print(f"{'SUBMITTING' if submit else 'DRY RUN'} Magi FIRE smoke: {config.name}")
+    if submit:
+        queueJobs(
+            Servers.magi,
+            [config],
+            build=False,
+            resume=True,
+            jobCopies=1,
+            time_limit="03:00:00",
         )
     else:
         print("DRY RUN COMPLETE: no job was submitted")
@@ -758,7 +797,7 @@ def queueReversibilitySizeScalingJobs(
 
 
 def restartSizeScalingSeed(size, seed, server, jobCopies=100, submit=False):
-    size_groups, _ = size_scaling_job(reconnection="edgeFlip")
+    size_groups, _ = reconnecting_size_scaling_job(reconnection="edgeFlip")
     matches = [
         config
         for group in size_groups

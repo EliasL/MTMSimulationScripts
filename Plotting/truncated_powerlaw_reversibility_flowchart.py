@@ -21,6 +21,11 @@ Fast layout mode::
 
     .venv/bin/python -m Plotting.truncated_powerlaw_reversibility_flowchart \
         --reuse-subplots
+
+Single-size reconnecting panels without the slow p-value bootstrap::
+
+    .venv/bin/python -m Plotting.truncated_powerlaw_reversibility_flowchart \
+        --single-size 200 --data-root /path/to/MTS2D_output --skip-pvalue
 """
 
 from __future__ import annotations
@@ -50,7 +55,7 @@ from matplotlib.transforms import Bbox
 import numpy as np
 from pypdf import PageObject, PdfReader, PdfWriter, Transformation
 
-from Management.jobs import size_scaling_job
+from Management.jobs import nonreconnecting_size_scaling_job
 from Management.updateCSV import read_macrodata_csv
 from MTMath.evaluatePowerlawFit import (
     Fit,
@@ -87,6 +92,8 @@ from Plotting.standardPowerlaw import (
 # Running the script without arguments refreshes the data panels.  Use
 # ``--reuse-subplots`` for fast layout-only iterations.
 REGENERATE_SUBPLOTS = False
+# This resolves the historical non-reconnecting ``PBCt8`` campaign, not the
+# newer reconnecting Jean-Zay ``PBCt4`` profile.
 REQUESTED_SYSTEM_SIZE = 250
 REQUESTED_SEEDS = tuple(range(10))
 REQUIRE_ALL_REQUESTED_SEEDS = False
@@ -113,10 +120,12 @@ TRUE_GLOBAL_PARALLEL = False
 XMIN_MAX_MARKERS = 250
 ALPHA_MAX_MARKERS = 250
 FIT_PDF_MAX_MARKERS = 400
+SHOW_INVERSE_LAMBDA = True
 
 # Bootstrap settings for the selected global xmin fit.  ``confidence`` is the
 # existing evaluator's replicate-accuracy parameter: 0.05 requests about 100
-# replicates.  The plot reports the observed bootstrap min/max range.
+# replicates.  The fit panel shades the 95% cutoff and alpha percentile
+# intervals; bootstrap min/max values remain in the JSON summary.
 BOOTSTRAP_ACCURACY = 0.05
 BOOTSTRAP_CI_LEVEL = 0.95
 BOOTSTRAP_MAX_WORKERS = 1
@@ -229,7 +238,7 @@ EQUATION_BOXES = {
             r"$\Delta E_S=\widehat E_{n+1}-E_{n+1}$"
             "\n"
             r"$\widehat E_{n+1}=E_n+V_0\langle\sigma_{12}\rangle_n\Delta\gamma_n"
-            r"+\frac{V_0}{2}a_{1212,n}(\Delta\gamma_n)^2$"
+            r"+\frac{V_0}{2}a_{1212}(0)(\Delta\gamma_n)^2$"
         ),
         "color": "C1",
     },
@@ -362,7 +371,7 @@ def _configure_matplotlib():
 
 
 def _l250_configs_and_labels():
-    groups, label_groups = size_scaling_job(reconnection="none")
+    groups, label_groups = nonreconnecting_size_scaling_job()
     for configs, labels in zip(groups, label_groups):
         if configs and int(configs[0].rows) == REQUESTED_SYSTEM_SIZE:
             requested = [
@@ -448,8 +457,12 @@ def _marker_stride(point_count, max_markers):
     return max(1, int(np.ceil(point_count / max_markers)))
 
 
-def _exhaustive_xmin_analysis(data):
+def _exhaustive_xmin_analysis(data, *, cache_dir=None, parallel=None):
     """Evaluate every observed xmin retaining the requested tail size."""
+    if cache_dir is None:
+        cache_dir = EXHAUSTIVE_XMIN_CACHE_DIR
+    if parallel is None:
+        parallel = TRUE_GLOBAL_PARALLEL
     drops = np.asarray(data, dtype=float)
     drops = drops[np.isfinite(drops) & (drops > MIN_DROP)]
     if drops.size < XMIN_MIN_TAIL_COUNT:
@@ -461,9 +474,9 @@ def _exhaustive_xmin_analysis(data):
     signature = hashlib.sha1()
     signature.update(np.ascontiguousarray(sorted_drops, dtype=np.float64).tobytes())
     signature.update(
-        f"|{XMIN_MIN_TAIL_COUNT}|{Truncated_Power_Law.name}|{TRUE_GLOBAL_PARALLEL}".encode()
+        f"|{XMIN_MIN_TAIL_COUNT}|{Truncated_Power_Law.name}|{parallel}".encode()
     )
-    cache_path = EXHAUSTIVE_XMIN_CACHE_DIR / f"{signature.hexdigest()}.npz"
+    cache_path = cache_dir / f"{signature.hexdigest()}.npz"
 
     candidate_max = float(sorted_drops[-XMIN_MIN_TAIL_COUNT])
     xmins = np.unique(sorted_drops[sorted_drops <= candidate_max])
@@ -499,7 +512,7 @@ def _exhaustive_xmin_analysis(data):
             drops,
             xmins,
             distType=Truncated_Power_Law,
-            parallel=TRUE_GLOBAL_PARALLEL,
+            parallel=parallel,
         )
         distances = np.asarray(distances, dtype=float)
         valid_fits = np.asarray(valid_fits, dtype=bool)
@@ -510,7 +523,7 @@ def _exhaustive_xmin_analysis(data):
             ],
             dtype=float,
         )
-        EXHAUSTIVE_XMIN_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
             cache_path,
             xmins=xmins,
@@ -572,7 +585,11 @@ def _exhaustive_xmin_analysis(data):
     }
 
 
-def _collect_analysis(csv_paths):
+def _collect_analysis(
+    csv_paths, *, system_size=None, evaluate_pvalue=True, cache_dir=None,
+    parallel_xmin=None,
+):
+    system_size = REQUESTED_SYSTEM_SIZE if system_size is None else int(system_size)
     raw_df, raw_steps, raw_info = _read_steps(csv_paths[0])
     first_strain_limit = tuple(
         float(value)
@@ -584,7 +601,7 @@ def _collect_analysis(csv_paths):
     records = []
     kappa_all = []
     for path in csv_paths:
-        df = read_macrodata_csv(str(path), L=REQUESTED_SYSTEM_SIZE)
+        df = read_macrodata_csv(str(path), L=system_size)
         load = np.asarray(df["load"], dtype=float)
         delta_e_r_rows = -np.asarray(
             df["total_e_change_from_init"], dtype=float
@@ -593,7 +610,7 @@ def _collect_analysis(csv_paths):
         kappa_rows[1:] = kappa_from_relaxation_energy(
             delta_e_r_rows,
             np.diff(load),
-            float(REQUESTED_SYSTEM_SIZE * REQUESTED_SYSTEM_SIZE),
+            float(system_size * system_size),
             rho=KAPPA_RHO,
         )
         strain_lim = _resolve_strain_lim(STRAIN_LIMIT, df=df, postRegime=True)
@@ -616,7 +633,6 @@ def _collect_analysis(csv_paths):
             average_energy=AVERAGE_ENERGY,
             stress_corrected=True,
             correction_order=2,
-            tangent="current",
             drop_sign="negative",
             min_drop=MIN_DROP,
         )
@@ -678,7 +694,9 @@ def _collect_analysis(csv_paths):
     )
     if use_true_global:
         es_fit = None
-        es_analysis = _exhaustive_xmin_analysis(es_irrev)
+        es_analysis = _exhaustive_xmin_analysis(
+            es_irrev, cache_dir=cache_dir, parallel=parallel_xmin
+        )
     else:
         es_fit = _fit(es_irrev)
         es_analysis = es_fit.xmin_analysis
@@ -696,15 +714,16 @@ def _collect_analysis(csv_paths):
     es_fit_fixed.xmin_fitting_results = bootstrap_analysis
     es_fit_fixed.xmin_selection = BOOTSTRAP_XMIN_MODE
     es_fit_fixed.xmin_search_mode = "rapid"
-    es_fit_fixed.evaluate_fit(
-        data=es_irrev,
-        confidence=BOOTSTRAP_ACCURACY,
-        ci_level=BOOTSTRAP_CI_LEVEL,
-        parallel=BOOTSTRAP_MAX_WORKERS > 1,
-        max_workers=BOOTSTRAP_MAX_WORKERS,
-        cache_dir=str(BOOTSTRAP_EVALUATION_CACHE_DIR),
-        tqdmDesc="irreversible Delta E_S bootstrap",
-    )
+    if evaluate_pvalue:
+        es_fit_fixed.evaluate_fit(
+            data=es_irrev,
+            confidence=BOOTSTRAP_ACCURACY,
+            ci_level=BOOTSTRAP_CI_LEVEL,
+            parallel=BOOTSTRAP_MAX_WORKERS > 1,
+            max_workers=BOOTSTRAP_MAX_WORKERS,
+            cache_dir=str(BOOTSTRAP_EVALUATION_CACHE_DIR),
+            tqdmDesc="irreversible Delta E_S bootstrap",
+        )
 
     return {
         "csv_paths": [str(path) for path in csv_paths],
@@ -726,11 +745,16 @@ def _collect_analysis(csv_paths):
         "xmin_selection_is_approximate": not use_true_global,
         "es_xmin_ks": es_xmin_ks,
         "es_fit_fixed": es_fit_fixed,
-        "bootstrap_ci_level": float(es_fit_fixed.bootstrap_ci_level),
-        "bootstrap_replicates": int(
-            max(1, int(1 / (4 * BOOTSTRAP_ACCURACY**2)))
+        "system_size": system_size,
+        "evaluate_pvalue": bool(evaluate_pvalue),
+        "bootstrap_ci_level": (
+            float(es_fit_fixed.bootstrap_ci_level) if evaluate_pvalue else None
         ),
-        "bootstrap_xmin_mode": BOOTSTRAP_XMIN_MODE,
+        "bootstrap_replicates": (
+            max(1, int(1 / (4 * BOOTSTRAP_ACCURACY**2)))
+            if evaluate_pvalue else 0
+        ),
+        "bootstrap_xmin_mode": BOOTSTRAP_XMIN_MODE if evaluate_pvalue else None,
     }
 
 
@@ -753,17 +777,18 @@ def _new_panel(name, *, figsize=None):
     return fig, ax
 
 
-def _save_panel(fig, name):
-    PANEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+def _save_panel(fig, name, output_dir=None):
+    output_dir = PANEL_CACHE_DIR if output_dir is None else Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     fig.savefig(
-        PANEL_FILES[name],
+        output_dir / f"{name}.png",
         dpi=PANEL_DPI,
         facecolor="white",
         bbox_inches="tight",
         pad_inches=PANEL_CROP_PAD_INCHES,
     )
     fig.savefig(
-        PANEL_PDF_FILES[name],
+        output_dir / f"{name}.pdf",
         facecolor="white",
         bbox_inches="tight",
         pad_inches=PANEL_CROP_PAD_INCHES,
@@ -841,7 +866,7 @@ def _format_event_count(value):
         locale.setlocale(locale.LC_NUMERIC, previous_locale)
 
 
-def _reversibility_er_panel(analysis):
+def _reversibility_er_panel(analysis, output_dir=None):
     """Show the kappa PDF and its material plasticity-selection threshold."""
     fig, ax = _new_panel("reversibility_er")
     kappa_all = analysis["kappa_all"]
@@ -895,10 +920,10 @@ def _reversibility_er_panel(analysis):
         zorder=4,
     )
     ax.legend(loc="best", fontsize=5.4)
-    _save_panel(fig, "reversibility_er")
+    _save_panel(fig, "reversibility_er", output_dir)
 
 
-def _reversibility_es_panel(analysis):
+def _reversibility_es_panel(analysis, output_dir=None):
     """Show reversible and irreversible PDFs after the kappa split."""
     fig, ax = _new_panel("reversibility_es")
     reversible = analysis["es_rev"]
@@ -923,7 +948,7 @@ def _reversibility_es_panel(analysis):
     ax.lines[-1].set_markersize(2.4)
     _set_pdf_axes(ax, r"\Delta E_S")
     ax.legend(loc="best", fontsize=5.4)
-    _save_panel(fig, "reversibility_es")
+    _save_panel(fig, "reversibility_es", output_dir)
 
 
 def _ccdf_panel(analysis):
@@ -952,7 +977,7 @@ def _ccdf_panel(analysis):
     _save_panel(fig, "ccdf_ks")
 
 
-def _xmin_panel(analysis):
+def _xmin_panel(analysis, output_dir=None):
     """Plot raw D(x_min), with search markers only for approximate scans."""
     fig, ax = _new_panel("xmin_scan")
     scan = analysis["es_analysis"]
@@ -1026,25 +1051,29 @@ def _xmin_panel(analysis):
     ax.set_ylabel(r"$D$")
     ax.grid(False, which="both")
     ax.legend(loc="best", fontsize=5.0)
-    _save_panel(fig, "xmin_scan")
+    _save_panel(fig, "xmin_scan", output_dir)
 
 
-def _fit_panel(analysis):
+def _fit_panel(analysis, output_dir=None):
     """Fit panel with alpha(xmin) on a twin y-axis."""
     fig, ax1 = _new_panel("mle_fit")
     fit = analysis["es_fit_fixed"]
     alpha_fit = dist_from_fit(fit)
+    if not np.isfinite(alpha_fit.Lambda) or alpha_fit.Lambda <= 0:
+        raise RuntimeError("Expected a positive fitted lambda.")
+    inverse_lambda = 1.0 / alpha_fit.Lambda
+    has_bootstrap = analysis.get("evaluate_pvalue", True)
     uncertainty_values = {
         "alpha_std": getattr(fit, "alpha_std", np.nan),
         "lambda_std": getattr(fit, "Lambda_std", np.nan),
-        "alpha_min": getattr(fit, "alpha_min", np.nan),
-        "alpha_max": getattr(fit, "alpha_max", np.nan),
-        "lambda_min": getattr(fit, "Lambda_min", np.nan),
-        "lambda_max": getattr(fit, "Lambda_max", np.nan),
-        "xmin_min": getattr(fit, "bootstrap_xmin_min", np.nan),
-        "xmin_max": getattr(fit, "bootstrap_xmin_max", np.nan),
+        "alpha_ci_low": getattr(fit, "alpha_ci_low", np.nan),
+        "alpha_ci_high": getattr(fit, "alpha_ci_high", np.nan),
+        "xmin_ci_low": getattr(fit, "bootstrap_xmin_ci_low", np.nan),
+        "xmin_ci_high": getattr(fit, "bootstrap_xmin_ci_high", np.nan),
     }
-    if not all(np.isfinite(value) for value in uncertainty_values.values()):
+    if has_bootstrap and not all(
+        np.isfinite(value) for value in uncertainty_values.values()
+    ):
         raise RuntimeError(
             "Selected irreversible Delta E_S fit is missing finite bootstrap "
             "uncertainties."
@@ -1060,7 +1089,7 @@ def _fit_panel(analysis):
         show=False,
         close=False,
         show_fit_region=True,
-        show_cutoff=True,
+        show_cutoff=SHOW_INVERSE_LAMBDA,
         show_title=False,
         show_legend=False,
         xmin_analysis=False,
@@ -1071,16 +1100,29 @@ def _fit_panel(analysis):
         _marker_stride(len(ax1.lines[0].get_xdata()), FIT_PDF_MAX_MARKERS)
     )
     if len(ax1.lines) > 1:
-        ax1.lines[1].set_label(
-            rf"$\hat{{\alpha}}={alpha_fit.alpha:.2f}"
-            rf"\pm{uncertainty_values['alpha_std']:.2f}$, "
-            rf"$\hat{{\lambda}}={alpha_fit.Lambda:.1e}"
-            rf"\pm{uncertainty_values['lambda_std']:.1e}$"
-        )
-    # Keep the gray fit-region shading, but omit its verbose label from the
-    # combined legend.
-    for patch in ax1.patches:
-        patch.set_label("_nolegend_")
+        if has_bootstrap:
+            replicate_count = analysis["bootstrap_replicates"]
+            if replicate_count < 1 or not np.isfinite(fit.p):
+                raise RuntimeError("Missing bootstrap p-value or replicate count.")
+            # First-order propagation of the bootstrap lambda standard deviation.
+            inverse_lambda_std = uncertainty_values["lambda_std"] * inverse_lambda**2
+            fit_label = (
+                rf"$\hat{{\alpha}}={alpha_fit.alpha:.2f}"
+                rf"\pm{uncertainty_values['alpha_std']:.2f}$, "
+                rf"$1/\hat{{\lambda}}={inverse_lambda:.1f}"
+                rf"\pm{inverse_lambda_std:.1f}$, "
+                rf"$p={round(fit.p * replicate_count)}/{replicate_count}$"
+            )
+        else:
+            fit_label = (
+                rf"$\hat{{\alpha}}={alpha_fit.alpha:.2f}$, "
+                rf"$1/\hat{{\lambda}}={inverse_lambda:.1f}$"
+            )
+        ax1.lines[1].set_label(fit_label)
+    if len(ax1.patches) != 1:
+        raise RuntimeError("Expected one shaded fit-data region.")
+    fit_region = ax1.patches[0]
+    fit_region.set_label("Fit region")
     ax1.set_xlabel(r"$\Delta E$")
     ax1.set_ylabel(r"$p(\Delta E_S)$")
     ax1.grid(False, which="both")
@@ -1099,23 +1141,33 @@ def _fit_panel(analysis):
     order = np.argsort(x[valid])
     x_valid = x[valid][order]
     alpha_valid = alpha[valid][order]
-    ax2.axvspan(
-        uncertainty_values["xmin_min"],
-        uncertainty_values["xmin_max"],
-        color="0.45",
-        alpha=0.16,
-        label="_nolegend_",
-        zorder=0,
-    )
-    ax2.axhspan(
-        uncertainty_values["alpha_min"],
-        uncertainty_values["alpha_max"],
-        color=ES_COLOR,
-        alpha=0.16,
-        label="_nolegend_",
-        zorder=1,
-    )
-    ax2.plot(
+    ci_region = None
+    alpha_ci_region = None
+    if has_bootstrap:
+        ci_region = ax2.axvspan(
+            uncertainty_values["xmin_ci_low"],
+            uncertainty_values["xmin_ci_high"],
+            color=ALPHA_COLOR,
+            alpha=0.16,
+            label=(
+                rf"95% CI: $\Delta E_{{S,\min}}^{{KS}}\in"
+                rf"[{uncertainty_values['xmin_ci_low']:.2e},"
+                rf"\ {uncertainty_values['xmin_ci_high']:.2e}]$"
+            ),
+            zorder=0,
+        )
+        alpha_ci_region = ax2.axhspan(
+            uncertainty_values["alpha_ci_low"],
+            uncertainty_values["alpha_ci_high"],
+            color=ES_COLOR,
+            alpha=0.16,
+            label=(
+                rf"95% CI: $\alpha\in[{uncertainty_values['alpha_ci_low']:.2f},"
+                rf"\ {uncertainty_values['alpha_ci_high']:.2f}]$"
+            ),
+            zorder=1,
+        )
+    alpha_line, = ax2.plot(
         x_valid,
         alpha_valid,
         color=ALPHA_COLOR,
@@ -1127,7 +1179,7 @@ def _fit_panel(analysis):
         zorder=4,
     )
     es_xmin_ks = analysis["es_xmin_ks"]
-    ax2.axvline(
+    selected_xmin_line = ax2.axvline(
         es_xmin_ks,
         color="0.25",
         linestyle=":",
@@ -1136,9 +1188,7 @@ def _fit_panel(analysis):
             rf"$\Delta E_{{S,\min}}^{{KS,*}}={es_xmin_ks:.2e}$"
             if analysis.get("xmin_selection_is_approximate", False)
             else rf"$\Delta E_{{S,\min}}^{{KS}}={es_xmin_ks:.2e}$"
-        )
-        + rf" $[{uncertainty_values['xmin_min']:.2e},"
-        + rf"\ {uncertainty_values['xmin_max']:.2e}]$",
+        ),
         zorder=3,
     )
     ax2.set_xscale("log")
@@ -1148,25 +1198,46 @@ def _fit_panel(analysis):
     ax2.tick_params(axis="y", colors="black")
     ax2.spines["right"].set_color("black")
     ax2.grid(False, which="both")
+    alpha_ymin, alpha_ymax = ax2.get_ylim()
+    alpha_shift = 0.15 * (alpha_ymin + alpha_ymax) / 2
+    ax2.set_ylim(
+        alpha_ymin - alpha_shift,
+        alpha_ymax - alpha_shift,
+    )
 
-    handles1, labels1 = ax1.get_legend_handles_labels()
-    handles2, labels2 = ax2.get_legend_handles_labels()
+    if len(ax1.lines) != 2 + int(SHOW_INVERSE_LAMBDA):
+        raise RuntimeError("Unexpected number of data, fit, or 1/lambda lines.")
+    handles = [ax1.lines[0], *ax1.lines[2:], alpha_line, fit_region]
+    handles.append(ax1.lines[1])
+    if alpha_ci_region is not None:
+        handles.append(alpha_ci_region)
+    if ci_region is not None:
+        handles.append(ci_region)
+    handles.append(selected_xmin_line)
     legend = ax1.legend(
-        handles1 + handles2,
-        labels1 + labels2,
-        loc="center left",
+        handles,
+        [handle.get_label() for handle in handles],
+        loc="lower right",
+        ncol=2,
         fontsize=4.2,
         framealpha=0.82,
     )
     legend.set_zorder(1000.0)
     legend.set_clip_on(False)
-    _save_panel(fig, "mle_fit")
+    _save_panel(fig, "mle_fit", output_dir)
 
 
-def _write_analysis_summary(analysis):
+def _write_analysis_summary(analysis, output_path=None):
     es_fit_dist = dist_from_fit(analysis["es_fit_fixed"])
+    fit = analysis["es_fit_fixed"]
+    has_bootstrap = analysis.get("evaluate_pvalue", True)
+
+    def bootstrap_value(name):
+        return getattr(fit, name) if has_bootstrap else None
+
     summary = {
         "csv_paths": analysis["csv_paths"],
+        "system_size": analysis["system_size"],
         "post_yield": True,
         "number_of_kappa_events": int(analysis["kappa_all"].size),
         "rho": float(KAPPA_RHO),
@@ -1198,40 +1269,52 @@ def _write_analysis_summary(analysis):
         "bootstrap_ci_level": analysis["bootstrap_ci_level"],
         "bootstrap_replicates": analysis["bootstrap_replicates"],
         "bootstrap_xmin_mode": analysis["bootstrap_xmin_mode"],
+        "bootstrap_interpretation": (
+            "Each replicate has the original event count; values below the "
+            "selected cutoff are resampled from the data, values above it "
+            "are generated from the fitted model, and the cutoff and alpha "
+            "are refitted. Intervals are marginal 2.5th–97.5th percentiles."
+            if has_bootstrap else None
+        ),
+        "p_value_evaluated": has_bootstrap,
+        "delta_E_S_xmin_ks_p_value": bootstrap_value("p"),
+        "delta_E_S_xmin_ks_p_accuracy": bootstrap_value("p_std"),
         "delta_E_S_xmin_ks_ci": [
-            analysis["es_fit_fixed"].bootstrap_xmin_ci_low,
-            analysis["es_fit_fixed"].bootstrap_xmin_ci_high,
+            bootstrap_value("bootstrap_xmin_ci_low"),
+            bootstrap_value("bootstrap_xmin_ci_high"),
         ],
         "delta_E_S_xmin_ks_minmax": [
-            analysis["es_fit_fixed"].bootstrap_xmin_min,
-            analysis["es_fit_fixed"].bootstrap_xmin_max,
+            bootstrap_value("bootstrap_xmin_min"),
+            bootstrap_value("bootstrap_xmin_max"),
         ],
         "delta_E_S_xmin_ks_alpha_ci": [
-            analysis["es_fit_fixed"].alpha_ci_low,
-            analysis["es_fit_fixed"].alpha_ci_high,
+            bootstrap_value("alpha_ci_low"),
+            bootstrap_value("alpha_ci_high"),
         ],
         "delta_E_S_xmin_ks_alpha_minmax": [
-            analysis["es_fit_fixed"].alpha_min,
-            analysis["es_fit_fixed"].alpha_max,
+            bootstrap_value("alpha_min"),
+            bootstrap_value("alpha_max"),
         ],
         "delta_E_S_xmin_ks_lambda_ci": [
-            analysis["es_fit_fixed"].Lambda_ci_low,
-            analysis["es_fit_fixed"].Lambda_ci_high,
+            bootstrap_value("Lambda_ci_low"),
+            bootstrap_value("Lambda_ci_high"),
         ],
         "delta_E_S_xmin_ks_lambda_minmax": [
-            analysis["es_fit_fixed"].Lambda_min,
-            analysis["es_fit_fixed"].Lambda_max,
+            bootstrap_value("Lambda_min"),
+            bootstrap_value("Lambda_max"),
         ],
         "fit_population": "irreversible_delta_E_S",
     }
-    ANALYSIS_SUMMARY_PATH.write_text(json.dumps(summary, indent=2) + "\n")
+    output_path = ANALYSIS_SUMMARY_PATH if output_path is None else Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(summary, indent=2) + "\n")
     return summary
 
 
-def regenerate_panels():
+def regenerate_panels(*, evaluate_pvalue=True):
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     paths = _resolve_csv_paths()
-    analysis = _collect_analysis(paths)
+    analysis = _collect_analysis(paths, evaluate_pvalue=evaluate_pvalue)
     _energy_panel(analysis)
     _reversibility_er_panel(analysis)
     _reversibility_es_panel(analysis)
@@ -1239,6 +1322,31 @@ def regenerate_panels():
     _xmin_panel(analysis)
     _fit_panel(analysis)
     return _write_analysis_summary(analysis)
+
+
+def generate_single_size_panels(
+    csv_paths, *, system_size, output_dir, evaluate_pvalue=True
+):
+    """Render the flowchart's split, KS scan, and panel-(f) fit for one size."""
+    paths = [Path(path) for path in csv_paths]
+    if not paths:
+        raise ValueError("At least one macroData.csv path is required.")
+    if int(system_size) != system_size or system_size <= 0:
+        raise ValueError("system_size must be a positive integer.")
+    output_dir = Path(output_dir)
+    _configure_matplotlib()
+    analysis = _collect_analysis(
+        paths,
+        system_size=int(system_size),
+        evaluate_pvalue=evaluate_pvalue,
+        cache_dir=output_dir / "exhaustive_xmin_cache",
+        parallel_xmin=True,
+    )
+    _reversibility_er_panel(analysis, output_dir)
+    _reversibility_es_panel(analysis, output_dir)
+    _xmin_panel(analysis, output_dir)
+    _fit_panel(analysis, output_dir)
+    return _write_analysis_summary(analysis, output_dir / "analysis_summary.json")
 
 
 # =============================================================================
@@ -1444,7 +1552,7 @@ def compose_flowchart(summary):
     return fig
 
 
-def generate_flowchart(*, regenerate_subplots=None, show=False):
+def generate_flowchart(*, regenerate_subplots=None, show=False, evaluate_pvalue=True):
     _configure_matplotlib()
     regenerate = (
         REGENERATE_SUBPLOTS
@@ -1452,7 +1560,7 @@ def generate_flowchart(*, regenerate_subplots=None, show=False):
         else bool(regenerate_subplots)
     )
     if regenerate:
-        summary = regenerate_panels()
+        summary = regenerate_panels(evaluate_pvalue=evaluate_pvalue)
     else:
         summary = _load_summary()
     fig = compose_flowchart(summary)
@@ -1474,12 +1582,30 @@ def _parse_args():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--regenerate-subplots", action="store_true")
     mode.add_argument("--reuse-subplots", action="store_true")
+    parser.add_argument("--single-size", type=int, help="Render the single-size flowchart panels.")
+    parser.add_argument("--data-root", type=Path, help="Root containing the run folders.")
+    parser.add_argument("--output-dir", type=Path, help="Single-size panel output folder.")
+    parser.add_argument("--skip-pvalue", action="store_true", help="Skip bootstrap p-value and uncertainty bands.")
     parser.add_argument("--show", action="store_true")
     return parser.parse_args()
 
 
 def main():
     args = _parse_args()
+    if args.single_size is not None:
+        if args.data_root is None:
+            raise ValueError("--data-root is required with --single-size.")
+        size = args.single_size
+        paths = sorted(args.data_root.glob(
+            f"simpleShear,s{size}x{size}*PBCedgeFlip*/macroData.csv"
+        ))
+        output_dir = args.output_dir or OUTPUT_DIR / f"reconnecting_L{size}"
+        generate_single_size_panels(
+            paths, system_size=size, output_dir=output_dir,
+            evaluate_pvalue=not args.skip_pvalue,
+        )
+        print(f"Saved single-size panels to {output_dir}")
+        return
     if args.regenerate_subplots:
         regenerate = True
     elif args.reuse_subplots:
@@ -1489,7 +1615,11 @@ def main():
         # flowchart.  By default it reuses the cached panels; set
         # REGENERATE_SUBPLOTS=True above when the data panels should refresh.
         regenerate = REGENERATE_SUBPLOTS
-    generate_flowchart(regenerate_subplots=regenerate, show=args.show)
+    generate_flowchart(
+        regenerate_subplots=regenerate,
+        show=args.show,
+        evaluate_pvalue=not args.skip_pvalue,
+    )
 
 
 if __name__ == "__main__":

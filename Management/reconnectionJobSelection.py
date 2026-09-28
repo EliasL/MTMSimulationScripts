@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Dict, List, Optional
 
-from Management.jobs import size_scaling_job
+from Management.jobs import reconnecting_size_scaling_job
 
 
 @dataclass(frozen=True)
@@ -21,7 +21,7 @@ def _expected_jobs(job_type: str) -> Dict[str, tuple[int, int]]:
         raise ValueError(
             f"Unknown job type {job_type!r}; available job types: 'size-scaling'."
         )
-    groups, _ = size_scaling_job(reconnection="edgeFlip")
+    groups, _ = reconnecting_size_scaling_job(reconnection="edgeFlip")
     return {
         config.name: (int(config.rows), int(config.seed))
         for group in groups

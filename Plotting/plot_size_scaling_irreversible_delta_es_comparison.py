@@ -5,6 +5,10 @@ The input files are macroData CSV files only.  Event pairing and post-yield
 selection are delegated to ``sizeScalingCollapse.extract_event_pairs``;
 classification is then applied to the paired Delta E_R/Delta E_S arrays with
 the standard kappa detector before positive Delta E_S filtering.
+
+This is a two-population overlay, not the default individual-size figure.
+For a single run group's established split and fit panels, use
+``truncated_powerlaw_reversibility_flowchart.generate_single_size_panels``.
 """
 
 from __future__ import annotations
@@ -42,7 +46,7 @@ from Plotting.standardPowerlaw import (
 
 
 DEFAULT_SIZE = 100
-POST_YIELD_OFFSET = 0.0
+POST_YIELD_OFFSET = 0.01
 MAX_LOAD = 1.0
 MIN_TAIL_COUNT = 100
 BOOTSTRAP_CONFIDENCE = 0.05

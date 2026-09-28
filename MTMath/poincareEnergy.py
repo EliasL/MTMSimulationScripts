@@ -664,6 +664,7 @@ def drawC(
     shade_values=None,  # scalar field, same indexing as C
     cmap="coolwarm",  # colormap
     cbarLims=None,  # colorbar limits when using shade_values
+    cbarTicks=None,  # optional explicit colorbar ticks
     agg="mean",  # aggregation method when using shade_values
     F=None,  # retained for compatibility with drawF callers
     **kwargs,
@@ -822,7 +823,9 @@ def drawC(
             # Optional: add a colorbar
             if cbarLims is not None:
                 im.set_clim(*cbarLims)
-            ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            cbar = ax.figure.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            if cbarTicks is not None:
+                cbar.set_ticks(cbarTicks)
 
     else:
         ax.plot(
@@ -1535,7 +1538,7 @@ def drawTriangularElasticDomain(ax, shade=False, **kwargs):
     # Shade the region defined by 0 <= C12 <= min(C11, C22)
     # Shading does not work with transformations yet
     transformation = kwargs.get("transformation", None)
-    if True:  # shade and transformation is None:
+    if shade:
         grid_size = kwargs.get("grid_size", 200)
         zoom_val = kwargs.get("zoom", 1)
 
@@ -2259,7 +2262,33 @@ def plot_reduction_history(
     return fig, ax
 
 
-def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation="none", show=False):
+def plotPoincareDiskTriangularReconnectionCriteria(
+    ax=None,
+    save=True,
+    grid_size=200,
+    depth=5,
+    transformation="triangular",
+    show=False,
+    label_positions=None,
+):
+    """Plot the Lagrange, edge, and triangular reconnection domains.
+
+    ``label_positions`` uses Poincare-disk coordinates and may override any of
+    ``"lagrange"``, ``"edge"``, and ``"triangular"``.  Keeping these three
+    coordinates together makes final manual label placement straightforward.
+    """
+    default_label_positions = {
+        "lagrange": (-0.28, -0.06),
+        "edge": (0.02, -0.16),
+        "triangular": (0.02, 0.16),
+    }
+    if label_positions is None:
+        label_positions = {}
+    unknown_labels = set(label_positions) - set(default_label_positions)
+    if unknown_labels:
+        raise ValueError(f"Unknown domain labels: {sorted(unknown_labels)}")
+    positions = default_label_positions | label_positions
+
     # Make plot of fundamental domain
     if ax is None:
         fig, ax = prepPoincareFig(grid_size=grid_size, withGrid=False, withYieldSurface=False)
@@ -2274,14 +2303,14 @@ def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation=
         transformation=transformation,
     )
 
-    # drawSquareElasticDomain(
-    #     ax=ax,
-    #     grid_size=grid_size,
-    #     zoom=zoom,
-    #     c="red",
-    #     transformation=transformation,
-    #     linewidth=1,
-    # )
+    drawReconnectionDomain(
+        ax=ax,
+        grid_size=grid_size,
+        zoom=zoom,
+        c="green",
+        transformation=transformation,
+        linewidth=1.5,
+    )
     drawTriangularElasticDomain(
         ax=ax,
         grid_size=grid_size,
@@ -2303,6 +2332,21 @@ def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation=
         transformation=transformation,
     )
 
+    for name, label in (
+        ("lagrange", r"$\mathcal{D}_{L}$"),
+        ("edge", r"$\mathcal{D}_{E}$"),
+        ("triangular", r"$\mathcal{D}_{T}$"),
+    ):
+        x_disk, y_disk = positions[name]
+        ax.text(
+            (x_disk + 1.0) * grid_size / 2.0,
+            (y_disk + 1.0) * grid_size / 2.0,
+            label,
+            ha="center",
+            va="center",
+            fontsize=14,
+        )
+
     # drawShearPath(
     #     ax,
     #     grid_size=grid_size,
@@ -2318,10 +2362,22 @@ def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation=
 
         if not os.path.exists("Plots"):
             os.makedirs("Plots")
-        plt.savefig("Plots/poincareDisk.pdf", dpi=500)
-        print("Saved plot to Plots/poincareDisk.pdf")
+        plt.savefig("Plots/poincareDiskTriangularReconnectionCriteria.pdf", dpi=500)
+        print("Saved plot to Plots/poincareDiskTriangularReconnectionCriteria.pdf")
     if show:
         plt.show()
+
+
+def plotPoincareDisk(ax=None, save=True, grid_size=200, depth=5, transformation="none", show=False):
+    """Backward-compatible general Poincare-disk plot."""
+    return plotPoincareDiskTriangularReconnectionCriteria(
+        ax=ax,
+        save=save,
+        grid_size=grid_size,
+        depth=depth,
+        transformation=transformation,
+        show=show,
+    )
 
 
 def transformed_fundamental_domain_inequalities(transformation):

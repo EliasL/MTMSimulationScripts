@@ -25,6 +25,7 @@ from Plotting.plasticReductionCorrectnessIllustration import (
     COLUMN_COLORS,
     GRID as FACTOR_GRID,
     TEXT as FACTOR_TEXT,
+    TOTAL_F as DETERMINANT_QUADRANTS_F,
     apply_style,
 )
 
@@ -36,12 +37,14 @@ ORANGE = "#E67E22"
 SHORT_PATH_COLOR = "#2ca02c"
 LONG_PATH_COLOR = "#d62728"
 OQ_PATH_COLOR = "#5B9BD5"
+OQ_ALTERNATIVE_PATH_COLOR = "#9467BD"
 NEUTRAL = "#59636E"
 GRID = FACTOR_GRID
 TEXT = FACTOR_TEXT
 SHORT_FACTOR_BACKGROUND = "#DDF2E0"
 LONG_FACTOR_BACKGROUND = "#F7DDDD"
 OQ_FACTOR_BACKGROUND = "#DCEBF7"
+OQ_ALTERNATIVE_FACTOR_BACKGROUND = "#E9DDF2"
 ORIGINAL_FACTOR_BACKGROUND = "#F3F5F6"
 MAX_ALTERNATIVE_DEPTH = 15
 
@@ -95,10 +98,8 @@ MOVE_MATRICES = {
     "L-": np.array([[1.0, 0.0], [-1.0, 1.0]]),
 }
 
-QUARTER_TURNS = (
-    np.array([[0, -1], [1, 0]], dtype=int),
-    np.array([[0, 1], [-1, 0]], dtype=int),
-)
+POSITIVE_QUARTER_TURN = np.array([[0, 1], [-1, 0]], dtype=int)
+NEGATIVE_QUARTER_TURN = np.array([[0, -1], [1, 0]], dtype=int)
 
 
 def _move_labels_from_history(history):
@@ -202,11 +203,12 @@ def _shortest_reduction_and_alternative(C0, max_depth=MAX_ALTERNATIVE_DEPTH):
 def _shortest_quarter_turn_match(
     C0,
     reduction_result,
+    quarter_turn,
     max_depth=MAX_ALTERNATIVE_DEPTH,
 ):
-    """Return the shortest BFS lift differing from PR by a quarter turn."""
+    """Return the shortest BFS lift differing from PR by ``quarter_turn``."""
     reduction_M = np.asarray(reduction_result["M"], dtype=int)
-    target_lifts = tuple(reduction_M @ turn for turn in QUARTER_TURNS)
+    target_lift = reduction_M @ np.asarray(quarter_turn, dtype=int)
     for search_depth in range(1, max_depth + 1):
         _candidate_Cs, paths = plasticReductionBFS(
             C0,
@@ -217,7 +219,7 @@ def _shortest_quarter_turn_match(
         )
         for path in paths:
             path_M = np.asarray(path["M"], dtype=int)
-            if any(np.array_equal(path_M, target) for target in target_lifts):
+            if np.array_equal(path_M, target_lift):
                 return path, paths
     raise RuntimeError(
         "No quarter-turn match reached the elastic domain by "
@@ -226,22 +228,33 @@ def _shortest_quarter_turn_match(
 
 
 def match2_decomposition_data(total_F=None):
-    """Return PR plus its shortest quarter- and half-turn BFS matches."""
+    """Return PR plus its shortest +/-90- and 180-degree BFS matches."""
     if total_F is None:
         total_F = SShear(1.3, s_conponent=(0, 1))
     C0 = total_F.T @ total_F
     reduction_path, half_turn_path, paths = (
         _shortest_reduction_and_alternative(C0)
     )
-    quarter_turn_path, _quarter_turn_paths = _shortest_quarter_turn_match(
+    positive_quarter_turn_path, _ = _shortest_quarter_turn_match(
         C0,
         reduction_path,
+        POSITIVE_QUARTER_TURN,
+    )
+    negative_quarter_turn_path, _ = _shortest_quarter_turn_match(
+        C0,
+        reduction_path,
+        NEGATIVE_QUARTER_TURN,
     )
     return (
         total_F,
         _representatives_from_paths(
             total_F,
-            (reduction_path, quarter_turn_path, half_turn_path),
+            (
+                reduction_path,
+                positive_quarter_turn_path,
+                negative_quarter_turn_path,
+                half_turn_path,
+            ),
         ),
         paths,
     )
@@ -302,6 +315,9 @@ def _draw_reduction_path_set(
     path_labels,
     linestyles,
     path_colors=None,
+    initial_label="Initial",
+    legend_location="lower right",
+    legend_anchor=(0.98, 0.02),
 ):
     """Draw PR and one or more rotationally related BFS paths."""
     if not (
@@ -378,16 +394,26 @@ def _draw_reduction_path_set(
             linewidth=0.6,
             zorder=7,
         )
-        if path_index > 0 and np.allclose(
-            history[-1],
-            histories[0][-1],
-            atol=1e-12,
-            rtol=1e-12,
-        ):
+        matching_endpoint = next(
+            (
+                previous_index
+                for previous_index, previous_history in enumerate(
+                    histories[:path_index]
+                )
+                if np.allclose(
+                    history[-1],
+                    previous_history[-1],
+                    atol=1e-12,
+                    rtol=1e-12,
+                )
+            ),
+            None,
+        )
+        if matching_endpoint is not None:
             ax.scatter(
                 *points[-1],
                 s=8,
-                color=path_colors[0],
+                color=path_colors[matching_endpoint],
                 edgecolor="none",
                 zorder=8,
             )
@@ -426,12 +452,12 @@ def _draw_reduction_path_set(
                 markeredgecolor=TEXT,
                 markeredgewidth=0.8,
                 linestyle="none",
-                label="Initial",
+                label=initial_label,
             ),
             *path_handles,
         ],
-        loc="lower right",
-        bbox_to_anchor=(0.98, 0.02),
+        loc=legend_location,
+        bbox_to_anchor=legend_anchor,
         borderaxespad=0.0,
         handlelength=1.6,
         handletextpad=0.4,
@@ -455,14 +481,32 @@ def _vector_limit(matrices):
     )
 
 
-def _draw_rotation_annotation(ax, degrees=180):
-    """Mark a red panel as a rotation of its green counterpart."""
-    ax.add_patch(
-        FancyArrowPatch(
+def _draw_rotation_annotation(ax, degrees=180, side=None):
+    """Mark a factor panel as a rotation of its reference factor."""
+    flipped = degrees < 0
+    if side is None:
+        side = "left" if flipped else "right"
+    if side == "left":
+        start, end = ((0.14, 0.15), (0.28, 0.13)) if flipped else (
+            (0.28, 0.13),
+            (0.14, 0.15),
+        )
+        text_x = 0.06
+    elif side == "right":
+        start, end = ((0.72, 0.13), (0.86, 0.15)) if flipped else (
             (0.86, 0.15),
             (0.72, 0.13),
+        )
+        text_x = 0.67
+    else:
+        raise ValueError("Rotation annotation side must be 'left' or 'right'.")
+    arc_radius = 0.9 if flipped else -0.9
+    ax.add_patch(
+        FancyArrowPatch(
+            start,
+            end,
             transform=ax.transAxes,
-            connectionstyle="arc3,rad=-0.9",
+            connectionstyle=f"arc3,rad={arc_radius}",
             arrowstyle="-|>",
             mutation_scale=7,
             linewidth=0.85,
@@ -473,7 +517,7 @@ def _draw_rotation_annotation(ax, degrees=180):
         )
     )
     ax.text(
-        0.67,
+        text_x,
         0.25,
         rf"${degrees}^\circ$",
         transform=ax.transAxes,
@@ -500,6 +544,7 @@ def _draw_factor_panel(
     vector_limit,
     reference_matrix=None,
     rotation_degrees=None,
+    rotation_annotation_side=None,
     panel_limit=None,
 ):
     """Draw a factor pair panel using the determinant-quadrant visual style."""
@@ -545,7 +590,11 @@ def _draw_factor_panel(
     ax.set_xticks([])
     ax.set_yticks([])
     if rotation_degrees is not None:
-        _draw_rotation_annotation(ax, rotation_degrees)
+        _draw_rotation_annotation(
+            ax,
+            rotation_degrees,
+            side=rotation_annotation_side,
+        )
     ax.text(
         0.06,
         0.93,
@@ -692,32 +741,59 @@ def plot_decompositions_match2(
     total_F,
     representatives,
     *,
-    path_labels=("Short", "OQ", "Long"),
-    path_titles=("Short", "Other quadrant (OQ)", "Long"),
-    path_colors=(SHORT_PATH_COLOR, OQ_PATH_COLOR, LONG_PATH_COLOR),
+    path_labels=(
+        r"$\mathbf{M}_1$",
+        r"$\mathbf{M}_4$",
+        r"$\mathbf{M}_4^\prime$",
+        r"$\mathbf{M}_1^\prime$",
+    ),
+    path_titles=None,
+    path_colors=(
+        SHORT_PATH_COLOR,
+        OQ_PATH_COLOR,
+        OQ_ALTERNATIVE_PATH_COLOR,
+        LONG_PATH_COLOR,
+    ),
     factor_backgrounds=(
         SHORT_FACTOR_BACKGROUND,
         OQ_FACTOR_BACKGROUND,
+        OQ_ALTERNATIVE_FACTOR_BACKGROUND,
         LONG_FACTOR_BACKGROUND,
     ),
+    disk_order=(0, 3, 1, 2),
+    legend_location="upper right",
+    legend_anchor=(0.98, 0.98),
+    swap_bottom_panels=False,
+    half_turn_annotation_side=None,
 ):
-    """Plot PR beside its shortest 90- and 180-degree rotational matches."""
-    short, match_90, match_180 = representatives
+    """Plot PR beside its shortest +90, -90, and 180-degree matches."""
+    if path_titles is None:
+        path_titles = path_labels
+    if sorted(disk_order) != list(range(len(representatives))):
+        raise ValueError("disk_order must contain each representative index once.")
+    short, match_90, match_negative_90, match_180 = representatives
     factor_matrices = (
         total_F,
         short["F_e"],
         short["F_p"],
         match_90["F_e"],
         match_90["F_p"],
+        match_negative_90["F_e"],
+        match_negative_90["F_p"],
         match_180["F_e"],
         match_180["F_p"],
     )
     vector_limit = _vector_limit(factor_matrices)
+    elastic_vector_limit = _vector_limit(
+        tuple(representative["F_e"] for representative in representatives)
+    )
+    if elastic_vector_limit > 1.0:
+        elastic_vector_limit *= 1.12
     fig = plt.figure(figsize=(6.2, 2.7))
     master = fig.add_gridspec(
         2,
         6,
-        width_ratios=(1.50, 0.85, 0.85, 0.85, 0.68, 0.68),
+        width_ratios=(1.50, 0.85, 0.765, 0.765, 0.765, 0.765),
         left=0.02,
         right=0.99,
         bottom=0.05,
@@ -728,20 +804,31 @@ def plot_decompositions_match2(
 
     disk_ax = fig.add_subplot(master[:, 0])
     original_ax = fig.add_subplot(master[:, 1])
-    short_elastic_ax = fig.add_subplot(master[:, 2])
-    short_plastic_ax = fig.add_subplot(master[:, 3])
+    short_elastic_ax = fig.add_subplot(master[0, 2])
+    short_plastic_ax = fig.add_subplot(master[0, 3])
     match_90_elastic_ax = fig.add_subplot(master[0, 4])
     match_90_plastic_ax = fig.add_subplot(master[0, 5])
-    match_180_elastic_ax = fig.add_subplot(master[1, 4])
-    match_180_plastic_ax = fig.add_subplot(master[1, 5])
+    bottom_left_columns = (4, 5) if swap_bottom_panels else (2, 3)
+    bottom_right_columns = (2, 3) if swap_bottom_panels else (4, 5)
+    match_negative_90_elastic_ax = fig.add_subplot(
+        master[1, bottom_left_columns[0]]
+    )
+    match_negative_90_plastic_ax = fig.add_subplot(
+        master[1, bottom_left_columns[1]]
+    )
+    match_180_elastic_ax = fig.add_subplot(master[1, bottom_right_columns[0]])
+    match_180_plastic_ax = fig.add_subplot(master[1, bottom_right_columns[1]])
 
     _draw_reduction_path_set(
         disk_ax,
         total_F,
-        representatives,
-        path_labels=path_labels,
-        linestyles=("-", "-", "--"),
-        path_colors=path_colors,
+        tuple(representatives[index] for index in disk_order),
+        path_labels=tuple(path_labels[index] for index in disk_order),
+        linestyles=("-", "-", "-", "-"),
+        path_colors=tuple(path_colors[index] for index in disk_order),
+        initial_label=r"$\mathbf{C}$",
+        legend_location=legend_location,
+        legend_anchor=legend_anchor,
     )
     _draw_factor_panel(
         original_ax,
@@ -750,38 +837,51 @@ def plot_decompositions_match2(
         background_color=ORIGINAL_FACTOR_BACKGROUND,
         vector_limit=vector_limit,
     )
-    _draw_factor_panel(
-        short_elastic_ax,
-        short["F_e"],
-        label=r"$\mathbf{F}_e$",
-        background_color=factor_backgrounds[0],
-        vector_limit=vector_limit,
-        panel_limit=1.0,
-    )
-    _draw_factor_panel(
-        short_plastic_ax,
-        short["F_p"],
-        label=r"$\mathbf{F}_p$",
-        background_color=factor_backgrounds[0],
-        vector_limit=vector_limit,
-    )
-    for axes, representative, degrees, background_color in (
+    for axes, representative, factor_degrees, background_color, annotation_side in (
+        (
+            (short_elastic_ax, short_plastic_ax),
+            short,
+            (None, None),
+            factor_backgrounds[0],
+            None,
+        ),
         (
             (match_90_elastic_ax, match_90_plastic_ax),
             match_90,
-            90,
+            (-90, 90),
             factor_backgrounds[1],
+            None,
+        ),
+        (
+            (match_negative_90_elastic_ax, match_negative_90_plastic_ax),
+            match_negative_90,
+            (90, -90),
+            factor_backgrounds[2],
+            None,
         ),
         (
             (match_180_elastic_ax, match_180_plastic_ax),
             match_180,
-            180,
-            factor_backgrounds[2],
+            (180, 180),
+            factor_backgrounds[3],
+            half_turn_annotation_side,
         ),
     ):
-        for ax, key, label, reference in (
-            (axes[0], "F_e", r"$\mathbf{F}_e$", short["F_e"]),
-            (axes[1], "F_p", r"$\mathbf{F}_p$", short["F_p"]),
+        for ax, key, label, reference, degrees in (
+            (
+                axes[0],
+                "F_e",
+                r"$\mathbf{F}_e$",
+                short["F_e"],
+                factor_degrees[0],
+            ),
+            (
+                axes[1],
+                "F_p",
+                r"$\mathbf{F}_p$",
+                short["F_p"],
+                factor_degrees[1],
+            ),
         ):
             _draw_factor_panel(
                 ax,
@@ -789,9 +889,10 @@ def plot_decompositions_match2(
                 label=label,
                 background_color=background_color,
                 vector_limit=vector_limit,
-                reference_matrix=reference,
+                reference_matrix=reference if degrees is not None else None,
                 rotation_degrees=degrees,
-                panel_limit=1.0 if key == "F_e" else None,
+                rotation_annotation_side=annotation_side,
+                panel_limit=elastic_vector_limit if key == "F_e" else None,
             )
 
     fig.canvas.draw()
@@ -802,9 +903,15 @@ def plot_decompositions_match2(
             ((box.x0 + box.x1) / 2.0, box.y1 + 0.012, title)
         )
     for left_ax, right_ax, title, offset in (
-        (short_elastic_ax, short_plastic_ax, path_titles[0], 0.012),
+        (short_elastic_ax, short_plastic_ax, path_titles[0], 0.008),
         (match_90_elastic_ax, match_90_plastic_ax, path_titles[1], 0.008),
-        (match_180_elastic_ax, match_180_plastic_ax, path_titles[2], 0.008),
+        (
+            match_negative_90_elastic_ax,
+            match_negative_90_plastic_ax,
+            path_titles[2],
+            0.008,
+        ),
+        (match_180_elastic_ax, match_180_plastic_ax, path_titles[3], 0.008),
     ):
         left_box = left_ax.get_position()
         right_box = right_ax.get_position()
@@ -935,6 +1042,9 @@ def main():
     other_initial_match2_F, other_initial_match2_representatives, _ = (
         match2_decomposition_data(same_length_F)
     )
+    determinant_match2_F, determinant_match2_representatives, _ = (
+        match2_decomposition_data(DETERMINANT_QUADRANTS_F)
+    )
 
     figures = {
         "elastic_plastic_factors": plot_decompositions(total_F, representatives),
@@ -945,6 +1055,35 @@ def main():
         "elastic_plastic_factors_match2_other_initial": plot_decompositions_match2(
             other_initial_match2_F,
             other_initial_match2_representatives,
+        ),
+        "elastic_plastic_factors_match2_determinant_quadrants_initial": (
+            plot_decompositions_match2(
+                determinant_match2_F,
+                determinant_match2_representatives,
+                path_labels=(
+                    r"$\mathbf{M}_4$",
+                    r"$\mathbf{M}_1$",
+                    r"$\mathbf{M}_1^\prime$",
+                    r"$\mathbf{M}_4^\prime$",
+                ),
+                path_colors=(
+                    OQ_PATH_COLOR,
+                    SHORT_PATH_COLOR,
+                    LONG_PATH_COLOR,
+                    OQ_ALTERNATIVE_PATH_COLOR,
+                ),
+                factor_backgrounds=(
+                    OQ_FACTOR_BACKGROUND,
+                    SHORT_FACTOR_BACKGROUND,
+                    LONG_FACTOR_BACKGROUND,
+                    OQ_ALTERNATIVE_FACTOR_BACKGROUND,
+                ),
+                disk_order=(1, 2, 0, 3),
+                legend_location="lower right",
+                legend_anchor=(0.98, 0.02),
+                swap_bottom_panels=True,
+                half_turn_annotation_side="left",
+            )
         ),
         "same_length_path": plot_decompositions(
             same_length_F,

@@ -371,7 +371,7 @@ def get_energy_drops(
     averageEnergy=False,
     stress_corrected=True,
     stress_correction_order=2,
-    stress_tangent="current",
+    stress_tangent="gamma0",
     drop_sign="negative",
     min_drop=0.0,
 ):
@@ -380,7 +380,7 @@ def get_energy_drops(
     When ``onlyStrainedEnergyDrops`` is true, retain only steps with a recorded
     element-level plastic event.
     Stress-corrected drops use the shared Taylor expansion helper; by default
-    this is second order with a1212 evaluated at the current strain gamma_i.
+    this is second order with a1212 evaluated at gamma=0.
     If debug=True, plot intermediate energy and drop traces.
 
     For stored energy-change columns, ``drop_sign`` explicitly specifies
@@ -1414,13 +1414,17 @@ def pretty_text(text, addEquation=True):
 
 
 def findPrePostSplit(csvPath="", df=None):
-    # Return strain value where the stress is the largest
-    # Prefer Cauchy shear stress, matching the spatial affine loading path.
+    """Return the peak valid Cauchy shear stress load, never a fixed proxy."""
     if df is None:
         df = read_macrodata_csv(csvPath, L=get_system_size([csvPath]))
     stress_col = infer_stress_column(df)
-    i = df[stress_col].argmax()
-    return df["load"].iloc[i]
+    stress = df[stress_col].to_numpy(dtype=float)
+    load = df["load"].to_numpy(dtype=float)
+    valid = np.isfinite(stress) & np.isfinite(load) & (stress != -1)
+    if not np.any(valid):
+        raise ValueError("No valid avg_sigma12 values for the yield peak.")
+    indices = np.flatnonzero(valid)
+    return float(load[indices[np.argmax(stress[valid])]])
 
 
 def get_drops_in_windows(
@@ -2102,6 +2106,7 @@ def find_best_xmin(
     plot_ax=None,
     show_selected_xmin=True,
     show_p_xmin=False,
+    show_title=True,
 ):
     """
     We scan many possible xmin values. We try to identify a plateau region
@@ -2261,7 +2266,7 @@ def find_best_xmin(
         test_fits,
         p_selected_fit,
         xmin_plot_path,
-        title=title,
+        title=title if show_title else None,
         data_info=plot_data_info,
         xmin_results=xmin_results,
         fast_xmin=fast_xmin,
@@ -2784,19 +2789,20 @@ def make_fit(
     parallel_xmin=False,
     xmin_search_kwargs=None,
     debug=False,
-    xmin_selection="simpleDrop",
+    xmin_selection="global",
     xmin_search_mode="full",
 ) -> Fit:
     """Fit the supplied positive population at a fixed or searched xmin.
 
-    This helper does not perform the standard kappa classification or
-    choose the irreversible Delta E_S population.
+    The default is the exhaustive observed-candidate global KS minimum. This
+    helper does not perform the standard kappa classification or choose the
+    irreversible Delta E_S population.
     """
     if xmin_range is not None:
         if not np.isscalar(xmin_range):
             raise ValueError(
                 "Automatic xmin ranges are no longer supported. Pass one fixed "
-                "xmin or leave xmin_range=None for the canonical simpleDrop search."
+                "xmin or leave xmin_range=None for the exhaustive global search."
             )
         xmin_range = float(xmin_range)
         if not np.isfinite(xmin_range) or xmin_range <= 0:
@@ -2831,7 +2837,7 @@ def make_fit(
         cache_path = _get_cache_path(
             cache_dir,
             data,
-            f"canonical-simpleDrop-v12-global-modes:{xmin_search_mode}:{distType.name}:{xmin_range}:"
+            f"canonical-xmin-v13-global-modes:{xmin_search_mode}:{distType.name}:{xmin_range}:"
             f"{xmin_selection}:"
             f"{parallel_xmin}:{search_kwargs}",
         )
@@ -3017,9 +3023,10 @@ def plot_fits_over_xmin(
     Plot KS distance/p-value, exponent alpha, and inverse cutoff 1/lambda versus xmin.
 
     ``selected_label`` and ``ks_label`` name the two optional vertical xmin
-    markers in the legend.  The defaults match the canonical simpleDrop and
-    global-minimum choices used by the current analysis. ``show_p_xmin``
-    controls the separate p-scan-selected marker and defaults to ``False``.
+    markers in the legend.  The canonical fit selection is the exhaustive
+    global minimum; simpleDrop remains available only as an explicit
+    diagnostic marker. ``show_p_xmin`` controls the separate p-scan-selected
+    marker and defaults to ``False``.
 
     If ``ax`` is supplied, draw the multi-axis plot into that existing Axes
     object and leave figure layout, saving, and closing to the caller.
@@ -3189,7 +3196,7 @@ def plot_fits_over_xmin(
     ax0.set_ylim(0.0, 0.5)
 
     # --- Left axis: p-values ---
-    p_curve_label = "p-value"
+    p_curve_label = r"$p$-value"
     ax1.errorbar(
         x_plot,
         pvals,
@@ -3211,7 +3218,7 @@ def plot_fits_over_xmin(
         linewidth=1.0,
         color=c_p,
         alpha=0.5,
-        label="p = 0.10 threshold",
+        label=r"$p = 0.10$ threshold",
         zorder=1,
     )
     custom_x_label = data_info.get("xmin_axis_label") if data_info else None
@@ -3745,6 +3752,236 @@ def get_group_structure(group_paths, group_labels):
     return normalized_paths, normalized_labels
 
 
+def plot_fitted_population_comparison(
+    fits,
+    *,
+    ax=None,
+    colors=None,
+    drop_label=r"E_R",
+    xmin_label=r"\Delta E_{R,\min}^{KS}",
+    title=None,
+):
+    """Compare empirical PDFs and fixed-xmin fits for named populations.
+
+    Each supplied fit is assumed to have already selected its final xmin.  This
+    helper deliberately does not choose an xmin or add alternative-cutoff
+    markers; callers remain responsible for the population and selection
+    protocol.
+    """
+    if not fits:
+        raise ValueError("At least one named fit is required.")
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(4.2, 3.0))
+    else:
+        fig = ax.figure
+    colors = dict(colors or {})
+    handles = []
+    for index, (label, fit) in enumerate(fits.items()):
+        color = colors.get(
+            label,
+            MINIMIZER_COLORS.get(label, f"C{index}"),
+        )
+        plot_data_pdf(
+            ax,
+            fit.data_original,
+            color=color,
+            drop_label=drop_label,
+            drop_sign="positive",
+            show_legend=False,
+        )
+        ax.lines[-1].set_markerfacecolor("none")
+        plot_fit_pdf(
+            ax,
+            fit,
+            color=color,
+            drop_label=drop_label,
+            drop_sign="positive",
+            show_legend=False,
+            set_title=False,
+            x_grid_mode="smooth",
+            xmin_only=True,
+            linewidth=1.5,
+        )
+        ax.axvline(
+            fit.xmin,
+            color=color,
+            linestyle=":",
+            linewidth=1.0,
+            alpha=0.75,
+        )
+        dist = dist_from_fit(fit)
+        tail_count = int(np.count_nonzero(np.asarray(fit.data_original) >= fit.xmin))
+        handles.append(
+            mpl.lines.Line2D(
+                [],
+                [],
+                color=color,
+                marker="o",
+                markerfacecolor="none",
+                linewidth=1.5,
+                label=(
+                    rf"{label}: $n={tail_count}$, "
+                    rf"$\alpha={dist.alpha:.3f}$, $D={fit.D:.3f}$"
+                ),
+            )
+        )
+    handles.append(
+        mpl.lines.Line2D(
+            [],
+            [],
+            color="0.25",
+            linestyle=":",
+            linewidth=1.0,
+            label=rf"Selected ${xmin_label}$",
+        )
+    )
+    ax.grid(alpha=0.18)
+    ax.legend(handles=handles, frameon=False, fontsize=7)
+    if title is not None:
+        ax.set_title(title)
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_xmin_d_alpha_comparison(
+    fits,
+    *,
+    ax=None,
+    colors=None,
+    xmin_label=r"\Delta E_{R,\min}^{KS}",
+    title=None,
+):
+    """Plot full global-search D/alpha traces and exact selections.
+
+    The curves use every eligible observed candidate from the exhaustive
+    global-KS search stored by :func:`make_fit`.  The marked cutoff and its
+    values come from that same search.  The coarse diagnostic scan is retained
+    in the fit for search initialization but is never plotted here.
+    """
+    if not fits:
+        raise ValueError("At least one named fit is required.")
+    if ax is None:
+        fig, d_axis = plt.subplots(figsize=(4.2, 2.64))
+    else:
+        fig = ax.figure
+        d_axis = ax
+    alpha_axis = d_axis.twinx()
+    colors = dict(colors or {})
+    algorithm_handles = []
+    selected_markers = []
+    for index, (label, fit) in enumerate(fits.items()):
+        analysis = getattr(fit, "xmin_analysis", None)
+        if analysis is None:
+            raise ValueError(f"Fit {label!r} has no xmin analysis.")
+        if getattr(fit, "xmin_selection", None) != "global":
+            raise ValueError(
+                f"Fit {label!r} must use xmin_selection='global' for this plot."
+            )
+        global_analysis = analysis.get("global_search_details")
+        if global_analysis is None:
+            raise ValueError(f"Fit {label!r} has no full global xmin search details.")
+        xmins = np.asarray(global_analysis["xmins"], dtype=float)
+        distances = np.asarray(global_analysis["distances"], dtype=float)
+        parameter_names = list(
+            getattr(fit.xmin_distribution, "parameter_names", [])
+        )
+        if "alpha" not in parameter_names:
+            raise ValueError(f"Fit {label!r} distribution has no alpha parameter.")
+        alpha_index = parameter_names.index("alpha")
+        param_vals = np.asarray(global_analysis["param_vals"], dtype=float)
+        if param_vals.ndim != 2 or param_vals.shape[0] != xmins.size:
+            raise ValueError(f"Inconsistent global parameter values for {label!r}.")
+        if alpha_index >= param_vals.shape[1]:
+            raise ValueError(f"Missing global alpha values for {label!r}.")
+        alphas = param_vals[:, alpha_index]
+        valid = np.asarray(global_analysis["valid_fits"], dtype=bool)
+        tail_counts = np.asarray(global_analysis["tail_counts"], dtype=int)
+        if not (
+            xmins.shape
+            == distances.shape
+            == alphas.shape
+            == valid.shape
+            == tail_counts.shape
+        ):
+            raise ValueError(f"Inconsistent xmin diagnostic arrays for {label!r}.")
+        mask = (
+            valid
+            & np.isfinite(xmins)
+            & (xmins > 0)
+            & np.isfinite(distances)
+            & np.isfinite(alphas)
+            & (tail_counts >= int(analysis["min_tail_count"]))
+        )
+        if not np.any(mask):
+            raise RuntimeError(f"No valid xmin diagnostics for {label!r}.")
+        order = np.argsort(xmins[mask])
+        x = xmins[mask][order]
+        color = colors.get(label, MINIMIZER_COLORS.get(label, f"C{index}"))
+        d_axis.plot(
+            x, distances[mask][order], color=color, linestyle="--", zorder=1
+        )
+        alpha_axis.plot(x, alphas[mask][order], color=color, linestyle="-", zorder=2)
+        dist = dist_from_fit(fit)
+        selected_markers.append((float(fit.xmin), float(fit.D), float(dist.alpha), color))
+        algorithm_handles.append(
+            mpl.lines.Line2D([], [], color=color, linewidth=1.6, label=label)
+        )
+    d_axis.set_xscale("log")
+    d_axis.set_ylim(top=0.1)
+    alpha_axis.set_ylim(bottom=0.5)
+    for xmin, distance, alpha, color in selected_markers:
+        # The twin alpha axis is above the D axis in Matplotlib's draw stack.
+        # Convert the selected D point to its alpha-axis coordinate so every
+        # marker follows the intentional layer order: dashed, solid, X, circle.
+        display_point = d_axis.transData.transform((xmin, distance))
+        _, alpha_coordinate = alpha_axis.transData.inverted().transform(display_point)
+        alpha_axis.scatter(
+            [xmin],
+            [alpha_coordinate],
+            color=color,
+            marker="x",
+            s=60,
+            linewidths=2.0,
+            zorder=3,
+        )
+        alpha_axis.scatter(
+            [xmin],
+            [alpha],
+            facecolors="none",
+            edgecolors=color,
+            marker="o",
+            s=35,
+            linewidths=1.2,
+            zorder=4,
+        )
+    d_axis.set_xlabel(rf"${xmin_label}$")
+    d_axis.set_ylabel(r"KS distance $D$")
+    alpha_axis.set_ylabel(r"Exponent $\alpha$")
+    d_axis.grid(alpha=0.18)
+    d_axis.legend(
+        handles=algorithm_handles
+        + [
+            mpl.lines.Line2D([], [], color="0.25", linestyle="--", label=r"$D$"),
+            mpl.lines.Line2D([], [], color="0.25", linestyle="-", label=r"$\alpha$"),
+            mpl.lines.Line2D(
+                [],
+                [],
+                color="0.25",
+                marker="x",
+                linestyle="none",
+                label=r"Global KS minimum",
+            ),
+        ],
+        frameon=False,
+        fontsize=7,
+        ncol=2,
+    )
+    if title is not None:
+        d_axis.set_title(title)
+    fig.tight_layout()
+    return fig, (d_axis, alpha_axis)
+
+
 def plot_powerlaw_compare(
     group_paths=None,
     group_labels=None,
@@ -3760,7 +3997,7 @@ def plot_powerlaw_compare(
     addFit=True,
     parallel_xmin=False,
     xmin_search_kwargs=None,
-    xmin_selection="simpleDrop",
+    xmin_selection="global",
     csvPaths=None,
     useCDF=False,
     drop_type="energy",
@@ -4012,7 +4249,7 @@ def plot_powerlaw(
     addFit=True,
     parallel_xmin=False,
     xmin_search_kwargs=None,
-    xmin_selection="simpleDrop",
+    xmin_selection="global",
     csvPaths=None,
     useCDF=False,
     drop_type="energy",

@@ -24,7 +24,7 @@ def disp_data():
 
 
 def disp_servers():
-    info = get_all_server_info()
+    info = get_all_server_info(Servers.status_servers)
     display_server_info(info)
 
 
@@ -108,7 +108,7 @@ if __name__ == "__main__":
         task = sys.argv[1]
         if task == "disp_data":
             disp_data()
-        elif task == "disp_servers":
+        elif task in ("disp_servers", "display_servers"):
             disp_servers()
         elif task == "disp_jobs":
             disp_jobs()
@@ -118,7 +118,7 @@ if __name__ == "__main__":
                 f"No such task {task}. The options are disp_<data/servers/jobs> or sylvain_status"
             )
     else:
-        from Management.jobs import sylvainBatches, size_scaling_job
+        from Management.jobs import sylvainBatches, nonreconnecting_size_scaling_job
         # dm = DataManager()
         # dm.clean_projects_on_servers()
         # disp_jobs()
@@ -129,7 +129,7 @@ if __name__ == "__main__":
         #     batch_configs, batch_labels = sylvainBatches(batch)
         #     configs.extend(batch_configs)
         #     labels.extend(f"batch={batch}, {label}" for label in batch_labels)
-        # configs, labels = size_scaling_job()
+        # configs, labels = nonreconnecting_size_scaling_job()
         # checkStatus(
         #     configs,
         #     labels=labels,

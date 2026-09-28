@@ -6,6 +6,7 @@ import numpy as np
 matplotlib.use("Agg")
 
 from Plotting.plot_plastic_quadrant_decomposition import (
+    DETERMINANT_QUADRANTS_F,
     decomposition_data,
     match2_decomposition_data,
     same_length_decomposition_data,
@@ -73,16 +74,31 @@ class PlasticQuadrantDecompositionPathTests(unittest.TestCase):
 
     def test_match2_uses_shortest_quarter_and_half_turn_lifts(self):
         _total_F, representatives, paths = match2_decomposition_data()
-        short, match_90, match_180 = representatives
+        short, match_90, match_negative_90, match_180 = representatives
 
         self.assertEqual(short["path"], ("U-",))
         self.assertEqual(match_90["path"], ("L-", "U+"))
+        self.assertEqual(
+            match_negative_90["path"],
+            ("L+", "U-", "L+", "L+"),
+        )
         self.assertEqual(
             match_180["path"],
             ("U+", "L-", "U+", "U+", "L-"),
         )
         quarter_turn = np.array([[0, 1], [-1, 0]])
+        negative_quarter_turn = np.array([[0, -1], [1, 0]])
         np.testing.assert_array_equal(match_90["M"], short["M"] @ quarter_turn)
+        np.testing.assert_array_equal(
+            match_negative_90["M"],
+            short["M"] @ negative_quarter_turn,
+        )
+        np.testing.assert_allclose(
+            self._terminal_metric(match_negative_90),
+            self._terminal_metric(match_90),
+            atol=1e-12,
+        )
+        self.assertEqual(len(match_negative_90["path"]), 4)
         self.assert_shortest_distinct_lift(short, match_180, paths)
 
     def test_match2_can_use_the_alternate_initial_state(self):
@@ -91,13 +107,28 @@ class PlasticQuadrantDecompositionPathTests(unittest.TestCase):
         alternate_F, _, _ = same_length_decomposition_data(total_F, long)
 
         _alternate_F, representatives, _ = match2_decomposition_data(alternate_F)
-        short, match_90, match_180 = representatives
+        short, match_90, match_negative_90, match_180 = representatives
 
         self.assertEqual(short["path"], ("U+", "L+"))
         self.assertEqual(match_90["path"], ("U+", "U+", "L-"))
+        self.assertEqual(match_negative_90["path"], ("L+", "U-", "U-"))
         self.assertEqual(
             match_180["path"],
             ("U+", "U+", "U+", "L-", "U+", "U+"),
+        )
+
+    def test_match2_can_use_the_determinant_quadrants_initial_state(self):
+        _total_F, representatives, _ = match2_decomposition_data(
+            DETERMINANT_QUADRANTS_F
+        )
+        m4, m1, m1_prime, m4_prime = representatives
+
+        self.assertEqual(m4["path"], ("U+",))
+        self.assertEqual(m1["path"], ("L-", "U+", "L-", "L-"))
+        self.assertEqual(m1_prime["path"], ("L+", "U-"))
+        self.assertEqual(
+            m4_prime["path"],
+            ("U-", "L+", "U-", "U-", "L+"),
         )
 
 

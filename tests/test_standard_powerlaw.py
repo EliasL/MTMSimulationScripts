@@ -5,6 +5,7 @@ import numpy as np
 from Plotting.standardPowerlaw import (
     EventDrops,
     kappa_detection_threshold,
+    kappa_from_relaxation_energy,
     positive_es,
     split_by_kappa,
     split_by_er,
@@ -55,6 +56,14 @@ class StandardPowerLawProtocolTests(unittest.TestCase):
 
     def test_default_kappa_detector_uses_mesh_density_two(self):
         self.assertAlmostEqual(kappa_detection_threshold(mu=6.0), 1.5)
+
+    def test_default_kappa_uses_mesh_density_two_with_event_volumes(self):
+        values = kappa_from_relaxation_energy(
+            delta_e_r=np.array([2.0, 8.0]),
+            delta_gamma=np.array([0.1, 0.2]),
+            reference_volume=np.array([10.0, 10.0]),
+        )
+        np.testing.assert_allclose(values, [10.0, 10.0])
 
 
 if __name__ == "__main__":

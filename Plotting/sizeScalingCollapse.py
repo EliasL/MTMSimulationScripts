@@ -6,6 +6,9 @@ Eq. (11)-(12). Run from the repository root with
     .venv/bin/python -m Plotting.sizeScalingCollapse
 
 Each stage is cached below ``Plots/powerLaw/size_collapse/cache``.
+These plots compare sizes; for individual-size classification, split, and
+fitted-PDF panels use
+``truncated_powerlaw_reversibility_flowchart.generate_single_size_panels``.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 
-from Management.jobs import size_scaling_job
+from Management.jobs import nonreconnecting_size_scaling_job
 from Management.updateCSV import HEADER_RENAME_MAP, update_df_header
 from Plotting.energyDropCalculations import (
     SIGMA12_RESCUE_SENTINEL,
@@ -47,12 +50,13 @@ PROTOCOL_DROP_SYMBOLS = {
     "previous_energy": r"\Delta E_I",
     "initial_guess_energy": r"\Delta E_R",
 }
-REGIMES = {"pre": (0.15, 0.5), "post": (0.7, 1.0)}
-CACHE_VERSION = 3  # adds event-level kappa to the paired-drop cache
+REGIMES = ("pre", "post")
+YIELD_REGIME_NAMES = ("pre", "post")
+CACHE_VERSION = 4  # Delta E_S now uses the fixed gamma=0 tangent
 COLLAPSE_CACHE_VERSION = 3
 EXPONENT_RANGE = (0.5, 2.5)
 DIMENSION_RANGE = (0.25, 2.25)
-XMIN_METHOD = "simpleDrop"
+XMIN_METHOD = "global"
 
 
 def _last_load(path: Path) -> float:
@@ -71,7 +75,7 @@ def _last_load(path: Path) -> float:
 
 
 def completed_size_scaling_paths(data_root: Path, seeds_per_size: int, post_hi: float):
-    groups, _ = size_scaling_job(reconnection="none")
+    groups, _ = nonreconnecting_size_scaling_job()
     paths = {}
     inventory = {}
     for group in groups:
@@ -228,7 +232,32 @@ def _read_energy_step_values(path: Path, size: int):
     return step_load, values
 
 
+def stress_yield_regimes(path: Path) -> dict[str, tuple[float, float]]:
+    """Return the run-specific pre/post windows split at peak Cauchy stress."""
+    frame = _read_mixed_selected(path, {"load", "avg_sigma12"})
+    load = frame["load"].to_numpy(dtype=float)
+    stress = frame["avg_sigma12"].to_numpy(dtype=float)
+    valid = np.isfinite(load) & np.isfinite(stress) & (stress != SIGMA12_RESCUE_SENTINEL)
+    if not np.any(valid):
+        raise ValueError(f"No finite load/avg_sigma12 pair in {path}.")
+    valid_indices = np.flatnonzero(valid)
+    peak_index = int(valid_indices[np.argmax(stress[valid])])
+    yield_load = float(load[peak_index])
+    end_load = float(load[valid_indices[-1]])
+    if yield_load + 0.01 >= end_load:
+        raise ValueError(
+            f"Stress maximum at load {yield_load:g} leaves no post-yield window "
+            f"before available end {end_load:g} in {path}."
+        )
+    return {
+        "pre": (float(load[valid_indices[0]]), yield_load),
+        "post": (yield_load + 0.01, end_load),
+    }
+
+
 def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
+    if regimes is None:
+        regimes = stress_yield_regimes(path)
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = _file_cache_path(path, size, regimes, cache_dir)
     if cache_path.exists() and not force:
@@ -259,6 +288,8 @@ def extract_event_pairs(path: Path, size: int, regimes, cache_dir: Path, force=F
     non-positive or non-finite values, so a later positive-E_S filter cannot
     change which events were labeled irreversible.
     """
+    if regimes is None:
+        regimes = stress_yield_regimes(path)
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = _file_cache_path(path, size, regimes, cache_dir)
     if cache_path.exists() and not force:
@@ -285,10 +316,11 @@ def extract_event_pairs(path: Path, size: int, regimes, cache_dir: Path, force=F
 
 def pool_event_pairs(paths_by_size, regimes, cache_dir: Path, force=False):
     """Pool E_R/E_S event pairs by system size and strain regime."""
+    regime_names = tuple(regimes) if regimes is not None else YIELD_REGIME_NAMES
     pooled = {
         regime: {size: {"initial_guess_energy": [], "second_order": [], "kappa": []}
                  for size in paths_by_size}
-        for regime in regimes
+        for regime in regime_names
     }
     for size, paths in paths_by_size.items():
         print(
@@ -301,7 +333,7 @@ def pool_event_pairs(paths_by_size, regimes, cache_dir: Path, force=False):
             )
             for path in paths
         ]
-        for regime in regimes:
+        for regime in regime_names:
             for protocol in ("initial_guess_energy", "second_order"):
                 arrays = [run[f"{protocol}_{regime}"] for run in per_run]
                 pooled[regime][size][protocol] = np.concatenate(arrays)
@@ -319,8 +351,9 @@ def pool_event_pairs(paths_by_size, regimes, cache_dir: Path, force=False):
 
 
 def pool_drops(paths_by_size, regimes, cache_dir: Path, force=False):
+    regime_names = tuple(regimes) if regimes is not None else YIELD_REGIME_NAMES
     pooled = {
-        protocol: {regime: {} for regime in regimes} for protocol in PROTOCOLS
+        protocol: {regime: {} for regime in regime_names} for protocol in PROTOCOLS
     }
     for size, paths in paths_by_size.items():
         print(f"Extracting/caching L={size}: {len(paths)} completed runs", flush=True)
@@ -329,7 +362,7 @@ def pool_drops(paths_by_size, regimes, cache_dir: Path, force=False):
             for path in paths
         ]
         for protocol in PROTOCOLS:
-            for regime in regimes:
+            for regime in regime_names:
                 arrays = [run[f"{protocol}_{regime}"] for run in per_run]
                 pooled[protocol][regime][size] = np.concatenate(arrays)
     return pooled
@@ -807,14 +840,19 @@ def run(args):
         raise ValueError("--bins-per-decade must be positive.")
     if not 0 < args.uncertainty_accuracy < 0.5:
         raise ValueError("--uncertainty-accuracy must be between 0 and 0.5.")
-    regimes = {
+    if (args.pre is None) != (args.post is None):
+        raise ValueError("Specify both --pre and --post for explicit fixed windows.")
+    regimes = None if args.pre is None else {
         "pre": (args.pre[0], args.pre[1]),
         "post": (args.post[0], args.post[1]),
     }
     paths, inventory = completed_size_scaling_paths(
-        Path(args.data_root), args.seeds_per_size, regimes["post"][1]
+        Path(args.data_root), args.seeds_per_size,
+        1.0 if regimes is None else regimes["post"][1],
     )
     pooled = pool_drops(paths, regimes, output / "cache" / "extracted", args.force)
+    if regimes is None:
+        regimes = YIELD_REGIME_NAMES
     if args.stage == "extract":
         return
 
@@ -1181,8 +1219,10 @@ def parse_args():
         default="all",
     )
     parser.add_argument("--seeds-per-size", type=int, default=6)
-    parser.add_argument("--pre", type=float, nargs=2, default=REGIMES["pre"])
-    parser.add_argument("--post", type=float, nargs=2, default=REGIMES["post"])
+    parser.add_argument("--pre", type=float, nargs=2, default=None,
+                        help="Explicit legacy fixed pre-yield window; also requires --post.")
+    parser.add_argument("--post", type=float, nargs=2, default=None,
+                        help="Explicit legacy fixed post-yield window; default uses each stress peak + 0.01.")
     parser.add_argument("--parallel-xmin", action="store_true")
     parser.add_argument("--uncertainty-accuracy", type=float, default=0.05)
     parser.add_argument("--parallel-uncertainty", action="store_true")

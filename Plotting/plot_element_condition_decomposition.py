@@ -17,8 +17,10 @@ DEFAULT_CURRENT_PDF = ROOT / "Plots/no_minimization_current_condition_decomposit
 DEFAULT_CURRENT_CSV = ROOT / "Plots/no_minimization_current_condition_decomposition.csv"
 DEFAULT_REFERENCE_PDF = ROOT / "Plots/no_minimization_reference_condition_decomposition.pdf"
 DEFAULT_REFERENCE_CSV = ROOT / "Plots/no_minimization_reference_condition_decomposition.csv"
-DEFAULT_SUMMARY_PDF = ROOT / "Plots/no_minimization_conditioning_summary.pdf"
-DEFAULT_SUMMARY_PNG = ROOT / "Plots/no_minimization_conditioning_summary.png"
+DEFAULT_GRAPHS_PDF = ROOT / "Plots/no_minimization_conditioning_graphs.pdf"
+DEFAULT_GRAPHS_PNG = ROOT / "Plots/no_minimization_conditioning_graphs.png"
+DEFAULT_GEOMETRY_PDF = ROOT / "Plots/no_minimization_conditioning_geometry.pdf"
+DEFAULT_GEOMETRY_PNG = ROOT / "Plots/no_minimization_conditioning_geometry.png"
 
 import matplotlib
 
@@ -396,9 +398,24 @@ def plot_records_on_axes(
             ax.set_title(column_title)
         ax.grid(True, which="both", alpha=0.25)
 
-    axes[-1].set_xlabel(r"$\gamma-n$" if mode == "current" else r"$\gamma$")
+    axes[-1].set_xlabel(
+        r"$\gamma_{\mathrm{cur}}\bmod 1$"
+        if mode == "current"
+        else r"$\gamma_{\mathrm{cur}}$"
+    )
     if not add_legends:
         return
+
+    if mode == "current":
+        shear_labels = {
+            shear: rf"$({shear},{shear + 1})$" for shear in shears
+        }
+        shear_legend_title = r"$\gamma_{\mathrm{cur}}$"
+    else:
+        shear_labels = {
+            shear: rf"${-shear}$" for shear in shears
+        }
+        shear_legend_title = r"$\gamma_{\mathrm{ref}}$"
 
     shear_handles = [
         Line2D(
@@ -409,7 +426,7 @@ def plot_records_on_axes(
             marker="o",
             markersize=2.8,
             linewidth=1.7,
-            label=str(shear),
+            label=shear_labels[shear],
         )
         for shear in shears
     ]
@@ -419,7 +436,7 @@ def plot_records_on_axes(
     ]
     shear_legend = axes[0].legend(
         handles=shear_handles,
-        title=r"$n$" if mode == "current" else r"$-\gamma_{\mathrm{ref}}$",
+        title=shear_legend_title,
         loc="upper left",
         ncol=2,
         fontsize=7.5,
@@ -553,14 +570,18 @@ def main() -> None:
             reference_csv=DEFAULT_REFERENCE_CSV,
             integer_shear=2,
             local_shear=0.5,
-            out_pdf=DEFAULT_SUMMARY_PDF,
-            out_png=DEFAULT_SUMMARY_PNG,
+            graphs_pdf=DEFAULT_GRAPHS_PDF,
+            graphs_png=DEFAULT_GRAPHS_PNG,
+            geometry_pdf=DEFAULT_GEOMETRY_PDF,
+            geometry_png=DEFAULT_GEOMETRY_PNG,
         )
         for path in (
             DEFAULT_CURRENT_PDF,
             DEFAULT_REFERENCE_PDF,
-            DEFAULT_SUMMARY_PDF,
-            DEFAULT_SUMMARY_PNG,
+            DEFAULT_GRAPHS_PDF,
+            DEFAULT_GRAPHS_PNG,
+            DEFAULT_GEOMETRY_PDF,
+            DEFAULT_GEOMETRY_PNG,
         ):
             print(path)
         return

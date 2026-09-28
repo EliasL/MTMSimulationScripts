@@ -45,6 +45,7 @@ from Management.sigmaRescue import (
     inspect_schema_intervals,
 )
 from Plotting.energyDropCalculations import calculate_energy_step_data
+from Plotting.standardPowerlaw import derive_sigma_rescue_yield_peaks
 
 
 ROW_KEY_COLUMNS = ("load_step", "load")
@@ -718,10 +719,15 @@ def build_snapshot_drop_tables(snapshot_root: Path) -> SnapshotTableBuild:
     _write_csv_atomic(
         combined.loc[combined["usable"]].copy(), work_root / "drops_usable.csv.gz"
     )
+    yield_peaks = derive_sigma_rescue_yield_peaks(audited=combined)
+    _write_csv_atomic(yield_peaks, work_root / "yield_peaks.csv")
     (work_root / "build_manifest.json").write_text(
         json.dumps(
             {
                 "run_count": len(runs),
+                "delta_E_S_tangent": "gamma0",
+                "post_yield_rule": "established per-run avg_sigma12 peak + 0.01",
+                "established_yield_peak_count": int(yield_peaks["peak_established"].sum()),
                 "audited_transition_count": len(combined),
                 "usable_transition_count": int(combined["usable"].sum()),
                 "runs": run_summaries,
@@ -905,8 +911,8 @@ def build_interim_drop_table(
     """Create one audited, paired event table for a partially rescued run.
 
     ``Delta E_I`` and ``Delta E_R`` are read from the authoritative source
-    trajectory.  ``Delta E_S`` is calculated by the existing second-order
-    energy helper.  The three quantities stay aligned on one source event key.
+    trajectory. ``Delta E_S`` uses the fixed gamma=0 second-order tangent.
+    The three quantities stay aligned on one source event key.
     No positivity or strain-regime filtering is performed here.
     """
 

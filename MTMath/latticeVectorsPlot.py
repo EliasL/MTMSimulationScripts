@@ -165,8 +165,11 @@ class LatticeFigure:
         ylim_: Vec2_ = None,
         maxDepth: int = 50,
         basis: Tuple[Vec2, Vec2] | None = None,
+        margin: float = 0.1,
     ) -> None:
-        xmin, xmax, ymin, ymax = self.limits(xlim=xlim_, ylim=ylim_, margin=0.1)
+        xmin, xmax, ymin, ymax = self.limits(
+            xlim=xlim_, ylim=ylim_, margin=margin
+        )
 
         e1, e2 = (
             self._basis
@@ -404,6 +407,10 @@ class LatticeFigure:
                 xlim_=xlim_,
                 ylim_=ylim_,
                 maxDepth=maxDepth,
+                # Match drawGrid's extent.  The grid lines already establish
+                # these automatic limits, so the added edge markers cannot
+                # enlarge the axes.
+                margin=self.margin,
             )
         if draw_grid:
             self.drawGrid()
@@ -574,7 +581,7 @@ def two_lattices_side_by_side():
 
 def four_lattices_translation_rotation(
     translation: float | Vec2 = 0.2,
-    rotation_deg: float = 10.0,
+    rotation_deg: float = 9.0,
 ):
     """Show translation and rotation freedoms using two lattice pairs."""
 
@@ -678,19 +685,22 @@ def four_lattices_translation_rotation(
 
     lf_right.add_corner_label("B")
 
+    # Retain data-driven limits while replacing Matplotlib's default 5% margin
+    # around the outer grid lines with just enough clearance to avoid clipping.
+    ax.margins(0.01)
     plt.tight_layout()
     path = Path("Plots/TranslationAndRotation.pdf")
     path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(path, bbox_inches="tight")
+    fig.savefig(path, bbox_inches="tight", pad_inches=0)
     print(f"Fig saved to : {path}")
     plt.show()
 
 
 def lagrange_reduction_bases_row(
-    save_path: str | Path = "Plots/LagrangeReductionBasesRow.pdf",
+    save_path: str | Path = "Plots/simpleLagrangeReductionIllustration.pdf",
     show: bool = True,
 ):
-    """Plot e^0 -> e^1 -> e^2 -> e~ for the Lagrange reduction example."""
+    """Plot barred a^(0) -> a^(1) -> a^(2) -> reduced a bases."""
 
     # Basis matrices (columns are basis vectors).
     e0 = np.array([[1.0, 0.0], [-1.0, 1.0]])
@@ -712,10 +722,10 @@ def lagrange_reduction_bases_row(
 
     bases = [e0, e1, e2, e_tildebar]
     titles = [
-        r"$\bar{\mathbf{e}}^0$",
-        r"$\bar{\mathbf{e}}^1$",
-        r"$\bar{\mathbf{e}}^2$",
-        r"$\tilde{\bar{\mathbf{e}}}$",
+        r"$\bar{\mathbf{a}}^{(0)}$",
+        r"$\bar{\mathbf{a}}^{(1)}$",
+        r"$\bar{\mathbf{a}}^{(2)}$",
+        r"$\tilde{\bar{\mathbf{a}}}$",
     ]
 
     max_abs = float(np.max(np.abs(np.hstack(bases))))
@@ -728,12 +738,12 @@ def lagrange_reduction_bases_row(
         e1_vec = tuple(basis[:, 0])
         e2_vec = tuple(basis[:, 1])
         x=-0.1 
-        e1_label_pos = [(x,0),(x,0),(x,0),(0.0, -0.2)][i]
-        e2_label_pos = [(x,0),(x,0),(x,0),(-0.12, 0.0)][i]
+        e1_label_pos = [(x - 0.2, 0), (x - 0.2, 0), (x + 0.05, 0), (-0.05, -0.2)][i]
+        e2_label_pos = [(x+0.07,0),(x+0.05,0),(x-0.2,0),(-0.4, 0.0)][i]
         label_base = (
-            r"\bar{\mathbf{e}}"
+            r"\bar{\mathbf{a}}"
             if i < 3
-            else r"\tilde{\bar{\mathbf{e}}}"
+            else r"\tilde{\bar{\mathbf{a}}}"
         )
         lf = LatticeFigure(
             ax,
@@ -765,7 +775,7 @@ def lagrange_reduction_bases_row(
         )
         lf.draw_vector(
             e1_vec,
-            label=rf"${label_base}_1^{i}$",
+            label=rf"${label_base}_1^{{({i})}}$",
             label_pos=e1_label_pos,
             color="tab:red",
             width=.017,
@@ -774,7 +784,7 @@ def lagrange_reduction_bases_row(
         )
         lf.draw_vector(
             e2_vec,
-            label=rf"${label_base}_2^{i}$",
+            label=rf"${label_base}_2^{{({i})}}$",
             label_pos=e2_label_pos,
             color="tab:blue",
             width=.017,
@@ -798,7 +808,7 @@ def lagrange_reduction_bases_row(
     ]
     for i, text in enumerate(transition_labels):
         axes[i].text(
-            1.03,
+            1.06,
             title_y+0.05,
             text,
             transform=axes[i].transAxes,

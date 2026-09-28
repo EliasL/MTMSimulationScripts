@@ -1,6 +1,6 @@
 """Plot post-yield size scaling from a sigma-rescue diagnostic summary.
 
-The summary supplies the rapidGlobal xmin, KS distance, and p-value.
+The summary supplies the exhaustive-global xmin, KS distance, and p-value.
 The observed tail is refit at that fixed xmin to obtain ``alpha`` and
 ``Lambda``.  The three drop measures are kept paired through the kappa split;
 the standard ``Delta E_S`` population is the irreversible tail.
@@ -24,18 +24,22 @@ import pandas as pd
 from Plotting.plotPowerLaw import dist_from_fit, make_fit
 from Plotting.sigmaRescueSizeScalingPowerlawDiagnostics import _plot_fit_panel
 from Plotting.standardPowerlaw import (
+    DEFAULT_KAPPA_RHO,
     EventDrops,
     kappa_detection_threshold,
+    kappa_from_relaxation_energy,
     positive_es,
+    load_sigma_rescue_post_yield,
+    require_gamma0_snapshot,
     split_by_kappa,
 )
 
 
-DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/snapshots/20260819T100206Z")
+DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0")
 DEFAULT_SUMMARY = Path(
     "Plots/powerLaw/sigma_rescue_size_scaling_individual/summary.json"
 )
-DEFAULT_OUTPUT_DIR = Path("Plots/powerLaw/sigma_rescue_size_scaling_rapidGlobal")
+DEFAULT_OUTPUT_DIR = Path("Plots/powerLaw/sigma_rescue_size_scaling")
 PROTOCOLS = ("delta_E_I", "delta_E_R", "delta_E_S")
 PROTOCOL_LABELS = {
     "delta_E_I": r"$\Delta E_I$ (inter-strain)",
@@ -46,7 +50,6 @@ COLORS = {"delta_E_I": "#0072B2", "delta_E_R": "#E69F00", "delta_E_S": "#009E73"
 MARKERS = {"delta_E_I": "o", "delta_E_R": "s", "delta_E_S": "^"}
 COUNT_COLOR = "#7B2CBF"
 FRACTION_COLOR = "#D1495B"
-EXPECTED_SEEDS_PER_SIZE = 10
 
 
 def _positive(values: np.ndarray) -> np.ndarray:
@@ -55,6 +58,7 @@ def _positive(values: np.ndarray) -> np.ndarray:
 
 
 def _load_post_yield(snapshot_root: Path) -> pd.DataFrame:
+    require_gamma0_snapshot(snapshot_root)
     table = Path(snapshot_root) / "tables" / "drops_usable.csv.gz"
     if not table.is_file():
         raise FileNotFoundError(f"Missing usable drop table: {table}")
@@ -67,41 +71,25 @@ def _load_post_yield(snapshot_root: Path) -> pd.DataFrame:
         "delta_E_R",
         "delta_E_S",
     ]
-    frame = pd.read_csv(table, usecols=wanted)
-    frame = frame[(frame["load_ip1"] > 0.7) & (frame["load_ip1"] < 1.0)].copy()
+    frame = load_sigma_rescue_post_yield(snapshot_root, wanted)
     if frame.empty:
         raise ValueError(f"No post-yield rows found in {table}")
-    frame["kappa"] = frame["delta_E_R"] / (
-        frame["reference_volume"] * frame["delta_gamma"] ** 2
+    frame["kappa"] = kappa_from_relaxation_energy(
+        frame["delta_E_R"].to_numpy(dtype=float),
+        frame["delta_gamma"].to_numpy(dtype=float),
+        frame["reference_volume"].to_numpy(dtype=float),
+        rho=DEFAULT_KAPPA_RHO,
     )
     return frame
 
 
 def _load_post_yield_rescue_fractions(snapshot_root: Path) -> dict[int, float]:
-    """Return valid fractions relative to the full ten-seed campaign."""
+    """Return validated fractions among audited post-yield transitions."""
     table = Path(snapshot_root) / "tables" / "drops_all_audited.csv.gz"
     if not table.is_file():
         raise FileNotFoundError(f"Missing audited drop table: {table}")
-    audited = pd.read_csv(table, usecols=["size", "seed", "load_ip1", "usable"])
-    audited = audited[
-        (audited["load_ip1"] > 0.7) & (audited["load_ip1"] < 1.0)
-    ]
-    per_seed = audited.groupby(["size", "seed"])["usable"].agg(["size", "sum"])
-    fractions: dict[int, float] = {}
-    for size, rows in per_seed.groupby(level="size"):
-        total_counts = rows["size"].to_numpy(dtype=int)
-        count_range = int(total_counts.max() - total_counts.min())
-        if count_range > 1:
-            raise ValueError(
-                f"L={size} has inconsistent post-yield transition counts: "
-                f"{sorted(set(total_counts.tolist()))}."
-            )
-        # A one-row endpoint difference is possible with the strict
-        # ``load_ip1 < 1.0`` selection.  Use the larger complete-seed count.
-        expected_total = int(total_counts.max()) * EXPECTED_SEEDS_PER_SIZE
-        valid_count = int(rows["sum"].sum())
-        fractions[int(size)] = valid_count / expected_total
-    return fractions
+    audited = load_sigma_rescue_post_yield(snapshot_root, ["size", "usable"], audited=True)
+    return {int(size): float(group["usable"].mean()) for size, group in audited.groupby("size")}
 
 
 def _populations(frame: pd.DataFrame, size: int) -> dict[str, np.ndarray]:
@@ -188,7 +176,10 @@ def _records(frame: pd.DataFrame, summary: dict, cache_dir: Path):
                     "alpha": alpha,
                     "Lambda": cutoff_rate,
                     "D": float(summary_protocol["global_min_D"]),
-                    "p": float(summary_protocol["clauset_pvalue_v2"]),
+                    "p": (float(summary_protocol["clauset_pvalue_v2"])
+                          if summary_protocol["clauset_pvalue_v2"] is not None else None),
+                    "xmin_ci_95": summary_protocol["bootstrap_xmin_ci_95"],
+                    "alpha_ci_95": summary_protocol["bootstrap_alpha_ci_95"],
                     "data_count": int(data.size),
                     "tail_count": int(tail.size),
                     "tail_fraction": float(tail.size / data.size),
@@ -229,7 +220,7 @@ def _plot_per_size_pdfs(
         )
         fig.suptitle(
             rf"Post-yield PDFs, $L={size}$; irreversible population from "
-            rf"$\kappa_{{\det}}=\mu/(2\rho)$ split; rapidGlobal xmin",
+            rf"$\kappa_{{\det}}=\mu/(2\rho)$ split; global KS xmin",
             y=0.995,
         )
         fig.tight_layout(rect=(0, 0, 1, 0.88))
@@ -243,9 +234,10 @@ def _plot(
     records: list[dict],
     paired_event_counts: dict[int, int],
     rescue_fractions: dict[int, float],
+    seed_counts: dict[int, int],
     output: Path,
 ) -> None:
-    """Plot scaling parameters with a temporary event-coverage panel."""
+    """Plot scaling parameters and validated post-yield event coverage."""
     metrics = (
         ("alpha", r"$\alpha$", False),
         ("Lambda", r"$\lambda$", True),
@@ -276,6 +268,10 @@ def _plot(
                 linewidth=1.2,
                 label="paired irreversible events",
             )
+            for size, count in zip(sizes, counts):
+                ax.annotate(f"{seed_counts[size]} seeds", (size, count),
+                            xytext=(0, 5), textcoords="offset points",
+                            ha="center", fontsize="x-small")
             fraction_ax.plot(
                 x,
                 fractions,
@@ -283,7 +279,7 @@ def _plot(
                 linestyle="--",
                 marker="D",
                 linewidth=1.2,
-                label=r"fraction of expected data with valid $\sigma_{12}$",
+                label=r"fraction of audited post-yield data with valid $\sigma_{12}$",
             )
             ax.set_xticks(sizes)
             ax.set_xlabel("System size $L$")
@@ -291,7 +287,7 @@ def _plot(
             ax.tick_params(axis="y", colors=COUNT_COLOR)
             ax.spines["left"].set_color(COUNT_COLOR)
             fraction_ax.set_ylabel(
-                r"fraction of expected data with valid $\sigma_{12}$",
+                r"fraction of audited post-yield data with valid $\sigma_{12}$",
                 color=FRACTION_COLOR,
             )
             fraction_ax.tick_params(axis="y", colors=FRACTION_COLOR)
@@ -314,7 +310,7 @@ def _plot(
                         color=FRACTION_COLOR,
                         linestyle="--",
                         marker="D",
-                        label=r"fraction of expected data with valid $\sigma_{12}$",
+                        label=r"fraction of audited post-yield data with valid $\sigma_{12}$",
                     ),
                 ],
                 loc="upper left",
@@ -339,6 +335,11 @@ def _plot(
                 linewidth=1.1,
                 label=PROTOCOL_LABELS[protocol],
             )
+            if protocol == "delta_E_S" and metric in {"alpha", "xmin"}:
+                interval_key = "alpha_ci_95" if metric == "alpha" else "xmin_ci_95"
+                intervals = np.asarray([row[interval_key] for row in rows], dtype=float)
+                ax.vlines(x, intervals[:, 0], intervals[:, 1],
+                          color=COLORS[protocol], alpha=0.55, linewidth=1.5)
         if log_y:
             ax.set_yscale("log")
         ax.set_xticks(sizes)
@@ -363,6 +364,8 @@ def _plot(
         bbox_to_anchor=(0.5, 0.965),
         fontsize="small",
     )
+    fig.text(0.5, 0.925, r"Green bars: 95% refit intervals for $\Delta E_S$",
+             ha="center", fontsize="small")
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output, bbox_inches="tight")
@@ -376,11 +379,18 @@ def run(
     output_dir: Path = DEFAULT_OUTPUT_DIR,
 ) -> Path:
     summary = json.loads(Path(summary_path).read_text())
-    if summary.get("bootstrap_xmin_mode") != "rapidGlobal":
+    require_gamma0_snapshot(snapshot_root)
+    if summary.get("delta_E_S_tangent") != "gamma0":
+        raise ValueError(f"Fit summary uses an old Delta E_S convention: {summary_path}")
+    if Path(summary["snapshot_root"]).resolve() != Path(snapshot_root).resolve():
+        raise ValueError("Fit summary and requested snapshot refer to different data.")
+    if summary.get("bootstrap_xmin_mode") != "global":
         raise ValueError(
-            "This plotting wrapper requires a rapidGlobal summary; "
+            "This plotting wrapper requires a full-global bootstrap summary; "
             f"got {summary.get('bootstrap_xmin_mode')!r}."
         )
+    if summary.get("xmin_selection") != "global minimum after exhaustive observed-candidate scan":
+        raise ValueError("This plotting wrapper requires exhaustive empirical xmin selection.")
     frame = _load_post_yield(Path(snapshot_root))
     records, fits_by_size, populations_by_size = _records(
         frame, summary, output_dir / "cache" / "fixed_xmin"
@@ -396,7 +406,12 @@ def run(
         for size in sorted(frame["size"].unique())
     }
     rescue_fractions = _load_post_yield_rescue_fractions(Path(snapshot_root))
-    _plot(records, paired_event_counts, rescue_fractions, output)
+    peaks = pd.read_csv(Path(snapshot_root) / "tables" / "yield_peaks.csv")
+    seed_counts = {
+        int(size): int(group["seed"].nunique())
+        for size, group in peaks.loc[peaks["peak_established"]].groupby("size")
+    }
+    _plot(records, paired_event_counts, rescue_fractions, seed_counts, output)
     (output_dir / "size_scaling_parameters.json").write_text(
         json.dumps(
             {
@@ -405,6 +420,7 @@ def run(
                 "records": records,
                 "paired_event_counts": paired_event_counts,
                 "rescue_fractions": rescue_fractions,
+                "established_seed_counts": seed_counts,
             },
             indent=2,
         )

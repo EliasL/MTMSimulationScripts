@@ -527,7 +527,9 @@ def getPrettyLabel(string):
     if not isinstance(string, str):
         return str(string)
 
-    s = string
+    s = {
+        "nr_func_evals": "Nr. func. evaluations",
+    }.get(string, string)
     eps_x = re.search(
         r"(?:LBFGSEpsx|LGBFSEpsx)=([^,]+)", string, flags=re.IGNORECASE
     )
@@ -548,7 +550,7 @@ def get_axis_labels(X, Y, x_name=None, y_name=None, use_y_axis_name=True, use_av
     Determines appropriate axis labels based on given column names.
     """
     if x_name is None:
-        x_name = r"Strain $\gamma$" if X == "load" else X
+        x_name = r"Strain $\gamma$" if X == "load" else getPrettyLabel(X)
 
     if y_name is None and use_y_axis_name:
         # Remove total_ and avg_
@@ -1217,17 +1219,12 @@ def compute_predicted_next_energy(csv_file_path):
         \widehat E_{n+1}
             = E_n
             + V_0 * <sigma_{12}>_n * delta_gamma_n
-            + 0.5 * V_0 * \mathfrak{a}_{1212,n}
-              * delta_gamma_n^2
-        \widehat E_{n+1}(\mathfrak{a}_{1212}(0))
-            = E_n
-            + V_0 * <sigma_{12}>_n * delta_gamma_n
             + 0.5 * V_0 * \mathfrak{a}_{1212}(0)
               * delta_gamma_n^2
 
     The Cauchy term approximates the generalized stress conjugate to MTS2D's
-    left-multiplicative affine shear. A is dP/dF evaluated along
-    F = [[1, gamma], [0, 1]], and the result is compared to measured E.
+    left-multiplicative affine shear. The second-order coefficient is the
+    spatial tangent at F=I, compared to measured E.
     """
     return calculate_energy_step_data(csv_file_path, average_energy=None)
 
@@ -1313,6 +1310,8 @@ def plot_predicted_energy_error(
         reference_prediction = reference_aliases[reference_key]
     if show_first_order_reference and reference_prediction is None:
         reference_prediction = "first_order"
+    if reference_prediction == "second_order_gamma0" and "second_order" in error_metric:
+        raise ValueError("The gamma=0 second-order prediction is already the default.")
     if reference_alpha is None:
         reference_alpha = first_order_alpha
 
@@ -1595,7 +1594,7 @@ def plot_predicted_energy_error(
         title_formula = (
             r"$\widehat E_{n+1}=E_n"
             r"+V_0\langle\sigma_{12}\rangle_n\Delta\gamma_n"
-            r"+\frac{1}{2}V_0\mathfrak{a}_{1212,n}(\Delta\gamma_n)^2$"
+            r"+\frac{1}{2}V_0\mathfrak{a}_{1212}(0)(\Delta\gamma_n)^2$"
         )
     else:
         title_formula = (

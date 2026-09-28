@@ -91,21 +91,10 @@ class SigmaRescueTests(unittest.TestCase):
     def test_energy_mismatch_marks_sigma_sentinel_and_continues(self):
         header = (
             "load_step,load,total_energy,avg_energy,avg_sigma12,"
-            "avg_init_sigma12,avg_sigma12_change_from_init\n"
+            "avg_init_sigma12,avg_sigma12_change_from_init,avg_P12,nr_iterations\n"
         )
-        source_rows = "1,0.15,10,10,0.1,0.1,0\n2,0.16,9,9,0.2,0.2,0\n3,0.17,8,8,0.3,0.3,0\n"
-        replay_rows = "1,0.15,10,10,0.11,0.11,0\n2,0.16,9.1,9.1,0.22,0.22,0\n3,0.17,8,8,0.33,0.33,0\n"
-        source = SourceRun(
-            name="run",
-            size=50,
-            seed=0,
-            server="test",
-            folder="/source/run",
-            config_path="/source/run/config.conf",
-            macro_path="/source/run/macroData.csv",
-            config_sha256="config",
-            macro_sha256="macro",
-        )
+        source_rows = "1,0.15,10,10,0.1,0.1,0,0.2,10\n2,0.16,9,9,0.2,0.2,0,0.3,10\n3,0.17,8,8,0.3,0.3,0,0.4,10\n"
+        replay_rows = "1,0.15,10,10,0.11,0.11,0,0.21,10\n2,0.16,9.1,9.1,0.22,0.22,0,0.32,10\n3,0.17,8,8,0.33,0.33,0,0.43,10\n"
         segment = SegmentPlan(
             segment_id="segment",
             run_name="run",
@@ -141,6 +130,98 @@ class SigmaRescueTests(unittest.TestCase):
         self.assertEqual(frame.loc[1, "avg_sigma12"], -1)
         self.assertEqual(frame.loc[1, "avg_init_sigma12"], -1)
         self.assertEqual(frame.loc[1, "avg_sigma12_change_from_init"], -1)
+
+    def test_failed_attempt_duplicate_is_discarded_before_validation(self):
+        header = (
+            "load_step,load,total_energy,avg_energy,avg_sigma12,"
+            "avg_init_sigma12,avg_sigma12_change_from_init,avg_P12,nr_iterations\n"
+        )
+        source_rows = "1,0.15,10,10,0.1,0.1,0,0.2,10\n2,0.16,9,9,0.2,0.2,0,0.3,10\n"
+        replay_rows = (
+            "1,0.15,10,10,0.11,0.11,0,0.21,10\n"
+            "2,0.16,1e20,1e20,4,4,0,5,0\n"
+            "2,0.16,9,9,0.22,0.22,0,0.32,12\n"
+        )
+        source = SourceRun(
+            name="run",
+            size=50,
+            seed=0,
+            server="test",
+            folder="/source/run",
+            config_path="/source/run/config.conf",
+            macro_path="/source/run/macroData.csv",
+            config_sha256="config",
+            macro_sha256="macro",
+        )
+        segment = SegmentPlan(
+            segment_id="segment",
+            run_name="run",
+            size=50,
+            seed=0,
+            server="test",
+            start_dump=DumpRecord("/source/run/dumps/dump.xml.gz", 0.14, 1, "dump", "test"),
+            stop_load=0.16,
+            expected_first_step=1,
+            expected_last_step=2,
+            expected_first_load=0.15,
+            expected_last_load=0.16,
+            output_directory="/rescue/segment",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            source_path = directory / "source.csv"
+            replay_path = directory / "replay.csv"
+            source_path.write_text(header + source_rows)
+            replay_path.write_text(header + replay_rows)
+            validated = validate_segment(
+                segment,
+                replay_path,
+                source_path,
+                ValidationTolerance(),
+            )
+            result = json.loads((validated.parent / "result.json").read_text())
+            frame = pd.read_csv(validated)
+
+        self.assertEqual(frame["load_step"].tolist(), [1, 2])
+        self.assertEqual(result["discarded_failed_attempt_rows"], 1)
+        self.assertEqual(result["discarded_failed_attempt_steps"], [2])
+
+    def test_ambiguous_duplicate_still_raises(self):
+        header = (
+            "load_step,load,total_energy,avg_energy,avg_sigma12,"
+            "avg_init_sigma12,avg_sigma12_change_from_init,avg_P12,nr_iterations\n"
+        )
+        rows = "1,0.15,10,10,0.1,0.1,0,0.2,10\n2,0.16,9,9,0.2,0.2,0,0.3,10\n"
+        duplicate_rows = rows + "2,0.16,9,9,0.2,0.2,0,0.3,11\n"
+        segment = SegmentPlan(
+            segment_id="segment",
+            run_name="run",
+            size=50,
+            seed=0,
+            server="test",
+            start_dump=DumpRecord("/source/run/dumps/dump.xml.gz", 0.14, 1, "dump", "test"),
+            stop_load=0.16,
+            expected_first_step=1,
+            expected_last_step=2,
+            expected_first_load=0.15,
+            expected_last_load=0.16,
+            output_directory="/rescue/segment",
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            directory = Path(directory)
+            source_path = directory / "source.csv"
+            replay_path = directory / "replay.csv"
+            source_path.write_text(header + rows)
+            replay_path.write_text(header + duplicate_rows)
+            with self.assertRaisesRegex(ValueError, "Ambiguous duplicate"):
+                validate_segment(
+                    segment,
+                    replay_path,
+                    source_path,
+                    ValidationTolerance(),
+                )
 
     def test_energy_and_stress_calculations_ignore_sigma_sentinel_steps(self):
         frame = pd.DataFrame(

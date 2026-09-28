@@ -18,7 +18,8 @@ for-value and never recomputed unnecessarily.
 
 Recovery strategy
 -----------------
-1. Discover the expected size-scaling runs with ``size_scaling_job`` and locate
+1. Discover the expected size-scaling runs with
+   ``nonreconnecting_size_scaling_job`` and locate
    their exact source folders with ``DataManager`` when working across servers.
 2. Parse each macro CSV as a sequence of schema eras.  Record exactly which
    ``(load_step, load)`` rows require a corrected stress value.
@@ -392,11 +393,17 @@ class ValidationTolerance:
 
 
 def expected_run_names(reconnection: str = "none") -> dict[str, tuple[int, int]]:
-    """Reuse the canonical job generator instead of duplicating run names."""
+    """Return run names from the explicit matching size-scaling campaign."""
 
-    from Management.jobs import size_scaling_job
+    from Management.jobs import (
+        nonreconnecting_size_scaling_job,
+        reconnecting_size_scaling_job,
+    )
 
-    groups, _ = size_scaling_job(reconnection=reconnection)
+    if reconnection == "none":
+        groups, _ = nonreconnecting_size_scaling_job()
+    else:
+        groups, _ = reconnecting_size_scaling_job(reconnection=reconnection)
     return {
         config.name: (int(config.rows), int(config.seed))
         for group in groups
@@ -1651,11 +1658,27 @@ def _validate_replay(
             raise ValueError(f"Duplicate source load_step {step} in {source_macro}")
         source_by_step[step] = row
     replay_by_step: dict[int, dict[str, str]] = {}
+    discarded_failed_attempt_steps: list[int] = []
+    previous_replay_step: int | None = None
     for row in replay_rows:
-        step, _ = _row_key(row)
-        if step in replay_by_step:
-            raise ValueError(f"Duplicate replay load_step {step} in {replay_macro}")
+        step, load = _row_key(row)
+        previous = replay_by_step.get(step)
+        if previous is not None:
+            _, previous_load = _row_key(previous)
+            previous_iterations = _numeric(previous, "nr_iterations", replay_macro)
+            retry_iterations = _numeric(row, "nr_iterations", replay_macro)
+            if (
+                previous_replay_step != step
+                or abs(load - previous_load) > tolerances.load_atol
+                or previous_iterations != 0
+                or retry_iterations <= 0
+            ):
+                raise ValueError(
+                    f"Ambiguous duplicate replay load_step {step} in {replay_macro}"
+                )
+            discarded_failed_attempt_steps.append(step)
         replay_by_step[step] = row
+        previous_replay_step = step
 
     expected_steps = range(expected_first_step, expected_last_step + 1)
     expected_rows = [source_by_step[step] for step in expected_steps if step in source_by_step]
@@ -1728,6 +1751,8 @@ def _validate_replay(
         "first_invalid_step": invalid_steps[0] if invalid_steps else None,
         "last_invalid_step": invalid_steps[-1] if invalid_steps else None,
         "mismatch_columns": mismatch_columns,
+        "discarded_failed_attempt_rows": len(discarded_failed_attempt_steps),
+        "discarded_failed_attempt_steps": discarded_failed_attempt_steps,
     }
     result_path.write_text(json.dumps(result, indent=2) + "\n")
     return output_path

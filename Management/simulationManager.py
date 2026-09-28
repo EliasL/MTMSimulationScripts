@@ -473,6 +473,7 @@ def findOutputPath(
         "/data/elundheim/",
         "/lustre/fswork/projects/rech/bph/uog82gz/",  # JeanZay
         os.path.expanduser("~/Work/PhD/Code/localData/"),
+        os.path.expanduser("~/simulation/"),  # Magi persistent home storage
         "/tmp/",
     ]
 

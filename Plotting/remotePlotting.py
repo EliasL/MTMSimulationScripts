@@ -1530,9 +1530,6 @@ def plotPreYieldPowerLaw(paths, Y, **kwargs):
 
 
 def plotPostYieldPowerLaw(paths, Y, **kwargs):
-    # Define preyield range
-    postYield = (0.7, 1)
-
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     for i, group, method, mark in zip(range(3), paths, ["L-BFGS", "CG", "FIRE"], "abc"):
         kwargs["labels"] = [[method]]
@@ -1540,7 +1537,7 @@ def plotPostYieldPowerLaw(paths, Y, **kwargs):
         makeAverageComparisonPlot(
             [group],
             Y=Y,
-            xlim=postYield,
+            xlim=None,
             ax=axes[0, i],
             use_y_axis_name=method == "L-BFGS",
             fig=fig,
@@ -1804,7 +1801,6 @@ def plotReversibilityEnergyDropCorrelation(
                 averageEnergy=averageEnergy,
                 stress_corrected=True,
                 stress_correction_order=2,
-                stress_tangent="current",
             ),
             "fallback_label": "Stress-corrected energy drop",
         }

@@ -6,6 +6,18 @@ from .connectToCluster import (
     getServerUserName,
 )
 from tabulate import tabulate
+import shlex
+
+
+def _prepare_status_command(server, command):
+    if server == Servers.magi:
+        command = (
+            "source /etc/profile.d/modules.sh && "
+            "module load /softs/trixie/modules/x86-64/slurm/default && "
+            f"{command}"
+        )
+        return f"bash -lc {shlex.quote(command)}"
+    return command
 
 
 class ServerInfo:
@@ -37,13 +49,20 @@ def get_server_info(ssh_client, server):
     # Execute combined command for cores and node information
     # This returns:
     # jobsRunning\njobsWaiting\njobsRunningUser\njobsWaitingUser\nAlocated/Idle/Other/TotalCores
+    core_command = "sinfo -h -o '%C'"
+    state_command = "sinfo -N --noheader -o '%t'"
+    if server == Servers.magi:
+        core_command = "sinfo -h -p COMPUTE -o '%C'"
+        state_command = "sinfo -N --noheader -p COMPUTE -o '%t'"
+
     command = (
         "squeue -h -t R | wc -l; "
         "squeue -h -t PD | wc -l; "
         f"squeue -h -u {user} -t R | wc -l; "
         f"squeue -h -u {user} -t PD | wc -l; "
-        "sinfo -h -o '%C'"
+        f"{core_command}"
     )
+    command = _prepare_status_command(server, command)
     stdin, stdout, stderr = ssh_client.exec_command(command)
     outputs = stdout.read().decode().split("\n")
     si.nrJobsRunning = int(outputs[0])
@@ -55,7 +74,7 @@ def get_server_info(ssh_client, server):
     si.nrUsedCores = int(alocated)
     si.nrTotalCores = int(total)
 
-    command_state = "sinfo -N --noheader -o '%t'"
+    command_state = _prepare_status_command(server, state_command)
     stdin, stdout, stderr = ssh_client.exec_command(command_state)
     outputs = stdout.read().decode().strip().split("\n")
 
@@ -106,6 +125,7 @@ def get_server_info(ssh_client, server):
             "/data/elundheim",
             "/data2/elundheim",
             "/lustre/fswork/projects/rech/bph/uog82gz",
+            "/nfs/homes",
         ]
         for p in fallback_paths:
             free_bytes = _get_free_bytes(p)

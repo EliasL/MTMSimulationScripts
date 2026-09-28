@@ -18,6 +18,7 @@ files should normally include every setting needed for a reproducible run.
 - `reconnectionMethod` — Selects topology handling: `none` disables it, `edgeFlip` performs energy-based edge flips, and `delaunay` performs Delaunay reconnection.
 - `reconnectRevert` — When `true`, restores the best topology and stops the reconnection cycle as soon as a reconnection does not lower the minimized energy.
 - `reconnectEdgeLocking` — When `true`, prevents an edge already considered in an `edgeFlip` reconnection cycle from being reused.
+- `minimum_transport_distance` — When `true` (the default), chooses the shorter transport when reconnecting an edge; `false` chooses the longer transport.
 - `experiment` — Selects the loading protocol, as described in the [experiment reference](#experiment-reference).
 - `nrThreads` — Sets the OpenMP thread count, with `0` requesting the runtime's suggested count and oversized values reduced to the available capacity.
 - `seed` — Sets the random seed used to make disorder and initial-guess noise reproducible.
@@ -69,6 +70,7 @@ files should normally include every setting needed for a reproducible run.
 - `dtMin` — Sets FIRE's smallest permitted time step after an unstable step.
 - `maxCompS` — Is passed as FIRE's maximum component-step setting, but the corresponding constraint is disabled in the current FIRE implementation.
 - `eps` — Sets FIRE's absolute gradient-norm convergence tolerance.
+- `FIREEpsx` — Sets FIRE's absolute Euclidean step-size convergence tolerance, directly analogous to ALGLIB's unscaled `LBFGSEpsx`/`CGEpsx`; zero disables it.
 - `epsRel` — Sets FIRE's relative gradient-norm convergence tolerance, scaled by the displacement-vector norm.
 - `delta` — Is passed as FIRE's objective-stagnation tolerance, but has no effect because the current integration leaves FIRE's comparison history disabled.
 - `maxIt` — Caps FIRE iterations when positive, with `0` leaving the iteration count uncapped.

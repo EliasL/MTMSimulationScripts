@@ -51,7 +51,7 @@ GRID_SIZE = 320
 RIGHT_COLOR = "#0072B2"
 LEFT_COLOR = "#D55E00"
 ORIGINAL_COLOR = "#1A1A1A"
-TRIANGULAR_REGION_COLOR = "#009E73"
+TRIANGULAR_REGION_COLOR = "green"
 
 
 def simple_shear_F(gamma: float) -> np.ndarray:
@@ -173,6 +173,7 @@ def plot_disk_paths(
     if highlight_triangular_region:
         drawTriangularElasticDomain(
             ax=ax,
+            shade=True,
             grid_size=GRID_SIZE,
             zoom=1,
             c=TRIANGULAR_REGION_COLOR,
@@ -295,7 +296,7 @@ def make_figure() -> plt.Figure:
             axes[row, 2],
             g_right,
             g_left,
-            r"$\mathbf{G}$",
+            r"$\mathcal{G}$",
             show_ylabel=False,
             highlight_triangular_region=True,
         )
@@ -311,10 +312,6 @@ def make_figure() -> plt.Figure:
         ncol=3,
         frameon=False,
         bbox_to_anchor=(0.5, 0.995),
-    )
-    fig.suptitle(
-        r"Affine simple shear: metric tensor $\mathbf{C}$ versus element Gram matrix $\mathbf{G}$",
-        y=1.035,
     )
     return fig
 

@@ -24,8 +24,8 @@ The three aligned event quantities are:
 - `delta_E_I = -total_energy_change` at the ending row;
 - `delta_E_R = -total_e_change_from_init` at the ending row;
 - `delta_E_S`, calculated by
-  `Plotting.energyDropCalculations.calculate_energy_step_data` using the
-  corrected `avg_sigma12` and the current-strain second-order tangent.
+`Plotting.energyDropCalculations.calculate_energy_step_data` using the
+  corrected `avg_sigma12` and the second-order tangent at gamma=0.
 
 An event is usable only if:
 
@@ -78,14 +78,27 @@ reason. Seed—not replay segment—remains the statistical sample unit.
 4. Build `coverage.csv` by size, seed and strain bin. Current rescue completion
    is ordered by cluster task scheduling and is not automatically an unbiased
    sample of strain.
-5. Before scaling fits, select a common post-yield strain window and report the
-   number of seeds/events per size. Prefer a balanced seed subset as a
-   sensitivity check.
-6. Feed paired `delta_E_R`/`delta_E_S` rows into `EventDrops`. Apply the normal
-   `simpleDrop` classification to `delta_E_R`, then fit the positive
-   irreversible `delta_E_S` population using the global KS minimum.
+5. Before scaling fits, find each run's maximum validated `avg_sigma12` and
+   start its post-yield window 0.01 load later. Audit stress coverage around
+   the peak; exclude and report runs whose peak is not established. The old
+   fixed `0.7 < gamma < 1.0` interval was only a missing-stress proxy and must
+   never be the default when stress is available. Report seeds/events per size.
+   The current `yield_peaks.csv` audit requires at least 100 usable stress
+   samples on each side within 0.01 load of the apparent peak.
+6. Feed paired `delta_E_R`/`delta_E_S` rows into `EventDrops`. Classify with
+   `kappa_det = mu/(2 rho)` for `rho=2`, then fit the positive irreversible
+   `delta_E_S` population using the global KS minimum.
+
+The August 2026 drop tables and their plots are archived under
+`old_dynamic_mu`. Current readers require `delta_E_S_tangent: gamma0` in the
+table build manifest.
+
+For the frozen current snapshot, run `./.venv/bin/python -u
+rebuild_sigma_rescue_gamma0.py` from the repository root to regenerate the
+per-size diagnostics, combined size-scaling figure, four separate panels,
+exponent figure, and finite-size collapse in sequence. The script resumes
+completed bootstrap caches and prints `COMPLETE` only after all PDFs exist.
 
 The implementation should also report how many events were excluded for each
 reason. Do not derive a yield point from a partial reconstructed stress curve;
 use a fixed, documented strain window until complete curves are available.
-

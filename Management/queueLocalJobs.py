@@ -12,6 +12,7 @@ def get_batch_script(
     time_limit="1-00:05:00",
     account=None,
     qos=None,
+    memory=None,
 ):
     assert len(job_name) < 256, "Job name cannot be longer than 256 characters!"
     if not isinstance(nice, int) or nice < 0:
@@ -25,6 +26,7 @@ def get_batch_script(
             f"#SBATCH --account={account}" if account else "",
             f"#SBATCH --qos={qos}" if qos else "",
             f"#SBATCH --nice={nice}" if nice else "",
+            f"#SBATCH --mem={memory}" if memory else "",
         )
         if directive
     )
@@ -74,6 +76,9 @@ def queue_local_jobs(
     time_limit="1-00:05:00",
     account=None,
     qos=None,
+    nrThreads=None,
+    memory=None,
+    dryRun=False,
 ):
     if len(commands) != len(job_names):
         raise ValueError("commands and job_names must have the same length")
@@ -88,6 +93,7 @@ def queue_local_jobs(
     if not os.path.exists(base_path):
         raise Exception(f"The directory {base_path} does not exist.")
 
+    submitted_job_ids = []
     for command, job_name in zip(commands, job_names):
         outPath = os.path.join(base_path, f"{job_name}")
         batch_script_path = os.path.join(outPath, f"{job_name}.sh")
@@ -95,23 +101,26 @@ def queue_local_jobs(
         # Ensure the JobOutput directory exists
         os.makedirs(outPath, exist_ok=True)
 
-        nrThreads = get_threads_from_command(command)
+        job_threads = nrThreads if nrThreads is not None else get_threads_from_command(command)
         batch_script = get_batch_script(
             command,
             job_name,
-            nrThreads,
+            job_threads,
             outPath,
             nice=nice,
             time_limit=time_limit,
             account=account,
             qos=qos,
+            memory=memory,
         )
 
         # Write the batch script to a file
         with open(batch_script_path, "w") as f:
             f.write(batch_script)
 
-        if useQueueSystem:
+        if dryRun:
+            print(f"DRY RUN: wrote {batch_script_path}")
+        elif useQueueSystem:
             # Run the batch script locally using subprocess
             cmd = ["sbatch"]
             if useSingletons:
@@ -125,6 +134,7 @@ def queue_local_jobs(
                         f"sbatch failed for {job_name}, copy {copy_index + 1}/"
                         f"{jobCopies}: {result.stderr.strip()}"
                     )
+                submitted_job_ids.append(int(result.stdout.strip().split()[-1]))
 
             print(f"Submitted {jobCopies} copy/copies of {job_name}.")
 
@@ -132,6 +142,7 @@ def queue_local_jobs(
             print("Warning! Running processes outside of the SLURM queue system!")
             print("Make sure you have the permission of Sylvain.")
             run_command_outside_of_queue(command)
+    return submitted_job_ids
 
 
 def run_command_outside_of_queue(command):

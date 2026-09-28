@@ -688,7 +688,7 @@ def print_remote_runtimes(load_increment=1e-5):
     import os
     import pandas as pd
 
-    configs, labels = size_scaling_job()
+    configs, labels = nonreconnecting_size_scaling_job()
     configs, labels = ConfigGenerator.filter(configs, labels, keys="L=300")
     configs = [c for group in configs for c in group]
     configs = [c for c in configs if abs(c.loadIncrement - load_increment) < 1e-12]

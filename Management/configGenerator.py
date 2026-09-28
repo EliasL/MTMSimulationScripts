@@ -20,6 +20,7 @@ class SimulationConfig:
         self.reconnectionMethod = "none"  # "none", "edgeFlip", "delaunay"
         self.reconnectRevert = 1  # Stop if a reconnection raises the energy
         self.reconnectEdgeLocking = 0  # Edge locking is opt-in.
+        self.minimum_transport_distance = 1  # Choose the shorter edge-flip transport.
         self.experiment = "simpleShear"
         self.nrThreads = 1  # This needs to be 1. Don't change. (see queueLocalJobs)
         self.seed = 0
@@ -63,6 +64,7 @@ class SimulationConfig:
         self.dtMin = self.dtStart * 1e-10
         self.maxCompS = 0.01
         self.eps = 1e-15
+        self.FIREEpsx = 0.0
         self.epsRel = 0.0
         self.delta = 0.0
         self.maxIt = 200000
@@ -121,6 +123,7 @@ class SimulationConfig:
             + f"l{self.startLoad},{self.loadIncrement},{self.maxLoad}"
             + f"{'PBC' if self.usingPBC.lower() == 'true' else 'NPBC'}"
             + f"{'' if self.reconnectionMethod == 'none' else self.reconnectionMethod}"
+            + (f"mtd{self.minimum_transport_distance}" if self.minimum_transport_distance != 1 else "")
             + f"t{self.nrThreads}"
         )
 
@@ -138,6 +141,7 @@ class SimulationConfig:
                 "nrThreads",
                 "seed",
                 "reconnectionMethod",
+                "minimum_transport_distance",
                 "makeDumpAt",# Special: Should not make new simulation if changed!
             ]:
                 if defaultValues.get(attr) != value:
@@ -163,7 +167,7 @@ class SimulationConfig:
             if self.CGEpsf == 0 and self.CGEpsg == 0 and self.CGEpsx == 0:
                 raise AttributeError("No threshold set!")
         elif self.minimizer == "FIRE":
-            if self.eps == 0 and self.epsRel == 0:
+            if self.eps == 0 and self.FIREEpsx == 0 and self.epsRel == 0:
                 raise AttributeError("No threshold set!")
 
     def get_path_and_name(self, path, withExtension=True):
@@ -181,7 +185,7 @@ class SimulationConfig:
         try:
             git_tag = (
                 subprocess.check_output(
-                    ["git", "describe", "--tags", "--always"],
+                    ["git", "describe", "--tags", "--always", "--dirty"],
                     stderr=subprocess.DEVNULL,
                     cwd=project_path,  # Specify the project directory
                 )
@@ -189,12 +193,19 @@ class SimulationConfig:
                 .decode("utf-8")
             )
         except (subprocess.CalledProcessError, FileNotFoundError):
-            git_tag = "unknown"  # Fallback if no git tag is found
+            version_file = Path(project_path) / "GIT_VERSION"
+            git_tag = version_file.read_text().strip() if version_file.is_file() else "unknown"
+        if not git_tag:
+            raise RuntimeError("Empty MTS2D version identifier")
         return git_tag
 
-    def write_to_file(self, path):
+    def write_to_file(self, path, filename=None):
         # Get the full path for the config file
-        full_path = self.get_path_and_name(path)
+        full_path = (
+            os.path.join(path, filename)
+            if filename is not None
+            else self.get_path_and_name(path)
+        )
         git_tag = self.get_git_tag_of_MTS2D()
 
         with open(full_path, "w") as file:

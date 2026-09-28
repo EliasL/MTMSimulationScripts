@@ -36,9 +36,9 @@ Recommended simulation energy-drop workflow
 1. Restrict the event extraction to the post-yield region.
 2. Extract Delta E_R and Delta E_S as paired values from the same event
    transitions, in the same order and with the same length.
-3. Apply the ``simpleDrop`` rule to Delta E_R.  Call the resulting
-   reversible/irreversible classification threshold ``er_det`` and label it
-   Delta E_{R,\det}; it is not the final fit cutoff.
+3. Compute kappa with rho=N/V_0=2 and apply the fixed detector
+   kappa_det=mu/(2 rho) to classify the paired events.  The detector is not
+   the final fit cutoff.
 4. Transfer that classification to the paired Delta E_S events, then keep
    only finite positive Delta E_S values from the irreversible events.  Fit
    that population, ``es_irrev``, only.
@@ -82,7 +82,7 @@ set to 2, then the processing would use (up to) 6 cores.
 """
 PARALLEL_UNUSED_CORES = 2
 
-EVALUATION_CACHE_VERSION = "v3"
+EVALUATION_CACHE_VERSION = "v4"
 CLAUSET_EVALUATION_PROTOCOL = "clauset-semiparametric-refit-xmin"
 
 
@@ -1567,6 +1567,27 @@ class Fit(powerlaw.Fit):
             f"{json.dumps(selection_kwargs, sort_keys=True)}"
         )
         cache_path = None
+        partial_results = []
+
+        def write_cache_payload(payload):
+            if cache_path is None:
+                return
+            directory = os.path.dirname(cache_path) or "."
+            os.makedirs(directory, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                delete=False,
+                dir=directory,
+                prefix=".tmp_",
+                suffix=".json",
+            ) as stream:
+                json.dump(payload, stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+                temporary_path = stream.name
+            os.replace(temporary_path, cache_path)
+
         parameter_names = list(self.xmin_distribution.parameter_names)
         if use_cache:
             cache_path = self._get_cache_path(
@@ -1580,32 +1601,55 @@ class Fit(powerlaw.Fit):
                     payload = json.load(stream)
                 if payload.get("evaluation_protocol") != evaluation_protocol:
                     raise RuntimeError(f"Unexpected cache protocol in {cache_path}.")
-                self.p = float(payload["p"])
-                self.p_std = float(payload["p_std"])
-                self.alpha_mean = float(payload["alpha_mean"])
-                self.alpha_std = float(payload["alpha_std"])
-                for name, value in payload.get("param_means", {}).items():
-                    setattr(self, f"{name}_mean", float(value))
-                for name, value in payload.get("param_stds", {}).items():
-                    setattr(self, f"{name}_std", float(value))
-                for name, value in payload.get("param_mins", {}).items():
-                    setattr(self, f"{name}_min", float(value))
-                for name, value in payload.get("param_maxs", {}).items():
-                    setattr(self, f"{name}_max", float(value))
-                for name, value in payload["param_ci_low"].items():
-                    setattr(self, f"{name}_ci_low", float(value))
-                for name, value in payload["param_ci_high"].items():
-                    setattr(self, f"{name}_ci_high", float(value))
-                self.bootstrap_ci_level = float(payload["bootstrap_ci_level"])
-                self.bootstrap_xmin_mean = float(payload["bootstrap_xmin_mean"])
-                self.bootstrap_xmin_std = float(payload["bootstrap_xmin_std"])
-                self.bootstrap_xmin_min = float(payload["bootstrap_xmin_min"])
-                self.bootstrap_xmin_max = float(payload["bootstrap_xmin_max"])
-                self.bootstrap_xmin_ci_low = float(payload["bootstrap_xmin_ci_low"])
-                self.bootstrap_xmin_ci_high = float(payload["bootstrap_xmin_ci_high"])
-                self.pvalue_xmin_mode = xmin_mode
-                self.pvalue_protocol = f"{CLAUSET_EVALUATION_PROTOCOL}-{xmin_mode}"
-                return self.p, self.alpha_mean, self.alpha_std
+                if not payload.get("complete", True):
+                    partial_results = [
+                        (float(result[0]), list(result[1]), float(result[2]))
+                        for result in payload.get("results", [])
+                    ]
+                    if len(partial_results) >= nr_sets:
+                        raise RuntimeError(
+                            f"Invalid partial bootstrap cache in {cache_path}."
+                        )
+                else:
+                    self.p = float(payload["p"])
+                    self.p_std = float(payload["p_std"])
+                    self.alpha_mean = float(payload["alpha_mean"])
+                    self.alpha_std = float(payload["alpha_std"])
+                    for name, value in payload.get("param_means", {}).items():
+                        setattr(self, f"{name}_mean", float(value))
+                    for name, value in payload.get("param_stds", {}).items():
+                        setattr(self, f"{name}_std", float(value))
+                    for name, value in payload.get("param_mins", {}).items():
+                        setattr(self, f"{name}_min", float(value))
+                    for name, value in payload.get("param_maxs", {}).items():
+                        setattr(self, f"{name}_max", float(value))
+                    for name, value in payload["param_ci_low"].items():
+                        setattr(self, f"{name}_ci_low", float(value))
+                    for name, value in payload["param_ci_high"].items():
+                        setattr(self, f"{name}_ci_high", float(value))
+                    self.bootstrap_ci_level = float(payload["bootstrap_ci_level"])
+                    self.bootstrap_xmin_mean = float(payload["bootstrap_xmin_mean"])
+                    self.bootstrap_xmin_std = float(payload["bootstrap_xmin_std"])
+                    self.bootstrap_xmin_min = float(payload["bootstrap_xmin_min"])
+                    self.bootstrap_xmin_max = float(payload["bootstrap_xmin_max"])
+                    self.bootstrap_xmin_ci_low = float(payload["bootstrap_xmin_ci_low"])
+                    self.bootstrap_xmin_ci_high = float(payload["bootstrap_xmin_ci_high"])
+                    self.bootstrap_D_values = np.asarray(
+                        payload["bootstrap_D_values"], dtype=float
+                    )
+                    self.bootstrap_xmins = np.asarray(
+                        payload["bootstrap_xmins"], dtype=float
+                    )
+                    if (
+                        self.bootstrap_D_values.size != nr_sets
+                        or self.bootstrap_xmins.size != nr_sets
+                    ):
+                        raise RuntimeError(
+                            f"Unexpected bootstrap sample count in {cache_path}."
+                        )
+                    self.pvalue_xmin_mode = xmin_mode
+                    self.pvalue_protocol = f"{CLAUSET_EVALUATION_PROTOCOL}-{xmin_mode}"
+                    return self.p, self.alpha_mean, self.alpha_std
 
         distribution = dist_from_fit(self)
         rng = np.random.default_rng(0)
@@ -1634,22 +1678,38 @@ class Fit(powerlaw.Fit):
                     xmin_mode,
                 )
 
+        task_iterator = tasks()
+        for _ in range(len(partial_results)):
+            next(task_iterator)
+        results = list(partial_results)
+
+        def collect(result_iterator):
+            progress = tqdm(
+                result_iterator,
+                total=nr_sets,
+                initial=len(results),
+                desc=tqdmDesc,
+            )
+            for result in progress:
+                result = (float(result[0]), list(result[1]), float(result[2]))
+                results.append(result)
+                if use_cache and cache_path is not None:
+                    write_cache_payload(
+                        {
+                            "evaluation_protocol": evaluation_protocol,
+                            "complete": False,
+                            "results": results,
+                        }
+                    )
+
         if parallel:
             with ProcessPoolExecutor(max_workers=max_workers) as executor:
-                results = list(
-                    tqdm(
-                        executor.map(_clauset_refit_xmin_task, tasks()),
-                        total=nr_sets,
-                        desc=tqdmDesc,
-                    )
+                collect(
+                    executor.map(_clauset_refit_xmin_task, task_iterator)
                 )
         else:
-            results = list(
-                tqdm(
-                    (_clauset_refit_xmin_task(task) for task in tasks()),
-                    total=nr_sets,
-                    desc=tqdmDesc,
-                )
+            collect(
+                _clauset_refit_xmin_task(task) for task in task_iterator
             )
 
         D_vals = np.asarray([result[0] for result in results], dtype=float)
@@ -1673,6 +1733,8 @@ class Fit(powerlaw.Fit):
         )
         self.p = float(np.mean(D_vals >= float(self.D)))
         self.p_std = float(confidence)
+        self.bootstrap_D_values = D_vals
+        self.bootstrap_xmins = bootstrap_xmins
         param_means = {}
         param_stds = {}
         param_mins = {}
@@ -1706,6 +1768,7 @@ class Fit(powerlaw.Fit):
         if use_cache and cache_path is not None:
             payload = {
                 "evaluation_protocol": evaluation_protocol,
+                "complete": True,
                 "p": self.p,
                 "p_std": self.p_std,
                 "alpha_mean": self.alpha_mean,
@@ -1724,21 +1787,9 @@ class Fit(powerlaw.Fit):
                 "bootstrap_xmin_max": self.bootstrap_xmin_max,
                 "bootstrap_xmin_ci_low": self.bootstrap_xmin_ci_low,
                 "bootstrap_xmin_ci_high": self.bootstrap_xmin_ci_high,
+                "bootstrap_D_values": D_vals.tolist(),
+                "bootstrap_xmins": bootstrap_xmins.tolist(),
             }
-            directory = os.path.dirname(cache_path) or "."
-            os.makedirs(directory, exist_ok=True)
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                delete=False,
-                dir=directory,
-                prefix=".tmp_",
-                suffix=".json",
-            ) as stream:
-                json.dump(payload, stream, ensure_ascii=False)
-                stream.flush()
-                os.fsync(stream.fileno())
-                temporary_path = stream.name
-            os.replace(temporary_path, cache_path)
+            write_cache_payload(payload)
 
         return self.p, self.alpha_mean, self.alpha_std

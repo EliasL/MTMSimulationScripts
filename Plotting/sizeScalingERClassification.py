@@ -13,6 +13,10 @@ mistaken for the standard result.  With ``population_mode="all"``, no initial
 E_R split is made and both fields are fitted directly on the paired positive
 event populations.
 
+This module's figures compare *multiple* sizes. For individual-size kappa,
+reversible/irreversible, and fitted-PDF panels, use
+``truncated_powerlaw_reversibility_flowchart.generate_single_size_panels``.
+
 Run from the repository root with::
 
     MPLCONFIGDIR=/tmp/mpl-cache .venv/bin/python -m \
@@ -42,7 +46,7 @@ from Plotting.plotPowerLaw import (
     plot_xmin_analysis,
 )
 from Plotting.sizeScalingCollapse import (
-    REGIMES,
+    YIELD_REGIME_NAMES,
     completed_size_scaling_paths,
     pool_event_pairs,
 )
@@ -358,15 +362,6 @@ def _plot_fit_grid(
     _save_figure(fig, output_dir / f"{filename_prefix}_{regime}_yield.pdf")
 
 
-def _save_ks_plot(fit, path: Path):
-    analysis = getattr(fit, "xmin_fitting_results", None)
-    if analysis is None:
-        raise RuntimeError(f"No xmin analysis available for {path}.")
-    fig, ax = plot_xmin_analysis(analysis)
-    ax.set_title("xmin analysis")
-    _save_figure(fig, path)
-
-
 def _plot_ks_grid(
     regime,
     fit_results,
@@ -456,11 +451,11 @@ def run(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     paths, inventory = completed_size_scaling_paths(
-        data_root, seeds_per_size, REGIMES["post"][1]
+        data_root, seeds_per_size, 1.0
     )
     events_by_regime = pool_event_pairs(
         paths,
-        REGIMES,
+        None,
         output_dir / "cache" / "event_pairs",
         force=force,
     )
@@ -470,6 +465,7 @@ def run(
     summary = {
         "data_root": str(data_root),
         "reconnection": "none",
+        "yield_split": "per-run peak native avg_sigma12",
         "seeds_per_size": seeds_per_size,
         "population_mode": population_mode,
         "selection": (
@@ -501,7 +497,7 @@ def run(
         "fits": {},
     }
 
-    for regime in REGIMES:
+    for regime in YIELD_REGIME_NAMES:
         events = events_by_regime[regime]
         if population_mode == "classified":
             populations = {
@@ -622,17 +618,8 @@ def run(
                         },
                     }
                 )
-            _save_ks_plot(
-                er_fit,
-                output_dir / "D_plots" / regime / f"L{size}_delta_E_R_xmin_search.pdf",
-            )
-            es_diagnostic_name = (
-                "irreversible" if population_mode == "classified" else "all_events"
-            )
-            _save_ks_plot(
-                es_fit,
-                output_dir / "D_plots" / regime / f"L{size}_delta_E_S_{es_diagnostic_name}_xmin_search.pdf",
-            )
+            # Per-size diagnostics belong to the reversibility flowchart;
+            # keep only the cross-size grids here.
         _plot_fit_grid(
             regime,
             fit_results,

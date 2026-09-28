@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 from paramiko import SSHException
 
@@ -23,6 +24,7 @@ class Servers:
     # mesopsl = "mesopsl.obspm.fr"
 
     jeanZay = "jean-zay.idris.fr"
+    magi = "magi"
 
     local_path_mac = os.path.expanduser("~/Work/PhD/Code/localData")
 
@@ -43,6 +45,7 @@ class Servers:
         jeanZay,
         # mesopsl,
     ]
+    status_servers = search_servers + [magi]
     run_servers = [
         galois,
         pascal,
@@ -233,6 +236,26 @@ def uploadProject(cluster_address="Servers.default", verbose=False, setup=True):
         delete=True,
     )
 
+    version = subprocess.check_output(
+        ["git", "describe", "--tags", "--always", "--dirty"],
+        cwd=local_path_MTS2D,
+        text=True,
+    ).strip()
+    if not version:
+        raise RuntimeError("Empty local MTS2D version identifier")
+    ssh = connectToCluster(cluster_address, verbose=verbose)
+    try:
+        command = (
+            "printf '%s\\n' "
+            + shlex.quote(version)
+            + " > ~/simulation/MTS2D/GIT_VERSION"
+        )
+        _, stdout, stderr = ssh.exec_command(command)
+        if stdout.channel.recv_exit_status() != 0:
+            raise RuntimeError(stderr.read().decode().strip())
+    finally:
+        ssh.close()
+
     # Step 3: Optionally run setup
     if setup:
         run_setup(cluster_address, verbose)
@@ -348,6 +371,9 @@ def connectToCluster(cluster_address=Servers.default, verbose=True):
     # Get the SSH configuration
     ssh_config = get_ssh_config()
     config = ssh_config.lookup(cluster_address)
+    hostname = config.get("hostname", cluster_address)
+    username = config.get("user")
+    port = int(config.get("port", 22))
 
     # Create the SSH client
     ssh = SSHClient()
@@ -358,20 +384,22 @@ def connectToCluster(cluster_address=Servers.default, verbose=True):
     try:
         if proxy_jump:
             proxy_command = ProxyCommand(
-                f"ssh -W {config['hostname']}:{22} {proxy_jump}"
+                f"ssh -W {hostname}:{port} {proxy_jump}"
             )
             # Connect to the server through the proxy with increased timeout
             ssh.connect(
-                config["hostname"],
-                username=config["user"],
+                hostname,
+                username=username,
+                port=port,
                 sock=proxy_command,
                 banner_timeout=20,
             )
         else:
             # Connect using the private key instead of a password
             ssh.connect(
-                cluster_address,
-                username=config["user"],
+                hostname,
+                username=username,
+                port=port,
                 banner_timeout=20,
             )
     except Exception as e:

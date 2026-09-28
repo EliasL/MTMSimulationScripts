@@ -128,7 +128,7 @@ def extract_events(path: Path) -> tuple[EventDrops, dict]:
         raise RuntimeError("Delta E_R, Delta E_S, and Delta gamma are not aligned.")
     if np.any(~np.isfinite(delta_gamma)) or np.any(delta_gamma <= 0):
         raise RuntimeError("Completed transitions contain non-positive Delta gamma.")
-    kappa = kappa_from_relaxation_energy(delta_er, delta_gamma, volume, rho=1.0)
+    kappa = kappa_from_relaxation_energy(delta_er, delta_gamma, volume)
     drops = EventDrops(er=delta_er, es=delta_es, kappa=kappa)
     details = {
         "original_rows": original_rows,

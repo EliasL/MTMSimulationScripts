@@ -6,7 +6,8 @@ relaxed VTU pair at a time, so it does not accumulate the mesh data in memory.
 
 The output columns include:
 
-- `delta_E_S`: second-order stress-corrected energy drop divided by mesh volume.
+- `delta_E_S`: second-order stress-corrected energy drop using the fixed
+  gamma=0 shear tangent, divided by mesh volume.
 - `delta_sigma_S`: first-order elasticity-corrected stress drop.
 - `delta_E_I`, `delta_E_R`, `delta_sigma_I`, and `delta_sigma_R` for comparison.
 - `delta_rev_E`, `delta_rev_sigma`, `delta_rev_u`, and `delta_u_R`.

@@ -54,6 +54,22 @@ minForce = 0
 maxForce = 0.3
 
 
+def _matrix_components_for_plot(data, matrix_name):
+    if matrix_name == "T":
+        matrix = np.asarray(data.get_T(), dtype=float)
+        if matrix.shape[-2:] != (2, 2):
+            raise ValueError(
+                f"Expected total T to have trailing shape (2, 2), got {matrix.shape}."
+            )
+        return {
+            (1, 1): matrix[..., 0, 0],
+            (1, 2): matrix[..., 0, 1],
+            (2, 1): matrix[..., 1, 0],
+            (2, 2): matrix[..., 1, 1],
+        }
+    return data.get_matrix_components(matrix_name)
+
+
 def get_energy_range(vtu_files, cvs_file):
     df = pd.read_csv(cvs_file, usecols=["max_energy"])
     max_energy = df["max_energy"].max()
@@ -74,7 +90,7 @@ def get_matrix_range(vtu_files, matrix_name):
     found_finite_value = False
 
     for vtu_file in vtu_files:
-        components = VTUData(vtu_file).get_matrix_components(matrix_name)
+        components = _matrix_components_for_plot(VTUData(vtu_file), matrix_name)
         for field in components.values():
             values = np.asarray(field, dtype=float)
             finite = values[np.isfinite(values)]
@@ -1516,7 +1532,7 @@ def plot_matrix_component_grid(
     connectivity = data.get_connectivity()
     x, y = nodes[:, 0], nodes[:, 1]
 
-    components = data.get_matrix_components(matrix_name)
+    components = _matrix_components_for_plot(data, matrix_name)
     element_indices = _element_subset_indices(
         len(connectivity), kwargs.get("element_subset")
     )
@@ -1541,7 +1557,6 @@ def plot_matrix_component_grid(
         matrix_lims = (-frame_max, frame_max)
 
     matrix_abs_max = max(abs(float(matrix_lims[0])), abs(float(matrix_lims[1])))
-    matrix_abs_max = 5 # Manually set until fixed
     norm = mcolors.Normalize(vmin=-matrix_abs_max, vmax=matrix_abs_max)
     cmap = "coolwarm"
     backgroundColor = plt.get_cmap(cmap)(0.5)
@@ -1604,10 +1619,10 @@ def plot_matrix_component_grid(
             y1 = base_limits[3] + dy
             ax.text(
                 x0 + 0.03 * (x1 - x0),
-                y1 - 0.04 * (y1 - y0),
+                y0 + 0.04 * (y1 - y0),
                 pretty_matrix_component(matrix_name, i, j),
                 ha="left",
-                va="top",
+                va="bottom",
                 fontsize=11,
                 bbox={"facecolor": "white", "alpha": 0.75, "edgecolor": "none"},
             )

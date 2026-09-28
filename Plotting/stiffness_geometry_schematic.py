@@ -36,34 +36,33 @@ def centered_unit_triangle() -> np.ndarray:
     return points - points.mean(axis=0)
 
 
-def configure_axis(ax, *, title: str, xlim: tuple[float, float]) -> None:
-    ax.set_title(title, fontsize=10)
+def configure_axis(ax, *, title: str, xlim: tuple[float, float], scale: float = 1.0) -> None:
+    ax.set_title(title, fontsize=12 * scale)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(*xlim)
-    ax.set_ylim(-1.08, 0.88)
+    ax.set_ylim(-0.45, 0.88)
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
 
 
-def add_panel_text(ax, lines: list[str], *, xy: tuple[float, float]) -> None:
+def add_panel_text(
+    ax, lines: list[str], *, xy: tuple[float, float], scale: float = 1.0
+) -> None:
     ax.text(
         xy[0],
         xy[1],
         "\n".join(lines),
-        fontsize=8.2,
+        fontsize=10 * scale,
         ha="left",
         va="bottom",
-        bbox=dict(boxstyle="round,pad=0.22", facecolor="white", edgecolor="0.85", alpha=0.92),
-    )
-
-
-def schematic_title(integer_shear: int, local_shear: float) -> str:
-    return (
-        rf"$n={integer_shear}$, $s={local_shear:g}$, "
-        rf"$F_{{12}}=\gamma_{{\mathrm{{cur}}}}-\gamma_{{\mathrm{{ref}}}}="
-        rf"{integer_shear + local_shear:g}$"
+        bbox=dict(
+            boxstyle=f"round,pad={0.22 * scale}",
+            facecolor="white",
+            edgecolor="0.85",
+            alpha=0.92,
+        ),
     )
 
 
@@ -88,8 +87,8 @@ def schematic_handles(reference_color: str, current_color: str) -> list[Line2D]:
     ]
 
 
-def add_center_annotation(
-    axes, *, integer_shear: int, local_shear: float, reference_color: str, current_color: str
+def add_center_legend(
+    axes, *, reference_color: str, current_color: str, scale: float = 1.0
 ) -> None:
     positions = [ax.get_position() for ax in axes]
     left = min(position.x0 for position in positions)
@@ -100,28 +99,22 @@ def add_center_annotation(
     height = top - bottom
     fig = axes[0].figure
 
-    fig.text(
-        center_x,
-        bottom + 0.31 * height,
-        schematic_title(integer_shear, local_shear),
-        ha="center",
-        va="center",
-        fontsize=8.8,
-    )
     fig.legend(
         handles=schematic_handles(reference_color, current_color),
         loc="center",
-        bbox_to_anchor=(center_x, bottom + 0.16 * height),
+        bbox_to_anchor=(center_x, bottom + 0.50 * height),
         bbox_transform=fig.transFigure,
-        fontsize=7.8,
+        fontsize=9.5 * scale,
         frameon=True,
         framealpha=0.92,
-        borderpad=0.25,
-        handlelength=1.8,
+        borderpad=0.25 * scale,
+        handlelength=1.8 * scale,
     )
 
 
-def plot_schematic(axes, *, integer_shear: int, local_shear: float) -> None:
+def plot_schematic(
+    axes, *, integer_shear: int, local_shear: float, scale: float = 1.0
+) -> None:
     axes = np.asarray(axes).ravel()
     if len(axes) != 2:
         raise ValueError(f"Expected two schematic axes, got {len(axes)}.")
@@ -130,16 +123,16 @@ def plot_schematic(axes, *, integer_shear: int, local_shear: float) -> None:
     current_color = "#d95f02"
     reference_style = MeshStyle(
         color=reference_color,
-        linewidth=2.0,
+        linewidth=2.0 * scale,
         linestyle="--",
-        node_size=18,
+        node_size=18 * scale**2,
         node_linewidth=0.0,
     )
     current_style = MeshStyle(
         color=current_color,
-        linewidth=2.0,
+        linewidth=2.0 * scale,
         linestyle="-",
-        node_size=18,
+        node_size=18 * scale**2,
         node_linewidth=0.0,
     )
 
@@ -168,9 +161,15 @@ def plot_schematic(axes, *, integer_shear: int, local_shear: float) -> None:
             r"$\gamma_{\mathrm{ref}}=0$",
             rf"$\gamma_{{\mathrm{{cur}}}}={integer_shear + local_shear:g}$",
         ],
-        xy=(-1.18, -1.0),
+        xy=(-1.18, 0.24),
+        scale=scale,
     )
-    configure_axis(ax, title="distorted current geometry", xlim=(-1.35, 2.45))
+    configure_axis(
+        ax,
+        title="(a) Distorted current geometry",
+        xlim=(-1.35, 2.45),
+        scale=scale,
+    )
     ax = axes[1]
     mesh = MeshFigure(ax)
     mesh.draw_mesh(
@@ -189,15 +188,20 @@ def plot_schematic(axes, *, integer_shear: int, local_shear: float) -> None:
             rf"$\gamma_{{\mathrm{{ref}}}}=-{integer_shear}$",
             rf"$\gamma_{{\mathrm{{cur}}}}={local_shear:g}$",
         ],
-        xy=(0.38, -1.0),
+        xy=(0.38, 0.24),
+        scale=scale,
     )
-    configure_axis(ax, title="distorted reference geometry", xlim=(-2.25, 1.45))
-    add_center_annotation(
+    configure_axis(
+        ax,
+        title="(b) Distorted reference geometry",
+        xlim=(-2.25, 1.45),
+        scale=scale,
+    )
+    add_center_legend(
         axes,
-        integer_shear=integer_shear,
-        local_shear=local_shear,
         reference_color=reference_color,
         current_color=current_color,
+        scale=scale,
     )
 
 

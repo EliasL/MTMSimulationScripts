@@ -7,8 +7,10 @@ from Plotting.plasticReductionAllDecompositionsIllustration import (
     decomposition_table_data,
 )
 from Plotting.plasticReductionDeterminantQuadrantsIllustration import (
+    DISPLAY_EXPRESSIONS,
     PANEL_COLOR_STRENGTH,
     _elastic_transform_label,
+    _transform_label,
     grouped_disk_points,
     panel_background_color,
     quadrant_palette,
@@ -61,7 +63,28 @@ class PlasticReductionDeterminantQuadrantsIllustrationTests(unittest.TestCase):
         self.assertEqual(len(histories["lagrange"]["transforms"]), 3)
         self.assertEqual(
             _elastic_transform_label(histories["elastic"]["history"], 0),
-            r"$\mathbf{M}$",
+            r"$\mathbf{M}_p$",
+        )
+
+    def test_display_notation_uses_bold_indexed_generators(self):
+        self.assertFalse(any(r"\mathbf{R}" in label for label in DISPLAY_EXPRESSIONS))
+        self.assertFalse(any(r"\mathbf{s}" in label for label in DISPLAY_EXPRESSIONS))
+        self.assertEqual(
+            DISPLAY_EXPRESSIONS,
+            (
+                r"$\mathbf{M}_4=\mathbf{M}_p$",
+                r"$\mathbf{M}_1=\mathbf{M}_p\mathbf{M}_R$",
+                r"$\mathbf{M}_4'=\mathbf{M}_p\mathbf{M}_R^{2}$",
+                r"$\mathbf{M}_1'=\mathbf{M}_p\mathbf{M}_R^{3}$",
+                r"$\mathbf{M}_3=\mathbf{M}_p\mathbf{M}^{(1)}$",
+                r"$\mathbf{M}_2=\mathbf{M}_p\mathbf{M}_R\mathbf{M}^{(1)}$",
+                r"$\mathbf{M}_3'=\mathbf{M}_p\mathbf{M}_R^{2}\mathbf{M}^{(1)}$",
+                r"$\mathbf{M}_2'=\mathbf{M}_p\mathbf{M}_R^{3}\mathbf{M}^{(1)}$",
+            ),
+        )
+        self.assertEqual(
+            _transform_label(np.array([[1, 0], [0, -1]])),
+            r"$\mathbf{M}^{(1)}$",
         )
 
 

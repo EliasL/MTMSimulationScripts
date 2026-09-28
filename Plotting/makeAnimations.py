@@ -481,9 +481,10 @@ def makeAnimations(
     ]
     if videoNames is not None:
         wanted = {videoNames} if isinstance(videoNames, str) else set(videoNames)
+        selectable_jobs = render_jobs + matrix_jobs
         render_jobs = [
             job
-            for job in render_jobs
+            for job in selectable_jobs
             if job[1] in wanted or _with_suffixes(job[1]) in wanted
         ]
         if not render_jobs:

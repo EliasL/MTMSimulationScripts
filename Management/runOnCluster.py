@@ -20,6 +20,16 @@ from fabric import Connection
 import sys
 
 
+def get_remote_command(server, command):
+    if server == Servers.magi:
+        return (
+            "source /etc/profile.d/modules.sh && "
+            "module load /softs/trixie/modules/x86-64/slurm/default && "
+            f"{command}"
+        )
+    return command
+
+
 def run_remote_script_with_debug(server_hostname, script_path, silent=False):
     """
     Executes a Python script on a remote server, with optional support for debugging.
@@ -177,7 +187,9 @@ def run_remote_command(server_hostname, command, hide=False, silent=True):
     user = getServerUserName(server_hostname)
     with Connection(host=server_hostname, user=user) as c:
         # Execute the remote command (your Python script)
-        result = c.run(command, hide=hide, warn=True)
+        result = c.run(
+            get_remote_command(server_hostname, command), hide=hide, warn=True
+        )
 
         # `hide=False` means output and errors are printed in real time
         # `warn=True` means execution won't stop on errors (similar to try/except)
@@ -220,7 +232,11 @@ def queue_remote_job(server_hostname, command, job_name, nrThreads):
         c.run(f'cat << "EOF" > {batch_script_path}\n{batch_script}\nEOF')
 
         # Submit the batch script to Slurm
-        result = c.run(f"sbatch {batch_script_path}", hide=True, warn=True)
+        result = c.run(
+            get_remote_command(server_hostname, f"sbatch {batch_script_path}"),
+            hide=True,
+            warn=True,
+        )
 
         # Check the submission result
         if result.ok:
@@ -248,10 +264,11 @@ def build_on_server(server, uploadOnly=False):
         return  # Exit the function after uploading
 
     project_path = "~/simulation/MTS2D/build-release/"
+    architecture_option = " -DENABLE_NATIVE_ARCH=OFF" if server == Servers.magi else ""
     build_command = (
         f"mkdir -p {project_path} && "
         f"cd {project_path} && "
-        f"cmake -DCMAKE_BUILD_TYPE=Release .. && "
+        f"cmake -DCMAKE_BUILD_TYPE=Release{architecture_option} .. && "
         f"make"
     )
 

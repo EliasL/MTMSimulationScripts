@@ -906,7 +906,13 @@ def umutJobs(loadIncrement=2e-5):
     return all_configs, all_labels
 
 
-def size_scaling_job(
+_NONRECONNECTING_SIZE_SCALING_THREADS = (2, 3, 4, 8, 8)
+_RECONNECTING_SIZE_SCALING_THREADS = (1, 2, 3, 4, 4)
+
+
+def _size_scaling_job(
+    *,
+    nr_threads,
     reconnection="none",
     reconnectRevert=None,
     reconnectEdgeLocking=None,
@@ -915,17 +921,16 @@ def size_scaling_job(
     energyDropThreshold=None,
     nrSeeds=10,
 ):
-    """
-    Generates a job for size scaling tests.
-    """
+    """Build one explicitly selected size-scaling configuration family."""
     sizes = [50, 100, 150, 200, 250]  # , 300]
     if not isinstance(nrSeeds, int) or nrSeeds <= 0:
         raise ValueError("nrSeeds must be a positive integer")
+    if len(nr_threads) != len(sizes):
+        raise ValueError("Need one thread count for every size-scaling size.")
     nr_samples = [nrSeeds] * len(sizes)
-    nr_threads = [1, 2, 3, 4, 4]  # , 8]
     sizes.reverse()
     nr_samples.reverse()
-    nr_threads.reverse()
+    nr_threads = list(nr_threads)[::-1]
     all_configs = []
     all_labels = []
     for size, samples, threads in zip(sizes, nr_samples, nr_threads):
@@ -959,6 +964,66 @@ def size_scaling_job(
     return all_configs, all_labels
 
 
+def nonreconnecting_size_scaling_job(nrSeeds=10):
+    """Return the historical non-reconnecting size-scaling campaign.
+
+    This is the ``PBCt2/t3/t4/t8/t8`` campaign behind the existing L=50--250
+    flowchart and sigma-rescue source data.  Keep it explicit: changing the
+    performance profile would change configuration names and silently select
+    a different scientific dataset.
+    """
+    groups, labels = _size_scaling_job(
+        nr_threads=_NONRECONNECTING_SIZE_SCALING_THREADS,
+        reconnection="none",
+        energyDropThreshold=1e-4,
+        nrSeeds=nrSeeds,
+    )
+    # ``energyDropThreshold=1e-4`` was the generator default when this
+    # campaign was submitted, so it was not encoded in its saved names.  The
+    # present default is different; remove only that now-explicit default to
+    # recover the immutable historical source names exactly.
+    for config in (config for group in groups for config in group):
+        suffix = "energyDropThreshold0.0001"
+        if suffix not in config.name:
+            raise RuntimeError(
+                "The historical size-scaling name no longer contains its "
+                "expected current-default suffix."
+            )
+        config.name = config.name.replace(suffix, "")
+    return groups, labels
+
+
+def reconnecting_size_scaling_job(
+    reconnection="edgeFlip",
+    reconnectRevert=None,
+    reconnectEdgeLocking=None,
+    experiment="simpleShear",
+    startLoad=0.15,
+    energyDropThreshold=None,
+    nrSeeds=10,
+):
+    """Return the newer compact size-scaling profile for reconnecting jobs.
+
+    This is the ``PBCt1/t2/t3/t4/t4`` profile used for the reconnecting
+    Jean-Zay campaign.  It is intentionally separate from the completed
+    non-reconnecting ``PBCt8`` dataset above.
+    """
+    if reconnection == "none":
+        raise ValueError(
+            "Use nonreconnecting_size_scaling_job() for non-reconnecting data."
+        )
+    return _size_scaling_job(
+        nr_threads=_RECONNECTING_SIZE_SCALING_THREADS,
+        reconnection=reconnection,
+        reconnectRevert=reconnectRevert,
+        reconnectEdgeLocking=reconnectEdgeLocking,
+        experiment=experiment,
+        startLoad=startLoad,
+        energyDropThreshold=energyDropThreshold,
+        nrSeeds=nrSeeds,
+    )
+
+
 def reversibility_size_scaling_job(
     reconnection="none",
     reconnectRevert=1,
@@ -966,7 +1031,8 @@ def reversibility_size_scaling_job(
     nrSeeds=5,
 ):
     """Generate the size-scaling campaign using the reversibility protocol."""
-    return size_scaling_job(
+    return _size_scaling_job(
+        nr_threads=_RECONNECTING_SIZE_SCALING_THREADS,
         reconnection=reconnection,
         reconnectRevert=reconnectRevert,
         reconnectEdgeLocking=reconnectEdgeLocking,

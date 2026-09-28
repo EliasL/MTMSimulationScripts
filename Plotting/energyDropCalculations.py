@@ -138,17 +138,17 @@ def infer_energy_prediction_stress_column(df):
     return "avg_sigma12"
 
 
-def stress_corrected_drop_column(correction_order=2, tangent="current"):
+def stress_corrected_drop_column(correction_order=2, tangent="gamma0"):
     if correction_order == 1:
         return "stress_corrected_drop_first_order"
     if correction_order == 2:
-        if tangent in {"current", "gamma", "gamma_i"}:
-            return "stress_corrected_drop_second_order"
         if tangent in {"gamma0", "zero", "gamma_zero"}:
-            return "stress_corrected_drop_second_order_gamma0"
+            return "stress_corrected_drop_second_order"
+        if tangent in {"current", "gamma", "gamma_i", "dynamic_mu"}:
+            raise ValueError("The dynamic-mu Delta E_S convention is archived.")
     raise ValueError(
         "Expected correction_order=1 or correction_order=2 with "
-        "tangent in {'current', 'gamma0'}."
+        "tangent='gamma0'."
     )
 
 
@@ -327,20 +327,21 @@ def calculate_energy_step_data(
 ):
     """
     Compute per-load-step internal-energy drops and Taylor predictions using
-    the averaged Cauchy shear stress and spatial tangent a_1212:
+    the averaged Cauchy shear stress and reference spatial tangent a_1212(0):
 
         E_hat_{n+1} = E_n + V_0 <sigma_12>_n delta_gamma_n
-            + 0.5 V_0 a_1212,n delta_gamma_n^2.
+            + 0.5 V_0 a_1212(0) delta_gamma_n^2.
 
     ``<sigma_12>`` approximates the exact generalized stress
     ``<(P F.T)_12>_A0 = <J sigma_12>_A0`` for MTS2D's left-multiplicative
-    affine shear step. The spatial second-order tangent is evaluated along the
-    homogeneous simple-shear path and retained as an approximation; it is not a
-    measured macroscopic tangent.
+    affine shear step. The default second-order tangent is evaluated at
+    gamma=0. It is an approximation rather than a measured macroscopic tangent.
 
     The stress-corrected drop is stored as predicted E_hat_{n+1} minus the
     measured E_{n+1}. Positive values are therefore energy drops relative to
     the elastic prediction.
+    The legacy ``a1212_i`` and ``simple_shear_tangent_i`` output column names
+    also contain the constant gamma=0 value here; they are not dynamic moduli.
     """
     csv_path = Path(csv_file_path) if csv_file_path is not None else None
     if df is None:
@@ -397,8 +398,7 @@ def calculate_energy_step_data(
         )
     bulk_modulus = float(config.get("bulkModulus", 4.0))
 
-    a1212_i = _simple_shear_tangent(load_i, bulk_modulus=bulk_modulus)
-    a1212_gamma0_i = _simple_shear_tangent_gamma0(
+    a1212_i = _simple_shear_tangent_gamma0(
         load_i.shape, bulk_modulus=bulk_modulus
     )
 
@@ -406,28 +406,15 @@ def calculate_energy_step_data(
     e_pred_next_second_order = (
         e_pred_next + 0.5 * reference_volume * a1212_i * delta_gamma**2
     )
-    e_pred_next_second_order_gamma0 = (
-        e_pred_next + 0.5 * reference_volume * a1212_gamma0_i * delta_gamma**2
-    )
-
     prediction_error = e_real_next - e_pred_next
     second_order_prediction_error = e_real_next - e_pred_next_second_order
-    second_order_gamma0_prediction_error = (
-        e_real_next - e_pred_next_second_order_gamma0
-    )
 
     abs_prediction_error = np.abs(prediction_error)
     abs_second_order_prediction_error = np.abs(second_order_prediction_error)
-    abs_second_order_gamma0_prediction_error = np.abs(
-        second_order_gamma0_prediction_error
-    )
 
     relative_prediction_error = np.full_like(abs_prediction_error, np.nan)
     relative_second_order_prediction_error = np.full_like(
         abs_second_order_prediction_error, np.nan
-    )
-    relative_second_order_gamma0_prediction_error = np.full_like(
-        abs_second_order_gamma0_prediction_error, np.nan
     )
     denom = np.abs(e_real_next)
     nonzero = denom > 0
@@ -435,14 +422,10 @@ def calculate_energy_step_data(
     relative_second_order_prediction_error[nonzero] = (
         abs_second_order_prediction_error[nonzero] / denom[nonzero]
     )
-    relative_second_order_gamma0_prediction_error[nonzero] = (
-        abs_second_order_gamma0_prediction_error[nonzero] / denom[nonzero]
-    )
 
     drop_scale = nr_elements if use_average_energy else 1.0
     first_order_drop = -prediction_error / drop_scale
     second_order_drop = -second_order_prediction_error / drop_scale
-    second_order_gamma0_drop = -second_order_gamma0_prediction_error / drop_scale
 
     step_df = pd.DataFrame(
         {
@@ -452,14 +435,14 @@ def calculate_energy_step_data(
             "sigma12_i": sigma12_i,
             "stress_i": sigma12_i,
             "a1212_i": a1212_i,
-            "a1212_gamma0_i": a1212_gamma0_i,
+            "a1212_gamma0_i": a1212_i,
             # Backward-compatible aliases for downstream analysis code.
             "simple_shear_tangent_i": a1212_i,
-            "simple_shear_tangent_gamma0_i": a1212_gamma0_i,
+            "simple_shear_tangent_gamma0_i": a1212_i,
             "E_i": e_i,
             "E_ip1_pred": e_pred_next,
             "E_ip1_pred_second_order": e_pred_next_second_order,
-            "E_ip1_pred_second_order_gamma0": e_pred_next_second_order_gamma0,
+            "E_ip1_pred_second_order_gamma0": e_pred_next_second_order,
             "E_ip1_real": e_real_next,
             "prediction_error": prediction_error,
             "abs_prediction_error": abs_prediction_error,
@@ -467,12 +450,12 @@ def calculate_energy_step_data(
             "second_order_prediction_error": second_order_prediction_error,
             "abs_second_order_prediction_error": abs_second_order_prediction_error,
             "relative_second_order_prediction_error": relative_second_order_prediction_error,
-            "second_order_gamma0_prediction_error": second_order_gamma0_prediction_error,
-            "abs_second_order_gamma0_prediction_error": abs_second_order_gamma0_prediction_error,
-            "relative_second_order_gamma0_prediction_error": relative_second_order_gamma0_prediction_error,
+            "second_order_gamma0_prediction_error": second_order_prediction_error,
+            "abs_second_order_gamma0_prediction_error": abs_second_order_prediction_error,
+            "relative_second_order_gamma0_prediction_error": relative_second_order_prediction_error,
             "stress_corrected_drop_first_order": first_order_drop,
             "stress_corrected_drop_second_order": second_order_drop,
-            "stress_corrected_drop_second_order_gamma0": second_order_gamma0_drop,
+            "stress_corrected_drop_second_order_gamma0": second_order_drop,
         }
     )
     invalid_rows = cauchy_stress == SIGMA12_RESCUE_SENTINEL
@@ -508,7 +491,7 @@ def extract_energy_drops_from_dataframe(
     average_energy=False,
     stress_corrected=True,
     correction_order=2,
-    tangent="current",
+    tangent="gamma0",
     drop_sign="negative",
     min_drop=0.0,
     plastic_only=False,

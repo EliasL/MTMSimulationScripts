@@ -3,10 +3,26 @@ from unittest.mock import patch
 
 import main
 from Management.connectToCluster import Servers
+from Management.jobs import nonreconnecting_size_scaling_job
 from Management.multiServerJob import queueJobs
 
 
 class JeanZayQueueTests(unittest.TestCase):
+    def test_historical_nonreconnecting_profile_preserves_source_names(self):
+        groups, _ = nonreconnecting_size_scaling_job(nrSeeds=1)
+        configs = [config for group in groups for config in group]
+
+        self.assertEqual(
+            {config.rows: config.nrThreads for config in configs},
+            {50: 2, 100: 3, 150: 4, 200: 8, 250: 8},
+        )
+        self.assertTrue(all(config.reconnectionMethod == "none" for config in configs))
+        self.assertTrue(all(config.energyDropThreshold == 1e-4 for config in configs))
+        self.assertIn(
+            "simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0",
+            {config.name for config in configs},
+        )
+
     def test_size_scaling_plan_has_expected_settings(self):
         configs = main.jeanZaySizeScalingPlan(nrSeeds=2)
 
@@ -67,6 +83,21 @@ class JeanZayQueueTests(unittest.TestCase):
         self.assertEqual(kwargs["jobCopies"], 10)
         self.assertEqual(kwargs["time_limit"], "00:01:00")
         self.assertEqual(kwargs["qos"], "qos_cpu-dev")
+        self.assertTrue(kwargs["resume"])
+
+    @patch("main.queueJobs")
+    def test_magi_fire_smoke_uses_epsx_and_two_threads(self, queue_jobs):
+        config = main.queueMagiFireEpsxSmokeTest(submit=True)
+
+        self.assertEqual((config.rows, config.cols), (10, 10))
+        self.assertEqual((config.startLoad, config.maxLoad), (0.0, 0.1))
+        self.assertEqual(config.minimizer, "FIRE")
+        self.assertEqual(config.FIREEpsx, 1e-6)
+        self.assertEqual(config.nrThreads, 2)
+        self.assertEqual(config.reconnectionMethod, "edgeFlip")
+        args, kwargs = queue_jobs.call_args
+        self.assertEqual(args[0], Servers.magi)
+        self.assertEqual(kwargs["time_limit"], "03:00:00")
         self.assertTrue(kwargs["resume"])
 
     @patch("Management.multiServerJob.run_remote_command")

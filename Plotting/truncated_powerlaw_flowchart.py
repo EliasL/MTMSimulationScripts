@@ -43,7 +43,7 @@ from matplotlib.transforms import Bbox
 import numpy as np
 from pypdf import PageObject, PdfReader, PdfWriter, Transformation
 
-from Management.jobs import size_scaling_job
+from Management.jobs import nonreconnecting_size_scaling_job
 from Management.updateCSV import read_macrodata_csv
 from MTMath.evaluatePowerlawFit import (
     POWERLAW_STANDARD_WORKFLOW,
@@ -72,7 +72,8 @@ from Plotting.plotPowerLaw import (
 # Workflow mode. CLI flags override this value.
 REGENERATE_SUBPLOTS = False
 
-# Preferred data: the ten non-reconnecting L=250 size-scaling simulations.
+# Preferred data: the ten historical non-reconnecting ``PBCt8`` L=250 runs.
+# Do not substitute the newer reconnecting Jean-Zay ``PBCt4`` profile here.
 REQUESTED_SYSTEM_SIZE = 250
 REQUESTED_SEEDS = tuple(range(10))
 REQUIRE_ALL_REQUESTED_SEEDS = False
@@ -311,7 +312,7 @@ def _configure_matplotlib():
 
 
 def _l250_configs_and_labels():
-    groups, label_groups = size_scaling_job(reconnection="none")
+    groups, label_groups = nonreconnecting_size_scaling_job()
     for configs, labels in zip(groups, label_groups):
         if configs and int(configs[0].rows) == REQUESTED_SYSTEM_SIZE:
             requested = [
@@ -461,7 +462,6 @@ def _collect_analysis(csv_paths: list[Path], used_fallback: bool):
         averageEnergy=AVERAGE_ENERGY,
         stress_corrected=True,
         stress_correction_order=2,
-        stress_tangent="current",
         min_drop=MIN_DROP,
     )
     drops = np.asarray(drops, dtype=float)
@@ -484,7 +484,7 @@ def _collect_analysis(csv_paths: list[Path], used_fallback: bool):
     xmin_analysis = fit.xmin_analysis
     if xmin_analysis is None:
         raise RuntimeError("Canonical xmin analysis was not attached to the fit.")
-    selected_xmin = xmin_analysis["simple_drop_xmin"]
+    selected_xmin = xmin_analysis["global_min_xmin"]
     dist = dist_from_fit(fit)
 
     source_meta = get_metadata(str(csv_paths[0]))
@@ -701,7 +701,7 @@ def _write_analysis_summary(analysis):
         "first_run_post_yield_limit": list(analysis["first_strain_limit"]),
         "minimum_drop": MIN_DROP,
         "number_of_drops": int(analysis["drops"].size),
-        "xmin_method": "simpleDrop",
+        "xmin_method": "global",
         "global_min_xmin": analysis["global_min_xmin"],
         "global_min_distance": analysis["global_min_distance"],
         "global_min_differs_from_simple_drop": not np.isclose(
@@ -966,7 +966,7 @@ def _add_equations(fig):
             "\n"
             r"$\widehat E_{n+1}=E_n"
             r"+V_0\langle\sigma_{12}\rangle_n\Delta\gamma_n"
-            r"+\frac{V_0}{2}\mathfrak{a}_{1212,n}(\Delta\gamma_n)^2$"
+            r"+\frac{V_0}{2}\mathfrak{a}_{1212}(0)(\Delta\gamma_n)^2$"
         ),
         "ks_equation": (
             r"$D(\Delta E_{\min})="

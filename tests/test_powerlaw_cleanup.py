@@ -119,6 +119,9 @@ class PValueXminTests(unittest.TestCase):
                 payload = json.load(stream)
             self.assertIn(EVALUATION_CACHE_VERSION, payload["evaluation_protocol"])
             self.assertIn(CLAUSET_EVALUATION_PROTOCOL, payload["evaluation_protocol"])
+            self.assertTrue(payload["complete"])
+            self.assertEqual(payload["bootstrap_D_values"], [0.5])
+            self.assertEqual(payload["bootstrap_xmins"], [2.0])
 
             with mock.patch(
                 "MTMath.evaluatePowerlawFit._clauset_refit_xmin_task",
@@ -393,10 +396,10 @@ class XminCleanupTests(unittest.TestCase):
         )
         self.assertNotIn("plateau", XMIN_STRATEGIES)
 
-    def test_default_comparison_runs_global_min_last(self):
+    def test_default_comparison_uses_full_global_minimum(self):
         self.assertEqual(
             DEFAULT_XMIN_COMPARISON_STRATEGIES,
-            ("simpleDrop", "slope", "global_min"),
+            ("global_min",),
         )
 
     def test_simple_drop_starts_from_exactly_100_initial_measurements(self):
@@ -781,6 +784,7 @@ class XminCleanupTests(unittest.TestCase):
                 use_cache=False,
                 parallel_xmin=True,
                 xmin_search_kwargs={"nr_initial": 100},
+                xmin_selection="simpleDrop",
             )
         self.assertEqual(fit.xmin, 2.0)
         self.assertIs(fit.xmin_analysis, analysis)

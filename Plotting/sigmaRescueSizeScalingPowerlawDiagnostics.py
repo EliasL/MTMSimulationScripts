@@ -6,6 +6,8 @@ classified with ``kappa_det = mu/(2 rho)`` for ``rho=N/V_0=2``; that event mask 
 ``Delta E_I``/``Delta E_S`` values before positive filtering.  Each size then
 gets one figure containing fitted PDFs and xmin/KS scans for the three drop
 measures, plus a separate PDF showing the reversible/irreversible split.
+The Clauset refit bootstrap and 95% intervals are computed for the standard
+irreversible ``Delta E_S`` fit.
 
 Run from the repository root with::
 
@@ -37,20 +39,21 @@ from Plotting.plotPowerLaw import (
     plot_fit_pdf,
 )
 from Plotting.standardPowerlaw import (
+    DEFAULT_KAPPA_RHO,
     EventDrops,
     kappa_detection_threshold,
+    kappa_from_relaxation_energy,
     positive_es,
+    load_sigma_rescue_post_yield,
+    require_gamma0_snapshot,
     split_by_kappa,
 )
 
 
-DEFAULT_SNAPSHOT = Path(
-    "sigma_rescue_interim/snapshots/20260819T100206Z"
-)
+DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0")
 DEFAULT_OUTPUT = Path(
     "Plots/powerLaw/sigma_rescue_size_scaling_individual"
 )
-POST_YIELD = (0.7, 1.0)
 PROTOCOLS = ("delta_E_I", "delta_E_R", "delta_E_S")
 PROTOCOL_SYMBOLS = {
     "delta_E_I": r"$\Delta E_I$",
@@ -80,21 +83,21 @@ def _positive(values: np.ndarray) -> np.ndarray:
 
 
 def _load_post_yield(snapshot_root: Path) -> pd.DataFrame:
+    require_gamma0_snapshot(snapshot_root)
     table_path = Path(snapshot_root).resolve() / "tables" / "drops_usable.csv.gz"
     if not table_path.is_file():
         raise FileNotFoundError(f"Missing combined usable table: {table_path}")
     columns = ["size", "load_ip1", "delta_gamma", "reference_volume", *PROTOCOLS]
-    frame = pd.read_csv(table_path, usecols=columns)
+    frame = load_sigma_rescue_post_yield(snapshot_root, columns)
     if frame.empty:
         raise ValueError(f"The usable drop table is empty: {table_path}")
-    mask = (frame["load_ip1"] > POST_YIELD[0]) & (
-        frame["load_ip1"] < POST_YIELD[1]
-    )
-    frame = frame.loc[mask].copy()
     if frame.empty:
         raise ValueError(f"No post-yield rows found in {table_path}")
-    frame["kappa"] = frame["delta_E_R"] / (
-        frame["reference_volume"] * frame["delta_gamma"] ** 2
+    frame["kappa"] = kappa_from_relaxation_energy(
+        frame["delta_E_R"].to_numpy(dtype=float),
+        frame["delta_gamma"].to_numpy(dtype=float),
+        frame["reference_volume"].to_numpy(dtype=float),
+        rho=DEFAULT_KAPPA_RHO,
     )
     return frame
 
@@ -119,8 +122,6 @@ def _fit_population(
         xmin_selection=xmin_selection,
         xmin_search_mode="rapid" if xmin_selection == "rapidGlobal" else "full",
         xmin_search_kwargs={
-            "progress": True,
-            "progress_label": f"{protocol}, post-yield, L={size}",
             "refine": True,
         },
     )
@@ -323,45 +324,42 @@ def _draw_full_xmin_scan(
     pvalue_confidence: float,
     force_pvalue: bool,
 ) -> None:
-    """Draw the established bootstrapped four-trace xmin diagnostic."""
+    """Draw the empirical xmin scan and bootstrap the standard Delta E_S fit."""
     if fit.xmin_fitting_results is None:
         raise RuntimeError(f"Missing xmin results for L={size}, {protocol}.")
     parallel = int(pvalue_workers) > 1
     eval_cache_dir = output_dir / "cache" / "xmin_bootstrap" / protocol / f"L{size}"
-    fit.evaluate_clauset_pvalue(
-        data=data,
-        confidence=pvalue_confidence,
-        parallel=parallel,
-        max_workers=pvalue_workers,
-        use_cache=not force_pvalue,
-        cache_dir=str(eval_cache_dir),
-        tqdmDesc=f"{protocol}, post-yield, L={size}: Clauset p-value",
-        xmin_mode=bootstrap_xmin_mode,
-    )
-    data_info = {
-        "customTitle": rf"Post-yield, $L={size}$; {PROTOCOL_SYMBOLS[protocol]} irreversible",
-        "drops": data,
-        "drop_label": PLOT_DROP_LABELS[protocol],
-        "xmin_axis_label": rf"$\Delta E_{{{PLOT_DROP_LABELS[protocol][-1]},\min}}$",
-        "xmin_min_tail_count": int(fit.xmin_fitting_results["min_tail_count"]),
-    }
-    find_best_xmin(
-        data,
-        nr_evaluation=PVALUE_NR_EVALUATION,
-        min_p=PVALUE_MIN,
-        start_accuracy=PVALUE_START_ACCURACY,
-        max_accuracy=PVALUE_MAX_ACCURACY,
-        DistType=Truncated_Power_Law,
-        data_info=data_info,
-        xmin_results=fit.xmin_fitting_results,
-        parallel=parallel,
-        max_workers=pvalue_workers,
-        use_memmap=True,
-        memmap_dir=str(output_dir / "pvalue_memmap"),
-        selected_fit=fit,
-        plot_ax=ax,
-        show_selected_xmin=False,
-    )
+    if protocol == "delta_E_S":
+        fit.evaluate_clauset_pvalue(
+            data=data,
+            confidence=pvalue_confidence,
+            parallel=parallel,
+            max_workers=pvalue_workers,
+            use_cache=not force_pvalue,
+            cache_dir=str(eval_cache_dir),
+            tqdmDesc=f"{protocol}, post-yield, L={size}: Clauset p-value",
+            xmin_mode=bootstrap_xmin_mode,
+        )
+    scan = fit.xmin_fitting_results
+    xmins = np.asarray(scan["xmins"], dtype=float)
+    distances = np.asarray(scan["distances"], dtype=float)
+    alphas = np.asarray(scan["alphas"], dtype=float)
+    valid = np.isfinite(xmins) & np.isfinite(distances) & np.isfinite(alphas)
+    if "valid_fits" in scan:
+        valid &= np.asarray(scan["valid_fits"], dtype=bool)
+    if not np.any(valid):
+        raise ValueError(f"No valid xmin scan for L={size}, {protocol}.")
+    ax.plot(xmins[valid], distances[valid], color="tab:blue", label="KS distance")
+    alpha_ax = ax.twinx()
+    alpha_ax.plot(xmins[valid], alphas[valid], color="tab:orange", alpha=0.7,
+                  label=r"empirical $\alpha(x_{\min})$")
+    ax.axvline(float(scan["global_min_xmin"]), color="black", linestyle=":")
+    ax.set(xscale="log", xlabel=r"$\Delta E_{\min}$", ylabel="KS distance")
+    alpha_ax.set_ylabel(r"$\alpha$")
+    title = PROTOCOL_SYMBOLS[protocol]
+    if protocol == "delta_E_S":
+        title += rf"; selected-fit $p={float(fit.p):.3f}$"
+    ax.set_title(title)
 
 
 def _save_size_figure(
@@ -369,13 +367,19 @@ def _save_size_figure(
     fits: dict[str, object],
     data: dict[str, np.ndarray],
     output_dir: Path,
+    protocols: tuple[str, ...],
     pvalue_workers: int,
     bootstrap_xmin_mode: str,
     pvalue_confidence: float,
     force_pvalue: bool,
 ) -> None:
-    fig, axes = plt.subplots(2, 3, figsize=(18.0, 8.8), squeeze=False)
-    for column, protocol in enumerate(PROTOCOLS):
+    fig, axes = plt.subplots(
+        2,
+        len(protocols),
+        figsize=(6.0 * len(protocols), 8.8),
+        squeeze=False,
+    )
+    for column, protocol in enumerate(protocols):
         _plot_fit_panel(axes[0, column], fits[protocol], data[protocol], protocol)
         _draw_full_xmin_scan(
             axes[1, column],
@@ -430,12 +434,20 @@ def run(
     *,
     parallel_xmin: bool = False,
     force: bool = False,
+    resume: bool = False,
     sizes: tuple[int, ...] | None = None,
+    protocols: tuple[str, ...] = PROTOCOLS,
     pvalue_workers: int = DEFAULT_PVALUE_WORKERS,
     bootstrap_xmin_mode: str = "global",
     pvalue_confidence: float = PVALUE_CONFIDENCE,
     observed_xmin_mode: str = "global",
 ) -> dict:
+    protocols = tuple(protocols)
+    if not protocols:
+        raise ValueError("At least one diagnostic protocol is required.")
+    unknown_protocols = sorted(set(protocols) - set(PROTOCOLS))
+    if unknown_protocols:
+        raise ValueError(f"Unknown diagnostic protocols: {unknown_protocols}")
     if bootstrap_xmin_mode in {"full", "rapid"}:
         bootstrap_xmin_mode = {"full": "global", "rapid": "rapidGlobal"}[
             bootstrap_xmin_mode
@@ -460,7 +472,12 @@ def run(
         if missing:
             raise ValueError(f"Requested sizes are absent from the snapshot: {missing}")
         frame = frame.loc[frame["size"].isin(requested)].copy()
-    if not force and output_dir.exists() and any(output_dir.glob("L*_post_yield_fits_and_xmin_scans.pdf")):
+    if (
+        not force
+        and not resume
+        and output_dir.exists()
+        and any(output_dir.glob("L*_post_yield_fits_and_xmin_scans.pdf"))
+    ):
         raise FileExistsError(
             f"Diagnostic output already exists in {output_dir}; use --force to overwrite."
         )
@@ -473,7 +490,9 @@ def run(
 
     summary = {
         "snapshot_root": str(Path(snapshot_root).resolve()),
-        "post_yield_window": list(POST_YIELD),
+        "delta_E_S_tangent": "gamma0",
+        "post_yield_window": "per-run validated sigma12 peak + 0.01, load < 1.0",
+        "yield_peak_audit": str((Path(snapshot_root).resolve() / "tables" / "yield_peaks.csv")),
         "population": "kappa_det = mu/(2 rho) irreversible event mask, rho=N/V_0=2",
         "kappa_detection": (
             "kappa = Delta E_R/(rho V_0 Delta gamma^2), "
@@ -492,7 +511,7 @@ def run(
                 if bootstrap_xmin_mode == "global"
                 else "rapidGlobal-xmin refitting"
             )
-            + " for every synthetic set"
+            + " for every synthetic Delta E_S set; Delta E_I and Delta E_R are cutoff diagnostics"
         ),
         "bootstrap_xmin_mode": bootstrap_xmin_mode,
         "bootstrap_xmin_strategy": (
@@ -506,6 +525,7 @@ def run(
         "pvalue_bootstrap_replicates": max(
             1, int(1 / (4 * pvalue_confidence**2))
         ),
+        "protocols": list(protocols),
         "fits": {},
     }
     for size in sorted(frame["size"].unique()):
@@ -553,13 +573,14 @@ def run(
                 xmin_selection=observed_xmin_mode,
                 force_recompute=force,
             )
-            for protocol in PROTOCOLS
+            for protocol in protocols
         }
         _save_size_figure(
             int(size),
             fits,
             data,
             output_dir,
+            protocols,
             pvalue_workers,
             bootstrap_xmin_mode,
             pvalue_confidence,
@@ -578,9 +599,21 @@ def run(
                     "simple_drop_xmin": float(fits[protocol].xmin_fitting_results["simple_drop_xmin"]),
                     "global_min_xmin": float(fits[protocol].xmin_fitting_results["global_min_xmin"]),
                     "global_min_D": float(fits[protocol].xmin_fitting_results["global_min_distance"]),
-                    "clauset_pvalue_v2": float(fits[protocol].p),
+                    "clauset_pvalue_v2": (
+                        float(fits[protocol].p) if protocol == "delta_E_S" else None
+                    ),
+                    "bootstrap_xmin_ci_95": (
+                        [float(fits[protocol].bootstrap_xmin_ci_low),
+                         float(fits[protocol].bootstrap_xmin_ci_high)]
+                        if protocol == "delta_E_S" else None
+                    ),
+                    "bootstrap_alpha_ci_95": (
+                        [float(fits[protocol].alpha_ci_low),
+                         float(fits[protocol].alpha_ci_high)]
+                        if protocol == "delta_E_S" else None
+                    ),
                 }
-                for protocol in PROTOCOLS
+                for protocol in protocols
             },
         }
         print(f"Saved L={int(size)} post-yield fit and xmin diagnostics", flush=True)
@@ -595,7 +628,19 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--parallel-xmin", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Reuse cached fits and bootstrap samples in an existing output directory.",
+    )
     parser.add_argument("--sizes", type=int, nargs="+", default=None)
+    parser.add_argument(
+        "--protocols",
+        choices=PROTOCOLS,
+        nargs="+",
+        default=PROTOCOLS,
+        help="Drop populations to fit and plot (default: all three).",
+    )
     parser.add_argument(
         "--observed-xmin-mode",
         choices=("global", "rapidGlobal"),
@@ -609,7 +654,7 @@ def main() -> None:
         "--pvalue-workers",
         type=int,
         default=DEFAULT_PVALUE_WORKERS,
-        help=f"Bootstrap worker processes (default: {DEFAULT_PVALUE_WORKERS}).",
+        help=f"Delta E_S bootstrap worker processes (default: {DEFAULT_PVALUE_WORKERS}).",
     )
     parser.add_argument(
         "--bootstrap-xmin-mode",
@@ -635,7 +680,9 @@ def main() -> None:
         args.output_dir,
         parallel_xmin=args.parallel_xmin,
         force=args.force,
+        resume=args.resume,
         sizes=None if args.sizes is None else tuple(args.sizes),
+        protocols=tuple(args.protocols),
         pvalue_workers=args.pvalue_workers,
         bootstrap_xmin_mode=args.bootstrap_xmin_mode,
         pvalue_confidence=args.pvalue_confidence,
