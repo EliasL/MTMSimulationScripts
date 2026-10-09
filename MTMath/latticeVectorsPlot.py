@@ -700,7 +700,7 @@ def lagrange_reduction_bases_row(
     save_path: str | Path = "Plots/simpleLagrangeReductionIllustration.pdf",
     show: bool = True,
 ):
-    """Plot barred a^(0) -> a^(1) -> a^(2) -> reduced a bases."""
+    """Plot barred A^(0) -> A^(1) -> A^(2) -> reduced A bases."""
 
     # Basis matrices (columns are basis vectors).
     e0 = np.array([[1.0, 0.0], [-1.0, 1.0]])
@@ -722,10 +722,10 @@ def lagrange_reduction_bases_row(
 
     bases = [e0, e1, e2, e_tildebar]
     titles = [
-        r"$\bar{\mathbf{a}}^{(0)}$",
-        r"$\bar{\mathbf{a}}^{(1)}$",
-        r"$\bar{\mathbf{a}}^{(2)}$",
-        r"$\tilde{\bar{\mathbf{a}}}$",
+        r"$\bar{\mathbf{A}}^{(0)}$",
+        r"$\bar{\mathbf{A}}^{(1)}$",
+        r"$\bar{\mathbf{A}}^{(2)}$",
+        r"$\tilde{\bar{\mathbf{A}}}$",
     ]
 
     max_abs = float(np.max(np.abs(np.hstack(bases))))
@@ -802,9 +802,9 @@ def lagrange_reduction_bases_row(
 
     # Place transform labels between neighboring panels, aligned with title level.
     transition_labels = [
-        r"$\times \mathbf{m}_1 \rightarrow$",
-        r"$\times \mathbf{m}_2 \rightarrow$",
-        r"$\times \mathbf{m}_3 \rightarrow$",
+        r"$\times \mathbf{M}^{(1)} \rightarrow$",
+        r"$\times \mathbf{M}^{(2)} \rightarrow$",
+        r"$\times \mathbf{M}^{(3)} \rightarrow$",
     ]
     for i, text in enumerate(transition_labels):
         axes[i].text(
