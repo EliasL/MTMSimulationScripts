@@ -75,10 +75,11 @@ def find_double_dislocation_run(
     data_root: Path,
     *,
     edge_flip: bool,
-    size: int = 20,
-    switch_load: float = 0.8,
+    size: int = DEFAULT_SIZE,
+    switch_load: float = DEFAULT_SWITCH_LOAD,
+    mesh_diagonal: str = "minor",
 ) -> Path:
-    """Find the requested minor-mesh double-dislocation output folder."""
+    """Find the requested mesh orientation without inferring it from a label."""
 
     data_root = Path(data_root)
     prefix = f"doubleDislocationTest,s{size}x{size}"
@@ -88,7 +89,7 @@ def find_double_dislocation_run(
         for path in data_root.iterdir()
         if path.is_dir()
         and path.name.startswith(prefix)
-        and "meshDiagonalminor" in path.name
+        and f"meshDiagonal{mesh_diagonal}" in path.name
         and switch_token in path.name
         and ("edgeFlip" in path.name) == edge_flip
         and (path / "collection.pvd").exists()
@@ -96,7 +97,7 @@ def find_double_dislocation_run(
     if len(matches) != 1:
         method = "edge flipping" if edge_flip else "no reconnection"
         raise ValueError(
-            f"Expected one {size}x{size} minor-mesh run with {method} and "
+            f"Expected one {size}x{size} {mesh_diagonal}-mesh run with {method} and "
             f"GP3={switch_load:g}; found {len(matches)} in {data_root}."
         )
     return matches[0]
@@ -119,6 +120,63 @@ def select_vtu_at_load(run_path: Path, target_load: float) -> Path:
             f"in {run_path}."
         )
     return vtu_file
+
+
+def validate_horizontal_first_runs(
+    fixed_run: Path, reconnecting_run: Path, *, switch_load: float = 1.0,
+    final_load: float = 4.0, mesh_diagonal: str | None = None,
+    alternating: bool = False,
+) -> dict[str, str]:
+    """Reject comparisons with different settings or incorrectly labelled loads."""
+    configs = []
+    for path in (fixed_run, reconnecting_run):
+        config = {}
+        for line in (Path(path) / "config.conf").read_text().splitlines():
+            line = line.split("#", 1)[0]
+            if "=" in line:
+                key, value = line.split("=", 1)
+                config[key.strip()] = value.strip()
+        configs.append(config)
+        if float(config.get("GP1", 0)) != 0 or float(config.get("GP2", 0)) != (2 if alternating else 0):
+            raise ValueError("The simulation loading protocol differs from the requested figure.")
+        actual_switch = float(config.get("GP3", 0)) or 1.0
+        if not np.isclose(actual_switch, switch_load):
+            raise ValueError("The illustrated loading switch differs from the simulation.")
+        if float(config["maxLoad"]) < final_load:
+            raise ValueError("The simulation does not cover the illustrated loading range.")
+        if mesh_diagonal is not None and config["meshDiagonal"] != mesh_diagonal:
+            raise ValueError(f"Requested {mesh_diagonal} mesh, found {config['meshDiagonal']} in {path}.")
+        initial = VTUData(select_vtu_at_load(Path(path), 0.0))
+        triangles = initial.get_connectivity()
+        shared = sorted(set(triangles[0]) & set(triangles[1]))
+        if len(shared) != 2:
+            raise ValueError("Cannot identify the initial square's shared diagonal.")
+        reference = initial.get_reference_nodes()[:, :2]
+        diagonal = reference[shared[1]] - reference[shared[0]]
+        actual_diagonal = "major" if np.prod(diagonal) < 0 else "minor"
+        if actual_diagonal != config["meshDiagonal"]:
+            raise ValueError("Initial VTU connectivity disagrees with the configured mesh orientation.")
+    matching = ("rows", "cols", "usingPBC", "seed", "QDSD", "initialGuessNoise",
+                "meshDiagonal", "energyFunction", "bulkModulus", "startLoad",
+                "loadIncrement", "maxLoad", "GP1", "GP2", "GP3", "minimizer",
+                "epsR", "LBFGSNrCorrections", "LBFGSScale", "LBFGSEpsg",
+                "LBFGSEpsf", "LBFGSEpsx", "LBFGSMaxIterations")
+    for key in matching:
+        if configs[0].get(key) != configs[1].get(key):
+            raise ValueError(f"Comparison runs have different {key} settings.")
+    if configs[0]["reconnectionMethod"] != "none" or configs[1]["reconnectionMethod"] != "edgeFlip":
+        raise ValueError("Expected a fixed-connectivity run and an edge-flipping run.")
+    return configs[0]
+
+
+def loading_displacements(load: float, switch_load: float = 1.0, *, alternating: bool = False):
+    """Map accumulated displacement to the two prescribed boundary components."""
+    if alternating:
+        cycles = np.floor(load / (2 * switch_load))
+        remainder = load - cycles * 2 * switch_load
+        return (float(cycles * switch_load + min(remainder, switch_load)),
+                float(cycles * switch_load + max(remainder - switch_load, 0)))
+    return min(load, switch_load), max(load - switch_load, 0)
 
 
 def classify_protocol_nodes(
@@ -176,6 +234,7 @@ def _draw_loading_protocol(
     *,
     switch_load: float,
     final_load: float,
+    alternating: bool = False,
 ) -> None:
     reference_nodes = np.asarray(reference_nodes, dtype=float)[:, :2]
     groups = classify_protocol_nodes(reference_nodes, fixed_status)
@@ -304,7 +363,7 @@ def _draw_loading_protocol(
         xmin + 0.75 * (xmax - xmin),
         ymin + 0.16 * (ymax - ymin),
         "2. vertical\n" + rf"$u_x={switch_load:g}$" + "\n"
-        + rf"$0\leq u_y\leq {max(final_load - switch_load, 0):g}$",
+        + rf"$0\leq u_y\leq {(switch_load if alternating else max(final_load - switch_load, 0)):g}$",
         color=Y_LOAD_COLOR,
         ha="center",
         va="center",
@@ -332,6 +391,12 @@ def _draw_loading_protocol(
         bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.78, "pad": 1.5},
     )
 
+    if alternating:
+        ux, uy = loading_displacements(final_load, switch_load, alternating=True)
+        ax.text(xmin + .5 * span, ymin + .5 * span,
+                "Repeat horizontal / vertical\n" + rf"to $u_x={ux:g},\;u_y={uy:g}$",
+                ha="center", va="center", fontsize=14,
+                bbox={"facecolor": "white", "edgecolor": "none", "alpha": .85, "pad": 2})
     ax.text(-0.04, 1.045, r"\textbf{(a)}", transform=ax.transAxes, fontsize=16)
     mesh.configure_axis(
         xlim=(xmin - 0.16 * span, xmax + 0.035 * span),
@@ -495,6 +560,8 @@ def make_mesh_locking_figure(
     final_load: float = 4.0,
     no_reconnection_run: Path | None = None,
     edge_flipping_run: Path | None = None,
+    mesh_diagonal: str = "minor",
+    alternating: bool = False,
 ) -> tuple[plt.Figure, dict[str, object]]:
     """Build the complete loading-protocol and mesh-evolution figure."""
 
@@ -508,15 +575,22 @@ def make_mesh_locking_figure(
         raise ValueError("Supply both explicit run paths, or neither.")
     run_paths = {
         "no_reconnection": find_double_dislocation_run(
-            data_root, edge_flip=False, size=size, switch_load=switch_load
+            data_root, edge_flip=False, size=size, switch_load=switch_load,
+            mesh_diagonal=mesh_diagonal,
         ),
         "edge_flipping": find_double_dislocation_run(
-            data_root, edge_flip=True, size=size, switch_load=switch_load
+            data_root, edge_flip=True, size=size, switch_load=switch_load,
+            mesh_diagonal=mesh_diagonal,
         ),
     } if no_reconnection_run is None else {
         "no_reconnection": Path(no_reconnection_run),
         "edge_flipping": Path(edge_flipping_run),
     }
+    validate_horizontal_first_runs(
+        run_paths["no_reconnection"], run_paths["edge_flipping"],
+        switch_load=switch_load, final_load=final_load, mesh_diagonal=mesh_diagonal,
+        alternating=alternating,
+    )
     snapshots = {
         method: [select_vtu_at_load(path, load) for load in loads]
         for method, path in run_paths.items()
@@ -582,6 +656,7 @@ def make_mesh_locking_figure(
         initial_data.get_fixed_status(),
         switch_load=switch_load,
         final_load=final_load,
+        alternating=alternating,
     )
 
     method_rows = (
@@ -609,8 +684,7 @@ def make_mesh_locking_figure(
             for spine in ax.spines.values():
                 spine.set_visible(False)
             if row == 0:
-                ux = min(load, switch_load)
-                uy = max(load - switch_load, 0.0)
+                ux, uy = loading_displacements(load, switch_load, alternating=alternating)
                 letter = "ABCD"[column]
                 ax.set_title(rf"$\mathbf{{{letter}}}\quad u_x={ux:g},\;u_y={uy:g}$", pad=8)
             if column == 0:
@@ -683,6 +757,14 @@ def _parse_args() -> argparse.Namespace:
         help="Explicit edge-flipping run folder (supply both run paths).",
     )
     parser.add_argument(
+        "--alternating", action="store_true",
+        help="Alternate horizontal and vertical loading every switch-load interval.",
+    )
+    parser.add_argument(
+        "--mesh-diagonal", choices=("major", "minor"), default="minor",
+        help="Solver diagonal orientation, checked against both run configurations.",
+    )
+    parser.add_argument(
         "--energy-max",
         type=float,
         help="Upper limit of the shared energy colour scale (lower limit is zero).",
@@ -719,6 +801,8 @@ def main() -> None:
         energy_limits=None if args.energy_max is None else (0.0, args.energy_max),
         no_reconnection_run=args.no_reconnection_run,
         edge_flipping_run=args.edge_flipping_run,
+        mesh_diagonal=args.mesh_diagonal,
+        alternating=args.alternating,
     )
     args.output_stem.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(args.output_stem.with_suffix(".pdf"), bbox_inches="tight")

@@ -7,7 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
+from matplotlib.patches import ConnectionPatch, Rectangle
 from matplotlib.ticker import FuncFormatter
 import numpy as np
 import pandas as pd
@@ -127,6 +127,29 @@ def _center_colorbar_on_axis(colorbar, axis) -> None:
     )
 
 
+def _energy_color_limit(values, quantile: float) -> float:
+    """Symmetric scale after trimming the largest absolute field values."""
+
+    magnitudes = np.abs(np.asarray(values, dtype=float))
+    finite = magnitudes[np.isfinite(magnitudes)]
+    if not finite.size:
+        raise ValueError("An energy field has no finite values.")
+    limit = float(np.quantile(finite, quantile))
+    return limit if limit > 0 else np.finfo(float).eps
+
+
+def _connect_zoom(fig, overview, detail, zoom) -> None:
+    """Connect the lower rectangle corners to the upper detail corners."""
+
+    for side, x in ((0, zoom.xlim[0]), (1, zoom.xlim[1])):
+        fig.add_artist(ConnectionPatch(
+            xyA=(x, zoom.ylim[0]), coordsA="data", axesA=overview,
+            xyB=(side, 1), coordsB="axes fraction", axesB=detail,
+            color="black", linewidth=0.65, alpha=0.75,
+            clip_on=False, zorder=0.5,
+        ))
+
+
 def _plot_reversibility_scatter(
     ax,
     catalog: pd.DataFrame,
@@ -144,6 +167,9 @@ def _plot_reversibility_scatter(
     if missing:
         raise KeyError(f"Scatter catalogue is missing columns: {sorted(missing)}")
     rows = catalog.copy()
+    if str(event.get("yield_regime", "")) != "post":
+        raise ValueError("Event sheets require a post-yield event.")
+    rows = rows[rows["yield_regime"].astype(str).eq("post")]
     if "delta_gamma" in rows and np.isfinite(float(event.get("delta_gamma", np.nan))):
         rows = rows[np.isclose(rows["delta_gamma"], float(event["delta_gamma"]))]
     if rows.empty:
@@ -157,22 +183,16 @@ def _plot_reversibility_scatter(
     if not np.isfinite(cut) or cut <= 0:
         raise ValueError(f"Invalid selected-setting Delta_rev u cut: {cut}")
 
-    # Marker shape identifies yield regime, while color identifies the
-    # reversible/irreversible population and yield regime.
+    # Only the post-yield populations are shown.
     colors = {
-        ("pre", "closing"): "#2166ac",
         ("post", "closing"): "#67a9cf",
-        ("pre", "nonclosing"): "#b2182b",
         ("post", "nonclosing"): "#ef8a62",
     }
     cut_color = "0.25"
     plotted_x = []
     plotted_y = []
     has_discarded = False
-    for post_yield, closing_marker, nonclosing_marker in (
-        ("pre", "^", "s"),
-        ("post", "o", "D"),
-    ):
+    for post_yield, closing_marker, nonclosing_marker in (("post", "o", "D"),):
         regime_rows = rows[rows["yield_regime"].astype(str) == post_yield]
         x = regime_rows[x_name].to_numpy(dtype=float)
         y = regime_rows[y_name].to_numpy(dtype=float)
@@ -219,12 +239,14 @@ def _plot_reversibility_scatter(
     plotted_x.append(np.array([event_x]))
     plotted_y.append(np.array([event_y]))
     ax.axvline(cut, color=cut_color, linestyle="--", linewidth=1.0, alpha=0.8, zorder=3)
-    ax.axvline(event_x, color="black", linewidth=0.75, alpha=0.8)
-    ax.axhline(event_y, color="black", linewidth=0.75, alpha=0.8)
+    ax.axvline(event_x, color="black", linewidth=0.85, alpha=0.9, zorder=4)
+    ax.axhline(event_y, color="black", linewidth=0.85, alpha=0.9, zorder=4)
     ax.scatter(
         [event_x], [event_y], facecolors="none", edgecolors="black",
         s=55, linewidths=0.9, zorder=8,
     )
+    ax.scatter([event_x], [event_y], marker="+", color="black",
+               s=100, linewidths=1.1, zorder=9)
     ax.set_xscale("log")
     ax.set_yscale("log")
     all_x = np.concatenate(plotted_x)
@@ -234,12 +256,10 @@ def _plot_reversibility_scatter(
     ax.set_xlabel(r"$\Delta_{\mathrm{rev}}\mathbf{u}$")
     ax.set_ylabel(r"$\Delta E_S/V_0$", labelpad=layout.scatter_ylabel_pad)
     ax.tick_params(axis="y", pad=layout.scatter_ytick_pad)
-    ax.set_title("(e) chosen-setting reversibility scatter")
+    ax.set_title("(e)")
     legend_markers = (
-        ("^", colors[("pre", "closing")], "pre-yield reversible"),
-        ("o", colors[("post", "closing")], "post-yield reversible"),
-        ("s", colors[("pre", "nonclosing")], "pre-yield irreversible"),
-        ("D", colors[("post", "nonclosing")], "post-yield irreversible"),
+        ("o", colors[("post", "closing")], "reversible"),
+        ("D", colors[("post", "nonclosing")], "irreversible"),
     )
     handles = [
         Line2D(
@@ -258,8 +278,9 @@ def _plot_reversibility_scatter(
     ax.legend(
         handles=handles,
         loc="upper left",
-        fontsize=6,
+        fontsize=8,
         frameon=True,
+        framealpha=1.0,
         ncol=1,
     )
 
@@ -280,13 +301,18 @@ def render_event_pdf(
     full-mesh panels show the same energy colours as their corresponding
     zoomed panels.
 
-    The energy field uses a symmetric coolwarm norm centered at zero.  Forward
-    m3-changed elements are outlined.  Arrow amplification is recorded in the
-    caption.  The title/caption records load, yield regime,
-    class, Delta E_inter/V0, Delta E_S/V0, Delta_rev u and participation.
+    Compare affine and relaxed states at the same load: 1-2 and 3-4.
+    Only post-yield events and scatter points are accepted. The energy field
+    uses a symmetric coolwarm norm centered at zero. Both columns share the
+    larger of their 97th-percentile absolute-field limits by default.
+    Forward m3-changed elements are
+    outlined. Displacement scales appear inside the panels; the sheet has
+    no overall title. Black connectors identify the zoomed regions.
     """
 
     options.validate()
+    if str(event.get("yield_regime", "")) != "post":
+        raise ValueError("Event sheets require a post-yield event.")
     layout = options.layout
     suffix = output_path.suffix.lower()
     if suffix not in {".pdf", ".png"}:
@@ -297,22 +323,27 @@ def render_event_pdf(
         )
     states = _load_states(state_paths)
     state0 = states["state0_min_gamma"]
+    if options.recover_legacy_geometry_fields:
+        from .legacy_fields import recover_legacy_fields
+        volume = len(states["state0_min_gamma"].triangles)/2
+        states = {name: recover_legacy_fields(state, volume) for name, state in states.items()}
+        state0 = states["state0_min_gamma"]
     state1 = states["state1_affine_gamma_plus"]
     state2 = states["state2_relaxed_gamma_plus"]
     state3 = states["state3_affine_gamma_minus"]
     state4 = states["state4_relaxed_gamma"]
-    relation = mesh_plot.determine_topology_relation(state0, state2)
+    relation = mesh_plot.determine_topology_relation(state1, state2)
     displacements = mesh_plot.calculate_event_displacements(states)
     m3_changed = mesh_plot.calculate_forward_m3_change(states)
     energy_change, geometry = mesh_plot.calculate_energy_change_field(
-        state0,
+        state1,
         state2,
         relation=relation,
         common_grid_resolution=options.common_grid_resolution,
     )
-    backward_relation = mesh_plot.determine_topology_relation(state2, state4)
+    backward_relation = mesh_plot.determine_topology_relation(state3, state4)
     backward_energy_change, backward_geometry = mesh_plot.calculate_energy_change_field(
-        state2,
+        state3,
         state4,
         relation=backward_relation,
         common_grid_resolution=options.common_grid_resolution,
@@ -343,12 +374,16 @@ def render_event_pdf(
     )
     energy_limit = options.common_energy_limit
     if energy_limit is None:
-        energy_limit = max(
-            float(np.nanmax(np.abs(field_values))),
-            float(np.nanmax(np.abs(backward_field_values))),
+        energy_limit = _energy_color_limit(field_values, options.energy_color_quantile)
+    backward_energy_limit = options.common_energy_limit
+    if backward_energy_limit is None:
+        backward_energy_limit = _energy_color_limit(
+            backward_field_values, options.energy_color_quantile
         )
-    if not np.isfinite(energy_limit) or energy_limit <= 0:
-        energy_limit = 1.0
+    energy_limit = backward_energy_limit = max(energy_limit, backward_energy_limit)
+    if any(not np.isfinite(limit) or limit <= 0
+           for limit in (energy_limit, backward_energy_limit)):
+        raise ValueError("Energy color limits must be finite and positive.")
     element_edges = state2.points[state2.triangles[:, [0, 1, 1, 2]].reshape(-1)]
     element_length = float(
         np.median(np.linalg.norm(element_edges[0::2] - element_edges[1::2], axis=1))
@@ -404,19 +439,19 @@ def render_event_pdf(
             zoom.xlim[1] - zoom.xlim[0],
             zoom.ylim[1] - zoom.ylim[0],
             fill=False,
-            color="C3",
+            color="black",
             linewidth=1.2,
         )
     )
-    locator_ax.set_title(r"(a) full mesh: $E_0^{(e)}-E_2^{(e)}$")
+    locator_ax.set_title(r"(a) $E_1^{(e)}-E_2^{(e)}$")
 
     mesh_plot.plot_energy_change_background(
         backward_locator_ax,
-        state2,
+        state4,
         backward_energy_change,
         backward_geometry,
         zoom=full_zoom,
-        symmetric_limit=energy_limit,
+        symmetric_limit=backward_energy_limit,
         show_mesh_edges=True,
         mesh_edge_color="face",
         rasterized=True,
@@ -427,13 +462,13 @@ def render_event_pdf(
             zoom.xlim[1] - zoom.xlim[0],
             zoom.ylim[1] - zoom.ylim[0],
             fill=False,
-            color="C3",
+            color="black",
             linewidth=1.2,
         )
     )
-    backward_locator_ax.set_title(r"(c) full mesh: $E_2^{(e)}-E_4^{(e)}$")
+    backward_locator_ax.set_title(r"(c) $E_3^{(e)}-E_4^{(e)}$")
     _plot_reversibility_scatter(scatter_ax, setting_catalog, event, layout)
-    scatter_ax.set_title("(e) chosen-setting reversibility scatter")
+    scatter_ax.set_title("(e)")
     mappable = mesh_plot.plot_energy_change_background(
         event_ax,
         state2,
@@ -455,10 +490,11 @@ def render_event_pdf(
         show_key=True,
         key_label=rf"$|\rightarrow| = {_scientific_latex(arrow_scale.physical_key_length)}$",
         rasterized=True,
+        scale_heads_with_length=True,
     )
     if relation is mesh_plot.TopologyRelation.IDENTICAL:
         _plot_m3_outline(event_ax, state2, m3_changed)
-    event_ax.set_title(r"(b) forward relaxation, $E_0^{(e)}-E_2^{(e)}$")
+    event_ax.set_title(r"(b) $E_1^{(e)}-E_2^{(e)}$")
     colorbar = fig.colorbar(
         mappable,
         ax=event_ax,
@@ -467,6 +503,7 @@ def render_event_pdf(
         fraction=0.05,
         pad=0.13,
         aspect=50,
+        extend="both",
     )
     colorbar.set_ticks((-0.75 * energy_limit, 0.0, 0.75 * energy_limit))
     colorbar.formatter = FuncFormatter(_scientific_tick)
@@ -474,17 +511,17 @@ def render_event_pdf(
 
     backward_mappable = mesh_plot.plot_energy_change_background(
         backward_ax,
-        state2,
+        state4,
         backward_energy_change,
         backward_geometry,
         zoom=zoom,
-        symmetric_limit=energy_limit,
+        symmetric_limit=backward_energy_limit,
         rasterized=True,
     )
     backward_indices = _arrow_indices(
         state3, displacements.backward_relaxation, zoom, options.maximum_arrows
     )
-    mesh_plot.plot_displacement_arrows(
+    backward_quiver = mesh_plot.plot_displacement_arrows(
         backward_ax,
         state3.points[backward_indices],
         displacements.backward_relaxation[backward_indices],
@@ -493,8 +530,9 @@ def render_event_pdf(
         show_key=True,
         key_label=rf"$|\rightarrow| = {_scientific_latex(backward_scale.physical_key_length)}$",
         rasterized=True,
+        scale_heads_with_length=True,
     )
-    backward_ax.set_title(r"(d) backward relaxation, $E_2^{(e)}-E_4^{(e)}$")
+    backward_ax.set_title(r"(d) $E_3^{(e)}-E_4^{(e)}$")
     backward_colorbar = fig.colorbar(
         backward_mappable,
         ax=backward_ax,
@@ -503,9 +541,10 @@ def render_event_pdf(
         fraction=0.05,
         pad=0.13,
         aspect=50,
+        extend="both",
     )
     backward_colorbar.set_ticks(
-        (-0.75 * energy_limit, 0.0, 0.75 * energy_limit)
+        (-0.75 * backward_energy_limit, 0.0, 0.75 * backward_energy_limit)
     )
     backward_colorbar.formatter = FuncFormatter(_scientific_tick)
     backward_colorbar.update_ticks()
@@ -530,11 +569,12 @@ def render_event_pdf(
         show_key=True,
         key_label=rf"$|\rightarrow| = {_scientific_latex(closure_scale.physical_key_length)}$",
         rasterized=True,
+        scale_heads_with_length=True,
     )
     closure_ax.set_xlim(*zoom.xlim)
     closure_ax.set_ylim(*zoom.ylim)
     closure_ax.set_aspect("equal", adjustable="box")
-    closure_ax.set_title(r"(f) closure residual $\mathbf{x}_4-\mathbf{x}_0$")
+    closure_ax.set_title(r"(f) $\mathbf{x}_4-\mathbf{x}_0$")
 
     # Equal-aspect mesh panels otherwise sit centered inside wider grid cells.
     # Anchor the first two columns toward one another to remove that invisible
@@ -546,18 +586,6 @@ def render_event_pdf(
     backward_ax.set_anchor("W")
     closure_ax.set_anchor("W")
 
-    event_class = str(event.get("event_class", "unknown")).replace("_", " ")
-    atlas_label = str(event.get("atlas_label", "")).replace("_", " ")
-    load = float(event.get("load", np.nan))
-    yield_regime = {"pre": "pre-yield", "post": "post-yield"}.get(
-        str(event.get("yield_regime", "unknown")),
-        str(event.get("yield_regime", "unknown")),
-    )
-    fig.suptitle(
-        f"{atlas_label + ' | ' if atlas_label else ''}{event_class} | "
-        f"$\\gamma$ = {load:.5g} | {yield_regime}",
-        fontsize=11,
-    )
     fig.subplots_adjust(
         top=layout.top,
         bottom=layout.bottom,
@@ -579,13 +607,17 @@ def render_event_pdf(
     # Keep the final column's left-side tick labels and y label clear of the
     # middle mesh panels; axes-box separation alone is insufficient here.
     _shift_axes_horizontally((scatter_ax, closure_ax), layout.final_column_shift)
+    _connect_zoom(fig, locator_ax, event_ax, zoom)
+    _connect_zoom(fig, backward_locator_ax, backward_ax, zoom)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if suffix == ".pdf":
         with plt.rc_context({"pdf.compression": 9}):
-            fig.savefig(output_path, dpi=options.rasterized_dpi)
+            fig.savefig(output_path, dpi=options.rasterized_dpi,
+                        bbox_inches="tight", pad_inches=0.025)
     else:
-        fig.savefig(output_path, dpi=options.rasterized_dpi)
+        fig.savefig(output_path, dpi=options.rasterized_dpi,
+                    bbox_inches="tight", pad_inches=0.025)
     plt.close(fig)
     return output_path
 

@@ -128,8 +128,10 @@ class RenderOptions:
     maximum_arrows: int | None = None
     common_arrow_scale: float | None = None
     common_energy_limit: float | None = None
+    energy_color_quantile: float = 0.97
+    recover_legacy_geometry_fields: bool = False
     common_grid_resolution: int = 400
-    figure_size: tuple[float, float] = (10.4, 5.0)
+    figure_size: tuple[float, float] = (9.36, 4.5)
     layout: EventSheetLayout = EventSheetLayout()
     rasterized_dpi: int = 200
     output_format: str = "auto"
@@ -147,4 +149,6 @@ class RenderOptions:
             raise ValueError("figure_size must contain two positive values.")
         if self.rasterized_dpi <= 0:
             raise ValueError("rasterized_dpi must be positive.")
+        if not 0 < self.energy_color_quantile <= 1:
+            raise ValueError("energy_color_quantile must lie in (0, 1].")
         self.layout.validate()

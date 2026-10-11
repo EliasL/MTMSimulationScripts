@@ -41,20 +41,53 @@ because state 1 already supplies that affine reference.
 - Output PNG by default; PDF can be requested explicitly, and animations are
   not generated.
 - Use a symmetric `coolwarm` color scale centered at zero for energy changes.
-- Show both `E(state0)-E(state2)` and `E(state2)-E(state4)` with the same
-  symmetric `coolwarm` limits, each with a full-mesh locator and a zoomed
-  panel.
+- Show both `E(state1)-E(state2)` and `E(state3)-E(state4)`, comparing
+  meshes at identical loading. Compute each field's 97th percentile of
+  absolute element values, then use the larger limit for both columns.
+  Larger magnitudes saturate the shared symmetric color scale.
+- Connect the bottom corners of each black locator rectangle to the top
+  corners of its zoom panel. Use short mathematical panel labels without
+  an overall title.
 - Convey displacement magnitude with arrow length.
 - Include a boxed in-panel quiver key using `|->| = ...` notation; the key
   arrow is the amplified display length corresponding to the stated physical
   displacement magnitude.
 - Outline forward m3-changed elements without using them to choose
   reversibility.
-- Show load and pre/post-yield status, but do not duplicate every selection into
-  separate pre/post groups.  The CLI may filter to `all`, `pre`, or `post`.
+- Render post-yield events only, including in the scatter inset.
 - Select the zoom from a 10-by-10-unit smoothed density of the absolute local
   energy difference, with a displayed width capped at 20 units.  The density
   is only a selection device and is not plotted.
+
+## Downloaded non-reconnecting atlas
+
+Run `python -m Plotting.real_space_events.rebuild_downloaded_atlas` with the
+project environment to produce PDF and PNG sheets from
+`~/Downloads/atlas_nonreconnecting_states`. Outputs are written to
+`Plots/real_space_events/atlas_nonreconnecting_relaxation_postyield`.
+The saved selection supplies the post-yield labels, without an additional
+strain buffer. Its one pre-yield example is excluded.
+
+The scatter inset uses all post-yield events in the standard epsilon_x=1e-6
+setting from the cached reversibility CSVs (all seeds), via the existing
+standard scatter catalogue builder. The highlighted atlas event retains its
+Delta E_S recomputed with the fixed gamma-zero tangent and energy and stress
+reconstructed independently from the full-precision node coordinates.
+The energy increment is validated against the original macro increment in
+selection.csv. Legacy exported P belongs to F_Fix; the exported sigma
+incorrectly combines P with F. Its scalar fields also have only five
+significant digits. `legacy_fields.py` validates triangle edges against F_Fix,
+reflects clockwise local bases (a square-potential symmetry), and evaluates
+the Conti-square potential and Cauchy stress. The stress average uses current
+triangle areas. All local energy differences use these reconstructed fields.
+Do not average exported sigma12 or subtract rounded VTU total energies for
+these sensitive quantities. This reader rejects reconnecting meshes.
+These saved states
+belong to older trajectories than the cached background runs. The five downloaded events are included explicitly in the scatter population,
+and the selected event is marked by crosshairs, an open ring and a plus marker.
+Quiver head length is 30% of each displayed vector length and head width is
+24%, so short vectors no longer receive oversized heads.
+`provenance.json` records the population, state pairs, and color limits.
 
 ## Reconnecting meshes
 

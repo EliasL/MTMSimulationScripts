@@ -754,10 +754,11 @@ def _render_pooled_poincare_flow(
     after_x: np.ndarray,
     after_y: np.ndarray,
     delta_T_frobenius: np.ndarray,
-    boundary: np.ndarray,
+    boundary: np.ndarray | None,
     dpi: int,
     direction_split_otsu: bool = False,
     show_arrows: bool = False,
+    density_norm: LogNorm | None = None,
 ) -> Path:
     """Render one pooled Poincare flow view at a requested zoom.
 
@@ -777,9 +778,10 @@ def _render_pooled_poincare_flow(
     )
     _prepare_poincare_axis(flow_axis, zoom=zoom)
     density_image = _draw_poincare_density_histogram(
-        flow_axis, density_histogram, zoom=zoom
+        flow_axis, density_histogram, zoom=zoom, norm=density_norm
     )
-    _draw_poincare_loss_of_ellipticity_limit(flow_axis, boundary, zoom=zoom)
+    if boundary is not None:
+        _draw_poincare_loss_of_ellipticity_limit(flow_axis, boundary, zoom=zoom)
     if show_arrows:
         if vector_colorbar_axis is None:
             raise RuntimeError("The vector colorbar axis was not created.")
@@ -817,7 +819,8 @@ def _render_pooled_poincare_flow(
             f"(N={total_element_count}; N_{{visible}}={visible_density_count})"
         )
     density_colorbar.set_label(density_label)
-    flow_axis.legend(loc="upper left", frameon=True)
+    if boundary is not None:
+        flow_axis.legend(loc="upper left", frameon=True)
     flow_figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
     plt.close(flow_figure)
     return output_path

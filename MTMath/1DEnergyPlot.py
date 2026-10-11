@@ -63,17 +63,38 @@ def _forces_worker(args):
     return f_lag, f_eul, x_chunk
 
 
-def plot_energy():
-    strain = np.linspace(-3, 3, 1000)
-    e = ContiEnergy.energy_from_simpleShear(strain)
+def plot_energy(strain=None, *, beta=-1 / 4, K=4, noise=1, save_path=None):
+    """Plot a homogeneous element's ground-referenced energy density.
 
-    fig, ax = plt.subplots()
-    ax.plot(strain, e, label="Energy")
-    ax.set_xlabel(r"$\gamma$ (Strain)")
-    ax.set_ylabel("Energy")
-    ax.set_title("Energy in Simple Shear")
-    ax.legend()
+    Horizontal shear is F = [[1, gamma], [0, 1]]. The constitutive
+    evaluator includes Lagrange reduction; total element energy is the
+    plotted density multiplied by the reference area.
+    """
+    if strain is None:
+        strain = np.linspace(-3, 3, 6001)
+    strain = np.asarray(strain, dtype=float)
+    if strain.ndim != 1 or strain.size < 2 or not np.all(np.isfinite(strain)):
+        raise ValueError("strain must be a finite 1D array with at least two points")
+    e = ContiEnergy.energy_from_simpleShear(strain, beta=beta, K=K, noise=noise)
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    ax.plot(strain, e, color="#0072B2", linewidth=2)
+    ax.set_xlabel(r"Horizontal shear, $\gamma$")
+    ax.set_ylabel(r"Energy density, $\phi(F(\gamma))-\phi(I)$")
+    ax.set_title("Single element under horizontal simple shear")
+    ax.text(0.5, 0.96, r"$x'=x+\gamma y,\quad y'=y$",
+            transform=ax.transAxes, ha="center", va="top")
+    ax.set_xlim(float(strain.min()), float(strain.max()))
+    ax.set_ylim(bottom=0, top=float(np.max(e)) * 1.20)
+    ax.grid(alpha=0.2)
+    ax.spines[["top", "right"]].set_visible(False)
     fig.tight_layout()
+    if save_path is not None:
+        output_dir = os.path.dirname(os.fspath(save_path))
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+        fig.savefig(save_path, bbox_inches="tight", dpi=200)
+    return fig, ax
 
 
 def plot_Lagrangian_forces():
