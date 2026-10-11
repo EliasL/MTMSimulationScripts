@@ -63,6 +63,7 @@ from Plotting.plotPowerLaw import (
     plot_energy_drop_trace,
     plot_ks_distance,
 )
+from Plotting.standardPowerlaw import POST_YIELD_RULE
 
 
 # =============================================================================
@@ -105,8 +106,7 @@ FALLBACK_CSV_PATHS = (
 )
 
 # Energy-drop analysis.
-# "auto" uses the existing stress-peak split and keeps only the post-yield
-# region: gamma > gamma_yield + 0.01, separately for every simulation.
+# "auto" keeps transitions strictly after each run's avg_P12 peak +0.01.
 STRAIN_LIMIT = "auto"
 AVERAGE_ENERGY = False
 DROP_COLUMN = "stress_corrected_drop_second_order"
@@ -279,7 +279,7 @@ PANEL_SUBPLOT_MARGINS = {
 # =============================================================================
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = REPO_ROOT / "Plots" / "powerLaw" / "truncated_powerlaw_flowchart"
+OUTPUT_DIR = REPO_ROOT / "Plots" / "powerLaw" / "truncated_powerlaw_flowchart_piola_peak"
 PANEL_CACHE_DIR = OUTPUT_DIR / "panels"
 DOWNLOAD_CACHE_DIR = OUTPUT_DIR / "data"
 ANALYSIS_SUMMARY_PATH = OUTPUT_DIR / "analysis_summary.json"
@@ -698,6 +698,7 @@ def _write_analysis_summary(analysis):
         "actual_size": analysis["actual_size"],
         "reconnecting": bool(analysis["reconnecting"]),
         "strain_limit": STRAIN_LIMIT,
+        "post_yield_rule": POST_YIELD_RULE,
         "first_run_post_yield_limit": list(analysis["first_strain_limit"]),
         "minimum_drop": MIN_DROP,
         "number_of_drops": int(analysis["drops"].size),
@@ -789,7 +790,10 @@ def _load_summary():
         raise FileNotFoundError(
             f"Missing cached plot panels {missing_panels}; run --regenerate-subplots."
         )
-    return json.loads(ANALYSIS_SUMMARY_PATH.read_text())
+    summary = json.loads(ANALYSIS_SUMMARY_PATH.read_text())
+    if summary.get("post_yield_rule") != POST_YIELD_RULE:
+        raise ValueError("Cached flowchart panels use an obsolete yield rule; regenerate them.")
+    return summary
 
 
 def _calculate_panel_positions():

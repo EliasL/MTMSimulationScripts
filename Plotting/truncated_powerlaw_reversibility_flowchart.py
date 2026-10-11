@@ -80,6 +80,7 @@ from Plotting.plotPowerLaw import (
 )
 from Plotting.standardPowerlaw import (
     DEFAULT_KAPPA_RHO,
+    POST_YIELD_RULE,
     kappa_detection_threshold,
     kappa_from_relaxation_energy,
 )
@@ -341,7 +342,7 @@ FLOWCHART_TEXT_ZORDER = 9.0
 # =============================================================================
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-OUTPUT_DIR = REPO_ROOT / "Plots" / "powerLaw" / "truncated_powerlaw_reversibility_flowchart"
+OUTPUT_DIR = REPO_ROOT / "Plots" / "powerLaw" / "truncated_powerlaw_reversibility_flowchart_piola_peak"
 PANEL_CACHE_DIR = OUTPUT_DIR / "panels"
 XMIN_FIT_CACHE_DIR = OUTPUT_DIR / "xmin_fit_cache"
 EXHAUSTIVE_XMIN_CACHE_DIR = OUTPUT_DIR / "exhaustive_xmin_cache"
@@ -587,7 +588,7 @@ def _exhaustive_xmin_analysis(data, *, cache_dir=None, parallel=None):
 
 def _collect_analysis(
     csv_paths, *, system_size=None, evaluate_pvalue=True, cache_dir=None,
-    parallel_xmin=None,
+    parallel_xmin=None, es_sample_size=None, es_sample_seed=0,
 ):
     system_size = REQUESTED_SYSTEM_SIZE if system_size is None else int(system_size)
     raw_df, raw_steps, raw_info = _read_steps(csv_paths[0])
@@ -641,6 +642,7 @@ def _collect_analysis(
         records.append(
             {
                 "path": str(path),
+                "strain_lim": tuple(map(float, strain_lim)),
                 "er_mask": np.asarray(er_mask, dtype=bool),
                 "er_signed": np.asarray(er_signed, dtype=float),
                 "kappa": kappa_rows,
@@ -683,6 +685,22 @@ def _collect_analysis(
     es_irrev = es_irrev[
         np.isfinite(es_irrev) & (es_irrev > MIN_DROP)
     ]
+    fit_subsampling = None
+    es_sample_indices = None
+    if es_sample_size is not None:
+        if not isinstance(es_sample_size, (int, np.integer)) or not (
+            XMIN_MIN_TAIL_COUNT <= es_sample_size <= es_irrev.size
+        ):
+            raise ValueError("Subsample size must be an integer between min-tail count and population size.")
+        es_sample_indices = np.sort(np.random.default_rng(es_sample_seed).choice(
+            es_irrev.size, size=es_sample_size, replace=False,
+        ))
+        fit_subsampling = {
+            "source_count": int(es_irrev.size), "selected_count": int(es_sample_size),
+            "random_seed": int(es_sample_seed), "replace": False,
+            "selection_stage": "finite_positive_irreversible_delta_E_S",
+        }
+        es_irrev = es_irrev[es_sample_indices]
     if es_irrev.size < XMIN_MIN_TAIL_COUNT:
         raise RuntimeError(
             f"Only {es_irrev.size} irreversible Delta E_S drops were found."
@@ -731,12 +749,15 @@ def _collect_analysis(
         "raw_steps": raw_steps,
         "raw_info": raw_info,
         "first_strain_limit": first_strain_limit,
+        "per_run_windows": {record["path"]: record["strain_lim"] for record in records},
         "kappa_all": kappa_all,
         "kappa_det": kappa_det,
         "kappa_rev": kappa_rev,
         "kappa_irrev": kappa_irrev,
         "es_rev": es_rev,
         "es_irrev": es_irrev,
+        "fit_subsampling": fit_subsampling,
+        "es_sample_indices": es_sample_indices,
         "es_fit": es_fit,
         "es_analysis": es_analysis,
         "xmin_selection_mode": (
@@ -1094,7 +1115,7 @@ def _fit_panel(analysis, output_dir=None):
         show_legend=False,
         xmin_analysis=False,
     )
-    ax1.lines[0].set_label("Irreversible $\u0394E_S$ PDF")
+    ax1.lines[0].set_label(r"Irreversible $\Delta E_S$ PDF")
     ax1.lines[0].set_markersize(1.6)
     ax1.lines[0].set_markevery(
         _marker_stride(len(ax1.lines[0].get_xdata()), FIT_PDF_MAX_MARKERS)
@@ -1117,6 +1138,7 @@ def _fit_panel(analysis, output_dir=None):
             fit_label = (
                 rf"$\hat{{\alpha}}={alpha_fit.alpha:.2f}$, "
                 rf"$1/\hat{{\lambda}}={inverse_lambda:.1f}$"
+                "\nNo p-value or uncertainty intervals"
             )
         ax1.lines[1].set_label(fit_label)
     if len(ax1.patches) != 1:
@@ -1239,6 +1261,8 @@ def _write_analysis_summary(analysis, output_path=None):
         "csv_paths": analysis["csv_paths"],
         "system_size": analysis["system_size"],
         "post_yield": True,
+        "post_yield_rule": POST_YIELD_RULE,
+        "per_run_windows": analysis.get("per_run_windows"),
         "number_of_kappa_events": int(analysis["kappa_all"].size),
         "rho": float(KAPPA_RHO),
         "rho_definition": "N/V_0 = (2 L^2)/(L^2) = 2",
@@ -1304,6 +1328,7 @@ def _write_analysis_summary(analysis, output_path=None):
             bootstrap_value("Lambda_max"),
         ],
         "fit_population": "irreversible_delta_E_S",
+        "fit_subsampling": analysis.get("fit_subsampling"),
     }
     output_path = ANALYSIS_SUMMARY_PATH if output_path is None else Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1363,7 +1388,10 @@ def _load_summary():
         raise FileNotFoundError(
             "Missing cached reversibility panels; run --regenerate-subplots first."
         )
-    return json.loads(ANALYSIS_SUMMARY_PATH.read_text())
+    summary = json.loads(ANALYSIS_SUMMARY_PATH.read_text())
+    if summary.get("post_yield_rule") != POST_YIELD_RULE:
+        raise ValueError("Cached flowchart panels use an obsolete yield rule; regenerate them.")
+    return summary
 
 
 def _calculate_panel_positions():

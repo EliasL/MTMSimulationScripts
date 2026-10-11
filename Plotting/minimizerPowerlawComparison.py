@@ -7,9 +7,7 @@ irreversible Delta E_R values are fitted.  Each minimizer independently uses
 the exhaustive observed-candidate global minimum of the KS distance.  The
 legacy simpleDrop cutoff is neither selected nor displayed.
 
-The old L=200 minimizer exports do not contain Cauchy stress.  For those files,
-the post-yield start is explicitly approximated by the peak stored P12 value
-plus ``POST_YIELD_OFFSET``.  Native Cauchy stress is preferred when present.
+The post-yield start is each run's avg_P12 peak +0.01.
 """
 
 from __future__ import annotations
@@ -36,6 +34,7 @@ from Plotting.plotPowerLaw import (
     plot_xmin_d_alpha_comparison,
 )
 from Plotting.standardPowerlaw import (
+    POST_YIELD_RULE, yield_regimes,
     EventDrops,
     kappa_detection_threshold,
     kappa_from_relaxation_energy,
@@ -46,7 +45,6 @@ from Plotting.standardPowerlaw import (
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = ROOT / "Plots/powerLaw/minimizer_irreversible_er"
 DEFAULT_SIZE = 200
-POST_YIELD_OFFSET = 1e-2
 MIN_TAIL_COUNT = 100
 NR_DIAGNOSTIC_XMINS = 160
 ALGORITHMS = ("FIRE", "CG", "L-BFGS")
@@ -149,19 +147,9 @@ def _read_relaxation_steps(path: Path, size: int) -> tuple[np.ndarray, np.ndarra
     if load.size < 3 or not np.all(np.isfinite(load)) or np.any(np.diff(load) <= 0):
         raise ValueError(f"Load must be finite and strictly increasing in {path}")
 
-    if "avg_sigma12" in frame and np.isfinite(frame["avg_sigma12"]).any():
-        yield_column = "avg_sigma12"
-        yield_method = "peak native avg_sigma12"
-    elif "avg_P12" in frame and np.isfinite(frame["avg_P12"]).any():
-        yield_column = "avg_P12"
-        yield_method = "peak avg_P12 proxy (Cauchy stress unavailable)"
-    else:
-        raise KeyError(f"No avg_sigma12 or avg_P12 yield proxy in {path}")
-    yield_values = frame[yield_column].to_numpy(dtype=float)
-    finite_yield = np.isfinite(yield_values)
-    yield_indices = np.flatnonzero(finite_yield)
-    peak_index = int(yield_indices[np.argmax(yield_values[finite_yield])])
-    post_yield_start = float(load[peak_index] + POST_YIELD_OFFSET)
+    post_yield_start = yield_regimes(frame)["post"][0]
+    if load[-1] <= post_yield_start:
+        raise ValueError(f"No data after avg_P12 peak +0.01 in {path}")
 
     delta_gamma = np.diff(load)
     delta_e_r = -frame["total_e_change_from_init"].to_numpy(dtype=float)[1:]
@@ -189,7 +177,7 @@ def _read_relaxation_steps(path: Path, size: int) -> tuple[np.ndarray, np.ndarra
         "available_load_end": float(load[-1]),
         "complete_to_load_1": bool(load[-1] >= 1.0),
         "post_yield_start": post_yield_start,
-        "yield_method": yield_method,
+        "yield_method": POST_YIELD_RULE,
         "positive_post_yield_delta_E_R_count": int(delta_e_r.size),
     }
 
@@ -331,7 +319,7 @@ def run_analysis(
                     "post-yield events classified by kappa; finite positive "
                     "irreversible Delta E_R fitted"
                 ),
-                "post_yield_offset": POST_YIELD_OFFSET,
+                "yield_criterion": POST_YIELD_RULE,
                 "simple_drop_used": False,
                 "populations": population_summaries,
                 "fits": fit_summaries,

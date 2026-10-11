@@ -27,6 +27,7 @@ import pandas as pd
 
 from Management.configGenerator import ConfigGenerator, SimulationConfig
 from Management.jobs import sylvainBatches
+from Plotting.standardPowerlaw import POST_YIELD_OFFSET
 from Plotting.dataFunctions import get_metadata
 from Plotting.energyDropCalculations import (
     calculate_energy_step_data,
@@ -269,7 +270,7 @@ def _load_sample(path: Path, config: SimulationConfig, batch: int) -> SampleData
         raise ValueError(f"Non-finite inter-strain stress drops in {path}.")
 
     gamma = load[1:]
-    yield_load = float(findPrePostSplit(df=df))
+    yield_load = float(findPrePostSplit(df=df)) + POST_YIELD_OFFSET
     return SampleData(
         path=path,
         batch=batch,

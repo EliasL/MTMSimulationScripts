@@ -14,6 +14,7 @@ import sys
 import tempfile
 
 import numpy as np
+from Plotting.standardPowerlaw import yield_region_mask
 
 
 def _collect_values(
@@ -43,12 +44,6 @@ def _collect_values(
         load_i = np.asarray(prediction_df["load_i"], dtype=float)
         step_energy_change = np.asarray(raw_df["total_energy_change"], dtype=float)[1:]
         drop_mask = step_energy_change < 0.0
-        # Use the Cauchy shear-stress peak consistently with the energy
-        # predictor. avg_P12 mixes material directions from independently
-        # oriented element reference maps and is not conjugate to MTS2D's
-        # left-multiplicative affine shear.
-        stress = np.asarray(raw_df["avg_sigma12"], dtype=float)
-        yield_load = float(load[int(np.nanargmax(stress))])
 
         if event_only or no_event_only:
             event_mask = np.asarray(raw_df["nr_total_edge_flips"], dtype=float)[1:] > 0
@@ -68,7 +63,7 @@ def _collect_values(
 
             for region in ("pre", "post"):
                 region_mask = (
-                    load_i < yield_load if region == "pre" else load_i >= yield_load
+                    yield_region_mask(raw_df, region, load[1:])
                 )
                 if region == "pre" and pre_yield_min_gamma is not None:
                     region_mask &= load_i >= pre_yield_min_gamma

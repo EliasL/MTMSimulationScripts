@@ -24,6 +24,7 @@ import pandas as pd
 from Plotting.plotPowerLaw import dist_from_fit, make_fit
 from Plotting.sigmaRescueSizeScalingPowerlawDiagnostics import _plot_fit_panel
 from Plotting.standardPowerlaw import (
+    SIGMA_RESCUE_POST_YIELD_WINDOW,
     DEFAULT_KAPPA_RHO,
     EventDrops,
     kappa_detection_threshold,
@@ -35,16 +36,16 @@ from Plotting.standardPowerlaw import (
 )
 
 
-DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0")
+DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0_piola_peak")
 DEFAULT_SUMMARY = Path(
-    "Plots/powerLaw/sigma_rescue_size_scaling_individual/summary.json"
+    "Plots/powerLaw/sigma_rescue_size_scaling_individual_piola_peak/summary.json"
 )
-DEFAULT_OUTPUT_DIR = Path("Plots/powerLaw/sigma_rescue_size_scaling")
+DEFAULT_OUTPUT_DIR = Path("Plots/powerLaw/sigma_rescue_size_scaling_piola_peak")
 PROTOCOLS = ("delta_E_I", "delta_E_R", "delta_E_S")
 PROTOCOL_LABELS = {
-    "delta_E_I": r"$\Delta E_I$ (inter-strain)",
-    "delta_E_R": r"$\Delta E_R$ (relaxation)",
-    "delta_E_S": r"$\Delta E_S$ (stress corrected)",
+    "delta_E_I": r"$\Delta E_I$",
+    "delta_E_R": r"$\Delta E_R$",
+    "delta_E_S": r"$\Delta E_S$",
 }
 COLORS = {"delta_E_I": "#0072B2", "delta_E_R": "#E69F00", "delta_E_S": "#009E73"}
 MARKERS = {"delta_E_I": "o", "delta_E_R": "s", "delta_E_S": "^"}
@@ -64,6 +65,7 @@ def _load_post_yield(snapshot_root: Path) -> pd.DataFrame:
         raise FileNotFoundError(f"Missing usable drop table: {table}")
     wanted = [
         "size",
+        "seed",
         "load_ip1",
         "delta_gamma",
         "reference_volume",
@@ -168,6 +170,12 @@ def _records(frame: pd.DataFrame, summary: dict, cache_dir: Path):
             cutoff_rate = float(getattr(distribution, "Lambda", np.nan))
             if not np.isfinite(alpha) or not np.isfinite(cutoff_rate) or cutoff_rate <= 0:
                 raise RuntimeError(f"Invalid fixed-xmin parameters for L={size}, {protocol}.")
+            xmin_interval = np.asarray(summary_protocol["bootstrap_xmin_interval_95"], dtype=float)
+            alpha_interval = np.asarray(summary_protocol["bootstrap_alpha_interval_95"], dtype=float)
+            lambda_interval = np.asarray(summary_protocol["bootstrap_lambda_interval_95"], dtype=float)
+            for name, interval in (("xmin", xmin_interval), ("alpha", alpha_interval), ("Lambda", lambda_interval)):
+                if interval.shape != (2,) or not np.all(np.isfinite(interval)) or not 0 < interval[0] < interval[1]:
+                    raise ValueError(f"Invalid 95% bootstrap {name} interval for L={size}, {protocol}.")
             records.append(
                 {
                     "size": size,
@@ -178,8 +186,9 @@ def _records(frame: pd.DataFrame, summary: dict, cache_dir: Path):
                     "D": float(summary_protocol["global_min_D"]),
                     "p": (float(summary_protocol["clauset_pvalue_v2"])
                           if summary_protocol["clauset_pvalue_v2"] is not None else None),
-                    "xmin_ci_95": summary_protocol["bootstrap_xmin_ci_95"],
-                    "alpha_ci_95": summary_protocol["bootstrap_alpha_ci_95"],
+                    "xmin_interval_95": xmin_interval.tolist(),
+                    "alpha_interval_95": alpha_interval.tolist(),
+                    "Lambda_interval_95": lambda_interval.tolist(),
                     "data_count": int(data.size),
                     "tail_count": int(tail.size),
                     "tail_fraction": float(tail.size / data.size),
@@ -191,43 +200,31 @@ def _records(frame: pd.DataFrame, summary: dict, cache_dir: Path):
 def _plot_per_size_pdfs(
     fits_by_size: dict[int, dict[str, object]],
     populations_by_size: dict[int, dict[str, np.ndarray]],
+    fit_summary: dict,
     output_dir: Path,
 ) -> None:
     """Reuse the established per-protocol PDF panel for each system size."""
-    from matplotlib.lines import Line2D
-
     output_dir.mkdir(parents=True, exist_ok=True)
     for size in sorted(fits_by_size):
-        fig, axes = plt.subplots(1, len(PROTOCOLS), figsize=(13.5, 4.1), squeeze=False)
-        for axis, protocol in zip(axes[0], PROTOCOLS):
+        for protocol in PROTOCOLS:
+            fig, axis = plt.subplots(figsize=(5.5, 4.2))
+            protocol_summary = fit_summary["fits"][str(size)]["protocols"][protocol]
             _plot_fit_panel(
                 axis,
                 fits_by_size[size][protocol],
                 populations_by_size[size][protocol],
                 protocol,
+                bootstrap_intervals=(
+                    tuple(protocol_summary["bootstrap_xmin_interval_95"]),
+                    tuple(protocol_summary["bootstrap_alpha_interval_95"]),
+                    tuple(protocol_summary["bootstrap_lambda_interval_95"]),
+                ),
             )
-        handles = [
-            Line2D([], [], color="black", marker="o", linestyle="None", label="irreversible events"),
-            Line2D([], [], color="tab:red", label="truncated power-law fit"),
-        ]
-        fig.legend(
-            handles=handles,
-            loc="upper center",
-            ncol=2,
-            frameon=False,
-            bbox_to_anchor=(0.5, 0.945),
-            fontsize="small",
-        )
-        fig.suptitle(
-            rf"Post-yield PDFs, $L={size}$; irreversible population from "
-            rf"$\kappa_{{\det}}=\mu/(2\rho)$ split; global KS xmin",
-            y=0.995,
-        )
-        fig.tight_layout(rect=(0, 0, 1, 0.88))
-        path = output_dir / f"L{size}_post_yield_pdf_fits.pdf"
-        fig.savefig(path, bbox_inches="tight")
-        fig.savefig(path.with_suffix(".png"), dpi=220, bbox_inches="tight")
-        plt.close(fig)
+            fig.tight_layout()
+            path = output_dir / f"L{size}_post_yield_{protocol}_fit.pdf"
+            fig.savefig(path, bbox_inches="tight")
+            fig.savefig(path.with_suffix(".png"), dpi=220, bbox_inches="tight")
+            plt.close(fig)
 
 
 def _plot(
@@ -239,14 +236,17 @@ def _plot(
 ) -> None:
     """Plot scaling parameters and validated post-yield event coverage."""
     metrics = (
-        ("alpha", r"$\alpha$", False),
-        ("Lambda", r"$\lambda$", True),
+        ("alpha", r"$\hat\alpha$", False),
+        ("Lambda", r"$\hat\lambda$", True),
         ("event_count", "events used in fit", False),
         ("xmin", r"$\Delta E_{\min}$", True),
     )
     sizes = sorted({row["size"] for row in records})
-    fig, axes = plt.subplots(2, 2, figsize=(9.5, 7.5), squeeze=False)
-    for ax, (metric, ylabel, log_y) in zip(axes.flat, metrics):
+    output.parent.mkdir(parents=True, exist_ok=True)
+    for metric, ylabel, log_y in metrics:
+        fig, ax = plt.subplots(figsize=(5.76, 4.32))
+        stem = {"Lambda": "lambda", "event_count": "event_coverage"}.get(metric, metric)
+        path = output.parent / f"{stem}.pdf"
         if metric == "event_count":
             fraction_ax = ax.twinx()
             x = np.asarray(sizes, dtype=float)
@@ -268,6 +268,7 @@ def _plot(
                 linewidth=1.2,
                 label="paired irreversible events",
             )
+            ax.margins(y=0.14)
             for size, count in zip(sizes, counts):
                 ax.annotate(f"{seed_counts[size]} seeds", (size, count),
                             xytext=(0, 5), textcoords="offset points",
@@ -317,6 +318,10 @@ def _plot(
                 fontsize="small",
                 frameon=True,
             )
+            fig.tight_layout()
+            fig.savefig(path, bbox_inches="tight")
+            fig.savefig(path.with_suffix(".png"), dpi=220, bbox_inches="tight")
+            plt.close(fig)
             continue
         for protocol in PROTOCOLS:
             rows = [
@@ -335,8 +340,12 @@ def _plot(
                 linewidth=1.1,
                 label=PROTOCOL_LABELS[protocol],
             )
-            if protocol == "delta_E_S" and metric in {"alpha", "xmin"}:
-                interval_key = "alpha_ci_95" if metric == "alpha" else "xmin_ci_95"
+            if metric in {"alpha", "xmin", "Lambda"}:
+                interval_key = {
+                    "alpha": "alpha_interval_95",
+                    "xmin": "xmin_interval_95",
+                    "Lambda": "Lambda_interval_95",
+                }[metric]
                 intervals = np.asarray([row[interval_key] for row in rows], dtype=float)
                 ax.vlines(x, intervals[:, 0], intervals[:, 1],
                           color=COLORS[protocol], alpha=0.55, linewidth=1.5)
@@ -346,31 +355,15 @@ def _plot(
         ax.set_xlabel("System size $L$")
         ax.set_ylabel(ylabel)
         ax.grid(alpha=0.2)
-    handles = [
-        Line2D(
-            [],
-            [],
-            color=COLORS[protocol],
-            marker=MARKERS[protocol],
-            label=PROTOCOL_LABELS[protocol],
-        )
-        for protocol in PROTOCOLS
-    ]
-    fig.legend(
-        handles=handles,
-        loc="upper center",
-        ncol=3,
-        frameon=False,
-        bbox_to_anchor=(0.5, 0.965),
-        fontsize="small",
-    )
-    fig.text(0.5, 0.925, r"Green bars: 95% refit intervals for $\Delta E_S$",
-             ha="center", fontsize="small")
-    fig.tight_layout(rect=(0, 0, 1, 0.93))
-    output.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output, bbox_inches="tight")
-    fig.savefig(output.with_suffix(".png"), dpi=220, bbox_inches="tight")
-    plt.close(fig)
+        handles, labels = ax.get_legend_handles_labels()
+        handles.append(Line2D([], [], color="0.35", marker="|", linestyle="none",
+                              markersize=10, label="95% bootstrap percentile intervals"))
+        labels.append("95% bootstrap percentile intervals")
+        ax.legend(handles, labels, fontsize="small")
+        fig.tight_layout()
+        fig.savefig(path, bbox_inches="tight")
+        fig.savefig(path.with_suffix(".png"), dpi=220, bbox_inches="tight")
+        plt.close(fig)
 
 
 def run(
@@ -382,6 +375,8 @@ def run(
     require_gamma0_snapshot(snapshot_root)
     if summary.get("delta_E_S_tangent") != "gamma0":
         raise ValueError(f"Fit summary uses an old Delta E_S convention: {summary_path}")
+    if summary.get("post_yield_window") != SIGMA_RESCUE_POST_YIELD_WINDOW:
+        raise ValueError(f"Fit summary uses an obsolete yield selection: {summary_path}")
     if Path(summary["snapshot_root"]).resolve() != Path(snapshot_root).resolve():
         raise ValueError("Fit summary and requested snapshot refer to different data.")
     if summary.get("bootstrap_xmin_mode") != "global":
@@ -398,6 +393,7 @@ def run(
     _plot_per_size_pdfs(
         fits_by_size,
         populations_by_size,
+        summary,
         output_dir / "per_size_pdf_fits",
     )
     output = output_dir / "post_yield_size_scaling_parameters.pdf"
@@ -406,10 +402,9 @@ def run(
         for size in sorted(frame["size"].unique())
     }
     rescue_fractions = _load_post_yield_rescue_fractions(Path(snapshot_root))
-    peaks = pd.read_csv(Path(snapshot_root) / "tables" / "yield_peaks.csv")
     seed_counts = {
         int(size): int(group["seed"].nunique())
-        for size, group in peaks.loc[peaks["peak_established"]].groupby("size")
+        for size, group in frame.groupby("size")
     }
     _plot(records, paired_event_counts, rescue_fractions, seed_counts, output)
     (output_dir / "size_scaling_parameters.json").write_text(
@@ -420,12 +415,12 @@ def run(
                 "records": records,
                 "paired_event_counts": paired_event_counts,
                 "rescue_fractions": rescue_fractions,
-                "established_seed_counts": seed_counts,
+                "post_yield_seed_counts": seed_counts,
             },
             indent=2,
         )
     )
-    return output
+    return output_dir
 
 
 def main() -> None:

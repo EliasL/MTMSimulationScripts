@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import numpy as np
@@ -8,10 +9,12 @@ import numpy as np
 from Plotting.sizeScalingCollapse import (
     _read_mixed_selected,
     collapse_variance,
+    completed_size_scaling_paths,
     exclude_size,
     fit_xmins,
     log_histogram,
     optimize_collapse,
+    pool_irreversible_es,
     tail_histogram_curves,
 )
 
@@ -22,6 +25,30 @@ class _Fit:
 
 
 class SizeScalingCollapseTests(unittest.TestCase):
+    def test_standard_pool_classifies_before_filtering_positive_es(self):
+        events = {"post": {100: {"initial_guess_energy": np.array([1., 2., 3., 4.]),
+                                "second_order": np.array([1., -4., 3., 2.]),
+                                "kappa": np.array([.5, 2., 2., .5])}}}
+        with mock.patch("Plotting.sizeScalingCollapse.pool_event_pairs", return_value=events), \
+                mock.patch("Plotting.sizeScalingCollapse.kappa_detection_threshold", return_value=1.):
+            pooled = pool_irreversible_es({}, ("post",), Path("cache"))
+        np.testing.assert_array_equal(pooled["second_order"]["post"][100], [3.])
+
+    def test_size_selection_does_not_require_or_include_small_runs(self):
+        groups = [[SimpleNamespace(rows=50, seed=0, name="small")],
+                  [SimpleNamespace(rows=100, seed=0, name="supported")]]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "supported.csv"
+            source.touch()
+            with mock.patch("Plotting.sizeScalingCollapse.nonreconnecting_size_scaling_job",
+                            return_value=(groups, [])), mock.patch(
+                    "Plotting.sizeScalingCollapse._last_load", return_value=1.0) as last_load:
+                paths, inventory = completed_size_scaling_paths(root, 1, 1.0)
+            self.assertEqual(paths, {100: [source]})
+            self.assertEqual(inventory, {100: 1})
+            last_load.assert_called_once_with(source)
+
     def test_fit_xmins_uses_canonical_make_fit(self):
         fake_fit = _Fit(1.0)
         with mock.patch(
@@ -98,15 +125,20 @@ class SizeScalingCollapseTests(unittest.TestCase):
         self.assertAlmostEqual(float(result["dimension"]), dimension, delta=0.01)
         self.assertFalse(bool(result["boundary"]))
 
-    def test_tail_histogram_is_recomputed_after_xmin_filter(self):
+    def test_tail_histogram_uses_complete_full_pdf_bins(self):
+        data = np.geomspace(1.0, 16.0, 256)
+        xmin = 2.3
         curves = tail_histogram_curves(
-            {50: np.array([1.0, 2.0, 4.0, 8.0])},
-            {50: 2.0},
+            {100: data},
+            {100: xmin},
             bins_per_decade=10,
         )
-        expected = log_histogram([2.0, 4.0, 8.0], bins_per_decade=10)
-        np.testing.assert_allclose(curves[50][0], expected[0])
-        np.testing.assert_allclose(curves[50][1], expected[1])
+        x, density = log_histogram(data, bins_per_decade=10)
+        complete = x / 10**0.05 >= xmin
+        np.testing.assert_allclose(curves[100][0], x[complete])
+        np.testing.assert_allclose(
+            curves[100][1], density[complete] * len(data) / np.count_nonzero(data >= xmin)
+        )
 
     def test_log_histogram_rejects_too_few_positive_values(self):
         with self.assertRaisesRegex(ValueError, "three positive drops"):

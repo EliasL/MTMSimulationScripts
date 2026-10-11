@@ -321,8 +321,8 @@ def plotShearFiniteDifferenceDerivatives():
         np.linspace(0, grid_size, 5),
         np.linspace(-1, 1, 5).round(2),
     )
-    ax.set_xlabel(r"$x_p$")
-    ax.set_ylabel(r"$y_p$")
+    ax.set_xlabel(r"$x_P$")
+    ax.set_ylabel(r"$y_P$")
 
     import os
 

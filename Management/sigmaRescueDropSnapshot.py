@@ -45,7 +45,7 @@ from Management.sigmaRescue import (
     inspect_schema_intervals,
 )
 from Plotting.energyDropCalculations import calculate_energy_step_data
-from Plotting.standardPowerlaw import derive_sigma_rescue_yield_peaks
+from Plotting.standardPowerlaw import POST_YIELD_RULE, POST_YIELD_OFFSET, yield_peak_load
 
 
 ROW_KEY_COLUMNS = ("load_step", "load")
@@ -654,6 +654,40 @@ def _write_csv_atomic(frame: pd.DataFrame, destination: Path) -> None:
     os.replace(partial, destination)
 
 
+def build_piola_yield_view(source_root: Path, destination: Path) -> Path:
+    """Reuse unfiltered gamma=0 drop tables, with a fresh native-P12 peak audit."""
+    from Plotting.sizeScalingCollapse import _read_mixed_selected
+    from Plotting.standardPowerlaw import require_gamma0_snapshot
+
+    source_root = Path(source_root).resolve()
+    destination = Path(destination)
+    if destination.exists():
+        require_gamma0_snapshot(destination)
+        return destination
+    source_tables = source_root / "tables"
+    manifest = json.loads((source_tables / "build_manifest.json").read_text())
+    if manifest.get("delta_E_S_tangent") != "gamma0":
+        raise ValueError("A Piola-yield view requires unfiltered gamma=0 drop tables.")
+    peaks = []
+    for run in manifest["runs"]:
+        path = (source_root / "raw" / f"L{run['size']:03d}" / f"seed_{run['seed']:03d}"
+                / run["run_name"].replace(",", "_") / "macroData.csv")
+        print(f"Reading avg_P12 peak: L={run['size']}, seed={run['seed']}", flush=True)
+        peak = yield_peak_load(_read_mixed_selected(path, {"load", "avg_P12"}))
+        peaks.append({"run_name": run["run_name"], "size": run["size"], "seed": run["seed"],
+                      "peak_load": peak, "post_yield_start": peak + POST_YIELD_OFFSET,
+                      "source_macro": str(path)})
+    tables = destination / "tables"
+    tables.mkdir(parents=True)
+    for name in ("drops_all_audited.csv.gz", "drops_usable.csv.gz"):
+        (tables / name).symlink_to(source_tables / name)
+    pd.DataFrame(peaks).to_csv(tables / "yield_peaks.csv", index=False)
+    manifest.update(post_yield_rule=POST_YIELD_RULE, yield_stress_column="avg_P12",
+                    source_snapshot=str(source_root))
+    (tables / "build_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return destination
+
+
 def build_snapshot_drop_tables(snapshot_root: Path) -> SnapshotTableBuild:
     """Create audited local drop tables, without fitting or plotting anything.
 
@@ -674,6 +708,7 @@ def build_snapshot_drop_tables(snapshot_root: Path) -> SnapshotTableBuild:
 
     tables: list[pd.DataFrame] = []
     run_summaries = []
+    yield_peaks = []
     for index, run in enumerate(runs, start=1):
         print(
             f"Combining {index}/{len(runs)}: L={run.size}, seed={run.seed}, "
@@ -684,6 +719,10 @@ def build_snapshot_drop_tables(snapshot_root: Path) -> SnapshotTableBuild:
             run.fragments,
             size=run.size,
         )
+        peak = yield_peak_load(merged)
+        yield_peaks.append({"run_name": run.run_name, "size": run.size,
+                            "seed": run.seed, "peak_load": peak,
+                            "post_yield_start": peak + POST_YIELD_OFFSET})
         table = build_interim_drop_table(
             merged,
             source_macro=run.source_macro,
@@ -715,19 +754,18 @@ def build_snapshot_drop_tables(snapshot_root: Path) -> SnapshotTableBuild:
         )
 
     combined = combine_drop_tables(tables)
+    pd.DataFrame(yield_peaks).to_csv(work_root / "yield_peaks.csv", index=False)
     _write_csv_atomic(combined, work_root / "drops_all_audited.csv.gz")
     _write_csv_atomic(
         combined.loc[combined["usable"]].copy(), work_root / "drops_usable.csv.gz"
     )
-    yield_peaks = derive_sigma_rescue_yield_peaks(audited=combined)
-    _write_csv_atomic(yield_peaks, work_root / "yield_peaks.csv")
     (work_root / "build_manifest.json").write_text(
         json.dumps(
             {
                 "run_count": len(runs),
                 "delta_E_S_tangent": "gamma0",
-                "post_yield_rule": "established per-run avg_sigma12 peak + 0.01",
-                "established_yield_peak_count": int(yield_peaks["peak_established"].sum()),
+                "post_yield_rule": POST_YIELD_RULE,
+                "yield_stress_column": "avg_P12",
                 "audited_transition_count": len(combined),
                 "usable_transition_count": int(combined["usable"].sum()),
                 "runs": run_summaries,

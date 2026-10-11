@@ -680,8 +680,8 @@ def _decorate_disk_axes(
     transformation: str,
     hide_y: bool,
     title: Optional[str] = None,
-    xlabel: str = r"$x_p$",
-    ylabel: Optional[str] = r"$y_p$",
+    xlabel: str = r"$x_P$",
+    ylabel: Optional[str] = r"$y_P$",
 ) -> None:
     """Common overlays + ticks + labels used on all disk plots."""
     drawTriangularElasticDomain(ax, grid_size=N, transformation=transformation)
@@ -993,8 +993,8 @@ def test():
         pass
     ax.set_title("Waldron L error factor (unit curvature)")
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel(r"$x_p$")
-    ax.set_ylabel(r"$y_p$")
+    ax.set_xlabel(r"$x_P$")
+    ax.set_ylabel(r"$y_P$")
     _set_axis_ticks_unit(ax, N)
     # ax.legend(loc="upper right")
     _save_plot(fig, "waldron_unit_curvature")

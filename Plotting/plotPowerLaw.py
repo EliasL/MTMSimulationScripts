@@ -41,6 +41,7 @@ from .energyDropCalculations import (
     infer_plastic_event_column,
     infer_stress_column,
 )
+from .standardPowerlaw import yield_peak_load, yield_regimes
 import os
 import glob
 import tempfile
@@ -345,17 +346,14 @@ def get_mu(df):
 
 def _resolve_strain_lim(strainLim, *, df, postRegime):
     """
-    Resolve "auto"/"all"/None strain limits based on the stress peak.
+    Resolve automatic strain limits using each run's first-Piola stress peak.
     """
     if strainLim == "all":
         return [-np.inf, np.inf]
     if strainLim is None or strainLim == "auto":
-        gamma_max_stress = findPrePostSplit(df=df)
         if postRegime is None:
             return [df["load"].min(), df["load"].max()]
-        if postRegime:
-            return [gamma_max_stress + 1e-2, df["load"].max()]
-        return [df["load"].min(), gamma_max_stress - 1e-4]
+        return yield_regimes(df)["post" if postRegime else "pre"]
     return strainLim
 
 
@@ -1414,17 +1412,10 @@ def pretty_text(text, addEquation=True):
 
 
 def findPrePostSplit(csvPath="", df=None):
-    """Return the peak valid Cauchy shear stress load, never a fixed proxy."""
+    """Return the global avg_P12 peak load; buffered windows use _resolve_strain_lim."""
     if df is None:
         df = read_macrodata_csv(csvPath, L=get_system_size([csvPath]))
-    stress_col = infer_stress_column(df)
-    stress = df[stress_col].to_numpy(dtype=float)
-    load = df["load"].to_numpy(dtype=float)
-    valid = np.isfinite(stress) & np.isfinite(load) & (stress != -1)
-    if not np.any(valid):
-        raise ValueError("No valid avg_sigma12 values for the yield peak.")
-    indices = np.flatnonzero(valid)
-    return float(load[indices[np.argmax(stress[valid])]])
+    return yield_peak_load(df)
 
 
 def get_drops_in_windows(

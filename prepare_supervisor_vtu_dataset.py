@@ -3,8 +3,7 @@
 
 The script assumes that the simulations have already been run.  It selects one
 matching MTS2D job for every requested ``(size, seed)`` pair and classifies its
-files using the maximum of ``avg_sigma12`` in ``macroData.csv`` (or the legacy
-``avg_sigmaxy`` column when that is the schema in the source file).  Dump mode
+files at each run's first-Piola P12 peak +0.01 boundary. Dump mode
 copies every valid dump; VTU mode copies a fixed number of meshes from each
 side of that split.
 
@@ -31,6 +30,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
+from Plotting.standardPowerlaw import POST_YIELD_OFFSET, yield_peak_load
 
 
 DEFAULT_SIZES = (50, 100, 150, 200)
@@ -222,44 +222,9 @@ def discover_jobs(
 
 
 def read_yield_load(path: Path) -> float:
-    with path.open(newline="", encoding="utf-8") as stream:
-        rows = csv.DictReader(stream)
-        if rows.fieldnames is None or "load" not in rows.fieldnames:
-            raise KeyError(f"{path} has no 'load' column")
-        stress_column = next(
-            (
-                column
-                for column in ("avg_sigma12", "avg_sigmaxy")
-                if column in rows.fieldnames
-            ),
-            None,
-        )
-        if stress_column is None:
-            raise KeyError(f"{path} has neither 'avg_sigma12' nor legacy 'avg_sigmaxy'")
-        if stress_column != "avg_sigma12":
-            print(f"Warning: using legacy {stress_column} as yield proxy for {path}")
-
-        best_stress = -math.inf
-        best_load: float | None = None
-        for row_number, row in enumerate(rows, 2):
-            if row.get("load") == "load":
-                # Some long/resumed macro files append their #HEADER line
-                # before continuing the data rows.
-                continue
-            try:
-                load = float(row["load"])
-                stress = float(row[stress_column])
-            except (TypeError, ValueError) as error:
-                raise ValueError(f"Invalid load/stress in {path}:{row_number}") from error
-            if not math.isfinite(load) or not math.isfinite(stress):
-                raise ValueError(f"Non-finite load/stress in {path}:{row_number}")
-            if stress > best_stress:
-                best_stress = stress
-                best_load = load
-
-    if best_load is None:
-        raise ValueError(f"{path} contains no data rows")
-    return best_load
+    """Return the run's first-Piola peak +0.01 post-yield boundary."""
+    from Management.updateCSV import read_macrodata_csv
+    return yield_peak_load(read_macrodata_csv(path)) + POST_YIELD_OFFSET
 
 
 def vtu_load(path: Path) -> float:
@@ -443,6 +408,7 @@ def write_manifest(root: Path, rows: list[dict[str, object]], args: argparse.Nam
 
     summary = {
         "artifact": "vtu",
+        "yield_selection": "avg_P12 peak +0.01" if args.yield_load is None else f"explicit boundary {args.yield_load}",
         "sizes": list(args.sizes),
         "seed_start": args.seed_start,
         "seed_count": args.seed_count,
@@ -479,6 +445,7 @@ def write_dump_manifest(
 
     summary = {
         "artifact": "dump",
+        "yield_selection": "avg_P12 peak +0.01" if args.yield_load is None else f"explicit boundary {args.yield_load}",
         "sizes": list(args.sizes),
         "seed_start": args.seed_start,
         "seed_count": args.seed_count,
@@ -675,7 +642,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--start-load", type=float, default=0.15)
     parser.add_argument("--max-load", type=float, default=1.0)
     parser.add_argument("--load-increment", type=float, default=1e-5)
-    parser.add_argument("--yield-load", type=float, help="Override the per-job stress-maximum split")
+    parser.add_argument("--yield-load", type=float, help="Use an explicit alternative to the avg_P12 peak +0.01")
     parser.add_argument("--download", action="store_true", help="Download the selected artifact with rsync first")
     parser.add_argument(
         "--remote-source",

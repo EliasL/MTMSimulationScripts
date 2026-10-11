@@ -83,6 +83,23 @@ class PValueXminTests(unittest.TestCase):
         evaluate.assert_called_once()
         self.assertEqual(evaluate.call_args.kwargs["xmin_mode"], "global")
 
+    def test_bootstrap_precision_rounding_keeps_requested_replicate_count(self):
+        data = np.asarray([1.0, 1.5, 2.0, 2.5, 3.0, 4.0])
+        fit = Fit(data=data, xmin=2.0,
+                  xmin_distribution=Truncated_Power_Law.name, verbose=0)
+        fit.xmin_selection = "global"
+        fit.xmin_analysis = dict(nr_initial=10, min_tail_count=3,
+                                 max_xmin=None, refinement="exhaustive")
+        for confidence, expected in ((0.05, 100), (0.1, 25)):
+            with self.subTest(confidence=confidence), mock.patch(
+                "MTMath.evaluatePowerlawFit._clauset_refit_xmin_task",
+                return_value=(0.5, [1.2, 0.3], 2.0),
+            ) as refit:
+                fit.evaluate_fit(data, confidence=confidence, parallel=False,
+                                 use_cache=False)
+                self.assertEqual(refit.call_count, expected)
+                self.assertEqual(fit.bootstrap_xmins.size, expected)
+
     def test_clauset_pvalue_uses_v2_semiparametric_cache(self):
         data = np.asarray([1.0, 1.5, 2.0, 2.5, 3.0, 4.0])
         fit = Fit(

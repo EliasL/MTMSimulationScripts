@@ -38,6 +38,8 @@ from Plotting.kappaEventClassification import (
 )
 from Plotting.standardPowerlaw import (
     DEFAULT_KAPPA_RHO,
+    POST_YIELD_RULE,
+    yield_region_mask,
     kappa_detection_threshold,
 )
 from Plotting.sizeScalingCollapse import _read_mixed_selected
@@ -46,7 +48,7 @@ from Plotting.sizeScalingCollapse import _read_mixed_selected
 DEFAULT_DATA_ROOT = Path("/Volumes/data/remoteData/macro")
 DEFAULT_SIZE_SUMMARY = (
     _REPO_ROOT
-    / "Plots/reversible_event_analysis/size_scaling_E_R_classification/classification_summary.csv"
+    / "Plots/reversible_event_analysis/size_scaling_E_R_classification_piola_peak_post_only/classification_summary.csv"
 )
 DEFAULT_OUTPUT = _REPO_ROOT / "output/pdf/kappa_event_classification_by_size.pdf"
 
@@ -66,8 +68,8 @@ def _read_required_columns(path):
 
     wanted = {
         "load",
+        "avg_P12",
         "total_e_change_from_init",
-        "avg_sigma12",
         "nr_elements_with_m3_fix_change",
         "nr_elements_with_m3_change",
     }
@@ -85,14 +87,14 @@ def _read_required_columns(path):
     )
     if plastic_name is None:
         raise KeyError(f"Missing plastic-event column in {path}.")
-    required = ("load", "total_e_change_from_init", "avg_sigma12")
+    required = ("load", "avg_P12", "total_e_change_from_init")
     missing = [name for name in required if name not in df]
     if missing:
         raise KeyError(f"Missing columns {missing} in {path}.")
     return {
         "load": df["load"].to_numpy(dtype=float),
+        "avg_P12": df["avg_P12"].to_numpy(dtype=float),
         "total_e_change_from_init": df["total_e_change_from_init"].to_numpy(dtype=float),
-        "avg_sigma12": df["avg_sigma12"].to_numpy(dtype=float),
         "plastic": df[plastic_name].to_numpy(dtype=float),
     }
 
@@ -119,16 +121,7 @@ def _constant_kappa_data(csv_paths, size, *, rho=DEFAULT_KAPPA_RHO):
             rho=rho,
         )
         load_ip1 = load[1:]
-        stress = columns["avg_sigma12"]
-        valid_stress = np.isfinite(stress) & (stress != -1)
-        if not np.any(valid_stress):
-            raise ValueError(f"No valid avg_sigma12 in {path}.")
-        valid_indices = np.flatnonzero(valid_stress)
-        peak_index = valid_indices[np.argmax(stress[valid_stress])]
-        yield_load = float(load[peak_index])
-        if peak_index == valid_indices[-1]:
-            raise ValueError(f"Stress peak is at the last valid point in {path}.")
-        post_yield = (load_ip1 > yield_load + 0.01) & (load_ip1 < float(load.max()))
+        post_yield = yield_region_mask(columns, "post", load_ip1)
         recorded_plastic = columns["plastic"][1:] >= 1
         valid = post_yield & np.isfinite(kappa) & (kappa > 0)
 
@@ -161,13 +154,9 @@ def _discover_paths(data_root, sizes, seeds_per_size):
             groups[size].append(path)
 
     if not any(groups.values()):
-        from Plotting.sizeScalingCollapse import completed_size_scaling_paths
+        from Plotting.sizeScalingCollapse import size_scaling_paths
 
-        discovered, _ = completed_size_scaling_paths(
-            data_root,
-            seeds_per_size,
-            post_hi=1.0 - 1e-12,
-        )
+        discovered, _ = size_scaling_paths(data_root, seeds_per_size)
         groups = {
             int(size): list(discovered[size])
             for size in sizes
@@ -195,6 +184,9 @@ def _simple_drop_thresholds(size_summary, sizes):
     size_summary = Path(size_summary)
     if not size_summary.is_file():
         return None
+    provenance = json.loads((size_summary.parent / "summary.json").read_text())
+    if provenance.get("post_yield_rule") != POST_YIELD_RULE:
+        raise ValueError(f"Obsolete yield selection in threshold table: {size_summary}")
     thresholds = {}
     with size_summary.open(newline="", encoding="utf-8") as stream:
         for row in csv.DictReader(stream):
@@ -394,7 +386,7 @@ def make_size_diagnostic(
         note = (
             f"rho={rho:g}; mu(F=I)={mu_reference:.6g}; fixed threshold={reference_threshold:.6g}\n"
             "Fixed classifier is kappa >= mu/(2 rho); no a_1212,i classifier is used.\n"
-            "Post-yield starts 0.01 after each run's valid avg_sigma12 peak; "
+            "Post-yield starts after each run's avg_P12 peak +0.01; "
             + (
                 "historical simpleDrop thresholds are shown when available."
                 if has_simple
@@ -421,17 +413,19 @@ _PDF_OUTPUT = DEFAULT_OUTPUT
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
-    parser.add_argument("--seeds-per-size", type=int, default=6)
+    parser.add_argument("--seeds-per-size", type=int, default=None,
+                        help="Optional sample cap; default uses all available post-yield samples.")
     parser.add_argument("--size-summary", type=Path, default=DEFAULT_SIZE_SUMMARY)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--rho", type=float, default=DEFAULT_KAPPA_RHO)
-    parser.add_argument("--sizes", type=int, nargs="+", default=[50, 100, 150, 200, 250])
+    parser.add_argument("--sizes", type=int, nargs="+", default=[100, 150, 200, 250])
+    parser.add_argument("--largest-first", action="store_true")
     args = parser.parse_args(argv)
 
     global _PDF_OUTPUT
     _PDF_OUTPUT = args.output
     path_groups = _discover_paths(args.data_root, args.sizes, args.seeds_per_size)
-    sizes = sorted(path_groups)
+    sizes = sorted(path_groups, reverse=args.largest_first)
     thresholds = _simple_drop_thresholds(args.size_summary, sizes)
     data_by_size = {}
     for size in sizes:

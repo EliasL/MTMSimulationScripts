@@ -23,7 +23,7 @@ from Plotting.sizeScalingCollapse import (
 )
 
 
-SIZES = (50, 100, 150, 200, 250)
+SIZES = (100, 150, 200, 250)
 MARKERS = ("o", "s", "^")
 COLORS = ("#0072B2", "#E69F00", "#009E73")
 
@@ -149,7 +149,7 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("Plots/powerLaw/size_collapse/xmin_plateau_accuracy_0.1/parameters_per_size_L50_L250"),
+        default=Path("Plots/powerLaw/size_collapse/xmin_plateau_accuracy_0.1/parameters_per_size"),
     )
     parser.add_argument(
         "--xmin-cache-root",

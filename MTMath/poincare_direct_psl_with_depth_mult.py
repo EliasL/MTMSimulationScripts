@@ -398,7 +398,7 @@ def render_disk_map(XY: np.ndarray, A: np.ndarray, nx: int, out: Path,
     )
     ax.add_artist(Circle((0,0), 1.0, fill=False))
     ax.set_xlim(-1, 1); ax.set_ylim(-1, 1)
-    ax.set_xlabel(r"$x_p$"); ax.set_ylabel(r"$y_p$")
+    ax.set_xlabel(r"$x_P$"); ax.set_ylabel(r"$y_P$")
     ax.set_aspect("equal", adjustable="box")
 
     if add_colorbar:

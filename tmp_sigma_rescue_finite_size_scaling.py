@@ -30,6 +30,7 @@ from MTMath.finiteSizeScaling import (
 )
 from Plotting.plotPowerLaw import make_fit
 from Plotting.standardPowerlaw import (
+    SIGMA_RESCUE_POST_YIELD_WINDOW,
     DEFAULT_KAPPA_RHO,
     EventDrops,
     kappa_detection_threshold,
@@ -40,8 +41,8 @@ from Plotting.standardPowerlaw import (
 )
 
 
-DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0")
-DEFAULT_OUTPUT = Path("Plots/powerLaw/sigma_rescue_finite_size_scaling_L150_L250")
+DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0_piola_peak")
+DEFAULT_OUTPUT = Path("Plots/powerLaw/sigma_rescue_finite_size_scaling_L150_L250_piola_peak")
 DEFAULT_SIZES = (150, 200, 250)
 OBSERVABLES = ("delta_E_S", "delta_E_R", "delta_E_I")
 OBSERVABLE_LABELS = {
@@ -75,7 +76,7 @@ def _load_and_classify(snapshot_root: Path) -> tuple[pd.DataFrame, float]:
     ]
     frame = load_sigma_rescue_post_yield(snapshot_root, columns)
     if frame.empty:
-        raise ValueError("No rows after validated stress peaks.")
+        raise ValueError("No rows after the per-run avg_P12 peak +0.01.")
     for column in columns:
         if not np.isfinite(frame[column].to_numpy(dtype=float)).all():
             raise ValueError(f"Non-finite values found in required column {column}.")
@@ -160,7 +161,7 @@ def _fit_global_xmins(
     xmins = {}
     distances = {}
     scans = {}
-    for size, values in sorted(samples.items()):
+    for size, values in samples.items():
         fit = make_fit(
             values,
             cache_dir=str(output_dir / "xmin_cache" / observable / f"L{size}"),
@@ -203,7 +204,6 @@ def _plot_xmin_scans(
         ax.plot(selected, selected_distance, "x", color=color, ms=7, mew=1.5)
     ax.set_xlabel(rf"$x_{{\min}}$ for {label}")
     ax.set_ylabel("KS distance $D$")
-    ax.set_title(rf"Global-minimum-$D$ selection for {label}")
     ax.grid(alpha=0.2)
     ax.legend(fontsize="small")
     fig.tight_layout()
@@ -223,8 +223,8 @@ def _plot_collapse(
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     label = OBSERVABLE_LABELS[observable]
     label_plain = label[1:-1]
-    fig, axes = plt.subplots(2, 2, figsize=(11.5, 8.5))
-    raw_ax, collapsed_ax, landscape_ax, residual_ax = axes.flat
+    panels = [plt.subplots(figsize=(5.75, 4.25)) for _ in range(4)]
+    raw_ax, collapsed_ax, landscape_ax, residual_ax = [ax for _, ax in panels]
     for index, (size, curve) in enumerate(sorted(curves.items())):
         color = colors[index % len(colors)]
         raw_ax.loglog(
@@ -240,10 +240,8 @@ def _plot_collapse(
         collapsed_ax.loglog(x, y, "o-", ms=3, lw=0.9, color=color, label=f"L={int(size)}")
     raw_ax.set_xlabel(label)
     raw_ax.set_ylabel(rf"$p({label_plain})$")
-    raw_ax.set_title("Positive irreversible PDFs above global-min-D xmin")
     collapsed_ax.set_xlabel(rf"${label_plain}/L^{{d_E}}$")
     collapsed_ax.set_ylabel(rf"$L^{{d_E\tau}}p({label_plain},L)$")
-    collapsed_ax.set_title(rf"Collapse: $\tau={exponent:.3f}$, $d_E={dimension:.3f}$")
     raw_ax.legend(fontsize="small")
     collapsed_ax.legend(fontsize="small")
     for ax in (raw_ax, collapsed_ax):
@@ -261,8 +259,7 @@ def _plot_collapse(
     landscape_ax.plot(exponent, dimension, "wx", ms=8, mew=2)
     landscape_ax.set_xlabel(r"$\tau$")
     landscape_ax.set_ylabel(r"$d_E$")
-    landscape_ax.set_title("Coarse collapse objective")
-    fig.colorbar(mesh, ax=landscape_ax, label="log-PDF overlap variance")
+    panels[2][0].colorbar(mesh, ax=landscape_ax, label="log-PDF overlap variance")
 
     scaled_domains = [curve.x / size**dimension for size, curve in curves.items()]
     low = max(values.min() for values in scaled_domains)
@@ -275,14 +272,11 @@ def _plot_collapse(
     residual_ax.semilogx(common, np.std(np.asarray(log_values), axis=0), color="black")
     residual_ax.set_xlabel(rf"${label_plain}/L^{{d_E}}$")
     residual_ax.set_ylabel("log-density spread")
-    residual_ax.set_title("Residual spread across sizes")
     residual_ax.grid(alpha=0.2)
-    fig.suptitle(
-        rf"Finite-size scaling of {label}; post-yield $\gamma>\gamma_{{peak}}+0.01$, "
-        rf"$\kappa_{{det}}=\mu/(2\rho)$"
-    )
-    fig.tight_layout()
-    _save(fig, output)
+    for (fig, _), name in zip(panels, ("raw_pdf", "collapse", "quality", "residual")):
+        fig.tight_layout()
+        path = output if name == "collapse" else output.with_name(f"{output.stem}_{name}.pdf")
+        _save(fig, path)
 
 
 def _plot_moments(moment: dict[str, object], observable: str, output: Path) -> None:
@@ -294,12 +288,12 @@ def _plot_moments(moment: dict[str, object], observable: str, output: Path) -> N
     dimension = float(moment["dimension"])
     intercept = float(moment["moment_order_intercept"])
     label = OBSERVABLE_LABELS[observable]
-    fig, (moment_ax, exponent_ax) = plt.subplots(1, 2, figsize=(11, 4.3))
+    moment_fig, moment_ax = plt.subplots(figsize=(5.5, 4.3))
+    exponent_fig, exponent_ax = plt.subplots(figsize=(5.5, 4.3))
     for column, order in enumerate(orders):
         moment_ax.loglog(sizes, moments[:, column], "o-", label=rf"$q={order:g}$")
     moment_ax.set_xlabel("System size $L$")
     moment_ax.set_ylabel(rf"Moment $\langle({label[1:-1]})^q\rangle$")
-    moment_ax.set_title("Moment scaling above global-min-D xmin")
     moment_ax.grid(alpha=0.2, which="both")
     moment_ax.legend(fontsize="small")
     exponent_ax.errorbar(
@@ -314,11 +308,12 @@ def _plot_moments(moment: dict[str, object], observable: str, output: Path) -> N
     exponent_ax.plot(order_grid, dimension * order_grid + intercept, label=rf"$d_E={dimension:.3f}$")
     exponent_ax.set_xlabel("Moment order $q$")
     exponent_ax.set_ylabel(r"$z_q$ in $\langle E^q\rangle\sim L^{z_q}$")
-    exponent_ax.set_title(rf"{label} moment-order fit: $\tau={float(moment['exponent']):.3f}$")
     exponent_ax.grid(alpha=0.2)
     exponent_ax.legend(fontsize="small")
-    fig.tight_layout()
-    _save(fig, output)
+    for fig, path in ((moment_fig, output),
+                      (exponent_fig, output.with_name(f"{output.stem}_exponents.pdf"))):
+        fig.tight_layout()
+        _save(fig, path)
 
 
 def _json_number(value):
@@ -337,12 +332,13 @@ def run(
     observables: tuple[str, ...] = OBSERVABLES,
     bins_per_decade: int = 12,
     force: bool = False,
+    largest_first: bool = False,
 ) -> dict:
     output_dir = Path(output_dir)
     if output_dir.exists() and (output_dir / "summary.json").exists() and not force:
         raise FileExistsError(f"Output already exists: {output_dir}; use --force to overwrite.")
     frame, kappa_det = _load_and_classify(Path(snapshot_root))
-    sizes = tuple(sorted({int(size) for size in sizes}))
+    sizes = tuple(sorted({int(size) for size in sizes}, reverse=largest_first))
     observables = tuple(observables)
     if len(sizes) < 2:
         raise ValueError("Finite-size scaling requires at least two requested sizes.")
@@ -429,7 +425,7 @@ def run(
     summary = {
         "snapshot_root": str(Path(snapshot_root).resolve()),
         "delta_E_S_tangent": "gamma0",
-        "post_yield_window": "per-run validated sigma12 peak + 0.01, load < 1.0",
+        "post_yield_window": SIGMA_RESCUE_POST_YIELD_WINDOW,
         "classification": "kappa_det = mu/(2 rho); kappa = Delta E_R/(rho V0 Delta gamma^2), rho=2",
         "kappa_det": float(kappa_det),
         "population": "finite positive irreversible observable values, after paired event classification",
@@ -452,6 +448,7 @@ def main() -> None:
     parser.add_argument("--observables", nargs="+", choices=OBSERVABLES, default=list(OBSERVABLES))
     parser.add_argument("--bins-per-decade", type=int, default=12)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--largest-first", action="store_true")
     args = parser.parse_args()
     if args.bins_per_decade < 1:
         raise ValueError("--bins-per-decade must be positive.")
@@ -462,6 +459,7 @@ def main() -> None:
         observables=tuple(args.observables),
         bins_per_decade=args.bins_per_decade,
         force=args.force,
+        largest_first=args.largest_first,
     )
 
 

@@ -102,6 +102,8 @@ def render_final_density(
     *,
     dpi: int = 234,
     load_increment: float = 1e-5,
+    show_loss_of_ellipticity_boundary: bool = False,
+    density_vmax: int | None = None,
 ) -> Path:
     """Render one density plot from one final VTU per simulation."""
 
@@ -109,6 +111,8 @@ def render_final_density(
         raise ValueError("dpi must be positive.")
     if not np.isfinite(load_increment) or load_increment <= 0.0:
         raise ValueError("load_increment must be finite and positive.")
+    if density_vmax is not None and density_vmax < 2:
+        raise ValueError("density_vmax must be at least 2.")
 
     (
         histogram,
@@ -117,13 +121,26 @@ def render_final_density(
         x,
         y,
     ) = _collect_final_density(vtu_paths, load_increment=load_increment)
-    boundary = _loss_of_ellipticity_boundary()
+    boundary = (
+        _loss_of_ellipticity_boundary()
+        if show_loss_of_ellipticity_boundary
+        else np.empty((0, 2))
+    )
+    density_norm = None
+    if density_vmax is not None:
+        observed_vmax = int(np.max(histogram))
+        if density_vmax < observed_vmax:
+            raise ValueError(
+                f"density_vmax ({density_vmax}) is below the histogram maximum "
+                f"({observed_vmax})."
+            )
+        density_norm = LogNorm(vmin=1, vmax=density_vmax)
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # The pooled renderer is shared with the event plot.  Passing the same
     # final-frame cloud as both endpoints disables transition arrows while
-    # preserving its established density, grid, boundary, and colourbar style.
+    # preserving its established density, grid, and colourbar style.
     return _render_pooled_poincare_flow(
         output_path,
         zoom=1.0,
@@ -139,6 +156,8 @@ def render_final_density(
         dpi=dpi,
         direction_split_otsu=False,
         show_arrows=False,
+        show_ellipticity_boundary=show_loss_of_ellipticity_boundary,
+        density_norm=density_norm,
     )
 
 
@@ -149,6 +168,7 @@ def render_combined_density(
     *,
     dpi: int = 234,
     load_increment: float = 1e-5,
+    show_loss_of_ellipticity_boundary: bool = False,
 ) -> Path:
     """Render both densities with one shared colour scale and colourbar."""
 
@@ -171,7 +191,11 @@ def render_combined_density(
         vmin=1,
         vmax=max(2, max(int(np.max(data[0])) for _, data in group_data)),
     )
-    boundary = _loss_of_ellipticity_boundary()
+    boundary = (
+        _loss_of_ellipticity_boundary()
+        if show_loss_of_ellipticity_boundary
+        else np.empty((0, 2))
+    )
     figure = plt.figure(figsize=(18.0, 9.6))
     axes = [
         figure.add_axes((0.04, 0.21, 0.42, 0.70)),
@@ -187,9 +211,12 @@ def render_combined_density(
                 axis, histogram, zoom=1.0, norm=shared_norm
             )
         )
-        _draw_poincare_loss_of_ellipticity_limit(axis, boundary, zoom=1.0)
+        if show_loss_of_ellipticity_boundary:
+            _draw_poincare_loss_of_ellipticity_limit(axis, boundary, zoom=1.0)
         axis.set_title(title, pad=12.0)
-        axis.legend(loc="upper left", frameon=True)
+        legend_handles, legend_labels = axis.get_legend_handles_labels()
+        if legend_handles:
+            axis.legend(loc="upper left", frameon=True)
 
     colorbar = figure.colorbar(images[0], cax=colorbar_axis, orientation="horizontal")
     totals = {data[1] for _, data in group_data}
@@ -214,6 +241,16 @@ def main() -> None:
     parser.add_argument("--non-reconnecting-vtu", type=Path, nargs="+")
     parser.add_argument("--dpi", type=int, default=234)
     parser.add_argument("--load-increment", type=float, default=1e-5)
+    parser.add_argument(
+        "--density-vmax",
+        type=int,
+        help="Set the logarithmic density colour scale's shared upper count.",
+    )
+    parser.add_argument(
+        "--show-loss-of-ellipticity-boundary",
+        action="store_true",
+        help="Overlay the loss of ellipticity boundary on the density plot.",
+    )
     args = parser.parse_args()
 
     if args.reconnecting_vtu is not None or args.non_reconnecting_vtu is not None:
@@ -227,6 +264,7 @@ def main() -> None:
             args.output,
             dpi=args.dpi,
             load_increment=args.load_increment,
+            show_loss_of_ellipticity_boundary=args.show_loss_of_ellipticity_boundary,
         )
     else:
         if args.vtu is None:
@@ -236,6 +274,8 @@ def main() -> None:
             args.output,
             dpi=args.dpi,
             load_increment=args.load_increment,
+            show_loss_of_ellipticity_boundary=args.show_loss_of_ellipticity_boundary,
+            density_vmax=args.density_vmax,
         )
     print(f"Saved {output}")
 

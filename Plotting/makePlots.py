@@ -26,6 +26,7 @@ from .energyDropCalculations import (
     infer_plastic_event_column,
     infer_stress_column,
 )
+from .standardPowerlaw import POST_YIELD_RULE, yield_region_mask
 from Management.updateCSV import update_df_header, read_macrodata_csv
 from collections import defaultdict
 
@@ -436,10 +437,9 @@ def plotEnergyAvalancheHistogram(dfs, fig=None, axs=None, label="", use_avg=None
             use_avg = "avg_energy" in dfs[0].columns
         else:
             use_avg = USE_AVG_ENERGY
-    e = "avg_energy" if use_avg else "energy"
     drop_label = energy_drop_label("energy_change", use_avg=use_avg)
-    pre_yield_df = [df[0 : np.argmax(df[e]) + 1] for df in dfs]
-    post_yield_df = [df[np.argmax(df[e]) + 1 :] for df in dfs]
+    pre_yield_df = [df.loc[yield_region_mask(df, "pre")] for df in dfs]
+    post_yield_df = [df.loc[yield_region_mask(df, "post")] for df in dfs]
 
     # Prepare the figure and subplots for a 3x3 grid
     if axs is None:
@@ -1742,13 +1742,6 @@ def plot_predicted_energy_error_distribution(
             step_energy_change < -float(drop_threshold)
         )
 
-        stress_col = infer_stress_column(raw_df)
-        stress = np.asarray(raw_df[stress_col], dtype=float)
-        finite_stress = np.isfinite(stress)
-        if not np.any(finite_stress):
-            raise ValueError(f"No finite yield-stress values found in {csv_path}.")
-        yield_load = float(load[int(np.nanargmax(stress))])
-
         if distance_steps is None:
             distance_masks = {None: np.ones(len(prediction_df), dtype=bool)}
         else:
@@ -1772,7 +1765,7 @@ def plot_predicted_energy_error_distribution(
         base_mask = np.isfinite(residual) & (residual > 0) & (~drop_mask)
         for region in regions:
             region_mask = (
-                load_i < yield_load if region == "pre" else load_i >= yield_load
+                yield_region_mask(raw_df, region, load[1:])
             )
             if region == "pre" and pre_yield_min_gamma is not None:
                 region_mask &= load_i >= float(pre_yield_min_gamma)
@@ -1870,7 +1863,7 @@ def plot_predicted_energy_error_distribution(
         "bins": edges,
         "counts": counts,
         "values": values,
-        "yield_filter": "load_i below/at the maximum stored avg_sigma12",
+        "yield_filter": POST_YIELD_RULE,
         "drop_filter": "total_energy_change < -drop_threshold",
         "distance_filter": distance_steps,
         "error_metric": error_metric,
@@ -2105,13 +2098,6 @@ def plot_predicted_energy_error_distribution_with_reconnection_events(
                 step_energy_change < -float(drop_threshold)
             )
 
-            stress_col = infer_stress_column(raw_df)
-            stress = np.asarray(raw_df[stress_col], dtype=float)
-            finite_stress = np.isfinite(stress)
-            if not np.any(finite_stress):
-                raise ValueError(f"No finite yield-stress values found in {csv_path}.")
-            yield_load = float(load[int(np.nanargmax(stress))])
-
             residual = np.abs(
                 np.asarray(prediction_df[error_metric], dtype=float)
             )
@@ -2145,7 +2131,7 @@ def plot_predicted_energy_error_distribution_with_reconnection_events(
 
             for region in ("pre", "post"):
                 region_mask = (
-                    load_i < yield_load if region == "pre" else load_i >= yield_load
+                    yield_region_mask(raw_df, region, load[1:])
                 )
                 if region == "pre" and pre_yield_min_gamma is not None:
                     region_mask &= load_i >= float(pre_yield_min_gamma)
@@ -2293,7 +2279,7 @@ def plot_average_elastic_frobenius_norm_vs_gamma(
     *,
     name="average_elastic_frobenius_norm_vs_gamma.pdf",
     energy_csv_file_paths=None,
-    figsize=(3.5, 2.4),
+    figsize=(6.5, 4.8),
     show=False,
     save=True,
 ):
@@ -2320,13 +2306,29 @@ def plot_average_elastic_frobenius_norm_vs_gamma(
             if gamma is None:
                 raise ValueError(f"Could not infer gamma from VTU filename {vtu_path}.")
             data = VTUData(str(vtu_path))
-            F = np.asarray(data.get_F(), dtype=float)
-            M_elastic = np.asarray(data.get_M(elastic_M=True), dtype=float)
-            if F.shape != M_elastic.shape or F.ndim != 3 or F.shape[-2:] != (2, 2):
-                raise ValueError(
-                    f"Unexpected F/M shape for {vtu_path}: {F.shape}, {M_elastic.shape}."
+            elastic_fields = {"F_E11", "F_E12", "F_E21", "F_E22"}
+            present_elastic_fields = elastic_fields.intersection(data.mesh.cell_data)
+            if present_elastic_fields and present_elastic_fields != elastic_fields:
+                raise KeyError(
+                    f"Incomplete elastic deformation fields in {vtu_path}: "
+                    f"{sorted(present_elastic_fields)}."
                 )
-            F_elastic = np.matmul(F, M_elastic)
+            if present_elastic_fields:
+                F_elastic = np.asarray(data.get_F_e(), dtype=float)
+            else:
+                F = np.asarray(data.get_F(), dtype=float)
+                M_elastic = np.asarray(data.get_M(elastic_M=True), dtype=float)
+                if F.shape != M_elastic.shape:
+                    raise ValueError(
+                        f"Unexpected F/M shape for {vtu_path}: "
+                        f"{F.shape}, {M_elastic.shape}."
+                    )
+                F_elastic = np.matmul(F, M_elastic)
+            if F_elastic.ndim != 3 or F_elastic.shape[-2:] != (2, 2):
+                raise ValueError(
+                    f"Unexpected elastic deformation shape for {vtu_path}: "
+                    f"{F_elastic.shape}."
+                )
             element_norm = np.linalg.norm(F_elastic, axis=(-2, -1))
             finite_norm = element_norm[np.isfinite(element_norm)]
             if finite_norm.size == 0:
@@ -2340,11 +2342,12 @@ def plot_average_elastic_frobenius_norm_vs_gamma(
     fig, ax = plt.subplots(figsize=figsize)
     summaries = {}
     curve_colors = {}
+    legend_handles = []
     for curve_index, (label, points) in enumerate(curves):
         gamma, mean_norm, paths = zip(*points)
         color = f"C{curve_index}"
         curve_colors[label] = color
-        ax.plot(
+        (norm_line,) = ax.plot(
             gamma,
             mean_norm,
             color=color,
@@ -2353,6 +2356,7 @@ def plot_average_elastic_frobenius_norm_vs_gamma(
             markersize=3.0,
             label=label,
         )
+        legend_handles.append(norm_line)
         summaries[label] = {
             "gamma": np.asarray(gamma),
             "mean_frobenius_norm": np.asarray(mean_norm),
@@ -2364,24 +2368,44 @@ def plot_average_elastic_frobenius_norm_vs_gamma(
         if not hasattr(energy_csv_file_paths, "items"):
             raise TypeError("energy_csv_file_paths must be a mapping of labels to CSV paths.")
         energy_ax = ax.twinx()
-        energy_handles = []
+        has_stress_peak = False
         for label, csv_path in energy_csv_file_paths.items():
             csv_path = Path(csv_path)
-            energy_df = read_macrodata_csv(csv_path)
+            energy_df = pd.read_csv(csv_path, low_memory=False)
             if "load" not in energy_df or "avg_energy" not in energy_df:
                 raise KeyError(
                     f"{csv_path} must contain 'load' and 'avg_energy' columns."
                 )
+            repeated_headers = energy_df["load"].astype(str).str.strip().eq("load")
+            energy_df = energy_df.loc[~repeated_headers].copy()
+            for column in ("load", "avg_energy"):
+                raw_values = energy_df[column]
+                numeric_values = pd.to_numeric(raw_values, errors="coerce")
+                invalid_values = (
+                    raw_values.notna()
+                    & raw_values.astype(str).str.strip().ne("")
+                    & numeric_values.isna()
+                )
+                if invalid_values.any():
+                    raise ValueError(
+                        f"Unexpected non-numeric {column} values in {csv_path}."
+                    )
+                energy_df[column] = numeric_values
+            valid_energy = np.isfinite(energy_df["load"]) & np.isfinite(
+                energy_df["avg_energy"]
+            )
+            energy_df = energy_df.loc[valid_energy]
+            if energy_df.empty:
+                raise ValueError(f"No finite average-energy rows found in {csv_path}.")
             load = np.asarray(energy_df["load"], dtype=float)
             energy = np.asarray(energy_df["avg_energy"], dtype=float)
             if load.shape != energy.shape:
                 raise ValueError(f"Energy/load shape mismatch in {csv_path}.")
-            stress_col = infer_stress_column(energy_df)
-            stress = np.asarray(energy_df[stress_col], dtype=float)
-            finite_stress = np.isfinite(stress)
-            if not np.any(finite_stress):
-                raise ValueError(f"No finite yield-stress values found in {csv_path}.")
-            yield_gamma = float(load[int(np.nanargmax(stress))])
+            stress_col = (
+                infer_stress_column(energy_df)
+                if "avg_sigma12" in energy_df
+                else "avg_sigmaxy" if "avg_sigmaxy" in energy_df else None
+            )
             color = curve_colors.get(label, f"C{len(curve_colors)}")
             (energy_line,) = energy_ax.plot(
                 load,
@@ -2392,28 +2416,43 @@ def plot_average_elastic_frobenius_norm_vs_gamma(
                 alpha=0.45,
                 label=f"{label} energy",
             )
-            energy_handles.append(energy_line)
-            ax.axvline(
-                yield_gamma,
-                color=color,
-                linestyle=":",
-                linewidth=0.9,
-                alpha=0.45,
+            legend_handles.append(energy_line)
+            if stress_col is not None:
+                stress = pd.to_numeric(energy_df[stress_col], errors="coerce")
+                finite_stress = np.isfinite(stress)
+                if not np.any(finite_stress):
+                    raise ValueError(f"No finite yield-stress values found in {csv_path}.")
+                stress_load = np.asarray(energy_df.loc[finite_stress, "load"], dtype=float)
+                yield_gamma = float(
+                    stress_load[np.nanargmax(np.asarray(stress[finite_stress], dtype=float))]
+                )
+                ax.axvline(
+                    yield_gamma,
+                    color=color,
+                    linestyle=":",
+                    linewidth=0.9,
+                    alpha=0.45,
+                )
+                has_stress_peak = True
+        if has_stress_peak:
+            legend_handles.append(
+                mlines.Line2D([], [], color="0.35", linestyle=":", linewidth=0.9, label="Stress peak")
             )
-        energy_ax.set_ylabel(r"$E$")
+        energy_ax.set_ylabel(r"Average energy $\langle E\rangle$ (dashed)")
         energy_ax.grid(False)
-        if energy_handles:
-            energy_ax.legend(
-                handles=energy_handles,
-                loc="lower right",
-                fontsize=5.5,
-                handlelength=1.5,
-                borderpad=0.3,
-            )
 
     ax.set_xlabel(r"$\gamma$")
     ax.set_ylabel(r"Mean elastic norm $\langle\|\mathbf{F}_e\|\rangle$")
-    ax.legend(loc="best", fontsize=6, handlelength=1.5, borderpad=0.3)
+    ax.legend(
+        handles=legend_handles,
+        loc="upper left",
+        ncol=1,
+        fontsize=8,
+        handlelength=2.0,
+        borderpad=0.5,
+        labelspacing=0.4,
+        framealpha=0.9,
+    )
     fig.tight_layout()
 
     if save:

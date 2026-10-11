@@ -78,13 +78,17 @@ reason. Seed—not replay segment—remains the statistical sample unit.
 4. Build `coverage.csv` by size, seed and strain bin. Current rescue completion
    is ordered by cluster task scheduling and is not automatically an unbiased
    sample of strain.
-5. Before scaling fits, find each run's maximum validated `avg_sigma12` and
-   start its post-yield window 0.01 load later. Audit stress coverage around
-   the peak; exclude and report runs whose peak is not established. The old
-   fixed `0.7 < gamma < 1.0` interval was only a missing-stress proxy and must
-   never be the default when stress is available. Report seeds/events per size.
-   The current `yield_peaks.csv` audit requires at least 100 usable stress
-   samples on each side within 0.01 load of the apparent peak.
+5. Before scaling fits, select transitions strictly above each run's native
+   `avg_P12` global peak +0.01 and strictly below 1.0. Report seeds/events per
+   size. Snapshot readers require a manifest declaring the current Piola-peak
+   rule and a `yield_peaks.csv` audit; fixed-0.7 and Cauchy-peak selections are
+   obsolete. `build_piola_yield_view` reuses unfiltered gamma=0 drop tables
+   from `current_gamma0` and calculates peaks from the frozen source macros,
+   independent of which rows have rescued sigma. The new
+   `current_gamma0_piola_peak` view has its own manifest and peak audit.
+   `rebuild_sigma_rescue_gamma0.py` prepares it before plotting. New figures
+   use `_piola_peak` output directories. The old views and figures are preserved
+   as historical artifacts, not current analysis inputs.
 6. Feed paired `delta_E_R`/`delta_E_S` rows into `EventDrops`. Classify with
    `kappa_det = mu/(2 rho)` for `rho=2`, then fit the positive irreversible
    `delta_E_S` population using the global KS minimum.

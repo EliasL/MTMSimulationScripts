@@ -360,8 +360,8 @@ def make_figure(
     for spec in BOUNDARIES:
         _draw_reduction_arrow(ax, spec)
 
-    ax.set_xlabel(r"$x_p$", color=TEXT)
-    ax.set_ylabel(r"$y_p$", color=TEXT)
+    ax.set_xlabel(r"$x_P$", color=TEXT)
+    ax.set_ylabel(r"$y_P$", color=TEXT)
     ax.set_xlim(*_native_to_plot(np.array([-1.04, 1.04])))
     ax.set_ylim(*_native_to_plot(np.array([-0.36, 0.36])))
     x_ticks = np.arange(-1.0, 1.01, 0.25)

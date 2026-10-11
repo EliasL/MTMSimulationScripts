@@ -333,8 +333,8 @@ def plot_centered_poincare_transition(
         arrowprops={"arrowstyle": "-|>", "color": "#d73027", "linewidth": 2.2},
         zorder=110,
     )
-    ax.set_xlabel(r"$x_p(\widetilde{C})$")
-    ax.set_ylabel(r"$y_p(\widetilde{C})$")
+    ax.set_xlabel(r"$x_P(\widetilde{C})$")
+    ax.set_ylabel(r"$y_P(\widetilde{C})$")
     add_centering_description(
         ax,
         history.matrices[before_index],

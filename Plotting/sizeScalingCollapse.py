@@ -6,6 +6,27 @@ Eq. (11)-(12). Run from the repository root with
     .venv/bin/python -m Plotting.sizeScalingCollapse
 
 Each stage is cached below ``Plots/powerLaw/size_collapse/cache``.
+By default, classify paired E_R/E_S events with kappa_det and use only finite
+positive irreversible E_S. The explicit ``--population-mode all`` alternative
+uses all positive drops and writes into a separate ``all_events`` directory.
+Collapse curves are normalized tail PDFs above each size's global KS cutoff.
+Use ``--stage shared --common-cutoff-size 100 --skip-pvalue`` for an alternate
+collapse using the L=100 KS cutoff for every size (``*_common_cutoff.pdf``).
+This is a cutoff-sensitivity comparison, not a replacement for per-size fits.
+For lambda-derived scaling without collapse optimization, use
+``--stage lambda-scaling --lambda-cutoff common --common-cutoff-size 100
+--minimum-size 50 --yield-regime post --skip-pvalue`` with a separate output
+folder. It writes the lambda-scaling, fixed-alpha collapse, raw PDFs with
+per-size cutoffs, and KS scan as separate PDFs. The cross-size lambda
+regression is not an individual-size flowchart fit.
+Use ``--lambda-normalization full --lambda-cutoff per-size`` to retain the
+full-population PDF normalization while hiding bins below each fitted cutoff.
+Use ``--standard-cache-root`` to share the classification analysis caches.
+For quick parameter plots using the completed cutoff fits, pass
+``--stage parameters --protocols second_order --parameter-xmin-methods global_min
+--yield-regime post --largest-first --skip-pvalue`` with the same ``--output``
+as the earlier run. These versions are saved under
+``xmin_global/parameters_per_size/without_uncertainties``.
 These plots compare sizes; for individual-size classification, split, and
 fitted-PDF panels use
 ``truncated_powerlaw_reversibility_flowchart.generate_single_size_panels``.
@@ -23,6 +44,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
+from matplotlib.ticker import NullFormatter
 
 from Management.jobs import nonreconnecting_size_scaling_job
 from Management.updateCSV import HEADER_RENAME_MAP, update_df_header
@@ -31,8 +53,11 @@ from Plotting.energyDropCalculations import (
     calculate_energy_step_data,
     validate_sigma12_column,
 )
-from Plotting.plotPowerLaw import dist_from_fit, make_fit
-from Plotting.standardPowerlaw import kappa_from_relaxation_energy
+from Plotting.plotPowerLaw import dist_from_fit, getHist, make_fit
+from Plotting.standardPowerlaw import (
+    EventDrops, POST_YIELD_RULE, SIZE_SCALING_MIN_SIZE, yield_regimes,
+    kappa_detection_threshold, kappa_from_relaxation_energy, positive_es, split_by_kappa,
+)
 
 
 PROTOCOLS = (
@@ -52,8 +77,8 @@ PROTOCOL_DROP_SYMBOLS = {
 }
 REGIMES = ("pre", "post")
 YIELD_REGIME_NAMES = ("pre", "post")
-CACHE_VERSION = 4  # Delta E_S now uses the fixed gamma=0 tangent
-COLLAPSE_CACHE_VERSION = 3
+CACHE_VERSION = 6  # fixed gamma=0 tangent and first-Piola peak yield windows
+COLLAPSE_CACHE_VERSION = 5  # invalidate curves selected by the former yield rule
 EXPONENT_RANGE = (0.5, 2.5)
 DIMENSION_RANGE = (0.25, 2.25)
 XMIN_METHOD = "global"
@@ -74,31 +99,48 @@ def _last_load(path: Path) -> float:
     return float(values[header.index("load")])
 
 
-def completed_size_scaling_paths(data_root: Path, seeds_per_size: int, post_hi: float):
+def size_scaling_paths(data_root: Path, seeds_per_size=None, minimum_end_load=None,
+                       *, minimum_size=SIZE_SCALING_MIN_SIZE):
+    """Use all runs with data after their own first-Piola peak +0.01."""
+    if minimum_size < 1:
+        raise ValueError("minimum_size must be positive.")
     groups, _ = nonreconnecting_size_scaling_job()
     paths = {}
     inventory = {}
     for group in groups:
         size = int(group[0].rows)
-        completed = []
+        if size < minimum_size:
+            continue
+        available = []
         for config in sorted(group, key=lambda item: item.seed):
             path = data_root / f"{config.name}.csv"
-            if path.exists() and _last_load(path) >= post_hi:
-                completed.append(path)
-        inventory[size] = len(completed)
-        if len(completed) < seeds_per_size:
+            if path.exists():
+                if minimum_end_load is None:
+                    low, high = stress_peak_regimes(path)["post"]
+                    usable = low < high
+                else:
+                    usable = _last_load(path) > minimum_end_load
+                if usable:
+                    available.append(path)
+        inventory[size] = len(available)
+        if not available or (seeds_per_size is not None and len(available) < seeds_per_size):
             raise RuntimeError(
-                f"L={size} has {len(completed)} completed runs; "
-                f"need {seeds_per_size}."
+                f"L={size} has {len(available)} usable runs; "
+                f"need {seeds_per_size or 'at least one'}."
             )
-        paths[size] = completed[:seeds_per_size]
+        paths[size] = available[:seeds_per_size]
     return dict(sorted(paths.items())), inventory
+
+
+def completed_size_scaling_paths(data_root: Path, seeds_per_size: int, post_hi: float):
+    """Compatibility entry point for explicitly completion-limited analyses."""
+    return size_scaling_paths(data_root, seeds_per_size, np.nextafter(post_hi, -np.inf))
 
 
 def _file_cache_path(path: Path, size: int, regimes, cache_dir: Path) -> Path:
     stat = path.stat()
     signature = repr(
-        (CACHE_VERSION, str(path), stat.st_size, stat.st_mtime_ns, size, regimes)
+        (CACHE_VERSION, POST_YIELD_RULE, str(path), stat.st_size, stat.st_mtime_ns, size, regimes)
     )
     return cache_dir / f"{hashlib.sha1(signature.encode()).hexdigest()}.npz"
 
@@ -232,32 +274,15 @@ def _read_energy_step_values(path: Path, size: int):
     return step_load, values
 
 
-def stress_yield_regimes(path: Path) -> dict[str, tuple[float, float]]:
-    """Return the run-specific pre/post windows split at peak Cauchy stress."""
-    frame = _read_mixed_selected(path, {"load", "avg_sigma12"})
-    load = frame["load"].to_numpy(dtype=float)
-    stress = frame["avg_sigma12"].to_numpy(dtype=float)
-    valid = np.isfinite(load) & np.isfinite(stress) & (stress != SIGMA12_RESCUE_SENTINEL)
-    if not np.any(valid):
-        raise ValueError(f"No finite load/avg_sigma12 pair in {path}.")
-    valid_indices = np.flatnonzero(valid)
-    peak_index = int(valid_indices[np.argmax(stress[valid])])
-    yield_load = float(load[peak_index])
-    end_load = float(load[valid_indices[-1]])
-    if yield_load + 0.01 >= end_load:
-        raise ValueError(
-            f"Stress maximum at load {yield_load:g} leaves no post-yield window "
-            f"before available end {end_load:g} in {path}."
-        )
-    return {
-        "pre": (float(load[valid_indices[0]]), yield_load),
-        "post": (yield_load + 0.01, end_load),
-    }
+def stress_peak_regimes(path: Path) -> dict[str, tuple[float, float]]:
+    """Read only loads and P12 to resolve the shared yield windows."""
+    return yield_regimes(_read_mixed_selected(path, {"load", "avg_P12"}))
 
 
 def extract_run(path: Path, size: int, regimes, cache_dir: Path, force=False):
-    if regimes is None:
-        regimes = stress_yield_regimes(path)
+    if regimes is None or not hasattr(regimes, "items"):
+        windows = stress_peak_regimes(path)
+        regimes = windows if regimes is None else {name: windows[name] for name in regimes}
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = _file_cache_path(path, size, regimes, cache_dir)
     if cache_path.exists() and not force:
@@ -288,8 +313,9 @@ def extract_event_pairs(path: Path, size: int, regimes, cache_dir: Path, force=F
     non-positive or non-finite values, so a later positive-E_S filter cannot
     change which events were labeled irreversible.
     """
-    if regimes is None:
-        regimes = stress_yield_regimes(path)
+    if regimes is None or not hasattr(regimes, "items"):
+        windows = stress_peak_regimes(path)
+        regimes = windows if regimes is None else {name: windows[name] for name in regimes}
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = _file_cache_path(path, size, regimes, cache_dir)
     if cache_path.exists() and not force:
@@ -324,7 +350,7 @@ def pool_event_pairs(paths_by_size, regimes, cache_dir: Path, force=False):
     }
     for size, paths in paths_by_size.items():
         print(
-            f"Extracting/caching event pairs L={size}: {len(paths)} completed runs",
+            f"Extracting/caching event pairs L={size}: {len(paths)} available runs",
             flush=True,
         )
         per_run = [
@@ -356,7 +382,7 @@ def pool_drops(paths_by_size, regimes, cache_dir: Path, force=False):
         protocol: {regime: {} for regime in regime_names} for protocol in PROTOCOLS
     }
     for size, paths in paths_by_size.items():
-        print(f"Extracting/caching L={size}: {len(paths)} completed runs", flush=True)
+        print(f"Extracting/caching L={size}: {len(paths)} available runs", flush=True)
         per_run = [
             extract_run(path, size, regimes, cache_dir / "runs", force=force)
             for path in paths
@@ -368,16 +394,27 @@ def pool_drops(paths_by_size, regimes, cache_dir: Path, force=False):
     return pooled
 
 
-def log_histogram(data, bins_per_decade=10):
+def pool_irreversible_es(paths_by_size, regimes, cache_dir: Path, force=False):
+    """Select positive E_S only after classifying paired events with kappa."""
+    events = pool_event_pairs(paths_by_size, regimes, cache_dir, force=force)
+    pooled = {"second_order": {regime: {} for regime in events}}
+    kappa_det = kappa_detection_threshold()
+    for regime, sizes in events.items():
+        for size, event in sizes.items():
+            drops = EventDrops(er=event["initial_guess_energy"],
+                               es=event["second_order"], kappa=event["kappa"])
+            split = split_by_kappa(drops, kappa_det)
+            pooled["second_order"][regime][size] = positive_es(drops, split.is_irrev)
+    return pooled
+
+
+def log_histogram(data, bins_per_decade=5):
+    """Use the same logarithmic histogram as the flowchart PDF panels."""
     data = np.asarray(data, dtype=float)
     data = data[np.isfinite(data) & (data > 0)]
     if data.size < 3:
         raise ValueError("Need at least three positive drops for a histogram.")
-    low, high = np.log10(data.min()), np.log10(data.max())
-    n_bins = max(10, int(np.ceil((high - low) * bins_per_decade)))
-    edges = np.logspace(low, high, n_bins + 1)
-    density, edges = np.histogram(data, bins=edges, density=True)
-    centers = np.sqrt(edges[:-1] * edges[1:])
+    centers, density = getHist(data, bins_per_decade=bins_per_decade)
     mask = np.isfinite(density) & (density > 0)
     return centers[mask], density[mask]
 
@@ -396,9 +433,8 @@ def fit_xmins(
         xmin_search_kwargs = {
             "progress": True,
             "progress_label": f"{description}, L={size}",
+            "refine": refine,
         }
-        if not refine:
-            xmin_search_kwargs["refine"] = False
         fits[size] = make_fit(
             drops,
             cache_dir=str(cache_dir),
@@ -416,8 +452,14 @@ def histogram_curves(size_drops, bins_per_decade):
     return curves
 
 
-def tail_histogram_curves(size_drops, xmins, bins_per_decade):
-    """Build normalized PDFs using only observations at or above xmin."""
+def tail_histogram_curves(size_drops, xmins, bins_per_decade, *, normalization="tail"):
+    """Show complete bins above xmin with tail or full-population normalization.
+
+    Bin the full population first, as in the flowchart. Discard the bin
+    straddling xmin rather than drawing an artificially partly filled bin.
+    """
+    if normalization not in ("tail", "full"):
+        raise ValueError(f"Unknown PDF normalization: {normalization}.")
     curves = {}
     for size, drops in size_drops.items():
         xmin = float(xmins[size])
@@ -427,7 +469,13 @@ def tail_histogram_curves(size_drops, xmins, bins_per_decade):
             raise ValueError(
                 f"L={size} has only {tail.size} drops at or above xmin={xmin:.3e}."
             )
-        curves[size] = log_histogram(tail, bins_per_decade=bins_per_decade)
+        drop, density = log_histogram(drops, bins_per_decade=bins_per_decade)
+        lower_edges = drop / 10 ** (0.5 / bins_per_decade)
+        complete = lower_edges >= xmin
+        if np.count_nonzero(complete) < 2:
+            raise ValueError(f"L={size} has too few complete histogram bins above xmin.")
+        factor = len(drops) / len(tail) if normalization == "tail" else 1.0
+        curves[size] = (drop[complete], density[complete] * factor)
     return curves
 
 
@@ -533,35 +581,28 @@ def plot_raw_and_xmin(
     path: Path,
     applied_xmins=None,
     xmin_note=None,
+    *,
+    save_png=True,
 ):
-    del applied_xmins, xmin_note
-    fig, (ax_pdf, ax_xmin) = plt.subplots(1, 2, figsize=(11, 4.2))
+    pdf_fig, ax_pdf = plt.subplots(figsize=(4.4, 3.36))
+    xmin_fig, ax_xmin = plt.subplots(figsize=(4.4, 3.36))
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     for curve_index, (size, (drop, density)) in enumerate(raw_curves.items()):
         analysis = getattr(fits[size], "xmin_analysis", None)
         if analysis is None:
             raise RuntimeError(f"Missing xmin analysis for L={size}.")
-        simple_xmin = float(analysis["simple_drop_xmin"])
         global_xmin = float(analysis["global_min_xmin"])
         global_distance = float(analysis["global_min_distance"])
         color = colors[curve_index % len(colors)]
         ax_pdf.axvline(
-            simple_xmin,
+            global_xmin if applied_xmins is None else applied_xmins[size],
             color=color,
-            linestyle="--",
+            linestyle=":",
             linewidth=1.0,
             alpha=0.85,
             zorder=0.1,
         )
-        ax_xmin.axvline(
-            simple_xmin,
-            color=color,
-            linestyle="--",
-            linewidth=1.0,
-            alpha=0.85,
-            zorder=0.1,
-        )
-        pdf_points = ax_pdf.plot(
+        ax_pdf.plot(
             drop,
             density,
             marker="o",
@@ -570,11 +611,12 @@ def plot_raw_and_xmin(
             label=f"L={size}",
             color=color,
             zorder=3,
-        )[0]
-        results = getattr(fits[size], "xmin_fitting_results", None) or {}
+        )
+        results = analysis["global_search_details"]
         xmins = np.asarray(results.get("xmins", []), dtype=float)
         distances = np.asarray(results.get("distances", []), dtype=float)
-        mask = np.isfinite(xmins) & np.isfinite(distances) & (xmins > 0)
+        mask = (np.asarray(results["valid_fits"], dtype=bool)
+                & np.isfinite(xmins) & np.isfinite(distances) & (xmins > 0))
         if mask.any():
             order = np.argsort(xmins[mask])
             valid_xmins = xmins[mask][order]
@@ -603,7 +645,6 @@ def plot_raw_and_xmin(
         ylabel=rf"$p({drop_symbol})$",
     )
     legend_extras = [
-        Line2D([], [], color="black", linestyle="--", label="simple drop"),
         Line2D(
             [],
             [],
@@ -617,27 +658,43 @@ def plot_raw_and_xmin(
     ]
     for axis in (ax_pdf, ax_xmin):
         handles, labels = axis.get_legend_handles_labels()
-        axis.legend(handles + legend_extras, labels + ["simple drop", "global min"])
+        if axis is ax_pdf:
+            cutoff_label = "KS cutoff" if applied_xmins is None else "Common cutoff"
+            extra = Line2D([], [], color="black", linestyle=":", label=cutoff_label)
+            axis.legend(handles + [extra], labels + [cutoff_label])
+        else:
+            axis.legend(handles + legend_extras, labels + ["global min"])
     ax_xmin.set(xscale="log", xlabel=r"$\Delta E_{\min}$", ylabel=r"$D$")
-    fig.suptitle("Pre-yield" if regime == "pre" else "Post-yield")
-    fig.tight_layout(rect=(0, 0, 1, 0.95))
-    fig.savefig(path, bbox_inches="tight")
-    plt.close(fig)
+    for fig, axis, suffix in ((pdf_fig, ax_pdf, "pdf"), (xmin_fig, ax_xmin, "xmin_scan")):
+        fig.tight_layout()
+        target = path.with_name(f"{path.stem}_{suffix}.pdf")
+        fig.savefig(target, bbox_inches="tight")
+        if save_png:
+            fig.savefig(target.with_suffix(".png"), dpi=180, bbox_inches="tight")
+        plt.close(fig)
 
 
-def plot_collapse(curves, result, protocol, regime, path: Path, xmin_note=None):
+def plot_collapse(curves, result, protocol, regime, path: Path, xmin_note=None,
+                  *, save_quality=True, save_png=True,
+                  parameter_symbols=("x", "D_x"), drop_symbol="s"):
     exponent = float(result["x"])
     dimension = float(result["dimension"])
-    fig, (ax_map, ax_collapse) = plt.subplots(1, 2, figsize=(11, 4.2))
-    image = ax_map.pcolormesh(
-        result["fine_d"],
-        result["fine_x"],
-        np.log10(result["fine_q"]),
-        shading="auto",
-    )
-    ax_map.scatter([dimension], [exponent], marker="*", s=90, color="red")
-    ax_map.set(xlabel="$D_x$", ylabel="$x$", title="Collapse quality")
-    fig.colorbar(image, ax=ax_map, label="$\\log_{10} Q$")
+    collapse_fig, ax_collapse = plt.subplots(figsize=(4.4, 3.36))
+    exponent_symbol, dimension_symbol = parameter_symbols
+    parameters = rf"${exponent_symbol}={exponent:.3f},\ {dimension_symbol}={dimension:.3f}$"
+    figures = [(collapse_fig, path)]
+    if save_quality:
+        quality_fig, ax_map = plt.subplots(figsize=(4.4, 3.36))
+        image = ax_map.pcolormesh(
+            result["fine_d"], result["fine_x"], np.log10(result["fine_q"]),
+            shading="auto",
+        )
+        ax_map.scatter([dimension], [exponent], marker="*", s=90, color="red")
+        ax_map.set(xlabel="$D_x$", ylabel="$x$")
+        quality_fig.colorbar(image, ax=ax_map, label="$\\log_{10} Q$")
+        ax_map.legend(handles=[Line2D([], [], marker="*", color="red", linestyle="none",
+                                      markersize=10, label=parameters)])
+        figures.append((quality_fig, path.with_name(f"{path.stem}_quality.pdf")))
     for size, (drop, density) in curves.items():
         scaled_x = drop / size**dimension
         scaled_y = density * size ** (dimension * exponent)
@@ -645,61 +702,49 @@ def plot_collapse(curves, result, protocol, regime, path: Path, xmin_note=None):
     ax_collapse.set(
         xscale="log",
         yscale="log",
-        xlabel="$s/L^{D_x}$",
-        ylabel="$P(s;L)L^{D_x x}$",
-        title=f"$x={exponent:.3f}$, $D_x={dimension:.3f}$",
+        xlabel=rf"${drop_symbol}/L^{{{dimension_symbol}}}$",
+        ylabel=rf"$P({drop_symbol};L)L^{{{dimension_symbol}\,{exponent_symbol}}}$",
     )
-    ax_collapse.legend()
-    title = f"{PROTOCOL_LABELS[protocol]} - {regime}-yield"
-    if xmin_note:
-        title += f"\n{xmin_note}"
-    fig.suptitle(title)
+    ax_collapse.legend(title=parameters)
+    for fig, target in figures:
+        fig.tight_layout()
+        fig.savefig(target, bbox_inches="tight")
+        if save_png:
+            fig.savefig(target.with_suffix(".png"), dpi=180, bbox_inches="tight")
+        plt.close(fig)
+
+
+def plot_lambda_scaling(fits, path: Path):
+    """Fit lambda=A L^(-D_lambda); take alpha directly from the L=250 fit."""
+    if 250 not in fits or len(fits) < 3:
+        raise ValueError("Lambda scaling requires L=250 and at least three sizes.")
+    sizes = np.asarray(sorted(fits), dtype=float)
+    distributions = {size: dist_from_fit(fit) for size, fit in fits.items()}
+    rates = np.asarray([distributions[int(size)].Lambda for size in sizes], dtype=float)
+    alpha = float(distributions[250].alpha)
+    if not np.isfinite(alpha) or not np.all(np.isfinite(rates) & (rates > 0)):
+        raise ValueError("Invalid fitted alpha or lambda for size scaling.")
+    slope, intercept = np.polyfit(np.log(sizes), np.log(rates), 1)
+    dimension = float(-slope)
+    prefactor = float(np.exp(intercept))
+    grid = np.geomspace(sizes.min(), sizes.max(), 200)
+    fig, ax = plt.subplots(figsize=(4.4, 3.36))
+    ax.plot(sizes, rates, "o", label="Per-size KS fits")
+    ax.plot(grid, prefactor * grid**(-dimension),
+            label=rf"$\lambda\propto L^{{-{dimension:.3f}}}$")
+    ax.set(xscale="log", yscale="log", xlabel=r"System size $L$", ylabel=r"$\lambda$")
+    ax.set_xticks(sizes, [str(int(size)) for size in sizes])
+    ax.xaxis.set_minor_formatter(NullFormatter())
+    ax.legend(fontsize="small")
+    ax.grid(alpha=0.2)
     fig.tight_layout()
     fig.savefig(path, bbox_inches="tight")
     plt.close(fig)
-
-
-def plot_protocol_comparison(
-    all_curves, results, output_path: Path, shared_xmins=None, figure_note=None
-):
-    fig, axes = plt.subplots(len(PROTOCOLS), len(REGIMES), figsize=(10, 13), squeeze=False)
-    for row, protocol in enumerate(PROTOCOLS):
-        for col, regime in enumerate(REGIMES):
-            ax = axes[row, col]
-            result = results[protocol][regime]
-            exponent = float(result["x"])
-            dimension = float(result["dimension"])
-            for size, (drop, density) in all_curves[protocol][regime].items():
-                ax.plot(
-                    drop / size**dimension,
-                    density * size ** (dimension * exponent),
-                    marker="o",
-                    ms=2.5,
-                    linestyle="none",
-                    label=f"L={size}" if row == 0 and col == 0 else None,
-                )
-            ax.set_xscale("log")
-            ax.set_yscale("log")
-            title = (
-                f"{PROTOCOL_LABELS[protocol]}\n"
-                f"{regime}: x={exponent:.3f}, D={dimension:.3f}"
-            )
-            if shared_xmins is not None:
-                title += f", xmin={shared_xmins[protocol][regime]:.2e} (L=250)"
-            ax.set_title(title)
-            if row == len(PROTOCOLS) - 1:
-                ax.set_xlabel("$s/L^{D_x}$")
-            if col == 0:
-                ax.set_ylabel("$P(s;L)L^{D_x x}$")
-    axes[0, 0].legend(ncol=3, fontsize="small")
-    if figure_note:
-        fig.suptitle(figure_note)
-        fig.tight_layout(rect=(0, 0, 1, 0.97))
-    else:
-        fig.tight_layout()
-    fig.savefig(output_path, bbox_inches="tight")
-    fig.savefig(output_path.with_suffix(".png"), dpi=180, bbox_inches="tight")
-    plt.close(fig)
+    return {"x": alpha, "dimension": dimension, "lambda_prefactor": prefactor,
+            "alpha_source_size": 250, "collapse_optimized": False,
+            "lambda_fit": "unweighted least squares: log(lambda) = log(A) - D_lambda log(L)",
+            "parameter_fit_cutoffs": {size: float(fit.xmin) for size, fit in fits.items()},
+            "lambda_per_size": dict(zip(sizes.astype(int).tolist(), rates.tolist()))}
 
 
 def fixed_xmin_parameter_fits(
@@ -711,6 +756,8 @@ def fixed_xmin_parameter_fits(
     uncertainty_accuracy,
     parallel,
     description,
+    selected_fits=None,
+    skip_pvalue=False,
 ):
     records = {}
     for size, drops in size_drops.items():
@@ -723,28 +770,33 @@ def fixed_xmin_parameter_fits(
             f"Fitting parameters: {description}, L={size}, xmin={size_xmin:.6g}",
             flush=True,
         )
-        fit = make_fit(
-            drops,
-            xmin_range=size_xmin,
-            cache_dir=str(fit_cache_dir),
-        )
-        fit.evaluate_fit(
-            data=drops,
-            confidence=uncertainty_accuracy,
-            parallel=parallel,
-            cache_dir=str(evaluation_cache_dir),
-            tqdmDesc=f"{description}, L={size}",
-        )
+        if selected_fits is None:
+            fit = make_fit(
+                drops, xmin_range=size_xmin, cache_dir=str(fit_cache_dir),
+                xmin_selection="simpleDrop",
+            )
+        else:
+            fit = selected_fits[size]
+            if float(fit.xmin) != size_xmin:
+                raise ValueError(f"Selected-fit xmin mismatch for {description}, L={size}.")
+        if not skip_pvalue:
+            fit.evaluate_fit(
+                data=drops,
+                confidence=uncertainty_accuracy,
+                parallel=parallel,
+                cache_dir=str(evaluation_cache_dir),
+                tqdmDesc=f"{description}, L={size}",
+            )
         print(f"Finished parameters: {description}, L={size}", flush=True)
         distribution = dist_from_fit(fit)
         alpha = float(distribution.alpha)
         cutoff = float(getattr(distribution, "Lambda", np.nan))
-        alpha_std = float(getattr(fit, "alpha_std", np.nan))
-        cutoff_std = float(getattr(fit, "Lambda_std", np.nan))
-        if not np.isfinite(alpha) or not np.isfinite(alpha_std):
-            raise RuntimeError(f"Invalid alpha uncertainty for {description}, L={size}.")
-        if not np.isfinite(cutoff) or cutoff <= 0 or not np.isfinite(cutoff_std):
-            raise RuntimeError(f"Invalid Lambda uncertainty for {description}, L={size}.")
+        alpha_std = None if skip_pvalue else float(getattr(fit, "alpha_std", np.nan))
+        cutoff_std = None if skip_pvalue else float(getattr(fit, "Lambda_std", np.nan))
+        if not np.isfinite(alpha) or not np.isfinite(cutoff) or cutoff <= 0:
+            raise RuntimeError(f"Invalid parameters for {description}, L={size}.")
+        if not skip_pvalue and not (np.isfinite(alpha_std) and np.isfinite(cutoff_std)):
+            raise RuntimeError(f"Invalid parameter uncertainties for {description}, L={size}.")
         records[size] = {
             "alpha": alpha,
             "alpha_std": alpha_std,
@@ -752,30 +804,41 @@ def fixed_xmin_parameter_fits(
             "Lambda_std": cutoff_std,
             "xmin": size_xmin,
             "tail_count": int(np.count_nonzero(np.asarray(drops) >= size_xmin)),
+            "p": None if skip_pvalue else float(fit.p),
+            "alpha_bootstrap_mean": None if skip_pvalue else float(fit.alpha_mean),
         }
+        if selected_fits is not None and not skip_pvalue:
+            records[size].update(
+                xmin_bootstrap_mean=float(fit.bootstrap_xmin_mean),
+                xmin_bootstrap_std=float(fit.bootstrap_xmin_std),
+            )
     return records
 
 
-def plot_parameter_vs_size(parameter_results, xmins, parameter, path: Path):
+def plot_parameter_vs_size(parameter_results, xmins, parameter, path: Path, skip_pvalue=False):
     del xmins
     if parameter not in {"alpha", "Lambda"}:
         raise ValueError("parameter must be 'alpha' or 'Lambda'.")
     markers = ("o", "s", "^", "D")
-    fig, axes = plt.subplots(1, len(REGIMES), figsize=(11, 4.4), sharex=True)
-    for ax, regime in zip(axes, REGIMES):
-        for marker, protocol in zip(markers, PROTOCOLS):
+    protocols = tuple(parameter_results)
+    regimes = tuple(parameter_results[protocols[0]])
+    for regime in regimes:
+        fig, ax = plt.subplots(figsize=(4.4, 3.52))
+        for marker, protocol in zip(markers, protocols):
             records = parameter_results[protocol][regime]
             sizes = np.asarray(sorted(records), dtype=float)
             values = np.asarray(
                 [records[int(size)][parameter] for size in sizes], dtype=float
             )
-            errors = np.asarray(
-                [records[int(size)][f"{parameter}_std"] for size in sizes],
-                dtype=float,
-            )
-            yerr = errors
-            if parameter == "Lambda":
-                yerr = np.vstack((np.minimum(errors, 0.99 * values), errors))
+            yerr = None
+            if not skip_pvalue:
+                errors = np.asarray(
+                    [records[int(size)][f"{parameter}_std"] for size in sizes],
+                    dtype=float,
+                )
+                yerr = errors
+                if parameter == "Lambda":
+                    yerr = np.vstack((np.minimum(errors, 0.99 * values), errors))
             ax.errorbar(
                 sizes,
                 values,
@@ -785,28 +848,34 @@ def plot_parameter_vs_size(parameter_results, xmins, parameter, path: Path):
                 label=PROTOCOL_LABELS[protocol],
             )
         ax.set_xlabel("System size $L$")
+        ax.set_xticks(sizes)
         ax.grid(alpha=0.2)
-        ax.set_title("Pre-yield" if regime == "pre" else "Post-yield")
         if parameter == "Lambda":
             ax.set_yscale("log")
             ax.set_ylabel(r"Cutoff rate $\lambda$")
         else:
             ax.set_ylabel(r"Exponent $\alpha$")
         ax.legend(fontsize="small")
-    fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight")
-    fig.savefig(path.with_suffix(".png"), dpi=180, bbox_inches="tight")
-    plt.close(fig)
+        target = path if len(regimes) == 1 else path.with_name(f"{path.stem}_{regime}.pdf")
+        if skip_pvalue:
+            fig.text(0.5, 0.01, "Bootstrap omitted: no p-value or uncertainties",
+                     ha="center", fontsize=8)
+        fig.tight_layout(rect=(0, 0.04 if skip_pvalue else 0, 1, 1))
+        fig.savefig(target, bbox_inches="tight")
+        fig.savefig(target.with_suffix(".png"), dpi=180, bbox_inches="tight")
+        plt.close(fig)
 
 
-def plot_xmin_vs_size(xmins, method: str, path: Path):
+def plot_xmin_vs_size(xmins, method: str, path: Path, skip_pvalue=False):
     if method not in xmins:
         raise ValueError(f"Unknown xmin method {method!r}.")
     markers = ("o", "s", "^")
     colors = ("#0072B2", "#E69F00", "#009E73")
-    fig, axes = plt.subplots(1, len(REGIMES), figsize=(11, 4.4), sharex=True)
-    for ax, regime in zip(axes, REGIMES):
-        for marker, color, protocol in zip(markers, colors, PROTOCOLS):
+    protocols = tuple(xmins[method])
+    regimes = tuple(xmins[method][protocols[0]])
+    for regime in regimes:
+        fig, ax = plt.subplots(figsize=(4.4, 3.52))
+        for marker, color, protocol in zip(markers, colors, protocols):
             values = xmins[method][protocol][regime]
             sizes = np.asarray(sorted(values), dtype=float)
             y = np.asarray([values[int(size)] for size in sizes], dtype=float)
@@ -822,58 +891,93 @@ def plot_xmin_vs_size(xmins, method: str, path: Path):
         ax.set_xticks(sizes)
         ax.set_yscale("log")
         ax.grid(alpha=0.2)
-        ax.set_title("Pre-yield" if regime == "pre" else "Post-yield")
-    axes[0].set_ylabel(r"$\Delta E_{\min}$")
-    axes[0].legend(fontsize="small")
-    fig.tight_layout()
-    fig.savefig(path, bbox_inches="tight")
-    fig.savefig(path.with_suffix(".png"), dpi=180, bbox_inches="tight")
-    plt.close(fig)
+        ax.set_ylabel(r"$\Delta E_{\min}$")
+        ax.legend(fontsize="small")
+        target = path if len(regimes) == 1 else path.with_name(f"{path.stem}_{regime}.pdf")
+        if skip_pvalue:
+            fig.text(0.5, 0.01, "Bootstrap omitted: no p-value or uncertainties",
+                     ha="center", fontsize=8)
+        fig.tight_layout(rect=(0, 0.04 if skip_pvalue else 0, 1, 1))
+        fig.savefig(target, bbox_inches="tight")
+        fig.savefig(target.with_suffix(".png"), dpi=180, bbox_inches="tight")
+        plt.close(fig)
 
 
 def run(args):
+    if args.common_cutoff_size is None:
+        args.common_cutoff_size = 100 if args.stage == "lambda-scaling" else 250
+    if args.stage == "lambda-scaling" and (not args.skip_pvalue or args.yield_regime != "post"):
+        raise ValueError("Lambda scaling requires --skip-pvalue and --yield-regime post.")
+    protocols = tuple(args.protocols)
+    if args.stage == "lambda-scaling" and (protocols != ("second_order",) or args.population_mode != "classified"):
+        raise ValueError("Lambda scaling uses the standard positive irreversible Delta E_S population.")
+    if args.population_mode == "classified" and protocols != ("second_order",):
+        raise ValueError("The standard classified population fits only second_order. "
+                         "Select --population-mode all explicitly for other protocols.")
+    if args.standard_cache_root and args.population_mode != "classified":
+        raise ValueError("--standard-cache-root requires the classified population.")
+    if len(set(protocols)) != len(protocols):
+        raise ValueError("--protocols must not contain duplicates.")
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
-    if args.seeds_per_size < 1:
+    if args.seeds_per_size is not None and args.seeds_per_size < 1:
         raise ValueError("--seeds-per-size must be positive.")
     if args.bins_per_decade < 1:
         raise ValueError("--bins-per-decade must be positive.")
     if not 0 < args.uncertainty_accuracy < 0.5:
         raise ValueError("--uncertainty-accuracy must be between 0 and 0.5.")
-    if (args.pre is None) != (args.post is None):
-        raise ValueError("Specify both --pre and --post for explicit fixed windows.")
-    regimes = None if args.pre is None else {
-        "pre": (args.pre[0], args.pre[1]),
-        "post": (args.post[0], args.post[1]),
-    }
-    paths, inventory = completed_size_scaling_paths(
-        Path(args.data_root), args.seeds_per_size,
-        1.0 if regimes is None else regimes["post"][1],
-    )
-    pooled = pool_drops(paths, regimes, output / "cache" / "extracted", args.force)
+    regimes = None if args.yield_regime == "both" else (args.yield_regime,)
+    paths, inventory = size_scaling_paths(Path(args.data_root), args.seeds_per_size,
+                                        minimum_size=args.minimum_size)
+    if args.largest_first:
+        paths = dict(sorted(paths.items(), reverse=True))
+    standard_cache = Path(args.standard_cache_root) if args.standard_cache_root else None
+    if args.population_mode == "classified":
+        pair_cache = (standard_cache or output / "cache") / "event_pairs"
+        pooled = pool_irreversible_es(paths, regimes, pair_cache, args.force)
+    else:
+        pooled = pool_drops(paths, regimes, output / "cache" / "extracted", args.force)
     if regimes is None:
         regimes = YIELD_REGIME_NAMES
     if args.stage == "extract":
         return
 
-    analysis_dir = output / f"xmin_{XMIN_METHOD}"
+    analysis_dir = output if args.stage == "lambda-scaling" else output / f"xmin_{XMIN_METHOD}"
+    if args.population_mode == "all":
+        analysis_dir /= "all_events"
     analysis_dir.mkdir(parents=True, exist_ok=True)
+    xmin_cache = ((standard_cache / "global_min") if standard_cache else
+                  output / "cache" / "xmin" / args.population_mode)
 
     do_local = args.stage in {"collapse", "all"}
     do_shared = args.stage in {"shared", "parameters", "all"}
     do_parameters = args.stage in {"parameters", "all"}
-    all_fits = {protocol: {} for protocol in PROTOCOLS}
-    all_raw_curves = {protocol: {} for protocol in PROTOCOLS}
-    all_curves = {protocol: {} for protocol in PROTOCOLS}
-    all_results = {protocol: {} for protocol in PROTOCOLS}
-    all_curves_without_l50 = {protocol: {} for protocol in PROTOCOLS}
-    all_results_without_l50 = {protocol: {} for protocol in PROTOCOLS}
+    all_fits = {protocol: {} for protocol in protocols}
+    all_raw_curves = {protocol: {} for protocol in protocols}
+    all_curves = {protocol: {} for protocol in protocols}
+    all_results = {protocol: {} for protocol in protocols}
     summary = {
         "inventory": inventory,
         "seeds_per_size": args.seeds_per_size,
+        "minimum_size": args.minimum_size,
+        "source_csvs": {size: [str(path) for path in files] for size, files in paths.items()},
+        "sample_counts": {size: len(files) for size, files in paths.items()},
+        "sample_selection": "available runs extending past their avg_P12 peak +0.01; partial runs included",
+        "histogram_method": "Plotting.plotPowerLaw.getHist",
+        "bins_per_decade": args.bins_per_decade,
+        "collapse_pdf": "conditional tail density; only bins wholly above the KS cutoff",
+        "yield_regimes": list(regimes),
+        "fit_size_order": list(paths),
+        "protocols": protocols,
+        "population_mode": args.population_mode,
+        "fit_population": ("positive irreversible Delta E_S" if args.population_mode == "classified"
+                           else "all positive drops; alternative analysis"),
+        "post_yield_rule": POST_YIELD_RULE,
+        "delta_E_S_tangent": "gamma0",
+        "kappa_det": kappa_detection_threshold() if args.population_mode == "classified" else None,
         "results": {},
     }
-    for protocol in PROTOCOLS:
+    for protocol in protocols:
         summary["results"][protocol] = {}
         for regime in regimes:
             print(
@@ -885,12 +989,45 @@ def run(args):
             fits = fit_xmins(
                 size_drops,
                 parallel=args.parallel_xmin,
-                cache_dir=output / "cache" / "xmin" / protocol / regime,
+                cache_dir=xmin_cache / protocol / regime,
                 description=f"{protocol}, {regime}-yield",
             )
             all_fits[protocol][regime] = fits
             raw_curves = histogram_curves(size_drops, args.bins_per_decade)
             all_raw_curves[protocol][regime] = raw_curves
+            if args.stage == "lambda-scaling":
+                result = plot_lambda_scaling(fits, analysis_dir / "lambda_scaling.pdf")
+                if args.lambda_cutoff == "common":
+                    if args.common_cutoff_size not in fits:
+                        raise ValueError(f"Missing common cutoff source L={args.common_cutoff_size}.")
+                    cutoff = float(fits[args.common_cutoff_size].xmin)
+                    xmins = {size: cutoff for size in fits}
+                else:
+                    xmins = {size: float(fit.xmin) for size, fit in fits.items()}
+                curves = tail_histogram_curves(
+                    size_drops, xmins, args.bins_per_decade,
+                    normalization=args.lambda_normalization,
+                )
+                plot_collapse(
+                    curves, result, protocol, regime,
+                    analysis_dir / f"{protocol}_{regime}_collapse_fixed_alpha.pdf",
+                    save_quality=False, save_png=False,
+                    parameter_symbols=(r"\alpha_{250}", r"D_\lambda"),
+                    drop_symbol=PROTOCOL_DROP_SYMBOLS[protocol],
+                )
+                plot_raw_and_xmin(raw_curves, fits, protocol, regime,
+                                  analysis_dir / f"{protocol}_{regime}.pdf",
+                                  save_png=False)
+                summary["results"][protocol][regime] = {
+                    **result, "collapse_cutoff_rule": args.lambda_cutoff,
+                    "collapse_normalization": args.lambda_normalization,
+                    "cutoff_source_size": args.common_cutoff_size if args.lambda_cutoff == "common" else None,
+                    "applied_cutoffs": xmins,
+                    "drop_count": {size: len(values) for size, values in size_drops.items()},
+                    "tail_count": {size: int(np.count_nonzero(values >= xmins[size]))
+                                   for size, values in size_drops.items()},
+                }
+                continue
             plot_raw_and_xmin(
                 raw_curves,
                 fits,
@@ -926,31 +1063,6 @@ def run(args):
                 analysis_dir / f"{protocol}_{regime}_collapse.pdf",
                 xmin_note=f"Per-size {XMIN_METHOD} xmin; tail PDFs renormalized",
             )
-            curves_without_l50 = exclude_size(curves, 50)
-            result_without_l50 = optimize_collapse(
-                curves_without_l50,
-                analysis_dir
-                / "without_L50"
-                / "cache"
-                / "collapse"
-                / f"{protocol}_{regime}.npz",
-                force=args.force,
-            )
-            all_curves_without_l50[protocol][regime] = curves_without_l50
-            all_results_without_l50[protocol][regime] = result_without_l50
-            plot_collapse(
-                curves_without_l50,
-                result_without_l50,
-                protocol,
-                regime,
-                analysis_dir
-                / "without_L50"
-                / f"{protocol}_{regime}_collapse_without_L50.pdf",
-                xmin_note=(
-                    f"Per-size {XMIN_METHOD} xmin; L=50 excluded; "
-                    "tail PDFs renormalized"
-                ),
-            )
             summary["results"][protocol][regime] = {
                 "x": float(result["x"]),
                 "dimension": float(result["dimension"]),
@@ -962,32 +1074,20 @@ def run(args):
                     str(size): int(np.count_nonzero(values >= xmins[size]))
                     for size, values in size_drops.items()
                 },
-                "collapse_without_L50": {
-                    "x": float(result_without_l50["x"]),
-                    "dimension": float(result_without_l50["dimension"]),
-                    "quality": float(result_without_l50["quality"]),
-                    "optimum_on_search_boundary": bool(
-                        result_without_l50["boundary"]
-                    ),
-                },
             }
+    if args.stage == "lambda-scaling":
+        summary["bootstrap_performed"] = False
+        summary["raw_pdf"] = "full positive irreversible E_S population; per-size KS cutoff markers"
+        summary["collapse_pdf"] = (
+            "full-population density; masking does not renormalize the tail"
+            if args.lambda_normalization == "full" else "conditional tail density"
+        ) + "; only complete bins above the applied cutoff"
+        (analysis_dir / "lambda_scaling_results.json").write_text(json.dumps(summary, indent=2))
+        return
     if args.stage == "xmin":
         return
 
     if do_local:
-        plot_protocol_comparison(
-            all_curves,
-            all_results,
-            analysis_dir / "protocol_collapse_comparison.pdf",
-        )
-        plot_protocol_comparison(
-            all_curves_without_l50,
-            all_results_without_l50,
-            analysis_dir
-            / "without_L50"
-            / "protocol_collapse_comparison_without_L50.pdf",
-            figure_note="Collapse excluding the L=50 system; per-size xmin",
-        )
         (analysis_dir / "collapse_results.json").write_text(
             json.dumps(summary, indent=2)
         )
@@ -997,17 +1097,19 @@ def run(args):
 
     if do_parameters:
         parameter_dir = analysis_dir / "parameters_per_size"
+        if args.skip_pvalue:
+            parameter_dir /= "without_uncertainties"
         parameter_dir.mkdir(parents=True, exist_ok=True)
         parameter_xmins = {
-            "simple_drop": {protocol: {} for protocol in PROTOCOLS},
-            "global_min": {protocol: {} for protocol in PROTOCOLS},
+            method: {protocol: {} for protocol in protocols}
+            for method in args.parameter_xmin_methods
         }
         parameter_results = {
-            method: {protocol: {} for protocol in PROTOCOLS}
+            method: {protocol: {} for protocol in protocols}
             for method in parameter_xmins
         }
         for method in parameter_xmins:
-            for protocol in PROTOCOLS:
+            for protocol in protocols:
                 for regime in regimes:
                     size_drops = pooled[protocol][regime]
                     parameter_xmins[method][protocol][regime] = {
@@ -1032,7 +1134,8 @@ def run(args):
                                 / protocol
                                 / regime
                             ),
-                            evaluation_cache_dir=(
+                            evaluation_cache_dir=(standard_cache / "evaluation" / protocol / regime
+                                                  if standard_cache and method == "global_min" else
                                 parameter_dir
                                 / "cache"
                                 / "evaluation"
@@ -1043,6 +1146,9 @@ def run(args):
                             uncertainty_accuracy=args.uncertainty_accuracy,
                             parallel=args.parallel_uncertainty,
                             description=f"{method}, {protocol}, {regime}-yield",
+                            selected_fits=(all_fits[protocol][regime]
+                                           if method == "global_min" else None),
+                            skip_pvalue=args.skip_pvalue,
                         )
                     )
         for method in parameter_results:
@@ -1051,25 +1157,36 @@ def run(args):
                 parameter_xmins[method],
                 "alpha",
                 parameter_dir / f"alpha_vs_size_{method}.pdf",
+                skip_pvalue=args.skip_pvalue,
             )
             plot_parameter_vs_size(
                 parameter_results[method],
                 parameter_xmins[method],
                 "Lambda",
                 parameter_dir / f"lambda_vs_size_{method}.pdf",
+                skip_pvalue=args.skip_pvalue,
             )
             plot_xmin_vs_size(
                 parameter_xmins,
                 method,
                 parameter_dir / f"xmin_vs_size_{method}.pdf",
+                skip_pvalue=args.skip_pvalue,
             )
         (parameter_dir / "parameter_results.json").write_text(
             json.dumps(
                 {
                     "inventory": inventory,
                     "seeds_per_size": args.seeds_per_size,
+                    "yield_regimes": list(regimes),
+                    "fit_size_order": list(paths),
                     "sizes": sorted(paths),
-                    "protocols": PROTOCOLS,
+                    "protocols": protocols,
+                    "bootstrap_performed": not args.skip_pvalue,
+                    "population_mode": args.population_mode,
+                    "fit_population": summary["fit_population"],
+                    "post_yield_rule": POST_YIELD_RULE,
+                    "delta_E_S_tangent": "gamma0",
+                    "kappa_det": summary["kappa_det"],
                     "xmins": parameter_xmins,
                     "records": parameter_results,
                 },
@@ -1077,34 +1194,50 @@ def run(args):
             )
         )
 
-    shared_dir = analysis_dir / "shared_L250_xmin"
+    if args.stage == "parameters":
+        return
+
+    source_size = args.common_cutoff_size
+    shared_suffix = "shared_xmin" if source_size == 250 else "common_cutoff"
+    shared_dir = analysis_dir / "shared_L250_xmin" if source_size == 250 else analysis_dir
     shared_dir.mkdir(parents=True, exist_ok=True)
-    shared_xmins = {protocol: {} for protocol in PROTOCOLS}
-    shared_curves = {protocol: {} for protocol in PROTOCOLS}
-    shared_results = {protocol: {} for protocol in PROTOCOLS}
-    shared_curves_without_l50 = {protocol: {} for protocol in PROTOCOLS}
-    shared_results_without_l50 = {protocol: {} for protocol in PROTOCOLS}
-    parameter_results = {protocol: {} for protocol in PROTOCOLS}
+    shared_xmins = {protocol: {} for protocol in protocols}
+    shared_curves = {protocol: {} for protocol in protocols}
+    shared_results = {protocol: {} for protocol in protocols}
+    parameter_results = {protocol: {} for protocol in protocols}
     shared_summary = {
         "inventory": inventory,
         "seeds_per_size": args.seeds_per_size,
-        "xmin_source_size": 250,
+        "minimum_size": args.minimum_size,
+        "yield_regimes": list(regimes),
+        "fit_size_order": list(paths),
+        "xmin_source_size": source_size,
+        "analysis_kind": "common-cutoff collapse sensitivity; per-size KS fits unchanged",
+        "histogram_method": summary["histogram_method"],
+        "bins_per_decade": args.bins_per_decade,
+        "collapse_pdf": "conditional tail density; only bins wholly above the common cutoff",
         "xmin_strategy": XMIN_METHOD,
         "uncertainty_accuracy": args.uncertainty_accuracy,
-        "bootstrap_sets": max(1, int(1 / (4 * args.uncertainty_accuracy**2))),
+        "bootstrap_performed": not args.skip_pvalue,
+        "bootstrap_sets": 0 if args.skip_pvalue else max(1, int(1 / (4 * args.uncertainty_accuracy**2))),
+        "post_yield_rule": POST_YIELD_RULE,
+        "delta_E_S_tangent": "gamma0",
+        "fit_population": summary["fit_population"],
+        "source_csvs": summary["source_csvs"],
+        "sample_counts": summary["sample_counts"],
         "results": {},
     }
-    for protocol in PROTOCOLS:
+    for protocol in protocols:
         shared_summary["results"][protocol] = {}
         for regime in regimes:
             size_drops = pooled[protocol][regime]
-            if 250 not in size_drops:
-                raise RuntimeError("Shared-xmin analysis requires L=250 data.")
-            shared_xmin = float(all_fits[protocol][regime][250].xmin)
+            if source_size not in size_drops:
+                raise RuntimeError(f"Common-cutoff analysis requires L={source_size} data.")
+            shared_xmin = float(all_fits[protocol][regime][source_size].xmin)
             xmins = {size: shared_xmin for size in size_drops}
             shared_xmins[protocol][regime] = shared_xmin
             note = (
-                f"Shared xmin={shared_xmin:.3e} from L=250 "
+                f"Shared xmin={shared_xmin:.3e} from L={source_size} "
                 f"({XMIN_METHOD})"
             )
             regime_summary = {
@@ -1121,7 +1254,7 @@ def run(args):
                     all_fits[protocol][regime],
                     protocol,
                     regime,
-                    shared_dir / f"{protocol}_{regime}_raw_shared_xmin.pdf",
+                    shared_dir / f"{protocol}_{regime}_raw_{shared_suffix}.pdf",
                     applied_xmins=xmins,
                     xmin_note=note,
                 )
@@ -1131,7 +1264,7 @@ def run(args):
                 shared_curves[protocol][regime] = curves
                 result = optimize_collapse(
                     curves,
-                    shared_dir / "cache" / "collapse" / f"{protocol}_{regime}.npz",
+                    shared_dir / "cache" / "collapse" / f"{protocol}_{regime}_{shared_suffix}.npz",
                     force=args.force,
                 )
                 shared_results[protocol][regime] = result
@@ -1140,7 +1273,7 @@ def run(args):
                     result,
                     protocol,
                     regime,
-                    shared_dir / f"{protocol}_{regime}_collapse_shared_xmin.pdf",
+                    shared_dir / f"{protocol}_{regime}_collapse_{shared_suffix}.pdf",
                     xmin_note=note,
                 )
                 regime_summary["collapse"] = {
@@ -1149,56 +1282,9 @@ def run(args):
                     "quality": float(result["quality"]),
                     "optimum_on_search_boundary": bool(result["boundary"]),
                 }
-                curves_without_l50 = exclude_size(curves, 50)
-                result_without_l50 = optimize_collapse(
-                    curves_without_l50,
-                    shared_dir
-                    / "without_L50"
-                    / "cache"
-                    / "collapse"
-                    / f"{protocol}_{regime}.npz",
-                    force=args.force,
-                )
-                shared_curves_without_l50[protocol][regime] = curves_without_l50
-                shared_results_without_l50[protocol][regime] = result_without_l50
-                plot_collapse(
-                    curves_without_l50,
-                    result_without_l50,
-                    protocol,
-                    regime,
-                    shared_dir
-                    / "without_L50"
-                    / f"{protocol}_{regime}_collapse_shared_xmin_without_L50.pdf",
-                    xmin_note=f"{note}; L=50 excluded",
-                )
-                regime_summary["collapse_without_L50"] = {
-                    "x": float(result_without_l50["x"]),
-                    "dimension": float(result_without_l50["dimension"]),
-                    "quality": float(result_without_l50["quality"]),
-                    "optimum_on_search_boundary": bool(
-                        result_without_l50["boundary"]
-                    ),
-                }
-
             shared_summary["results"][protocol][regime] = regime_summary
 
-    if do_shared:
-        plot_protocol_comparison(
-            shared_curves,
-            shared_results,
-            shared_dir / "protocol_collapse_comparison_shared_xmin.pdf",
-            shared_xmins=shared_xmins,
-        )
-        plot_protocol_comparison(
-            shared_curves_without_l50,
-            shared_results_without_l50,
-            shared_dir
-            / "without_L50"
-            / "protocol_collapse_comparison_shared_xmin_without_L50.pdf",
-            shared_xmins=shared_xmins,
-            figure_note="Collapse excluding the L=50 system; shared L=250 xmin",
-        )
-    (shared_dir / "shared_xmin_results.json").write_text(
+    (shared_dir / f"{shared_suffix}_results.json").write_text(
         json.dumps(shared_summary, indent=2)
     )
 
@@ -1211,23 +1297,41 @@ def parse_args():
     )
     parser.add_argument(
         "--output",
-        default="Plots/powerLaw/size_collapse",
+        default="Plots/powerLaw/size_collapse_piola_peak_post_only",
     )
     parser.add_argument(
         "--stage",
-        choices=("extract", "xmin", "collapse", "shared", "parameters", "all"),
+        choices=("extract", "xmin", "collapse", "shared", "parameters", "lambda-scaling", "all"),
         default="all",
     )
-    parser.add_argument("--seeds-per-size", type=int, default=6)
-    parser.add_argument("--pre", type=float, nargs=2, default=None,
-                        help="Explicit legacy fixed pre-yield window; also requires --post.")
-    parser.add_argument("--post", type=float, nargs=2, default=None,
-                        help="Explicit legacy fixed post-yield window; default uses each stress peak + 0.01.")
+    parser.add_argument("--seeds-per-size", type=int,
+                        help="Optional sample cap; default uses all available post-yield runs.")
+    parser.add_argument("--minimum-size", type=int, default=SIZE_SCALING_MIN_SIZE,
+                        help="Minimum system size (default: 100; use 50 for an explicitly requested comparison).")
     parser.add_argument("--parallel-xmin", action="store_true")
     parser.add_argument("--uncertainty-accuracy", type=float, default=0.05)
     parser.add_argument("--parallel-uncertainty", action="store_true")
-    parser.add_argument("--bins-per-decade", type=int, default=10)
+    parser.add_argument("--bins-per-decade", type=int, default=5)
+    parser.add_argument("--common-cutoff-size", type=int,
+                        help="Common-cutoff reference size (default: 100 for lambda scaling, 250 for other stages).")
+    parser.add_argument("--lambda-cutoff", choices=("common", "per-size"), default="common",
+                        help="Cutoff rule for the lambda-scaling stage.")
+    parser.add_argument("--lambda-normalization", choices=("tail", "full"), default="tail",
+                        help="Normalize to the retained tail or full population before masking bins.")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--yield-regime", choices=("both", "pre", "post"), default="post")
+    parser.add_argument("--largest-first", action="store_true")
+    parser.add_argument("--protocols", nargs="+", choices=PROTOCOLS, default=("second_order",),
+                        help="Energy-drop protocols to fit (default: second_order).")
+    parser.add_argument("--population-mode", choices=("classified", "all"), default="classified",
+                        help="Default: kappa-classified irreversible E_S; 'all' is an alternative analysis.")
+    parser.add_argument("--standard-cache-root", type=Path,
+                        help="Reuse event pairs, KS searches and bootstraps from sizeScalingERClassification/cache.")
+    parser.add_argument("--parameter-xmin-methods", nargs="+",
+                        choices=("global_min", "simple_drop"),
+                        default=("global_min",))
+    parser.add_argument("--skip-pvalue", action="store_true",
+                        help="Omit parameter bootstrap; save plots under without_uncertainties.")
     return parser.parse_args()
 
 

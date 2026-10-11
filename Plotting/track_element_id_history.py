@@ -206,24 +206,24 @@ def _render_plot(rows: list[dict[str, object]], path: Path, element_id: int) -> 
     axes[0, 0].plot(reduced_x, reduced_y, ".-", ms=2, lw=0.6, label="reduced")
     axes[0, 0].scatter(
         reduced_x[top_rows], reduced_y[top_rows], c="red", s=20,
-        label=r"largest $|\Delta x_p|$",
+        label=r"largest $|\Delta x_P|$",
     )
-    axes[0, 0].set_xlabel("x_p")
-    axes[0, 0].set_ylabel("y_p")
+    axes[0, 0].set_xlabel("x_P")
+    axes[0, 0].set_ylabel("y_P")
     axes[0, 0].set_title("Fixed element-ID path")
     axes[0, 0].set_aspect("equal", adjustable="box")
     axes[0, 0].legend(fontsize=8)
 
-    axes[0, 1].plot(loads, reduced_x, label="x_p")
-    axes[0, 1].plot(loads, reduced_y, label="y_p")
+    axes[0, 1].plot(loads, reduced_x, label="x_P")
+    axes[0, 1].plot(loads, reduced_y, label="y_P")
     axes[0, 1].scatter(loads[top_rows], reduced_x[top_rows], c="red", s=16)
     axes[0, 1].set_xlabel("load")
     axes[0, 1].set_ylabel("reduced Poincare coordinate")
     axes[0, 1].set_title("Reduced coordinates versus load")
     axes[0, 1].legend()
 
-    axes[1, 0].plot(loads, dx, label=r"$\Delta x_p$")
-    axes[1, 0].plot(loads, dy, label=r"$\Delta y_p$")
+    axes[1, 0].plot(loads, dx, label=r"$\Delta x_P$")
+    axes[1, 0].plot(loads, dy, label=r"$\Delta y_P$")
     axes[1, 0].axhline(0.0, color="black", lw=0.5)
     axes[1, 0].scatter(loads[top_rows], dx[top_rows], c="red", s=16)
     axes[1, 0].set_xlabel("load")
@@ -242,7 +242,7 @@ def _render_plot(rows: list[dict[str, object]], path: Path, element_id: int) -> 
     twin.set_ylabel(r"$\|\Delta T\|_F$")
     figure.suptitle(
         f"Fixed MTS2D element ID {element_id}; red points are the ten largest "
-        r"$|\Delta x_p|$ steps"
+        r"$|\Delta x_P|$ steps"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=234, bbox_inches="tight", pad_inches=0.05)

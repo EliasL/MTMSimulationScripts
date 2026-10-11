@@ -1012,8 +1012,8 @@ def plot_reference_basis_rotation():
     poincare_ax.set_xlim(-0.32, 0.32)
     poincare_ax.set_ylim(-0.27, 0.27)
     poincare_ax.set_aspect("equal", adjustable="box")
-    poincare_ax.set_xlabel(r"$x_p$")
-    poincare_ax.set_ylabel(r"$y_p$")
+    poincare_ax.set_xlabel(r"$x_P$")
+    poincare_ax.set_ylabel(r"$y_P$")
     poincare_ax.set_title(
         r"$\mathbf{C}(\theta)=\mathbf{Q}(\theta)^T\mathbf{C}(0)\mathbf{Q}(\theta)$ closes after $\theta=\pi$",
         color=TEXT,

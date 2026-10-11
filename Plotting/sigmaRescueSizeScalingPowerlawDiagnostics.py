@@ -6,8 +6,8 @@ classified with ``kappa_det = mu/(2 rho)`` for ``rho=N/V_0=2``; that event mask 
 ``Delta E_I``/``Delta E_S`` values before positive filtering.  Each size then
 gets one figure containing fitted PDFs and xmin/KS scans for the three drop
 measures, plus a separate PDF showing the reversible/irreversible split.
-The Clauset refit bootstrap and 95% intervals are computed for the standard
-irreversible ``Delta E_S`` fit.
+The Clauset refit bootstrap supplies 95% percentile intervals for xmin, alpha,
+and Lambda. The reference p-value belongs to ``Delta E_S``.
 
 Run from the repository root with::
 
@@ -26,7 +26,6 @@ import matplotlib as mpl
 mpl.use("Agg")
 mpl.rcParams["text.usetex"] = False
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 
@@ -40,6 +39,7 @@ from Plotting.plotPowerLaw import (
 )
 from Plotting.standardPowerlaw import (
     DEFAULT_KAPPA_RHO,
+    SIGMA_RESCUE_POST_YIELD_WINDOW,
     EventDrops,
     kappa_detection_threshold,
     kappa_from_relaxation_energy,
@@ -50,9 +50,9 @@ from Plotting.standardPowerlaw import (
 )
 
 
-DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0")
+DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0_piola_peak")
 DEFAULT_OUTPUT = Path(
-    "Plots/powerLaw/sigma_rescue_size_scaling_individual"
+    "Plots/powerLaw/sigma_rescue_size_scaling_individual_piola_peak"
 )
 PROTOCOLS = ("delta_E_I", "delta_E_R", "delta_E_S")
 PROTOCOL_SYMBOLS = {
@@ -60,6 +60,8 @@ PROTOCOL_SYMBOLS = {
     "delta_E_R": r"$\Delta E_R$",
     "delta_E_S": r"$\Delta E_S$",
 }
+MINIMUM_LINESTYLE = ":"
+MINIMUM_LINEWIDTH = 1.0
 PLOT_DROP_LABELS = {
     "delta_E_I": r"E_I",
     "delta_E_R": r"E_R",
@@ -75,6 +77,7 @@ PVALUE_START_ACCURACY = 0.1
 PVALUE_MAX_ACCURACY = 0.01
 PVALUE_CONFIDENCE = 0.01
 DEFAULT_PVALUE_WORKERS = min(4, os.cpu_count() or 1)
+BOOTSTRAP_CI_LEVEL = 0.95
 
 
 def _positive(values: np.ndarray) -> np.ndarray:
@@ -132,8 +135,11 @@ def _fit_population(
     return fit
 
 
-def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
+def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str,
+                    bootstrap_intervals: tuple[tuple[float, float], ...] | None = None):
     symbol = PROTOCOL_SYMBOLS[protocol]
+    subscript = protocol.rsplit("_", 1)[1]
+    cutoff_symbol = rf"\Delta E_{{{subscript},\min}}^{{\mathrm{{KS}}}}"
     plot_data_pdf(
         ax,
         data,
@@ -147,7 +153,7 @@ def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
         ax,
         fit,
         color="tab:red",
-        label="global-min truncated power law",
+        label=r"Fit: $p(x)\propto x^{-\hat\alpha}e^{-\hat\lambda x}$",
         drop_label=PLOT_DROP_LABELS[protocol],
         drop_sign="positive",
         show_legend=False,
@@ -161,18 +167,27 @@ def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
     ax.axvline(
         global_xmin,
         color="0.2",
-        linestyle=":",
-        linewidth=1.0,
+        linestyle=MINIMUM_LINESTYLE,
+        linewidth=MINIMUM_LINEWIDTH,
         label="global minimum",
     )
     distribution = dist_from_fit(fit)
     lambda_value = float(getattr(distribution, "Lambda", np.nan))
-    annotation = (
-        rf"$\Delta E_{{\min}}^{{global}}={global_xmin:.2e}$" "\n"
-        rf"$\alpha={float(distribution.alpha):.2f}$, "
-        rf"$\lambda={lambda_value:.2e}$" "\n"
-        rf"$D={float(fit.D):.3f}$, $n={data.size}$"
+    intervals = bootstrap_intervals or (
+        (float(fit.bootstrap_xmin_ci_low), float(fit.bootstrap_xmin_ci_high)),
+        (float(fit.alpha_ci_low), float(fit.alpha_ci_high)),
+        (float(fit.Lambda_ci_low), float(fit.Lambda_ci_high)),
     )
+    intervals = np.asarray(intervals, dtype=float)
+    if intervals.shape != (3, 2) or not np.isfinite(intervals).all() or np.any(intervals <= 0):
+        raise ValueError(f"Missing valid positive 95% bootstrap intervals for {protocol} fit.")
+    xmin_text = rf"${cutoff_symbol}={global_xmin:.2e}$ $[{intervals[0, 0]:.2e}, {intervals[0, 1]:.2e}]$"
+    alpha_text = rf"$\hat\alpha={float(distribution.alpha):.2f}$ $[{intervals[1, 0]:.2f}, {intervals[1, 1]:.2f}]$"
+    lambda_text = rf"$\hat\lambda={lambda_value:.2e}$ $[{intervals[2, 0]:.2e}, {intervals[2, 1]:.2e}]$"
+    annotation_lines = [xmin_text, alpha_text, lambda_text,
+                        rf"$\hat D={float(fit.D):.3f}$, $n={data.size}$"]
+    annotation_lines.append("95% bootstrap percentile interval")
+    annotation = "\n".join(annotation_lines)
     ax.text(
         0.04,
         0.04,
@@ -182,10 +197,10 @@ def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
         fontsize="x-small",
         bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "none"},
     )
-    ax.set_title(symbol)
     ax.set_xlabel(symbol)
     ax.set_ylabel(rf"$p({symbol[1:-1]})$")
     ax.grid(alpha=0.18)
+    ax.legend(loc="center left", fontsize="x-small", frameon=True)
 
 
 def _set_pdf_axes(ax, quantity: str) -> None:
@@ -223,8 +238,8 @@ def _save_separation_figure(
             f"got reversible={es_rev.size}, irreversible={es_irrev.size}."
         )
 
-    fig, axes = plt.subplots(1, 3, figsize=(12.8, 3.8), squeeze=False)
-    kappa_ax, er_ax, es_ax = axes[0]
+    panels = [plt.subplots(figsize=(5.5, 4.2)) for _ in range(3)]
+    kappa_ax, er_ax, es_ax = [ax for _, ax in panels]
     plot_data_pdf(
         kappa_ax,
         kappa_all,
@@ -246,7 +261,6 @@ def _save_separation_figure(
         label=rf"$\kappa_{{\det}}={kappa_det:.2e}$",
         zorder=4,
     )
-    kappa_ax.set_title(r"$\kappa$ split")
     kappa_ax.legend(loc="best", fontsize="x-small")
 
     plot_data_pdf(
@@ -277,7 +291,6 @@ def _save_separation_figure(
         show_legend=False,
     )
     _set_pdf_axes(er_ax, r"\Delta E_R")
-    er_ax.set_title(r"$\Delta E_R$ and $\kappa_{\det}$ split")
     er_ax.legend(loc="best", fontsize="x-small")
 
     plot_data_pdf(
@@ -299,16 +312,15 @@ def _save_separation_figure(
         show_legend=False,
     )
     _set_pdf_axes(es_ax, r"\Delta E_S")
-    es_ax.set_title(r"$\Delta E_S$ after $\kappa_{\det}$ split")
     es_ax.legend(loc="best", fontsize="x-small")
 
-    fig.suptitle(rf"Post-yield separation, $L={size}$")
-    fig.subplots_adjust(left=0.06, right=0.99, bottom=0.16, top=0.84, wspace=0.30)
     output_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = output_dir / f"L{size}_post_yield_separation_pdfs.pdf"
-    fig.savefig(pdf_path, bbox_inches="tight")
-    fig.savefig(pdf_path.with_suffix(".png"), dpi=220, bbox_inches="tight")
-    plt.close(fig)
+    for (fig, _), name in zip(panels, ("kappa", "delta_E_R", "delta_E_S")):
+        fig.tight_layout()
+        pdf_path = output_dir / f"L{size}_post_yield_{name}_separation.pdf"
+        fig.savefig(pdf_path, bbox_inches="tight")
+        fig.savefig(pdf_path.with_suffix(".png"), dpi=220, bbox_inches="tight")
+        plt.close(fig)
 
 
 def _draw_full_xmin_scan(
@@ -324,22 +336,22 @@ def _draw_full_xmin_scan(
     pvalue_confidence: float,
     force_pvalue: bool,
 ) -> None:
-    """Draw the empirical xmin scan and bootstrap the standard Delta E_S fit."""
+    """Draw the empirical xmin scan and bootstrap the fitted population."""
     if fit.xmin_fitting_results is None:
         raise RuntimeError(f"Missing xmin results for L={size}, {protocol}.")
     parallel = int(pvalue_workers) > 1
     eval_cache_dir = output_dir / "cache" / "xmin_bootstrap" / protocol / f"L{size}"
-    if protocol == "delta_E_S":
-        fit.evaluate_clauset_pvalue(
-            data=data,
-            confidence=pvalue_confidence,
-            parallel=parallel,
-            max_workers=pvalue_workers,
-            use_cache=not force_pvalue,
-            cache_dir=str(eval_cache_dir),
-            tqdmDesc=f"{protocol}, post-yield, L={size}: Clauset p-value",
-            xmin_mode=bootstrap_xmin_mode,
-        )
+    fit.evaluate_clauset_pvalue(
+        data=data,
+        confidence=pvalue_confidence,
+        ci_level=BOOTSTRAP_CI_LEVEL,
+        parallel=parallel,
+        max_workers=pvalue_workers,
+        use_cache=not force_pvalue,
+        cache_dir=str(eval_cache_dir),
+        tqdmDesc=f"{protocol}, post-yield, L={size}: refit bootstrap",
+        xmin_mode=bootstrap_xmin_mode,
+    )
     scan = fit.xmin_fitting_results
     xmins = np.asarray(scan["xmins"], dtype=float)
     distances = np.asarray(scan["distances"], dtype=float)
@@ -352,14 +364,31 @@ def _draw_full_xmin_scan(
     ax.plot(xmins[valid], distances[valid], color="tab:blue", label="KS distance")
     alpha_ax = ax.twinx()
     alpha_ax.plot(xmins[valid], alphas[valid], color="tab:orange", alpha=0.7,
-                  label=r"empirical $\alpha(x_{\min})$")
-    ax.axvline(float(scan["global_min_xmin"]), color="black", linestyle=":")
-    ax.set(xscale="log", xlabel=r"$\Delta E_{\min}$", ylabel="KS distance")
-    alpha_ax.set_ylabel(r"$\alpha$")
-    title = PROTOCOL_SYMBOLS[protocol]
+                  label=rf"$\hat\alpha(\Delta E_{{{protocol.rsplit('_', 1)[1]},\min}}^{{\mathrm{{KS}}}})$")
+    minimum_label = "global minimum"
     if protocol == "delta_E_S":
-        title += rf"; selected-fit $p={float(fit.p):.3f}$"
-    ax.set_title(title)
+        minimum_label += rf"; $p={float(fit.p):.3f}$"
+    ax.axvline(float(scan["global_min_xmin"]), color="0.2",
+               linestyle=MINIMUM_LINESTYLE, linewidth=MINIMUM_LINEWIDTH,
+               label=minimum_label)
+    subscript = protocol.rsplit("_", 1)[1]
+    ax.set(xscale="log",
+           xlabel=rf"$\Delta E_{{{subscript},\min}}^{{\mathrm{{KS}}}}$",
+           ylabel="KS distance")
+    alpha_ax.set_ylabel(r"$\hat\alpha$")
+    ax.spines["left"].set_color("tab:blue")
+    ax.spines["right"].set_visible(False)
+    ax.tick_params(axis="y", colors="tab:blue")
+    ax.yaxis.label.set_color("tab:blue")
+    alpha_ax.spines["right"].set_color("tab:orange")
+    alpha_ax.spines["left"].set_visible(False)
+    alpha_ax.tick_params(axis="y", colors="tab:orange")
+    alpha_ax.yaxis.label.set_color("tab:orange")
+    handles, labels = ax.get_legend_handles_labels()
+    alpha_handles, alpha_labels = alpha_ax.get_legend_handles_labels()
+    ax.legend(handles + alpha_handles, labels + alpha_labels,
+              loc="upper center", fontsize="x-small", frameon=True)
+    return alpha_ax
 
 
 def _save_size_figure(
@@ -373,59 +402,24 @@ def _save_size_figure(
     pvalue_confidence: float,
     force_pvalue: bool,
 ) -> None:
-    fig, axes = plt.subplots(
-        2,
-        len(protocols),
-        figsize=(6.0 * len(protocols), 8.8),
-        squeeze=False,
-    )
-    for column, protocol in enumerate(protocols):
-        _plot_fit_panel(axes[0, column], fits[protocol], data[protocol], protocol)
-        _draw_full_xmin_scan(
-            axes[1, column],
-            fits[protocol],
-            data[protocol],
-            size=size,
-            protocol=protocol,
-            output_dir=output_dir,
-            pvalue_workers=pvalue_workers,
-            bootstrap_xmin_mode=bootstrap_xmin_mode,
-            pvalue_confidence=pvalue_confidence,
-            force_pvalue=force_pvalue,
-        )
-
-    handles = [
-        Line2D([], [], color="black", marker="o", linestyle="None", label="irreversible data"),
-        Line2D([], [], color="tab:red", label="global-min truncated power law"),
-        Line2D([], [], color="black", marker="x", linestyle="None", label="global minimum"),
-    ]
-    fig.legend(
-        handles=handles,
-        loc="upper center",
-        ncol=3,
-        frameon=False,
-        fontsize="small",
-        bbox_to_anchor=(0.5, 0.985),
-    )
-    fig.suptitle(
-        rf"Post-yield, $L={size}$; irreversible population from "
-        rf"$\kappa_{{\det}}$ split",
-        y=1.02,
-    )
-    fig.subplots_adjust(
-        left=0.06,
-        right=0.97,
-        bottom=0.08,
-        top=0.88,
-        wspace=0.52,
-        hspace=0.44,
-    )
     output_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = output_dir / f"L{size}_post_yield_fits_and_xmin_scans.pdf"
-    png_path = pdf_path.with_suffix(".png")
-    fig.savefig(pdf_path, bbox_inches="tight")
-    fig.savefig(png_path, dpi=220, bbox_inches="tight")
-    plt.close(fig)
+    for protocol in protocols:
+        for kind in ("fit", "xmin_scan"):
+            fig, ax = plt.subplots(figsize=(5.5, 4.2))
+            if kind == "fit":
+                _plot_fit_panel(ax, fits[protocol], data[protocol], protocol)
+            else:
+                _draw_full_xmin_scan(
+                    ax, fits[protocol], data[protocol], size=size, protocol=protocol,
+                    output_dir=output_dir, pvalue_workers=pvalue_workers,
+                    bootstrap_xmin_mode=bootstrap_xmin_mode,
+                    pvalue_confidence=pvalue_confidence, force_pvalue=force_pvalue,
+                )
+            fig.tight_layout()
+            pdf_path = output_dir / f"L{size}_post_yield_{protocol}_{kind}.pdf"
+            fig.savefig(pdf_path, bbox_inches="tight")
+            fig.savefig(pdf_path.with_suffix(".png"), dpi=220, bbox_inches="tight")
+            plt.close(fig)
 
 
 def run(
@@ -436,6 +430,7 @@ def run(
     force: bool = False,
     resume: bool = False,
     sizes: tuple[int, ...] | None = None,
+    largest_first: bool = False,
     protocols: tuple[str, ...] = PROTOCOLS,
     pvalue_workers: int = DEFAULT_PVALUE_WORKERS,
     bootstrap_xmin_mode: str = "global",
@@ -476,7 +471,7 @@ def run(
         not force
         and not resume
         and output_dir.exists()
-        and any(output_dir.glob("L*_post_yield_fits_and_xmin_scans.pdf"))
+        and any(output_dir.glob("L*_post_yield_*_fit.pdf"))
     ):
         raise FileExistsError(
             f"Diagnostic output already exists in {output_dir}; use --force to overwrite."
@@ -491,8 +486,7 @@ def run(
     summary = {
         "snapshot_root": str(Path(snapshot_root).resolve()),
         "delta_E_S_tangent": "gamma0",
-        "post_yield_window": "per-run validated sigma12 peak + 0.01, load < 1.0",
-        "yield_peak_audit": str((Path(snapshot_root).resolve() / "tables" / "yield_peaks.csv")),
+        "post_yield_window": SIGMA_RESCUE_POST_YIELD_WINDOW,
         "population": "kappa_det = mu/(2 rho) irreversible event mask, rho=N/V_0=2",
         "kappa_detection": (
             "kappa = Delta E_R/(rho V_0 Delta gamma^2), "
@@ -511,7 +505,7 @@ def run(
                 if bootstrap_xmin_mode == "global"
                 else "rapidGlobal-xmin refitting"
             )
-            + " for every synthetic Delta E_S set; Delta E_I and Delta E_R are cutoff diagnostics"
+            + " for every synthetic set; Delta E_I and Delta E_R remain cutoff diagnostics"
         ),
         "bootstrap_xmin_mode": bootstrap_xmin_mode,
         "bootstrap_xmin_strategy": (
@@ -525,10 +519,11 @@ def run(
         "pvalue_bootstrap_replicates": max(
             1, int(1 / (4 * pvalue_confidence**2))
         ),
+        "bootstrap_ci_level": BOOTSTRAP_CI_LEVEL,
         "protocols": list(protocols),
         "fits": {},
     }
-    for size in sorted(frame["size"].unique()):
+    for size in sorted(frame["size"].unique(), reverse=largest_first):
         size_frame = frame.loc[frame["size"] == size].reset_index(drop=True)
         kappa_all = _positive(size_frame["kappa"].to_numpy(dtype=float))
         if kappa_all.size < 3:
@@ -602,16 +597,24 @@ def run(
                     "clauset_pvalue_v2": (
                         float(fits[protocol].p) if protocol == "delta_E_S" else None
                     ),
-                    "bootstrap_xmin_ci_95": (
-                        [float(fits[protocol].bootstrap_xmin_ci_low),
-                         float(fits[protocol].bootstrap_xmin_ci_high)]
-                        if protocol == "delta_E_S" else None
-                    ),
-                    "bootstrap_alpha_ci_95": (
-                        [float(fits[protocol].alpha_ci_low),
-                         float(fits[protocol].alpha_ci_high)]
-                        if protocol == "delta_E_S" else None
-                    ),
+                    "bootstrap_xmin_mean": float(fits[protocol].bootstrap_xmin_mean),
+                    "bootstrap_xmin_std": float(fits[protocol].bootstrap_xmin_std),
+                    "bootstrap_xmin_interval_95": [
+                        float(fits[protocol].bootstrap_xmin_ci_low),
+                        float(fits[protocol].bootstrap_xmin_ci_high),
+                    ],
+                    "bootstrap_alpha_mean": float(fits[protocol].alpha_mean),
+                    "bootstrap_alpha_std": float(fits[protocol].alpha_std),
+                    "bootstrap_alpha_interval_95": [
+                        float(fits[protocol].alpha_ci_low),
+                        float(fits[protocol].alpha_ci_high),
+                    ],
+                    "bootstrap_lambda_mean": float(fits[protocol].Lambda_mean),
+                    "bootstrap_lambda_std": float(fits[protocol].Lambda_std),
+                    "bootstrap_lambda_interval_95": [
+                        float(fits[protocol].Lambda_ci_low),
+                        float(fits[protocol].Lambda_ci_high),
+                    ],
                 }
                 for protocol in protocols
             },
@@ -634,6 +637,7 @@ def main() -> None:
         help="Reuse cached fits and bootstrap samples in an existing output directory.",
     )
     parser.add_argument("--sizes", type=int, nargs="+", default=None)
+    parser.add_argument("--largest-first", action="store_true")
     parser.add_argument(
         "--protocols",
         choices=PROTOCOLS,
@@ -682,6 +686,7 @@ def main() -> None:
         force=args.force,
         resume=args.resume,
         sizes=None if args.sizes is None else tuple(args.sizes),
+        largest_first=args.largest_first,
         protocols=tuple(args.protocols),
         pvalue_workers=args.pvalue_workers,
         bootstrap_xmin_mode=args.bootstrap_xmin_mode,
