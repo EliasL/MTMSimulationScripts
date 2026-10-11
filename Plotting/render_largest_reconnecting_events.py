@@ -964,7 +964,7 @@ def _render_pooled_poincare_flow(
     after_x: np.ndarray,
     after_y: np.ndarray,
     delta_T_frobenius: np.ndarray,
-    boundary: np.ndarray,
+    boundary: np.ndarray | None,
     dpi: int,
     direction_split_otsu: bool = False,
     show_arrows: bool = False,
@@ -989,6 +989,7 @@ def _render_pooled_poincare_flow(
     )
     _prepare_poincare_axis(flow_axis, zoom=zoom)
     density_image = _draw_poincare_density_histogram(
+        flow_axis, density_histogram, zoom=zoom, norm=density_norm
         flow_axis, density_histogram, zoom=zoom, norm=density_norm
     )
     if show_ellipticity_boundary:

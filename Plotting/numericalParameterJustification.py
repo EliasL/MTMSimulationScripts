@@ -179,11 +179,14 @@ def _read_required_columns(path: Path) -> tuple[pd.DataFrame, str]:
     return df, m3_column
 
 
-def _load_sample(path: Path, config: SimulationConfig, batch: int) -> SampleData:
+def _load_sample(path: Path, config: SimulationConfig, batch: int,
+                 *, allow_missing_steps: bool = False) -> SampleData:
     df, m3_column = _read_required_columns(path)
     load = df["load"].to_numpy(dtype=float)
     expected_steps = round((config.maxLoad - config.startLoad) / config.loadIncrement)
-    if load.size != expected_steps + 1:
+    if load.size != expected_steps + 1 and (
+        not allow_missing_steps or load.size > expected_steps + 1
+    ):
         raise ValueError(
             f"Expected {expected_steps + 1} load states in {path}, found {load.size}."
         )
@@ -193,7 +196,14 @@ def _load_sample(path: Path, config: SimulationConfig, batch: int) -> SampleData
             f"found [{load[0]}, {load[-1]}]."
         )
     delta_gamma = np.diff(load)
-    if not np.allclose(
+    valid_steps = np.isclose(delta_gamma, config.loadIncrement, rtol=2e-5, atol=1e-12)
+    grid_steps = delta_gamma / config.loadIncrement
+    if allow_missing_steps and (
+        np.any(grid_steps < 1 - 2e-5)
+        or not np.allclose(grid_steps, np.rint(grid_steps), rtol=2e-5, atol=1e-7)
+    ):
+        raise ValueError(f"Off-grid or non-increasing load states in {path}.")
+    if not allow_missing_steps and not np.allclose(
         delta_gamma,
         config.loadIncrement,
         # Decimal CSV serialization produces four 1e-11 deviations in the
@@ -299,6 +309,13 @@ def _load_sample(path: Path, config: SimulationConfig, batch: int) -> SampleData
         participation_fraction=participation_fraction,
         m3_participation_fraction=m3_participation_fraction,
     )
+    if not np.all(valid_steps):
+        print(f"{path}: excluding {np.count_nonzero(~valid_steps)} transitions across missing load states")
+        sample = replace(sample, **{
+            name: value[valid_steps] for name, value in vars(sample).items()
+            if isinstance(value, np.ndarray)
+        })
+    return sample
 
 
 def unbinned_log_otsu_cut(
@@ -350,17 +367,25 @@ def unbinned_log_otsu_cut(
     return cut, details
 
 
-def load_batch(batch: int) -> list[SampleData]:
+def load_batch(batch: int, *, csv_root: Path | None = None) -> list[SampleData]:
     configs, labels = sylvainBatches(batch)
     grouped_configs, grouped_labels, _ = ConfigGenerator.group_by_settings(
         configs, labels=labels
     )
-    paths, _ = get_csv_files(
-        grouped_configs,
-        labels=grouped_labels,
-        useOldFiles=False,
-        forceUpdate=False,
-    )
+    if csv_root is None:
+        paths, _ = get_csv_files(
+            grouped_configs,
+            labels=grouped_labels,
+            useOldFiles=False,
+            forceUpdate=False,
+        )
+    else:
+        paths = [[Path(csv_root) / config.name / "macroData.csv"
+                  for config in group] for group in grouped_configs]
+        missing_paths = [str(path) for group in paths for path in group
+                         if not path.is_file()]
+        if missing_paths:
+            raise FileNotFoundError(f"Missing cached macro CSVs: {missing_paths}")
     if not paths:
         raise RuntimeError(f"No CSV files found for Sylvain batch {batch}.")
 
@@ -378,7 +403,8 @@ def load_batch(batch: int) -> list[SampleData]:
     samples = []
     for index, path in enumerate(resolved_paths, start=1):
         print(f"Batch {batch}: reading sample {index}/{len(resolved_paths)}: {path.name}")
-        samples.append(_load_sample(path, config_by_name[_job_name(path)], batch))
+        samples.append(_load_sample(path, config_by_name[_job_name(path)], batch,
+                                    allow_missing_steps=csv_root is not None))
         gc.collect()
 
     setting_attribute = "eps_x" if batch == -2 else "load_increment"

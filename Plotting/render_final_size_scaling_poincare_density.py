@@ -54,13 +54,34 @@ def _final_deformation_map(path: Path, *, load_increment: float) -> np.ndarray:
     )
 
 
+def _final_elastic_map(path: Path, *, load_increment: float) -> np.ndarray:
+    """Read exported F_e, or recover F_e = F M_e for legacy fixed meshes."""
+    data = VTUData(path, load_increment=load_increment)
+    fields = set(data.mesh.cell_data)
+    if {"F_E11", "F_E12", "F_E21", "F_E22"} <= fields:
+        return np.asarray(data.get_F_e(), dtype=float)
+    # Undo the final fundamental-domain quadrant folding; retain the elastic
+    # domain and the full spatial rotation of the original deformation map.
+    return np.asarray(data.get_F(), dtype=float) @ np.asarray(
+        data.get_M(elastic_M=True), dtype=float
+    )
+
+
 def _collect_final_density(
-    vtu_paths: list[Path], *, load_increment: float
+    vtu_paths: list[Path],
+    *,
+    load_increment: float,
+    component: str = "total",
+    zoom: float = 1.0,
 ) -> tuple[np.ndarray, int, int, np.ndarray, np.ndarray]:
     """Collect one fixed-grid density histogram from final VTU frames."""
 
     if not vtu_paths:
         raise ValueError("At least one final VTU path is required.")
+    if component not in {"total", "elastic"}:
+        raise ValueError("component must be 'total' or 'elastic'.")
+    if not np.isfinite(zoom) or zoom < 1:
+        raise ValueError("zoom must be finite and at least one.")
     histogram = np.zeros((DENSITY_GRID_SIZE, DENSITY_GRID_SIZE), dtype=int)
     x_parts: list[np.ndarray] = []
     y_parts: list[np.ndarray] = []
@@ -72,8 +93,9 @@ def _collect_final_density(
         if not path.is_file():
             raise FileNotFoundError(f"Final VTU file does not exist: {path}")
 
-        total_T = _final_deformation_map(path, load_increment=load_increment)
-        metric = _metric_from_total_T(total_T, source=path)
+        reader = _final_elastic_map if component == "elastic" else _final_deformation_map
+        deformation = reader(path, load_increment=load_increment)
+        metric = _metric_from_total_T(deformation, source=path)
         x, y = _disk_coordinates(metric)
         x = np.asarray(x, dtype=np.float32).reshape(-1)
         y = np.asarray(y, dtype=np.float32).reshape(-1)
@@ -81,7 +103,7 @@ def _collect_final_density(
             raise ValueError(f"Final VTU produced an empty/inconsistent Poincare cloud: {path}")
 
         visible_density_count += _accumulate_poincare_density_histogram(
-            histogram, x, y, zoom=1.0
+            histogram, x, y, zoom=zoom
         )
         total_element_count += int(x.size)
         x_parts.append(x)
@@ -105,7 +127,7 @@ def render_final_density(
     show_loss_of_ellipticity_boundary: bool = False,
     density_vmax: int | None = None,
 ) -> Path:
-    """Render one density plot from one final VTU per simulation."""
+    """Render the total or elastic final-state density at a fixed disk zoom."""
 
     if dpi <= 0:
         raise ValueError("dpi must be positive.")
@@ -143,7 +165,7 @@ def render_final_density(
     # preserving its established density, grid, and colourbar style.
     return _render_pooled_poincare_flow(
         output_path,
-        zoom=1.0,
+        zoom=zoom,
         density_histogram=histogram,
         visible_density_count=visible_density_count,
         total_element_count=total_element_count,
@@ -254,6 +276,8 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.reconnecting_vtu is not None or args.non_reconnecting_vtu is not None:
+        if args.component != "total" or args.zoom not in (None, 1.0) or args.no_ellipticity_boundary:
+            parser.error("Component, zoom and boundary options require the single-density --vtu mode.")
         if args.reconnecting_vtu is None or args.non_reconnecting_vtu is None:
             parser.error("Both grouped VTU arguments are required for a combined plot.")
         if args.vtu is not None:

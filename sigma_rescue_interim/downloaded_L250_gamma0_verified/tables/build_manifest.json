@@ -1,0 +1,12 @@
+{
+  "delta_E_S_tangent": "gamma0",
+  "source": "/Users/elias/Downloads/drops_usable.csv.gz",
+  "source_sha256": "6ba278a8ded39cd248eaf4ad09017fc413aec2a41516a5f715a0df682dd64a0b",
+  "verification": "Every L250 Delta E_S independently checked against fixed gamma=0 tangent and starting-step avg_sigma12; Delta E_R checked against stored relaxation-energy change. Original build manifest not supplied.",
+  "gamma0_tangent": 6.075757575757595,
+  "max_delta_E_S_absolute_error": 1.1368683772161603e-13,
+  "usable_transition_count": 384157,
+  "run_count": 6,
+  "yield_audit_source": "Downloaded usable transitions; existing coverage audit applied",
+  "established_yield_peak_count": 6
+}

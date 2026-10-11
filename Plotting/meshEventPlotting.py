@@ -24,6 +24,7 @@ import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import matplotlib.tri as mtri
 from matplotlib.patches import Rectangle
+from matplotlib.quiver import Quiver
 import numpy as np
 
 from Plotting.vtuDataForSylvain import VTUData
@@ -950,6 +951,25 @@ def plot_energy_change_background(
     return mesh
 
 
+class LengthScaledQuiver(Quiver):
+    """Quiver with head length and width proportional to each vector length."""
+
+    def _h_arrows(self, length):
+        length = np.clip(np.asarray(length).reshape(-1), 0, 2**16)
+        neck = 0.70 * length
+        half_head = 0.12 * length
+        half_shaft = np.minimum(0.5, 0.035 * length)
+        zero = np.zeros_like(length)
+        x = np.column_stack((zero, neck, neck, length, neck, neck, zero, zero))
+        y = np.column_stack((half_shaft, half_shaft, half_head, zero,
+                             -half_head, -half_shaft, -half_shaft, half_shaft))
+        if self.pivot == "middle":
+            x -= 0.5 * length[:, None]
+        elif self.pivot == "tip":
+            x -= length[:, None]
+        return x, y
+
+
 def plot_displacement_arrows(
     ax,
     origins: np.ndarray,
@@ -963,6 +983,7 @@ def plot_displacement_arrows(
     rasterized: bool = False,
     periodic_vectors: tuple[np.ndarray, np.ndarray] | None = None,
     reference_indices: np.ndarray | None = None,
+    scale_heads_with_length: bool = False,
 ):
     """Overlay amplified arrows and optionally an unscaled physical key."""
 
@@ -974,7 +995,14 @@ def plot_displacement_arrows(
         reference_indices=reference_indices,
     )
     vectors = displacement * arrow_scale.amplification
-    quiver = ax.quiver(
+    def make_quiver(*args, **kwargs):
+        if not scale_heads_with_length:
+            return ax.quiver(*args, **kwargs)
+        artist = LengthScaledQuiver(ax, *args, **kwargs)
+        ax.add_collection(artist)
+        return artist
+
+    quiver = make_quiver(
         origins[:, 0],
         origins[:, 1],
         vectors[:, 0],

@@ -114,7 +114,7 @@ def build_catalog_from_job(job_directory: Path, *, batch: int = 0) -> pd.DataFra
 
 
 def build_standard_scatter_catalog(
-    *, batch: int = -2, setting: float = 1e-6
+    *, batch: int = -2, setting: float = 1e-6, csv_root: Path | None = None
 ) -> pd.DataFrame:
     """Build the exact positive-``Delta E_S`` population used by the standard scatter.
 
@@ -129,7 +129,7 @@ def build_standard_scatter_catalog(
 
     if batch not in (-2, -1):
         raise ValueError("The standard scatter catalogue supports batches -2 and -1.")
-    samples = npj.load_batch(batch)
+    samples = npj.load_batch(batch, csv_root=csv_root)
     attribute = "eps_x" if batch == -2 else "load_increment"
     groups = npj._setting_groups(samples, attribute)
     matching = [value for value in groups if np.isclose(value, setting)]
