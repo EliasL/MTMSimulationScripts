@@ -507,7 +507,7 @@ def relabel_mesh_locking_pdf(
         elif text in ("(a)", "(b)"):
             pass
         elif text == "Ei":
-            text, size = r"$E_i$", 15
+            text, size = r"$E^{(e)}$", 15
         else:
             size = 14  # Shared colour-bar tick labels.
             if energy_max is not None:
@@ -704,7 +704,7 @@ def make_mesh_locking_figure(
         cax=colorbar_ax,
         orientation="vertical",
     )
-    colorbar.ax.set_title(r"$E_i$", pad=6)
+    colorbar.ax.set_title(r"$E^{(e)}$", pad=6)
     colorbar.ax.tick_params(labelsize=14)
     colorbar.outline.set_linewidth(0.6)
 

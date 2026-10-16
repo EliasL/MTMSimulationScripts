@@ -114,6 +114,10 @@ available memory has been checked explicitly.
 
 ## Reconnecting deformation and stress
 
+Run simulation replay analyses only through Slurm. For reconnection checkpoint
+extraction, use one single-thread Slurm task per dump rather than unmanaged
+workers on the cluster hosts.
+
 For reconnecting edge-flip simulations, the total matrix
 `T = F_e T_p` is the reconnection-invariant replacement for `F`. The VTU
 fields named `T11`, `T12`, `T21`, and `T22` are legacy notation for `T_p`;

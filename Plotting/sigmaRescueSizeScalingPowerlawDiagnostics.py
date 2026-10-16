@@ -167,8 +167,13 @@ def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
     )
     distribution = dist_from_fit(fit)
     lambda_value = float(getattr(distribution, "Lambda", np.nan))
+    cutoff_symbol = (
+        r"\Delta E_{S,\min}^{KS}"
+        if protocol == "delta_E_S"
+        else r"\Delta E_{\min}^{global}"
+    )
     annotation = (
-        rf"$\Delta E_{{\min}}^{{global}}={global_xmin:.2e}$" "\n"
+        rf"${cutoff_symbol}={global_xmin:.2e}$" "\n"
         rf"$\alpha={float(distribution.alpha):.2f}$, "
         rf"$\lambda={lambda_value:.2e}$" "\n"
         rf"$D={float(fit.D):.3f}$, $n={data.size}$"
@@ -323,13 +328,14 @@ def _draw_full_xmin_scan(
     bootstrap_xmin_mode: str,
     pvalue_confidence: float,
     force_pvalue: bool,
+    skip_pvalue: bool = False,
 ) -> None:
     """Draw the empirical xmin scan and bootstrap the standard Delta E_S fit."""
     if fit.xmin_fitting_results is None:
         raise RuntimeError(f"Missing xmin results for L={size}, {protocol}.")
     parallel = int(pvalue_workers) > 1
     eval_cache_dir = output_dir / "cache" / "xmin_bootstrap" / protocol / f"L{size}"
-    if protocol == "delta_E_S":
+    if protocol == "delta_E_S" and not skip_pvalue:
         fit.evaluate_clauset_pvalue(
             data=data,
             confidence=pvalue_confidence,
@@ -354,11 +360,17 @@ def _draw_full_xmin_scan(
     alpha_ax.plot(xmins[valid], alphas[valid], color="tab:orange", alpha=0.7,
                   label=r"empirical $\alpha(x_{\min})$")
     ax.axvline(float(scan["global_min_xmin"]), color="black", linestyle=":")
-    ax.set(xscale="log", xlabel=r"$\Delta E_{\min}$", ylabel="KS distance")
+    cutoff_xlabel = (
+        r"$\Delta E_{S,\min}^{KS}$"
+        if protocol == "delta_E_S"
+        else r"$\Delta E_{\min}$"
+    )
+    ax.set(xscale="log", xlabel=cutoff_xlabel, ylabel="KS distance")
     alpha_ax.set_ylabel(r"$\alpha$")
     title = PROTOCOL_SYMBOLS[protocol]
     if protocol == "delta_E_S":
-        title += rf"; selected-fit $p={float(fit.p):.3f}$"
+        title += ("; bootstrap omitted: no p-value or intervals" if skip_pvalue
+                  else rf"; selected-fit $p={float(fit.p):.3f}$")
     ax.set_title(title)
 
 
@@ -372,6 +384,7 @@ def _save_size_figure(
     bootstrap_xmin_mode: str,
     pvalue_confidence: float,
     force_pvalue: bool,
+    skip_pvalue: bool = False,
 ) -> None:
     fig, axes = plt.subplots(
         2,
@@ -392,6 +405,7 @@ def _save_size_figure(
             bootstrap_xmin_mode=bootstrap_xmin_mode,
             pvalue_confidence=pvalue_confidence,
             force_pvalue=force_pvalue,
+            skip_pvalue=skip_pvalue,
         )
 
     handles = [
@@ -441,6 +455,7 @@ def run(
     bootstrap_xmin_mode: str = "global",
     pvalue_confidence: float = PVALUE_CONFIDENCE,
     observed_xmin_mode: str = "global",
+    skip_pvalue: bool = False,
 ) -> dict:
     protocols = tuple(protocols)
     if not protocols:
@@ -528,6 +543,10 @@ def run(
         "protocols": list(protocols),
         "fits": {},
     }
+    if skip_pvalue:
+        summary.update(selected_fit_pvalue="omitted at user request",
+                       bootstrap_xmin_mode="skipped", bootstrap_xmin_strategy="skipped",
+                       pvalue_bootstrap_replicates=0)
     for size in sorted(frame["size"].unique()):
         size_frame = frame.loc[frame["size"] == size].reset_index(drop=True)
         kappa_all = _positive(size_frame["kappa"].to_numpy(dtype=float))
@@ -585,6 +604,7 @@ def run(
             bootstrap_xmin_mode,
             pvalue_confidence,
             force_pvalue=force,
+            skip_pvalue=skip_pvalue,
         )
         summary["fits"][str(int(size))] = {
             "post_yield_rows": int(len(size_frame)),
@@ -600,17 +620,17 @@ def run(
                     "global_min_xmin": float(fits[protocol].xmin_fitting_results["global_min_xmin"]),
                     "global_min_D": float(fits[protocol].xmin_fitting_results["global_min_distance"]),
                     "clauset_pvalue_v2": (
-                        float(fits[protocol].p) if protocol == "delta_E_S" else None
+                        float(fits[protocol].p) if protocol == "delta_E_S" and not skip_pvalue else None
                     ),
                     "bootstrap_xmin_ci_95": (
                         [float(fits[protocol].bootstrap_xmin_ci_low),
                          float(fits[protocol].bootstrap_xmin_ci_high)]
-                        if protocol == "delta_E_S" else None
+                        if protocol == "delta_E_S" and not skip_pvalue else None
                     ),
                     "bootstrap_alpha_ci_95": (
                         [float(fits[protocol].alpha_ci_low),
                          float(fits[protocol].alpha_ci_high)]
-                        if protocol == "delta_E_S" else None
+                        if protocol == "delta_E_S" and not skip_pvalue else None
                     ),
                 }
                 for protocol in protocols
@@ -627,6 +647,8 @@ def main() -> None:
     parser.add_argument("--snapshot-root", type=Path, default=DEFAULT_SNAPSHOT)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--parallel-xmin", action="store_true")
+    parser.add_argument("--skip-pvalue", action="store_true",
+                        help="Omit bootstrap p-values and uncertainty intervals.")
     parser.add_argument("--force", action="store_true")
     parser.add_argument(
         "--resume",
@@ -687,6 +709,7 @@ def main() -> None:
         bootstrap_xmin_mode=args.bootstrap_xmin_mode,
         pvalue_confidence=args.pvalue_confidence,
         observed_xmin_mode=args.observed_xmin_mode,
+        skip_pvalue=args.skip_pvalue,
     )
 
 

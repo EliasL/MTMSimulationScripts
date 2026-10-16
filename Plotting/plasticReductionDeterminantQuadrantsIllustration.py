@@ -196,7 +196,7 @@ def _draw_quadrant_disk(ax, quadrant_grid, determinant):
     ax.text(
         circle_center[0],
         title_y,
-        rf"$\det\mathbf{{C}}={determinant_label}$",
+        rf"$\det\mathbf{{F}}={determinant_label}$",
         ha="center",
         va="bottom" if determinant > 0 else "top",
         color=TEXT,

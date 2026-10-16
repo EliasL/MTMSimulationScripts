@@ -128,11 +128,14 @@ def render_final_density(
     zoom: float | None = None,
     show_ellipticity_boundary: bool = True,
     density_norm: LogNorm | None = None,
+    figsize: tuple[float, float] = (10.0, 9.4),
 ) -> Path:
     """Render the total or elastic final-state density at a fixed disk zoom."""
 
     if dpi <= 0:
         raise ValueError("dpi must be positive.")
+    if len(figsize) != 2 or not np.all(np.isfinite(figsize)) or min(figsize) <= 0:
+        raise ValueError("figsize must contain two finite positive dimensions.")
     if not np.isfinite(load_increment) or load_increment <= 0.0:
         raise ValueError("load_increment must be finite and positive.")
     if zoom is None:
@@ -170,6 +173,7 @@ def render_final_density(
         direction_split_otsu=False,
         show_arrows=False,
         density_norm=density_norm,
+        figsize=figsize,
     )
 
 

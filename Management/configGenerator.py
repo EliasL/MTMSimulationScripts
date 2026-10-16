@@ -26,6 +26,7 @@ class SimulationConfig:
         self.seed = 0
         self.QDSD = 0.00  # Quenched dissorder standard deviation
         self.initialGuessNoise = 0.05
+        self.affineInitialGuess = 1  # 0: reuse previous relaxed free-node positions
         self.meshDiagonal = "major"
         self.energyFunction = "contiSquare"  # "contiSquare", "contiTriangular"
         self.bulkModulus = 4  # BulkModulus
