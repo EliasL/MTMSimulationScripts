@@ -1062,24 +1062,22 @@ def _plot_periodic_unwrapped_mesh_elements(
     ylim = ax.get_ylim()
     plotted_polygons = []
     plotted_fields = []
-    a = np.array([box_size, 0.0])
-    b = np.array([float(data.load) * box_size, box_size])
-    for i in range(-4, 5):
-        for j in range(-4, 5):
-            shifted = polygons + i * a + j * b
-            lower = shifted.min(axis=1)
-            upper = shifted.max(axis=1)
-            visible = (
-                (upper[:, 0] >= xlim[0])
-                & (lower[:, 0] <= xlim[1])
-                & (upper[:, 1] >= ylim[0])
-                & (lower[:, 1] <= ylim[1])
-            )
-            if not cull_to_view:
-                visible = np.ones(len(shifted), dtype=bool)
-            if np.any(visible):
-                plotted_polygons.append(shifted[visible])
-                plotted_fields.append(field[visible])
+    shifts = calculate_shifts(ax, data, polygons[:, :, 0], polygons[:, :, 1])
+    for dx, dy in shifts:
+        shifted = polygons + np.array([dx + float(data.load) * dy, dy])
+        lower = shifted.min(axis=1)
+        upper = shifted.max(axis=1)
+        visible = (
+            (upper[:, 0] >= xlim[0])
+            & (lower[:, 0] <= xlim[1])
+            & (upper[:, 1] >= ylim[0])
+            & (lower[:, 1] <= ylim[1])
+        )
+        if not cull_to_view:
+            visible = np.ones(len(shifted), dtype=bool)
+        if np.any(visible):
+            plotted_polygons.append(shifted[visible])
+            plotted_fields.append(field[visible])
     if not plotted_polygons:
         raise RuntimeError("Periodic triangle tiling produced no visible polygons.")
     mappable = PolyCollection(
