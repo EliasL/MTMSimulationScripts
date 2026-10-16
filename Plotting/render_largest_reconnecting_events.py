@@ -118,8 +118,13 @@ class TotalTTransition:
     delta_T_frobenius: np.ndarray
 
 
-def _macro_events(job_directory: Path) -> tuple[pd.DataFrame, float]:
-    """Return recorded negative equilibrium-energy changes and the step size."""
+def _macro_events(
+    job_directory: Path, *, energy_change_sign: str = "negative"
+) -> tuple[pd.DataFrame, float]:
+    """Return equilibrium-energy changes of the requested sign and step size."""
+
+    if energy_change_sign not in {"negative", "positive", "both"}:
+        raise ValueError("energy_change_sign must be 'negative', 'positive', or 'both'.")
 
     macro = read_live_macro_snapshot(
         Path(job_directory) / "macroData.csv",
@@ -137,11 +142,16 @@ def _macro_events(job_directory: Path) -> tuple[pd.DataFrame, float]:
     increment = float(np.median(increments))
     if not np.allclose(increments, increment, rtol=1e-8, atol=1e-12):
         raise ValueError("The macro-data load increment is not constant.")
-    events = macro[np.isfinite(macro["total_energy_change"]) & (macro["total_energy_change"] < 0)].copy()
+    change = macro["total_energy_change"]
+    selected_sign = (
+        change < 0 if energy_change_sign == "negative" else
+        change > 0 if energy_change_sign == "positive" else change != 0
+    )
+    events = macro[np.isfinite(change) & selected_sign].copy()
     if events.empty:
-        raise ValueError(f"No negative equilibrium-energy changes found in {job_directory}.")
+        raise ValueError(f"No {energy_change_sign} equilibrium-energy changes found in {job_directory}.")
     events["energy_drop"] = -events["total_energy_change"]
-    return events.sort_values("energy_drop", ascending=False).reset_index(drop=True), increment
+    return events.reindex(events["energy_drop"].abs().sort_values(ascending=False).index).reset_index(drop=True), increment
 
 
 def _periodic_box_size(job_directory: Path) -> float:
@@ -216,16 +226,17 @@ def _state_entry_for_start_load(
 
 
 def select_events(
-    job_directory: Path, *, number: int | None, saved_only: bool
+    job_directory: Path, *, number: int | None, saved_only: bool,
+    energy_change_sign: str = "negative",
 ) -> list[SelectedEvent]:
-    """Select the largest drops, never replacing missing global selections silently."""
+    """Select energy changes by magnitude, retaining the signed energy drop."""
 
     if number is not None and number <= 0:
         raise ValueError("number must be positive.")
     if number is None and not saved_only:
         raise ValueError("Selecting every event is only defined for --saved-only.")
     _require_edge_flip_slot_correspondence(job_directory)
-    events, increment = _macro_events(job_directory)
+    events, increment = _macro_events(job_directory, energy_change_sign=energy_change_sign)
     box_size = _periodic_box_size(job_directory)
     saved_states = _saved_states_by_start_load(Path(job_directory) / "data" / "reversibilityData")
     selected = []
@@ -243,6 +254,8 @@ def select_events(
                 break
             continue
         directory, state_paths = state_entry
+        if energy_change_sign != "negative" and not directory.name.startswith("irrev_drop_l_"):
+            continue
         selected.append(
             SelectedEvent(
                 rank=int(rank) + 1,
@@ -478,6 +491,8 @@ def _draw_poincare_loss_of_ellipticity_limit(
     boundary: np.ndarray,
     *,
     zoom: float,
+    color: str = "black",
+    linestyle: str = "--",
 ) -> None:
     """Overlay the fundamental-domain ellipticity limit on a disk axis."""
 
@@ -486,10 +501,11 @@ def _draw_poincare_loss_of_ellipticity_limit(
     line = axis.plot(
         center + scale * boundary[:, 0],
         center + scale * boundary[:, 1],
-        color="#d62728",
+        color=color,
         linewidth=1.3,
+        linestyle=linestyle,
         zorder=6,
-        label="loss of ellipticity",
+        label="loss of strong ellipticity",
     )[0]
     line.set_path_effects(
         [patheffects.withStroke(linewidth=2.5, foreground="white", alpha=0.75)]
@@ -620,7 +636,12 @@ def _accumulate_poincare_density_histogram(
     if x.shape != y.shape:
         raise ValueError("Poincare density coordinates must have matching shapes.")
     radius = 1.0 / zoom
-    valid = np.isfinite(x) & np.isfinite(y) & (x * x + y * y <= radius * radius)
+    valid = (
+        np.isfinite(x)
+        & np.isfinite(y)
+        & (np.abs(x) <= radius)
+        & (np.abs(y) <= radius)
+    )
     if not np.any(valid):
         return 0
     scale = DENSITY_GRID_SIZE / (2.0 * radius)
@@ -719,13 +740,7 @@ def _draw_stress_density_histogram(
     xmin, xmax, ymin, ymax = extent
     if not (xmin < xmax and ymin < ymax):
         raise ValueError("Stress density extent must have increasing bounds.")
-    histogram, _, _ = np.histogram2d(
-        x,
-        y,
-        bins=(DENSITY_GRID_SIZE, DENSITY_GRID_SIZE),
-        range=((xmin, xmax), (ymin, ymax)),
-    )
-    histogram = histogram.astype(int, copy=False)
+    histogram = _stress_density_histogram(x, y, extent=extent)
     if not np.any(histogram > 0):
         raise RuntimeError("The stress cloud is empty.")
     cmap = plt.get_cmap("inferno").copy()
@@ -740,6 +755,201 @@ def _draw_stress_density_histogram(
         zorder=1,
     )
     return image, int(np.count_nonzero(histogram))
+
+
+def _stress_density_histogram(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    extent: tuple[float, float, float, float],
+) -> np.ndarray:
+    """Bin stress coordinates on the fixed density grid and shared extent."""
+
+    x = np.asarray(x, dtype=float).reshape(-1)
+    y = np.asarray(y, dtype=float).reshape(-1)
+    if x.shape != y.shape:
+        raise ValueError("Stress density coordinates must have matching shapes.")
+    if not np.all(np.isfinite(x)) or not np.all(np.isfinite(y)):
+        raise ValueError("Stress density coordinates must be finite.")
+    xmin, xmax, ymin, ymax = extent
+    if not (xmin < xmax and ymin < ymax):
+        raise ValueError("Stress density extent must have increasing bounds.")
+    histogram, _, _ = np.histogram2d(
+        x,
+        y,
+        bins=(DENSITY_GRID_SIZE, DENSITY_GRID_SIZE),
+        range=((xmin, xmax), (ymin, ymax)),
+    )
+    return histogram.astype(int, copy=False)
+
+
+_DENSITY_CHANGE_LABELS = (
+    r"$\leq -501$",
+    "-[500,51]",
+    "-[50,6]",
+    "-[5,2]",
+    "-1",
+    "0",
+    "+1",
+    "[2,5]",
+    "[6,50]",
+    "[51,500]",
+    r"$\geq +501$",
+)
+
+
+def _categorize_density_change(values: np.ndarray) -> np.ndarray:
+    """Map integer after-minus-before counts onto eleven equal color regions."""
+
+    values = np.asarray(values)
+    if not np.issubdtype(values.dtype, np.integer):
+        raise ValueError("Density changes must be integer bin-count differences.")
+    return np.digitize(
+        values,
+        (-500.5, -50.5, -5.5, -1.5, -0.5, 0.5, 1.5, 5.5, 50.5, 500.5),
+    )
+
+
+def _density_change_colormap() -> tuple[ListedColormap, BoundaryNorm]:
+    """Return mirrored coolwarm colors and equal-width categorical regions."""
+
+    coolwarm = plt.get_cmap("coolwarm")
+    negative_colors = [coolwarm(value) for value in np.linspace(0.02, 0.42, 5)]
+    positive_colors = [coolwarm(value) for value in np.linspace(0.58, 0.98, 5)]
+    colors = negative_colors + [(1.0, 1.0, 1.0, 0.0)] + positive_colors
+    cmap = ListedColormap(colors, name="density_change_coolwarm_11")
+    norm = BoundaryNorm(np.arange(-0.5, 11.5, 1), ncolors=cmap.N)
+    return cmap, norm
+
+
+def _label_density_change_colorbar(colorbar: object) -> None:
+    colorbar.set_ticks(np.arange(len(_DENSITY_CHANGE_LABELS)))
+    colorbar.set_ticklabels(_DENSITY_CHANGE_LABELS)
+    colorbar.ax.tick_params(labelsize=8)
+    colorbar.set_label("Change in bin counts (after − before)")
+
+
+def _add_density_change_colorbar(
+    figure: plt.Figure, axis: plt.Axes, image: object
+) -> None:
+    """Place an equal-width categorical bar beneath the full image width."""
+
+    figure.canvas.draw()
+    bounds = axis.get_position()
+    colorbar_axis = figure.add_axes((bounds.x0, 0.13, bounds.width, 0.025))
+    colorbar = figure.colorbar(image, cax=colorbar_axis, orientation="horizontal")
+    _label_density_change_colorbar(colorbar)
+
+
+def _render_poincare_density_difference(
+    output_path: Path,
+    *,
+    after_histogram: np.ndarray,
+    before_histogram: np.ndarray,
+    zoom: float,
+    boundary: np.ndarray,
+    dpi: int,
+) -> Path:
+    """Render a zoomed after-minus-before Poincare bin-count heatmap."""
+
+    if after_histogram.shape != before_histogram.shape or after_histogram.shape != (
+        DENSITY_GRID_SIZE,
+        DENSITY_GRID_SIZE,
+    ):
+        raise ValueError("Poincare density histograms must have matching grid shapes.")
+    difference = after_histogram - before_histogram
+    categorized_difference = _categorize_density_change(difference)
+
+    figure = plt.figure(figsize=(8.4, 8.4))
+    axis = figure.add_axes((0.08, 0.22, 0.84, 0.70))
+    _prepare_poincare_axis(axis, zoom=zoom)
+    cmap, norm = _density_change_colormap()
+    image = _draw_poincare_grid_image(
+        axis,
+        categorized_difference,
+        zoom=zoom,
+        cmap=cmap,
+        norm=norm,
+        zorder=4,
+    )
+    _draw_poincare_loss_of_ellipticity_limit(
+        axis, boundary, zoom=zoom, color="black", linestyle="--"
+    )
+    axis.plot(
+        DISK_GRID_SIZE / 2, DISK_GRID_SIZE / 2, "k+",
+        markersize=11, markeredgewidth=0.8, zorder=8, label="origin",
+    )
+    axis.legend(loc="upper left", frameon=True)
+    _add_density_change_colorbar(figure, axis, image)
+    figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    figure.savefig(output_path.with_suffix(".pdf"), dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    plt.close(figure)
+    return output_path
+
+
+def _render_stress_density_difference(
+    output_path: Path,
+    *,
+    before_sigma_xy: np.ndarray,
+    before_normal_difference: np.ndarray,
+    after_sigma_xy: np.ndarray,
+    after_normal_difference: np.ndarray,
+    stress_limit_x: np.ndarray,
+    stress_limit_y: np.ndarray,
+    dpi: int,
+) -> Path:
+    """Render an after-minus-before stress bin-count heatmap."""
+
+    coordinates = (
+        np.asarray(before_sigma_xy, dtype=float),
+        np.asarray(before_normal_difference, dtype=float),
+        np.asarray(after_sigma_xy, dtype=float),
+        np.asarray(after_normal_difference, dtype=float),
+    )
+    if any(values.ndim != 1 or not np.all(np.isfinite(values)) for values in coordinates):
+        raise ValueError("Stress difference coordinates must be finite 1D arrays.")
+    if not (coordinates[0].shape == coordinates[1].shape == coordinates[2].shape == coordinates[3].shape):
+        raise ValueError("Before and after stress coordinates must have matching shapes.")
+    scatter_extent = max(float(np.max(np.abs(values))) for values in coordinates)
+    if not np.isfinite(scatter_extent) or scatter_extent <= 0:
+        raise ValueError("The stress density has no finite nonzero extent.")
+    scatter_extent *= 1.02
+    extent = (-scatter_extent, scatter_extent, -scatter_extent, scatter_extent)
+    before_histogram = _stress_density_histogram(
+        before_normal_difference, before_sigma_xy, extent=extent
+    )
+    after_histogram = _stress_density_histogram(
+        after_normal_difference, after_sigma_xy, extent=extent
+    )
+    difference = _categorize_density_change(after_histogram - before_histogram)
+
+    figure = plt.figure(figsize=(8.4, 8.4))
+    axis = figure.add_axes((0.08, 0.22, 0.84, 0.70))
+    cmap, norm = _density_change_colormap()
+    image = axis.imshow(
+        difference.T,
+        origin="lower",
+        extent=extent,
+        interpolation="nearest",
+        cmap=cmap,
+        norm=norm,
+        zorder=1,
+    )
+    axis.plot(stress_limit_x, stress_limit_y, color="black", linewidth=1.3,
+              linestyle="--", label="loss of strong ellipticity", zorder=4)
+    axis.set_xlabel(r"$(\sigma_{22}-\sigma_{11})/2$")
+    axis.set_ylabel(r"$\sigma_{12}$")
+    axis.set_xlim(-scatter_extent, scatter_extent)
+    axis.set_ylim(-scatter_extent, scatter_extent)
+    axis.set_aspect("equal", adjustable="box")
+    axis.plot(0, 0, "k+", markersize=11, markeredgewidth=0.8,
+              zorder=8, label="origin")
+    axis.legend(loc="best", frameon=True)
+    _add_density_change_colorbar(figure, axis, image)
+    figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    figure.savefig(output_path.with_suffix(".pdf"), dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    plt.close(figure)
+    return output_path
 
 
 def _render_pooled_poincare_flow(
@@ -758,6 +968,7 @@ def _render_pooled_poincare_flow(
     dpi: int,
     direction_split_otsu: bool = False,
     show_arrows: bool = False,
+    show_ellipticity_boundary: bool = True,
     density_norm: LogNorm | None = None,
     figsize: tuple[float, float] = (10.0, 9.4),
 ) -> Path:
@@ -780,8 +991,9 @@ def _render_pooled_poincare_flow(
     _prepare_poincare_axis(flow_axis, zoom=zoom)
     density_image = _draw_poincare_density_histogram(
         flow_axis, density_histogram, zoom=zoom, norm=density_norm
+        flow_axis, density_histogram, zoom=zoom, norm=density_norm
     )
-    if boundary is not None:
+    if show_ellipticity_boundary:
         _draw_poincare_loss_of_ellipticity_limit(flow_axis, boundary, zoom=zoom)
     if show_arrows:
         if vector_colorbar_axis is None:
@@ -820,9 +1032,11 @@ def _render_pooled_poincare_flow(
             f"(N={total_element_count}; N_{{visible}}={visible_density_count})"
         )
     density_colorbar.set_label(density_label)
-    if boundary is not None:
+    legend_handles, legend_labels = flow_axis.get_legend_handles_labels()
+    if legend_handles:
         flow_axis.legend(loc="upper left", frameon=True)
     flow_figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    flow_figure.savefig(output_path.with_suffix(".pdf"), dpi=dpi, bbox_inches="tight", pad_inches=0.05)
     plt.close(flow_figure)
     return output_path
 
@@ -866,9 +1080,10 @@ def _render_pooled_stress_density(
     stress_axis.plot(
         stress_limit_x,
         stress_limit_y,
-        color="#d62728",
+        color="black",
         linewidth=1.5,
-        label="loss of ellipticity",
+        linestyle="--",
+        label="loss of strong ellipticity",
         zorder=4,
     )
     stress_axis.set_xlabel(r"$(\sigma_{22}-\sigma_{11})/2$")
@@ -886,6 +1101,7 @@ def _render_pooled_stress_density(
     stress_axis.legend(loc="best", frameon=True)
     stress_figure.subplots_adjust(left=0.13, right=0.95, top=0.95, bottom=0.20)
     stress_figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    stress_figure.savefig(output_path.with_suffix(".pdf"), dpi=dpi, bbox_inches="tight", pad_inches=0.05)
     plt.close(stress_figure)
     return output_path
 
@@ -898,7 +1114,7 @@ def render_aggregate_largest_event_summary(
     direction_split_otsu: bool = False,
     fully_reduce_after: bool = True,
     show_arrows: bool = False,
-) -> tuple[Path, Path, Path, Path, Path, Path]:
+) -> tuple[Path, Path, Path, Path, Path, Path, Path, Path]:
     """Pool saved events into before/after Poincare and stress figures."""
 
     if not events:
@@ -1122,6 +1338,24 @@ def render_aggregate_largest_event_summary(
         total_element_count=total_element_count,
         dpi=dpi,
     )
+    poincare_density_change_png = _render_poincare_density_difference(
+        output_directory / f"aggregate_all{number:03d}_{flow_label}_zoomed_density_change.png",
+        after_histogram=zoomed_density_histogram,
+        before_histogram=before_zoomed_density_histogram,
+        zoom=zoomed_disk_zoom,
+        boundary=boundary,
+        dpi=dpi,
+    )
+    stress_density_change_png = _render_stress_density_difference(
+        output_directory / f"aggregate_all{number:03d}_stress_density_change.png",
+        before_sigma_xy=before_sigma_xy,
+        before_normal_difference=before_normal_difference,
+        after_sigma_xy=sigma_xy,
+        after_normal_difference=normal_difference,
+        stress_limit_x=stress_limit_x,
+        stress_limit_y=stress_limit_y,
+        dpi=dpi,
+    )
     return (
         flow_png,
         zoomed_flow_png,
@@ -1129,6 +1363,8 @@ def render_aggregate_largest_event_summary(
         before_flow_png,
         before_zoomed_flow_png,
         before_stress_png,
+        poincare_density_change_png,
+        stress_density_change_png,
     )
 
 
@@ -2012,6 +2248,14 @@ def main() -> None:
         help="Use every complete saved reversibility-protocol event, rather than --top.",
     )
     parser.add_argument(
+        "--positive-energy-change", action="store_true",
+        help="Select saved irreversible events with positive equilibrium-energy change.",
+    )
+    parser.add_argument(
+        "--all-irreversible", action="store_true",
+        help="Select saved irreversible events with either sign of equilibrium-energy change.",
+    )
+    parser.add_argument(
         "--output-directory", type=Path,
         default=ROOT / "Plots" / "reconnecting_largest_energy_events",
     )
@@ -2027,11 +2271,26 @@ def main() -> None:
 
     if args.all_saved and not args.saved_only:
         raise ValueError("--all-saved requires --saved-only.")
+    if args.positive_energy_change and args.all_irreversible:
+        raise ValueError("Choose only one energy-change cohort.")
+    if (args.positive_energy_change or args.all_irreversible) and not (args.saved_only and args.aggregate_only):
+        raise ValueError("Energy-change cohort flags require --saved-only --aggregate-only.")
+    energy_change_sign = (
+        "positive" if args.positive_energy_change else
+        "both" if args.all_irreversible else "negative"
+    )
     events = select_events(
         args.job,
         number=None if args.all_saved else args.top,
         saved_only=args.saved_only,
+        energy_change_sign=energy_change_sign,
     )
+    output_directory = (
+        args.output_directory / "positive_energy_change"
+        if args.positive_energy_change else args.output_directory
+    )
+    if args.all_irreversible:
+        output_directory = args.output_directory / "all_irreversible"
     if args.aggregate_only:
         (
             flow_output,
@@ -2040,9 +2299,11 @@ def main() -> None:
             before_flow_output,
             before_zoomed_flow_output,
             before_stress_output,
+            poincare_density_change_output,
+            stress_density_change_output,
         ) = render_aggregate_largest_event_summary(
             events,
-            args.output_directory,
+            output_directory,
             dpi=args.dpi,
             direction_split_otsu=args.aggregate_otsu,
             show_arrows=args.show_arrows,
@@ -2053,6 +2314,8 @@ def main() -> None:
         print(before_flow_output)
         print(before_zoomed_flow_output)
         print(before_stress_output)
+        print(poincare_density_change_output)
+        print(stress_density_change_output)
         return
     manifest_rows = []
     for event in events:

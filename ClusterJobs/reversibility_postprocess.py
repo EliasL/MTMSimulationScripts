@@ -29,13 +29,15 @@ from Plotting.energyDropCalculations import (
     volume_from_metadata,
 )
 from Plotting.vtuDataForSylvain import VTUData
+from Plotting.standardPowerlaw import POST_YIELD_OFFSET, yield_peak_load
 
 
 EVENT_PATTERN = re.compile(r"(?P<kind>rev|irrev)_drop_l_(?P<load>[0-9.eE+-]+)$")
+BINARY_YIELD_RULE = "post above avg_P12 global peak +0.01; pre otherwise"
 
 EVENT_COLUMNS = [
     "batch", "job_name", "seed", "load_increment", "LBFGSEpsx",
-    "event_index", "event_kind", "is_reversible", "yield_regime",
+    "event_index", "event_kind", "is_reversible", "yield_regime", "yield_rule",
     "event_start_load", "event_load", "mesh_volume", "bulk_modulus",
     "delta_gamma", "delta_E_S", "delta_E_I", "delta_E_R",
     "delta_sigma_S", "delta_sigma_I", "delta_sigma_R", "delta_rev_E",
@@ -166,8 +168,7 @@ def process_job(job_dir: Path, output_path: Path, batch: int) -> int:
     if len(energy_steps) != len(df) - 1 or len(stress_steps) != len(df) - 1:
         raise RuntimeError("Step-data length does not match macroData.csv.")
 
-    sigma = np.asarray(df["avg_sigma12"], dtype=float)
-    yield_load = float(loads[int(np.argmax(sigma))])
+    yield_load = yield_peak_load(df) + POST_YIELD_OFFSET
     epsx = metadata.get("LBFGSEpsx", np.nan)
     try:
         epsx = float(epsx)
@@ -211,6 +212,7 @@ def process_job(job_dir: Path, output_path: Path, batch: int) -> int:
                 "event_kind": event_kind,
                 "is_reversible": expected_reversible,
                 "yield_regime": "post-yield" if event_load > yield_load else "pre-yield",
+                "yield_rule": BINARY_YIELD_RULE,
                 "event_start_load": start_load,
                 "event_load": event_load,
                 "mesh_volume": mesh_volume,
@@ -305,6 +307,8 @@ def merge_tables(
         if not table_path.is_file():
             raise FileNotFoundError(f"Missing per-job table: {table_path}")
         table = pd.read_csv(table_path)
+        if "yield_rule" not in table or not table["yield_rule"].eq(BINARY_YIELD_RULE).all():
+            raise ValueError(f"Obsolete yield split in event table: {table_path}")
         if expected_columns is None:
             expected_columns = list(table.columns)
         elif list(table.columns) != expected_columns:

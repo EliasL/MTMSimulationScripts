@@ -41,6 +41,7 @@ import numpy as np
 import pandas as pd
 
 from Management.updateCSV import read_macrodata_csv
+from Plotting.standardPowerlaw import POST_YIELD_OFFSET
 from Plotting.dataFunctions import get_metadata
 from Plotting.energyDropCalculations import (
     calculate_energy_step_data,
@@ -189,7 +190,7 @@ def _load_drop_inputs(csv_path_string: str):
         info["reference_volume"],
     )
     er_positive_mask = _positive_relaxation_drop_mask(df, csv_path=csv_path)
-    yield_load = float(findPrePostSplit(df=df))
+    yield_load = float(findPrePostSplit(df=df)) + POST_YIELD_OFFSET
     return (
         df,
         step_df,

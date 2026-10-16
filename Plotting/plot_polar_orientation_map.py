@@ -9,6 +9,7 @@ plots.  Only the orientation field and the inset are specific to this figure.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -17,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import matplotlib.tri as mtri
 from matplotlib.cm import ScalarMappable
-from matplotlib.colors import Normalize
+from matplotlib.colors import LogNorm, Normalize
 from matplotlib.patches import ConnectionPatch
 from matplotlib.patches import Rectangle
 
@@ -352,6 +353,9 @@ def draw_reconnection_comparison(
     *,
     target_gamma: float,
     orientation: str = "longest-edge",
+    load_increment: float | None = None,
+    periodic_box_size: float | None = None,
+    show_insets: bool = True,
 ) -> None:
     """Draw a shared orientation comparison with and without reconnection."""
     if not SIMULATION_SCRIPTS.is_dir():
@@ -361,8 +365,15 @@ def draw_reconnection_comparison(
     from Plotting.pyplotFunctions import draw_periodic_shear_box
     from scipy.spatial import Delaunay
 
-    no_reconnection_data = VTUData(no_reconnection_vtu)
-    reconnecting_data = VTUData(reconnecting_vtu)
+    no_reconnection_data = VTUData(
+        no_reconnection_vtu, load_increment=load_increment
+    )
+    reconnecting_data = VTUData(reconnecting_vtu, load_increment=load_increment)
+    if periodic_box_size is not None:
+        if not np.isfinite(periodic_box_size) or periodic_box_size <= 0.0:
+            raise ValueError("periodic_box_size must be finite and positive.")
+        no_reconnection_data.size = (periodic_box_size, periodic_box_size)
+        reconnecting_data.size = (periodic_box_size, periodic_box_size)
     no_reconnection_points = np.asarray(no_reconnection_data.get_nodes()[:, :2], dtype=float)
     reconnecting_points = np.asarray(reconnecting_data.get_nodes()[:, :2], dtype=float)
     no_reconnection_stored = np.asarray(no_reconnection_data.get_connectivity(), dtype=int)
@@ -472,37 +483,37 @@ def draw_reconnection_comparison(
         load=reconnecting_gamma,
         box_size=box_size,
     )
-    add_mesh_insets(
-        left_axis,
-        no_reconnection_data,
-        no_reconnection_plot_points,
-        no_reconnection_plot_triangles,
-        no_reconnection_orientation,
-        box_size=box_size,
-        gamma=target_gamma,
-        cmap=cmap,
-        norm=norm,
-        tile_periodically=no_reconnection_tile_periodically,
-        locally_unwrapped=locally_unwrapped,
-        zoom_x_shifts=(0.02, -0.01),
-        bottom_right_local_center=(0.5, 0.32),
-    )
-    add_mesh_insets(
-        right_axis,
-        reconnecting_data,
-        reconnecting_points,
-        reconnecting_triangles,
-        reconnecting_orientation,
-        box_size=box_size,
-        gamma=target_gamma,
-        cmap=cmap,
-        norm=norm,
-        tile_periodically=reconnecting_tile_periodically,
-        locally_unwrapped=locally_unwrapped,
-        bottom_right_local_center=(0.45, 0.07),
-        bottom_right_zoom_half_width=12.0,
-        bottom_right_inset_width=0.375,
-    )
+    if show_insets:
+        add_mesh_insets(
+            left_axis,
+            no_reconnection_data,
+            no_reconnection_plot_points,
+            no_reconnection_plot_triangles,
+            no_reconnection_orientation,
+            box_size=box_size,
+            gamma=target_gamma,
+            cmap=cmap,
+            norm=norm,
+            tile_periodically=no_reconnection_tile_periodically,
+            locally_unwrapped=locally_unwrapped,
+            zoom_x_shifts=(0.02, -0.01),
+            bottom_right_local_center=(0.5, 0.32),
+        )
+        add_mesh_insets(
+            right_axis,
+            reconnecting_data,
+            reconnecting_points,
+            reconnecting_triangles,
+            reconnecting_orientation,
+            box_size=box_size,
+            gamma=target_gamma,
+            cmap=cmap,
+            norm=norm,
+            tile_periodically=reconnecting_tile_periodically,
+            locally_unwrapped=locally_unwrapped,
+            zoom_x_shifts=(0.02, -0.01),
+            bottom_right_local_center=(0.5, 0.32),
+        )
 
     colorbar = figure.colorbar(
         ScalarMappable(norm=norm, cmap=cmap),
@@ -515,6 +526,76 @@ def draw_reconnection_comparison(
     output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output, dpi=600, bbox_inches="tight", pad_inches=0.0)
     plt.close(figure)
+
+
+def draw_energy_reconnection_maps(
+    output_directory: Path, target_gamma: float, *, logarithmic: bool = False
+) -> None:
+    """Save the native element energies side by side without insets."""
+    from Plotting.dataFunctions import VTUData
+    from Plotting.pyplotFunctions import draw_periodic_shear_box
+
+    snapshots = []
+    for label, simulation in (
+        ("No reconnection", NO_RECONNECTION_SIMULATION),
+        ("With reconnection", SIMULATION),
+    ):
+        path, gamma = closest_vtu(simulation, target_gamma)
+        data = VTUData(path)
+        energy = np.asarray(data.get_energy_field(), dtype=float)
+        triangles = np.asarray(data.get_connectivity(), dtype=int)
+        if (energy.shape != (len(triangles),) or not np.all(np.isfinite(energy))
+                or np.any(energy <= 0)):
+            raise ValueError(f"Invalid element energy field in {path}")
+        snapshots.append((label, path, gamma, data, triangles, energy))
+    if snapshots[0][3].size != snapshots[1][3].size:
+        raise ValueError("Energy comparison requires equal cell sizes.")
+    cmap = plt.get_cmap("coolwarm")
+    norm = (LogNorm if logarithmic else Normalize)(
+        vmin=min(s[-1].min() for s in snapshots),
+        vmax=max(s[-1].max() for s in snapshots) if logarithmic else 0.2,
+    )
+    output_directory.mkdir(parents=True, exist_ok=True)
+    sources = []
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.3))
+    fig.subplots_adjust(left=0.0, right=0.995, bottom=0.20, top=0.91, wspace=0.02)
+    color_axis = fig.add_axes((0.17, 0.045, 0.66, 0.055))
+    for panel, ax, (label, path, gamma, data, triangles, energy) in zip(
+        ("a", "b"), axes, snapshots, strict=True
+    ):
+        box_size = float(data.size[0])
+        if data.size[0] != data.size[1]:
+            raise ValueError("Energy comparison requires a square periodic cell.")
+        ax.set(xlim=(0.0, box_size * (1.0 + target_gamma)), ylim=(0.0, box_size))
+        ax.set_aspect("equal", adjustable="box")
+        draw_comparison_orientation_field(
+            ax, data, np.asarray(data.get_nodes()[:, :2]), triangles, energy,
+            cmap=cmap, norm=norm, tile_periodically=True, locally_unwrapped=True,
+        )
+        # Keep the many flat-coloured elements compact in the PDF.
+        for collection in ax.collections:
+            collection.set_rasterized(True)
+        draw_periodic_shear_box(ax, origin=(0.0, 0.0), load=gamma, box_size=box_size)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_title(f"({panel}) {label}")
+        sources.append(dict(label=label, vtu=str(path), gamma=gamma,
+                            energy_min=float(energy.min()), energy_max=float(energy.max())))
+    fig.colorbar(ScalarMappable(norm=norm, cmap=cmap), cax=color_axis,
+                 orientation="horizontal", label=r"$E$")
+    stem = f"energy_reconnection_comparison_gamma_{target_gamma:g}".replace('.', 'p')
+    suffix = "_log" if logarithmic else ""
+    stem += suffix
+    for extension in ("pdf", "png"):
+        fig.savefig(output_directory / f"{stem}.{extension}", dpi=300,
+                    bbox_inches="tight", pad_inches=0.0)
+    plt.close(fig)
+    (output_directory / f"energy_sources{suffix}.json").write_text(
+        json.dumps(dict(snapshots=sources, color_limits=[norm.vmin, norm.vmax],
+                        connectivity="native", field="energy_field",
+                        color_scale="logarithmic" if logarithmic else "linear",
+                        colormap="coolwarm"), indent=2) + "\n"
+    )
 
 
 def get_matrix(data, name: str) -> np.ndarray:
@@ -988,6 +1069,12 @@ def main() -> None:
     )
     comparison_group = parser.add_mutually_exclusive_group()
     comparison_group.add_argument(
+        "--energy-reconnection-comparison", action="store_true",
+        help="Save native element-energy maps side by side with one colorbar and no insets.",
+    )
+    parser.add_argument("--energy-log", action="store_true",
+                        help="Use logarithmic energy colors and append _log to output names.")
+    comparison_group.add_argument(
         "--reconnection-comparison",
         action="store_true",
         help="Plot no-reconnection/Delaunay on the left and reconnecting mesh on the right.",
@@ -1008,6 +1095,11 @@ def main() -> None:
     args = parser.parse_args()
     if args.zoom_half_width <= 0.0:
         raise ValueError("zoom-half-width must be positive.")
+    if args.energy_reconnection_comparison:
+        draw_energy_reconnection_maps(args.output_directory, args.gamma,
+                                     logarithmic=args.energy_log)
+        print(f"Saved energy maps and source metadata to {args.output_directory}")
+        return
     if args.reconnection_comparison or args.reduced_polar_reconnection_comparison:
         no_reconnection_vtu, no_reconnection_gamma = closest_vtu(
             NO_RECONNECTION_SIMULATION, args.gamma

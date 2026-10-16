@@ -100,8 +100,8 @@ class ReductionHistoryPlotTests(unittest.TestCase):
         self.assertEqual(len(ax.images), 1)
         self.assertEqual(len(ax.texts), 4)
         self.assertEqual(len(ax.collections), 1)
-        self.assertEqual(ax.get_xlabel(), r"$x_p$")
-        self.assertEqual(ax.get_ylabel(), r"$y_p$")
+        self.assertEqual(ax.get_xlabel(), r"$x_P$")
+        self.assertEqual(ax.get_ylabel(), r"$y_P$")
 
 
 if __name__ == "__main__":

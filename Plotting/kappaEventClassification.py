@@ -34,6 +34,8 @@ from Plotting.energyDropCalculations import (
 )
 from Plotting.standardPowerlaw import (
     DEFAULT_KAPPA_RHO,
+    POST_YIELD_RULE,
+    yield_region_mask,
     kappa_detection_threshold,
     kappa_from_relaxation_energy,
 )
@@ -44,7 +46,7 @@ DEFAULT_DATA_DIR = (
 )
 DEFAULT_ANALYSIS_SUMMARY = (
     _REPO_ROOT
-    / "Plots/powerLaw/truncated_powerlaw_reversibility_flowchart/analysis_summary.json"
+    / "Plots/powerLaw/truncated_powerlaw_reversibility_flowchart_piola_peak/analysis_summary.json"
 )
 DEFAULT_OUTPUT = _REPO_ROOT / "output/pdf/kappa_event_classification_diagnostics.pdf"
 
@@ -110,6 +112,8 @@ def _simple_drop_er_threshold(summary_path):
         return None
     with summary_path.open(encoding="utf-8") as stream:
         summary = json.load(stream)
+    if summary.get("post_yield_rule") != POST_YIELD_RULE:
+        raise ValueError(f"Obsolete yield selection in threshold summary: {summary_path}")
     value = summary.get("delta_E_R_drop_detection_xmin")
     if value is None:
         return None
@@ -137,7 +141,7 @@ def collect_kappa_data(csv_paths, *, rho=DEFAULT_KAPPA_RHO):
         size = int(metadata["L"])
         seed = int(metadata["seed"])
         df = read_macrodata_csv(path, L=size)
-        required = {"load", "avg_sigma12", "total_e_change_from_init"}
+        required = {"load", "total_e_change_from_init"}
         missing = sorted(required - set(df.columns))
         if missing:
             raise KeyError(f"Missing columns {missing} in {path}.")
@@ -152,11 +156,8 @@ def collect_kappa_data(csv_paths, *, rho=DEFAULT_KAPPA_RHO):
             reference_volume,
             rho=rho,
         )
-        yield_load = float(df["load"].iloc[int(np.argmax(df["avg_sigma12"]))])
         event_load = load[1:]
-        post_yield = (event_load > yield_load + 1e-2) & (
-            event_load < float(df["load"].max())
-        )
+        post_yield = yield_region_mask(df, "post", event_load)
         plastic_col = infer_plastic_event_column(df)
         recorded_plastic = df[plastic_col].to_numpy()[1:] >= 1
         valid = post_yield & np.isfinite(kappa) & (kappa > 0)

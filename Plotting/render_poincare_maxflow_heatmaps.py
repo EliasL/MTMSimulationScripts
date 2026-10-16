@@ -62,9 +62,9 @@ def _collect_vectors(
         raise ValueError("At least one event is required.")
     if bins <= 0 or not np.isfinite(zoom) or zoom < 1:
         raise ValueError("bins must be positive and zoom must be at least one.")
-    if coordinate_source not in {"before", "after", "after_reduced"}:
+    if coordinate_source not in {"before", "after", "after_reduced", "before_after_reduced"}:
         raise ValueError(
-            "coordinate_source must be 'before', 'after', or 'after_reduced'."
+            "coordinate_source must be 'before', 'after', 'after_reduced', or 'before_after_reduced'."
         )
     radius = 1.0 / zoom
     edges = np.linspace(-radius, radius, bins + 1)
@@ -81,19 +81,18 @@ def _collect_vectors(
         before_y = np.asarray(transition.before_y, dtype=float)
         after_x = np.asarray(transition.after_x, dtype=float)
         after_y = np.asarray(transition.after_y, dtype=float)
-        if coordinate_source == "before":
+        if coordinate_source in {"before", "before_after_reduced"}:
             x, y = before_x, before_y
         elif coordinate_source == "after":
             x, y = after_x, after_y
-        else:
+        if coordinate_source in {"after_reduced", "before_after_reduced"}:
             reduced_after_metric, _ = plastic_reduction(
                 transition.after_metric, compute_M=True
             )
-            x, y = _disk_coordinates(reduced_after_metric)
-            # The plotted vector ends at the finally reduced after-state.
-            after_x, after_y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
-        # The before view keeps the raw Delta-T endpoint; the after-reduced view
-        # shows the endpoint after applying the final plastic reduction.
+            reduced_x, reduced_y = _disk_coordinates(reduced_after_metric)
+            after_x, after_y = np.asarray(reduced_x, dtype=float), np.asarray(reduced_y, dtype=float)
+            if coordinate_source == "after_reduced":
+                x, y = after_x, after_y
         u = after_x - before_x
         v = after_y - before_y
         if not (x.shape == y.shape == u.shape == v.shape):
@@ -106,7 +105,8 @@ def _collect_vectors(
             & (ix < bins)
             & (iy >= 0)
             & (iy < bins)
-            & (x * x + y * y <= radius * radius)
+            & np.isfinite(x)
+            & np.isfinite(y)
             & np.isfinite(u)
             & np.isfinite(v)
         )
@@ -197,6 +197,10 @@ def _max_abs_projection_direction(u: np.ndarray, v: np.ndarray) -> tuple[np.ndar
 
 
 def _cell_metrics(u: np.ndarray, v: np.ndarray) -> tuple[float, float, float, float]:
+    if not np.any(np.hypot(u, v) > 1e-15):
+        # A populated cell can contain only stationary elements; its axis and
+        # directional dispersion are undefined, while its flow magnitude is zero.
+        return np.nan, 0.0, np.nan, 0.0
     direction, _ = _max_abs_projection_direction(u, v)
     all_vectors = np.column_stack((u.astype(float), v.astype(float)))
     nonzero = np.linalg.norm(all_vectors, axis=1) > 1e-15
@@ -276,6 +280,17 @@ def _write_manifest(path: Path, count: np.ndarray, metrics: tuple[np.ndarray, ..
             writer.writerow((ix_bin, iy_bin, centers[ix_bin], centers[iy_bin], count[iy_bin, ix_bin], *(metric[iy_bin, ix_bin] for metric in metrics)))
 
 
+def _projected_flow_norm(magnitude: np.ndarray, *, vmin: float | None = None) -> LogNorm:
+    positive = magnitude[np.isfinite(magnitude) & (magnitude > 0.0)]
+    if positive.size == 0:
+        raise RuntimeError("The projected-flow heatmap has no positive values.")
+    lower = float(np.min(positive)) if vmin is None else float(vmin)
+    upper = float(np.max(positive))
+    if not np.isfinite(lower) or not 0 < lower < upper:
+        raise ValueError("Projected-flow vmin must be finite, positive, and below its maximum.")
+    return LogNorm(lower, upper, clip=vmin is not None)
+
+
 def render_maxflow_heatmaps(
     events: list,
     output_path: Path,
@@ -285,6 +300,7 @@ def render_maxflow_heatmaps(
     min_count: int = MIN_CELL_COUNT,
     zoom: float = 1.0,
     coordinate_source: str = "after",
+    magnitude_vmin: float | None = None,
     force_recompute: bool = False,
 ) -> tuple[Path, Path]:
     cache_path = heatmap_cache_path(
@@ -296,7 +312,7 @@ def render_maxflow_heatmaps(
             "min_count": min_count,
             "zoom": zoom,
             "coordinate_source": coordinate_source,
-            "metric_algorithm": "max_abs_projection_v1",
+            "metric_algorithm": "max_abs_projection_square_view_v2",
         },
     )
     cached = None if force_recompute else load_heatmap_cache(cache_path)
@@ -319,12 +335,9 @@ def render_maxflow_heatmaps(
     boundary = _loss_of_ellipticity_boundary()
 
     figure, axes = plt.subplots(2, 2, figsize=(13.0, 12.0), constrained_layout=True)
-    positive_magnitude = magnitude[np.isfinite(magnitude) & (magnitude > 0.0)]
-    if positive_magnitude.size == 0:
-        raise RuntimeError("The projected-flow heatmap has no positive values.")
     panels = (
         (angle, cmocean.cm.phase, Normalize(0.0, np.pi), "flow angle (mod $\\pi$)", (0.0, np.pi / 2.0, np.pi), (r"$0$", r"$\\pi/2$", r"$\\pi$")),
-        (magnitude, "viridis", LogNorm(float(np.min(positive_magnitude)), float(np.max(positive_magnitude))), "average projected magnitude", None, None),
+        (magnitude, "viridis", _projected_flow_norm(magnitude, vmin=magnitude_vmin), "average projected magnitude", None, None),
         (angle_std, "magma", Normalize(0.0, float(np.nanmax(angle_std))), "axial angle std (rad)", None, None),
         (magnitude_std, "plasma", Normalize(0.0, float(np.nanmax(magnitude_std))), "projected-magnitude std", None, None),
     )
@@ -341,8 +354,10 @@ def render_maxflow_heatmaps(
     axes[0, 1].set_title("(b) absolute projected flow")
     axes[1, 0].set_title("(c) directional dispersion")
     axes[1, 1].set_title("(d) magnitude dispersion")
+    axes[0, 0].legend(loc="upper left", frameon=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    figure.savefig(output_path.with_suffix(".pdf"), dpi=dpi, bbox_inches="tight", pad_inches=0.05)
     plt.close(figure)
     manifest = output_path.with_name(output_path.stem + "_cells.csv")
     _write_manifest(manifest, count, metrics, edges)
@@ -367,7 +382,15 @@ def main() -> None:
     parser.add_argument(
         "--include-other-views",
         action="store_true",
-        help="Also render the current and previous-coordinate comparison views.",
+        help="Also render comparisons binned at the after and reduced-after positions.",
+    )
+    parser.add_argument(
+        "--positive-energy-change", action="store_true",
+        help="Use complete saved irreversible events with positive equilibrium-energy change.",
+    )
+    parser.add_argument(
+        "--all-irreversible", action="store_true",
+        help="Use complete saved irreversible events with either energy-change sign.",
     )
     args = parser.parse_args()
     if (
@@ -382,23 +405,36 @@ def main() -> None:
         raise ValueError("dpi, bins, min-count must be positive and zooms must be at least one.")
     if args.top is not None and args.top <= 0:
         raise ValueError("--top must be positive.")
-    events = select_events(args.job, number=args.top, saved_only=True)
-    reduced_after_output, reduced_after_manifest = render_maxflow_heatmaps(
+    if args.positive_energy_change and args.all_irreversible:
+        raise ValueError("Choose only one energy-change cohort.")
+    energy_change_sign = (
+        "positive" if args.positive_energy_change else
+        "both" if args.all_irreversible else "negative"
+    )
+    events = select_events(
+        args.job, number=args.top, saved_only=True,
+        energy_change_sign=energy_change_sign,
+    )
+    output_directory = (
+        args.output_directory / "positive_energy_change" if args.positive_energy_change else
+        args.output_directory / "all_irreversible" if args.all_irreversible else args.output_directory
+    )
+    before_output, before_manifest = render_maxflow_heatmaps(
         events,
-        args.output_directory / "aggregate_maxflow_heatmaps_after_reduced.png",
+        output_directory / "aggregate_maxflow_heatmaps_previous.png",
         dpi=args.dpi,
         bins=args.bins,
         min_count=args.min_count,
         zoom=args.previous_zoom,
-        coordinate_source="after_reduced",
+        coordinate_source="before",
         force_recompute=args.force_recompute,
     )
-    print(reduced_after_output)
-    print(reduced_after_manifest)
+    print(before_output)
+    print(before_manifest)
     if args.include_other_views:
         output, manifest = render_maxflow_heatmaps(
             events,
-            args.output_directory / "aggregate_maxflow_heatmaps.png",
+            output_directory / "aggregate_maxflow_heatmaps.png",
             dpi=args.dpi,
             bins=args.bins,
             min_count=args.min_count,
@@ -406,20 +442,20 @@ def main() -> None:
             coordinate_source="after",
             force_recompute=args.force_recompute,
         )
-        previous_output, previous_manifest = render_maxflow_heatmaps(
+        reduced_after_output, reduced_after_manifest = render_maxflow_heatmaps(
             events,
-            args.output_directory / "aggregate_maxflow_heatmaps_previous.png",
+            output_directory / "aggregate_maxflow_heatmaps_after_reduced.png",
             dpi=args.dpi,
             bins=args.bins,
             min_count=args.min_count,
             zoom=args.previous_zoom,
-            coordinate_source="before",
+            coordinate_source="after_reduced",
             force_recompute=args.force_recompute,
         )
         print(output)
         print(manifest)
-        print(previous_output)
-        print(previous_manifest)
+        print(reduced_after_output)
+        print(reduced_after_manifest)
 
 
 if __name__ == "__main__":

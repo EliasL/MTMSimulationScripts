@@ -386,7 +386,7 @@ def make_figure() -> tuple[plt.Figure, plt.Axes]:
         (first[0], r"$\gamma_{n-1}$"),
         (inter[0], r"$\gamma_{n}$"),
         (equilibrium[0], r"$\gamma_{n+1}$"),
-        (true_top[0], r"$\gamma_c$"),
+        (true_top[0], r"$\check{\gamma}_n$"),
     )
     for x_mark, label in strain_marks:
         ax.plot(

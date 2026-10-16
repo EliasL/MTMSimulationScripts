@@ -47,12 +47,14 @@ from Plotting.plotPowerLaw import (
 )
 from Plotting.sizeScalingCollapse import (
     YIELD_REGIME_NAMES,
-    completed_size_scaling_paths,
+    size_scaling_paths,
     pool_event_pairs,
 )
 from Plotting.plotPowerLaw import make_fit
 from Plotting.standardPowerlaw import (
     DEFAULT_KAPPA_RHO,
+    POST_YIELD_RULE,
+    SIZE_SCALING_MIN_SIZE,
     EventDrops,
     kappa_detection_threshold,
     positive_es,
@@ -62,7 +64,7 @@ from Plotting.standardPowerlaw import (
 
 DEFAULT_DATA_ROOT = Path("/Volumes/data/remoteData/macro")
 DEFAULT_OUTPUT_DIR = Path(
-    "Plots/reversible_event_analysis/size_scaling_E_R_classification"
+    "Plots/reversible_event_analysis/size_scaling_E_R_classification_piola_peak_post_only"
 )
 PROTOCOL_LABELS = {
     "initial_guess_energy": r"$\Delta E_R$",
@@ -123,67 +125,22 @@ def _all_event_data(events):
 def _plot_decomposition(regime, populations, output_dir):
     sizes = sorted(populations)
     colors = plt.get_cmap("viridis")(np.linspace(0.08, 0.92, len(sizes)))
-    names = ("es_all", "es_rev", "es_irrev")
-    titles = ("All drops", "Reversible", "Irreversible")
-    fig, axes = plt.subplots(
-        1,
-        3,
-        figsize=(7.2, 2.9),
-        sharex=True,
-        sharey=True,
-        gridspec_kw={"wspace": 0.08},
-    )
-    for ax, name, title in zip(axes, names, titles):
+    for name in ("es_all", "es_rev", "es_irrev"):
+        fig, ax = plt.subplots(figsize=(4.4, 3.36))
         for size, color in zip(sizes, colors):
             data = populations[size][name]
             if data.size < 3:
-                ax.text(
-                    0.5,
-                    0.5,
-                    f"L={size}:\nno positive dE_S",
-                    transform=ax.transAxes,
-                    ha="center",
-                    va="center",
-                    fontsize="x-small",
-                    color=color,
-                )
+                ax.plot([], [], color=color, marker="o", linestyle="none",
+                        label=f"L={size}: too few positive drops")
                 continue
-            plot_data_pdf(
-                ax,
-                data,
-                label=f"L={size}",
-                color=color,
-                drop_label=DROP_LABELS["second_order"],
-                drop_sign="positive",
-                show_legend=False,
-            )
-        ax.set_title(title)
+            plot_data_pdf(ax, data, label=f"L={size}", color=color,
+                          drop_label=DROP_LABELS["second_order"],
+                          drop_sign="positive", show_legend=False)
+        ax.set(xlabel=r"$\Delta E_S$", ylabel=r"$p(\Delta E_S)$")
+        ax.legend(fontsize="small")
         ax.grid(alpha=0.18)
-    axes[0].set_ylabel(r"$p(\Delta E_S)$")
-    for ax in axes[1:]:
-        ax.set_ylabel("")
-    for ax in axes:
-        ax.set_xlabel(r"$\Delta E_S$")
-    handles = [
-        Line2D([], [], color=color, marker="o", linestyle="None", label=f"L={size}")
-        for size, color in zip(sizes, colors)
-    ]
-    fig.legend(
-        handles=handles,
-        loc="upper center",
-        ncol=len(handles),
-        frameon=False,
-        bbox_to_anchor=(0.5, 1.02),
-        fontsize="small",
-    )
-    fig.suptitle(
-        r"$\kappa_{\det}$ classification applied to $\Delta E_S$ events; "
-        + ("pre-yield" if regime == "pre" else "post-yield"),
-        y=1.10,
-        fontsize="medium",
-    )
-    fig.subplots_adjust(left=0.07, right=0.99, bottom=0.19, top=0.77, wspace=0.08)
-    _save_figure(fig, output_dir / f"delta_E_S_pdf_decomposition_{regime}_yield.pdf")
+        fig.tight_layout()
+        _save_figure(fig, output_dir / f"delta_E_S_{name}_{regime}_yield.pdf")
 
 
 def _evaluate_fit(fit, data, confidence, parallel, cache_dir, description):
@@ -255,16 +212,10 @@ def _plot_fit_grid(
 ):
     sizes = sorted(fit_results)
     fields = ("initial_guess_energy", "second_order")
-    fig, axes = plt.subplots(
-        2,
-        len(sizes),
-        figsize=(2.25 * len(sizes), 5.0),
-        squeeze=False,
-    )
-    for row, field in enumerate(fields):
-        for column, size in enumerate(sizes):
+    for field in fields:
+        for size in sizes:
             result = fit_results[size][field]
-            ax = axes[row, column]
+            fig, ax = plt.subplots(figsize=(4.4, 3.36))
             data = result["data"]
             fit = result["fit"]
             plot_data_pdf(
@@ -309,10 +260,7 @@ def _plot_fit_grid(
                 linestyle="--",
                 linewidth=0.9,
             )
-            ax.set_title(f"L={size}")
             ax.grid(alpha=0.18)
-            if row == 0:
-                ax.set_xlabel("")
             annotation = (
                 rf"$x_{{min}}={fit.xmin:.2e}$" "\n"
                 rf"$\alpha={result['alpha']:.2f}$, $\lambda={result['Lambda']:.2e}$" "\n"
@@ -327,39 +275,11 @@ def _plot_fit_grid(
                 fontsize="x-small",
                 bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "none"},
             )
-            if column == 0:
-                ax.set_ylabel(rf"$p(\Delta {DROP_LABELS[field]})$")
-            else:
-                ax.set_ylabel("")
-            if row == 1:
-                ax.set_xlabel(PROTOCOL_LABELS[field])
-    handles = [
-        Line2D([], [], color="black", marker="o", linestyle="None", label=data_label),
-        Line2D([], [], color="C3", label="truncated power-law fit"),
-        Line2D(
-            [],
-            [],
-            color="C3",
-            linestyle="--",
-            label=r"fit continuation below $x_{min}$",
-        ),
-        Line2D([], [], color="C0", linestyle="--", label=r"$x_{min}$"),
-    ]
-    fig.legend(
-        handles=handles,
-        loc="upper center",
-        ncol=4,
-        frameon=False,
-        fontsize="small",
-        bbox_to_anchor=(0.5, 0.96),
-    )
-    fig.suptitle(
-        title_prefix + "; "
-        + ("pre-yield" if regime == "pre" else "post-yield"),
-        y=0.995,
-    )
-    fig.subplots_adjust(left=0.06, right=0.995, bottom=0.13, top=0.82, wspace=0.34, hspace=0.36)
-    _save_figure(fig, output_dir / f"{filename_prefix}_{regime}_yield.pdf")
+            ax.set_ylabel(rf"$p(\Delta {DROP_LABELS[field]})$")
+            ax.set_xlabel(PROTOCOL_LABELS[field])
+            ax.legend(fontsize="small")
+            fig.tight_layout()
+            _save_figure(fig, output_dir / f"{filename_prefix}_{field}_L{size}_{regime}_yield.pdf")
 
 
 def _plot_ks_grid(
@@ -371,76 +291,38 @@ def _plot_ks_grid(
 ):
     sizes = sorted(fit_results)
     fields = ("initial_guess_energy", "second_order")
-    fig, axes = plt.subplots(
-        2,
-        len(sizes),
-        figsize=(2.25 * len(sizes), 5.0),
-        sharey=True,
-        squeeze=False,
-    )
-    for row, field in enumerate(fields):
-        for column, size in enumerate(sizes):
+    for field in fields:
+        for size in sizes:
             result = fit_results[size][field]
             fit = result["fit"]
-            ax = axes[row, column]
+            fig, ax = plt.subplots(figsize=(4.4, 3.36))
             analysis = fit.xmin_fitting_results
             if analysis is None:
                 raise RuntimeError(f"Missing xmin analysis for L={size}, {field}.")
             plot_xmin_analysis(analysis, ax=ax)
-            legend = ax.get_legend()
-            if legend is not None:
-                legend.remove()
-            ax.set_title(f"L={size}")
-            if column == 0:
-                ax.set_ylabel(r"KS distance $D$")
-            else:
-                ax.set_ylabel("")
-            if row == 1:
-                ax.set_xlabel(r"candidate $x_{min}$")
-            else:
-                ax.set_xlabel("")
-    handles = [
-        Line2D([], [], color="tab:red", marker="o", label=r"Eligible raw $D(x_{min})$"),
-        Line2D([], [], color="tab:blue", linestyle="-", marker="D", label="simpleDrop"),
-        Line2D([], [], color="0.25", linestyle="-", marker="X", label="global minimum"),
-    ]
-    fig.legend(
-        handles=handles,
-        loc="upper center",
-        ncol=3,
-        frameon=False,
-        fontsize="small",
-        bbox_to_anchor=(0.5, 0.96),
-    )
-    fig.suptitle(
-        title_prefix + r"; $D(x_{min})$ comparison; "
-        + ("pre-yield" if regime == "pre" else "post-yield"),
-        y=0.995,
-    )
-    fig.subplots_adjust(
-        left=0.06,
-        right=0.995,
-        bottom=0.13,
-        top=0.82,
-        wspace=0.34,
-        hspace=0.36,
-    )
-    _save_figure(fig, output_dir / f"{filename_prefix}_{regime}_yield.pdf")
+            ax.set(xlabel=r"candidate $x_{min}$", ylabel=r"KS distance $D$")
+            ax.set_title("")
+            fig.tight_layout()
+            _save_figure(fig, output_dir / f"{filename_prefix}_{field}_L{size}_{regime}_yield.pdf")
 
 
 def run(
     data_root: Path = DEFAULT_DATA_ROOT,
     output_dir: Path = DEFAULT_OUTPUT_DIR,
     *,
-    seeds_per_size: int = 6,
+    seeds_per_size: int | None = None,
+    minimum_size: int = SIZE_SCALING_MIN_SIZE,
     bins_per_decade: int = 10,
     parallel_xmin: bool = False,
     parallel_uncertainty: bool = False,
     uncertainty_accuracy: float = 0.1,
     force: bool = False,
     population_mode: str = "classified",
+    yield_regime: str = "both",
+    largest_first: bool = False,
+    split_only: bool = False,
 ):
-    if seeds_per_size < 1:
+    if seeds_per_size is not None and seeds_per_size < 1:
         raise ValueError("seeds_per_size must be positive.")
     if bins_per_decade < 1:
         raise ValueError("bins_per_decade must be positive.")
@@ -448,14 +330,18 @@ def run(
         raise ValueError("uncertainty_accuracy must lie between 0 and 0.5.")
     if population_mode not in {"classified", "all"}:
         raise ValueError("population_mode must be 'classified' or 'all'.")
+    if yield_regime not in {"both", "pre", "post"}:
+        raise ValueError("yield_regime must be 'both', 'pre', or 'post'.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    paths, inventory = completed_size_scaling_paths(
-        data_root, seeds_per_size, 1.0
-    )
+    paths, inventory = size_scaling_paths(data_root, seeds_per_size,
+                                        minimum_size=minimum_size)
+    if largest_first:
+        paths = dict(sorted(paths.items(), reverse=True))
+    regimes = YIELD_REGIME_NAMES if yield_regime == "both" else (yield_regime,)
     events_by_regime = pool_event_pairs(
         paths,
-        None,
+        regimes,
         output_dir / "cache" / "event_pairs",
         force=force,
     )
@@ -465,8 +351,16 @@ def run(
     summary = {
         "data_root": str(data_root),
         "reconnection": "none",
-        "yield_split": "per-run peak native avg_sigma12",
+        "yield_split": POST_YIELD_RULE,
+        "post_yield_rule": POST_YIELD_RULE,
+        "yield_regimes": regimes,
+        "fit_size_order": list(paths),
         "seeds_per_size": seeds_per_size,
+        "minimum_size": minimum_size,
+        "source_csvs": {size: [str(path) for path in files] for size, files in paths.items()},
+        "sample_counts": {size: len(files) for size, files in paths.items()},
+        "sample_selection": "available runs extending past their avg_P12 peak +0.01; partial runs included",
+        "analysis_stage": "split_only" if split_only else "fits",
         "population_mode": population_mode,
         "selection": (
             "kappa_det = mu/(2 rho) classification with rho=N/V_0=2"
@@ -497,7 +391,7 @@ def run(
         "fits": {},
     }
 
-    for regime in YIELD_REGIME_NAMES:
+    for regime in regimes:
         events = events_by_regime[regime]
         if population_mode == "classified":
             populations = {
@@ -520,7 +414,7 @@ def run(
         if population_mode == "classified":
             summary["classification"][regime] = {}
         fit_results = {}
-        for size in sorted(events):
+        for size in sorted(events, reverse=largest_first):
             population = populations[size]
             if population_mode == "classified":
                 size_kappa_det = population["kappa_det"]
@@ -553,6 +447,8 @@ def run(
                 er_data = population["er_all"]
                 es_data = population["es_all"]
                 classification_kappa_det = None
+            if split_only:
+                continue
             if er_data.size < 3 or es_data.size < 3:
                 raise ValueError(
                     f"Too few fit events for L={size}, {regime}: "
@@ -620,27 +516,22 @@ def run(
                 )
             # Per-size diagnostics belong to the reversibility flowchart;
             # keep only the cross-size grids here.
-        _plot_fit_grid(
-            regime,
-            fit_results,
-            output_dir,
-            fit_title,
-            fit_filename_prefix,
-            fit_data_label,
-        )
-        _plot_ks_grid(
-            regime,
-            fit_results,
-            output_dir,
-            fit_title,
-            f"{fit_filename_prefix}_D_simpleDrop_vs_global_min",
-        )
+        if not split_only:
+            _plot_fit_grid(
+                regime, fit_results, output_dir, fit_title,
+                fit_filename_prefix, fit_data_label,
+            )
+            _plot_ks_grid(
+                regime, fit_results, output_dir, fit_title,
+                f"{fit_filename_prefix}_D_simpleDrop_vs_global_min",
+            )
 
     if classification_rows:
         pd.DataFrame(classification_rows).to_csv(
             output_dir / "classification_summary.csv", index=False
         )
-    pd.DataFrame(fit_rows).to_csv(output_dir / "fit_results.csv", index=False)
+    if fit_rows:
+        pd.DataFrame(fit_rows).to_csv(output_dir / "fit_results.csv", index=False)
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
     return summary
 
@@ -653,24 +544,35 @@ def main():
     )
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
-    parser.add_argument("--seeds-per-size", type=int, default=6)
+    parser.add_argument("--seeds-per-size", type=int,
+                        help="Optional sample cap; default uses all available post-yield runs.")
+    parser.add_argument("--minimum-size", type=int, default=SIZE_SCALING_MIN_SIZE,
+                        help="Minimum system size (default: 100; use 50 for an explicitly requested comparison).")
+    parser.add_argument("--split-only", action="store_true",
+                        help="Regenerate raw distributions and classification counts without fits.")
     parser.add_argument("--bins-per-decade", type=int, default=10)
     parser.add_argument("--parallel-xmin", action="store_true")
     parser.add_argument("--parallel-uncertainty", action="store_true")
     parser.add_argument("--uncertainty-accuracy", type=float, default=0.1)
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--population-mode", choices=("classified", "all"), default="classified")
+    parser.add_argument("--yield-regime", choices=("both", "pre", "post"), default="both")
+    parser.add_argument("--largest-first", action="store_true")
     args = parser.parse_args()
     run(
         args.data_root,
         args.output_dir,
         seeds_per_size=args.seeds_per_size,
+        minimum_size=args.minimum_size,
         bins_per_decade=args.bins_per_decade,
         parallel_xmin=args.parallel_xmin,
         parallel_uncertainty=args.parallel_uncertainty,
         uncertainty_accuracy=args.uncertainty_accuracy,
         force=args.force,
         population_mode=args.population_mode,
+        yield_regime=args.yield_regime,
+        largest_first=args.largest_first,
+        split_only=args.split_only,
     )
 
 

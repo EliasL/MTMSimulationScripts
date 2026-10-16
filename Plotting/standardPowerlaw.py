@@ -22,81 +22,73 @@ import pandas as pd
 # cell, so N/V_0 = (2 L^2)/(L^2) = 2 for the macrodata convention.
 DEFAULT_KAPPA_RHO = 2.0
 POST_YIELD_OFFSET = 0.01
+PRE_YIELD_OFFSET = 1e-4
+SIZE_SCALING_MIN_SIZE = 100
+POST_YIELD_RULE = "avg_P12 global maximum per run; load_ip1 > peak_load + 0.01; pre: load_ip1 < peak_load - 0.0001"
+SIGMA_RESCUE_POST_YIELD_WINDOW = "avg_P12 peak_load + 0.01 < load_ip1 < 1.0"
+
+
+def yield_peak_load(df) -> float:
+    """Return the load at the first global maximum of native first-Piola P12."""
+    missing = {"load", "avg_P12"} - set(df)
+    if missing:
+        raise KeyError(f"Missing yield-peak columns: {sorted(missing)}")
+    load = np.asarray(df["load"], dtype=float)
+    stress = np.asarray(df["avg_P12"], dtype=float)
+    if load.ndim != 1 or load.size < 2 or stress.shape != load.shape:
+        raise ValueError("Yield-peak load and avg_P12 must be aligned 1D arrays.")
+    if not np.all(np.isfinite(load)) or np.any(np.diff(load) <= 0):
+        raise ValueError("Yield-peak loads must be finite and strictly increasing.")
+    if not np.all(np.isfinite(stress)):
+        raise ValueError("Yield-peak avg_P12 contains non-finite values.")
+    return float(load[np.argmax(stress)])
+
+
+def yield_regimes(df) -> dict[str, tuple[float, float]]:
+    """Historical peak buffers, using P12 rather than Cauchy shear stress."""
+    peak = yield_peak_load(df)
+    return {"pre": (float(np.min(df["load"])), peak - PRE_YIELD_OFFSET),
+            "post": (peak + POST_YIELD_OFFSET, float(np.max(df["load"])))}
+
+
+def yield_region_mask(df, region, event_load=None):
+    """Select pre/post events with the same buffered windows as extraction."""
+    if region not in ("pre", "post"):
+        raise ValueError(f"Unknown yield region: {region}")
+    low, high = yield_regimes(df)[region]
+    load = np.asarray(df["load"] if event_load is None else event_load, dtype=float)
+    return np.isfinite(load) & (load > low) & (load < high)
 
 
 def require_gamma0_snapshot(snapshot_root: Path) -> None:
-    """Reject sigma-rescue tables made with the archived dynamic-mu convention."""
+    """Reject snapshots built with an old energy or yield convention."""
     manifest = Path(snapshot_root) / "tables" / "build_manifest.json"
-    if json.loads(manifest.read_text()).get("delta_E_S_tangent") != "gamma0":
+    metadata = json.loads(manifest.read_text())
+    if metadata.get("delta_E_S_tangent") != "gamma0":
         raise ValueError(f"Delta E_S table was not built with static gamma=0 mu: {manifest}")
-
-
-def derive_sigma_rescue_yield_peaks(
-    snapshot_root: Path | None = None, *, audited: pd.DataFrame | None = None
-) -> pd.DataFrame:
-    """Record each run's measured Cauchy-stress peak and coverage around it."""
-    if audited is None:
-        if snapshot_root is None:
-            raise ValueError("Provide a snapshot root or audited table.")
-        require_gamma0_snapshot(snapshot_root)
-        table = Path(snapshot_root) / "tables" / "drops_all_audited.csv.gz"
-        audited = pd.read_csv(
-            table,
-            usecols=["run_name", "size", "seed", "load_ip1", "avg_sigma12_ip1", "usable"],
-        )
-    records = []
-    for run_name, group in audited.groupby("run_name", sort=True):
-        valid = group.loc[
-            group["usable"]
-            & np.isfinite(group["avg_sigma12_ip1"])
-            & (group["avg_sigma12_ip1"] != -1)
-        ]
-        if valid.empty:
-            raise ValueError(f"No validated stress for {run_name}.")
-        peak = valid.loc[valid["avg_sigma12_ip1"].idxmax()]
-        load = float(peak["load_ip1"])
-        before = int(((valid["load_ip1"] >= load - 0.01) & (valid["load_ip1"] < load)).sum())
-        after = int(((valid["load_ip1"] > load) & (valid["load_ip1"] <= load + 0.01)).sum())
-        # A maximum at the edge of rescued coverage cannot establish yield.
-        established = before >= 100 and after >= 100
-        records.append({
-            "run_name": run_name,
-            "size": int(peak["size"]),
-            "seed": int(peak["seed"]),
-            "peak_load": load,
-            "peak_sigma12": float(peak["avg_sigma12_ip1"]),
-            "validated_before_0p01": before,
-            "validated_after_0p01": after,
-            "peak_established": established,
-            "post_yield_start": load + POST_YIELD_OFFSET,
-        })
-    return pd.DataFrame.from_records(records)
+    if metadata.get("post_yield_rule") != POST_YIELD_RULE:
+        raise ValueError(f"Snapshot has an obsolete post-yield rule: {manifest}")
 
 
 def load_sigma_rescue_post_yield(
     snapshot_root: Path, columns: list[str], *, audited: bool = False
 ) -> pd.DataFrame:
-    """Select rows after each established stress peak, with no fixed-load fallback."""
+    """Select transitions after the audited per-run first-Piola stress peak."""
     require_gamma0_snapshot(snapshot_root)
     root = Path(snapshot_root) / "tables"
-    peaks = pd.read_csv(root / "yield_peaks.csv")
-    if peaks["run_name"].duplicated().any():
-        raise ValueError("Duplicate run names in yield_peaks.csv.")
     filename = "drops_all_audited.csv.gz" if audited else "drops_usable.csv.gz"
-    frame = pd.read_csv(root / filename, usecols=list(dict.fromkeys(["run_name", "load_ip1", *columns])))
-    frame = frame.merge(
-        peaks[["run_name", "post_yield_start", "peak_established"]],
-        on="run_name", how="left", validate="many_to_one",
-    )
-    if frame["peak_established"].isna().any():
-        raise ValueError("A source run has no stress-peak audit entry.")
+    frame = pd.read_csv(root / filename, usecols=list(dict.fromkeys(["run_name", "size", "load_ip1", *columns])))
+    peaks = pd.read_csv(root / "yield_peaks.csv", usecols=["run_name", "post_yield_start"])
+    frame = frame.merge(peaks, on="run_name", how="left", validate="many_to_one")
+    if frame["post_yield_start"].isna().any():
+        raise ValueError("A source run has no first-Piola yield-peak audit.")
     frame = frame.loc[
-        frame["peak_established"]
-        & (frame["load_ip1"] > frame["post_yield_start"])
+        (frame["load_ip1"] > frame["post_yield_start"])
         & (frame["load_ip1"] < 1.0)
+        & (frame["size"] >= SIZE_SCALING_MIN_SIZE)
     ].copy()
     if frame.empty:
-        raise ValueError("No rows remain after established stress peaks.")
+        raise ValueError("No rows remain after each run's avg_P12 peak +0.01.")
     return frame
 
 

@@ -2092,8 +2092,8 @@ def prepPoincareFig(
     else:
         ax.set_xticks(tick_pos, tick_lab)
         ax.set_yticks(tick_pos, tick_lab)
-        ax.set_xlabel(r"$x_p$")
-        ax.set_ylabel(r"$y_p$")
+        ax.set_xlabel(r"$x_P$")
+        ax.set_ylabel(r"$y_P$")
 
     ax.set_xlim(center - half, center + half)
     ax.set_ylim(center - half, center + half)
@@ -3168,8 +3168,8 @@ def make3DEnergyField(
     default_font_size = plt.rcParams["font.size"]  # Fetch default font size
     cbar.ax.set_title(f"Capped at ${energy_lim[1]}$", fontsize=default_font_size)
     # Set labels for the axes
-    ax.set_xlabel(r"$x_p$")
-    ax.set_ylabel(r"$y_p$")
+    ax.set_xlabel(r"$x_P$")
+    ax.set_ylabel(r"$y_P$")
     ax.set_zlabel(zLabel)
     # ax.set_title("Energy Surface Plot")
 
@@ -3450,8 +3450,8 @@ def plot3DEnergyDensityComparison(
         surfaces.append(surface)
 
         ax.set_title(title, y=title_y, pad=title_pad)
-        ax.set_xlabel(r"$x_p$")
-        ax.set_ylabel(r"$y_p$")
+        ax.set_xlabel(r"$x_P$")
+        ax.set_ylabel(r"$y_P$")
         ax.set_zlabel(z_axis_label)
         ax.set_xlim(-radius, radius)
         ax.set_ylim(-radius, radius)

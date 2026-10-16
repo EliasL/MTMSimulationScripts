@@ -9,6 +9,7 @@ from matplotlib.lines import Line2D
 
 from Management.configGenerator import SimulationConfig
 from Management.updateCSV import update_df_header, read_macrodata_csv
+from Plotting.standardPowerlaw import POST_YIELD_OFFSET
 from Plotting.dataFunctions import get_metadata
 from Plotting.energyDropCalculations import volume_from_metadata
 from Plotting.remotePlotting import get_csv_files
@@ -549,7 +550,7 @@ def _reversibility_event_records(csv_path):
     load_increment = float(metadata["loadIncrement"])
     if not np.isfinite(load_increment) or load_increment <= 0:
         raise ValueError(f"Invalid loadIncrement={load_increment} for {csv_path}.")
-    yield_load = findPrePostSplit(df=df)
+    yield_load = findPrePostSplit(df=df) + POST_YIELD_OFFSET
     loads = df["load"].to_numpy(dtype=float)
     event_root = Path(RAW_DATA_PATH) / _job_name_from_csv_path(csv_path) / "data/reversibilityData"
     if not event_root.is_dir():

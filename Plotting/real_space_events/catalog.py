@@ -13,6 +13,7 @@ import re
 import numpy as np
 import pandas as pd
 
+from Plotting.standardPowerlaw import POST_YIELD_OFFSET
 from Plotting.dataFunctions import get_metadata
 from Plotting.energyDropCalculations import calculate_energy_step_data, volume_from_metadata
 from Plotting.plotPowerLaw import findPrePostSplit
@@ -264,7 +265,7 @@ def _catalog_rows_from_csv(csv_path: Path, scope: AnalysisScope, batch: int) -> 
     if positive_rev_u.size < 50:
         raise ValueError(f"Too few recorded reversibility rows in {csv_path}.")
     rev_u_cut, _ = npj.unbinned_log_otsu_cut(positive_rev_u)
-    yield_load = float(findPrePostSplit(df=df))
+    yield_load = float(findPrePostSplit(df=df)) + POST_YIELD_OFFSET
     load_increment = float(np.median(np.diff(load)))
     job_directory = csv_path.parent
     event_root = job_directory / "data" / "reversibilityData"

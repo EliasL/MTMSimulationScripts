@@ -22,7 +22,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm, Normalize
+from matplotlib.colors import Normalize
 import cmocean
 
 from Plotting.render_largest_reconnecting_events import (
@@ -38,6 +38,7 @@ from Plotting.render_poincare_maxflow_heatmaps import (
     MIN_CELL_COUNT,
     SPATIAL_BINS,
     _compute_heatmaps,
+    _projected_flow_norm,
     _write_manifest,
 )
 from Plotting.heatmap_cache import (
@@ -162,6 +163,7 @@ def _collect_stress_vectors(
     vector_source: str = "delta_T",
     exclude_unreconstructable_T: bool = False,
     stress_extent: float | None = None,
+    coordinate_source: str = "after",
 ) -> tuple[
     np.ndarray,
     np.ndarray,
@@ -185,6 +187,8 @@ def _collect_stress_vectors(
         raise ValueError("bins and min_count must be positive.")
     if vector_source not in {"delta_T", "local_stress"}:
         raise ValueError("vector_source must be 'delta_T' or 'local_stress'.")
+    if coordinate_source not in {"before", "after"}:
+        raise ValueError("coordinate_source must be 'before' or 'after'.")
     before_x_parts: list[np.ndarray] = []
     before_y_parts: list[np.ndarray] = []
     after_x_parts: list[np.ndarray] = []
@@ -268,24 +272,22 @@ def _collect_stress_vectors(
     if not np.all(np.isfinite(u)) or not np.all(np.isfinite(v)):
         raise ValueError("Stress-space transition vectors contain non-finite values.")
 
-    # The heatmap location is always the after-state stress coordinate.  The
-    # vector attached to each occupied cell is the transition from the
-    # corresponding before-state stress to that after-state stress.
+    x, y = (before_x, before_y) if coordinate_source == "before" else (after_x, after_y)
     if stress_extent is None:
         extent = max(
-            float(np.max(np.abs(after_x))),
-            float(np.max(np.abs(after_y))),
+            float(np.max(np.abs(x))),
+            float(np.max(np.abs(y))),
         )
         if not np.isfinite(extent) or extent <= 0:
-            raise ValueError("The final-reduced stress cloud has no finite nonzero extent.")
+            raise ValueError("The stress cloud has no finite nonzero extent.")
         extent *= 1.02
     else:
         extent = float(stress_extent)
         if not np.isfinite(extent) or extent <= 0.0:
             raise ValueError("stress_extent must be finite and positive.")
     edges = np.linspace(-extent, extent, bins + 1)
-    ix = np.searchsorted(edges, after_x, side="right") - 1
-    iy = np.searchsorted(edges, after_y, side="right") - 1
+    ix = np.searchsorted(edges, x, side="right") - 1
+    iy = np.searchsorted(edges, y, side="right") - 1
     valid = (
         (ix >= 0)
         & (ix < bins)
@@ -295,7 +297,7 @@ def _collect_stress_vectors(
         & np.isfinite(v)
     )
     if not np.any(valid):
-        raise RuntimeError("No finite final-reduced stress transitions fit the plot extent.")
+        raise RuntimeError("No finite stress transitions fit the plot extent.")
     ix_valid = ix[valid].astype(np.int32, copy=False)
     iy_valid = iy[valid].astype(np.int32, copy=False)
     u_valid = u[valid].astype(np.float32, copy=False)
@@ -482,6 +484,8 @@ def render_stress_maxflow_heatmaps(
     vector_source: str = "delta_T",
     exclude_unreconstructable_T: bool = False,
     stress_extent: float | None = STRESS_EXTENT,
+    coordinate_source: str = "after",
+    magnitude_vmin: float | None = None,
     force_recompute: bool = False,
     vector_data: tuple[
         np.ndarray,
@@ -508,7 +512,8 @@ def render_stress_maxflow_heatmaps(
             "min_count": min_count,
             "vector_source": vector_source,
             "stress_extent": stress_extent,
-            "metric_algorithm": "max_abs_projection_v1",
+            "coordinate_source": coordinate_source,
+            "metric_algorithm": "max_abs_projection_v2",
         },
     )
     cached = None if force_recompute else load_heatmap_cache(cache_path)
@@ -528,6 +533,7 @@ def render_stress_maxflow_heatmaps(
                 vector_source=vector_source,
                 exclude_unreconstructable_T=exclude_unreconstructable_T,
                 stress_extent=stress_extent,
+                coordinate_source=coordinate_source,
             )
         else:
             u, v, ix, iy, count, edges, rejected_total_T = vector_data
@@ -540,9 +546,6 @@ def render_stress_maxflow_heatmaps(
     boundary = _loss_of_ellipticity_boundary()
     stress_limit_x, stress_limit_y = _stress_loss_of_ellipticity_limit(boundary)
 
-    positive_magnitude = magnitude[np.isfinite(magnitude) & (magnitude > 0.0)]
-    if positive_magnitude.size == 0:
-        raise RuntimeError("The stress projected-flow heatmap has no positive values.")
     if not np.any(np.isfinite(angle_std)) or not np.any(np.isfinite(magnitude_std)):
         raise RuntimeError("The stress dispersion heatmaps have no finite values.")
     panels = (
@@ -557,7 +560,7 @@ def render_stress_maxflow_heatmaps(
         (
             magnitude,
             "viridis",
-            LogNorm(float(np.min(positive_magnitude)), float(np.max(positive_magnitude))),
+            _projected_flow_norm(magnitude, vmin=magnitude_vmin),
             "average projected magnitude",
             None,
             None,
@@ -590,10 +593,11 @@ def render_stress_maxflow_heatmaps(
         axis.plot(
             stress_limit_x,
             stress_limit_y,
-            color="#d62728",
+            color="black",
             linewidth=1.3,
+            linestyle="--",
             zorder=6,
-            label="loss of ellipticity",
+            label="loss of strong ellipticity",
         )
         axis.set_xlim(extent[0], extent[1])
         axis.set_ylim(-plot_y_limit, plot_y_limit)
@@ -635,6 +639,7 @@ def render_stress_maxflow_heatmaps(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output_path, dpi=dpi, bbox_inches="tight", pad_inches=0.05)
+    figure.savefig(output_path.with_suffix(".pdf"), dpi=dpi, bbox_inches="tight", pad_inches=0.05)
     plt.close(figure)
     manifest = output_path.with_name(output_path.stem + "_cells.csv")
     _write_stress_manifest(manifest, count, metrics, edges)

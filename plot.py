@@ -421,8 +421,8 @@ def plotReductionHistory(show=True):
     history_tick_labels = [f"{value:.1f}" for value in np.linspace(-1.0, 1.0, 5)]
     history_ax.set_xticks(history_ticks, history_tick_labels)
     history_ax.set_yticks(history_ticks, history_tick_labels)
-    history_ax.set_xlabel(r"$x_p$")
-    history_ax.set_ylabel(r"$y_p$")
+    history_ax.set_xlabel(r"$x_P$")
+    history_ax.set_ylabel(r"$y_P$")
 
     factor_axes = []
     for row_index, (_, _, row_label, titles) in enumerate(factor_rows):

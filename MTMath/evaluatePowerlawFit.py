@@ -33,7 +33,8 @@ from tqdm import tqdm
 POWERLAW_STANDARD_WORKFLOW = r"""
 Recommended simulation energy-drop workflow
 --------------------------------------------
-1. Restrict the event extraction to the post-yield region.
+1. Restrict event extraction to load_ip1 > each run's global avg_P12 peak +0.01.
+   P12 only selects the window; Delta E_S uses avg_sigma12 and fixed gamma=0 mu.
 2. Extract Delta E_R and Delta E_S as paired values from the same event
    transitions, in the same order and with the same length.
 3. Compute kappa with rho=N/V_0=2 and apply the fixed detector
@@ -1193,7 +1194,7 @@ class Fit(powerlaw.Fit):
             return asarray([]), ([] if return_params else None)
 
         if nr_sets is None:
-            nr_sets = max(1, int(1 / (4 * confidence**2)))  # At least one set
+            nr_sets = max(1, int(np.ceil(1 / (4 * confidence**2))))  # At least one set
         nr_sets = int(nr_sets)
 
         # Get distribution (Let me know if there is a better way to do this)
@@ -1336,7 +1337,7 @@ class Fit(powerlaw.Fit):
             return self.p, self.alpha_mean, self.alpha_std
 
         # --- compute number of synthetic sets
-        nr_sets = max(1, int(1 / (4 * confidence**2)))  # At least one set
+        nr_sets = max(1, int(np.ceil(1 / (4 * confidence**2))))  # At least one set
 
         # --- try cache (JSON of computed scalars only)
         cache_path = None
@@ -1549,7 +1550,7 @@ class Fit(powerlaw.Fit):
         if tail_fraction < 1.0 and below_xmin.size == 0:
             raise RuntimeError("Missing empirical population below xmin.")
 
-        nr_sets = max(1, int(1 / (4 * confidence**2)))
+        nr_sets = max(1, int(np.ceil(1 / (4 * confidence**2))))
         nr_initial = int(analysis["nr_initial"])
         selection_kwargs = {
             "nr_initial": nr_initial,

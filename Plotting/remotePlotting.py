@@ -154,7 +154,7 @@ def smart_read_csv(file_path):
 
 
 def handleLocalPath(dataPath, configs, returnCsv=True):
-    names = [config.generate_name(False) for config in configs]
+    names = [config.name for config in configs]
 
     existing_paths = []  # This will store the paths to existing data files
     base_path = os.path.join(dataPath, REMOTE_FOLDER_NAME)
@@ -314,7 +314,7 @@ def get_csv_from_server(server, configs):
     if ssh is None:
         return []
 
-    names = [config.generate_name(False) for config in configs]
+    names = [config.name for config in configs]
     newPaths = []
     os.makedirs(MACRO_PATH, exist_ok=True)
 
@@ -2068,12 +2068,12 @@ def plotReversibilityQuantityCorrelation(
             missing = {xAxisCol, yAxisCol}.difference(df.columns)
             if missing:
                 raise KeyError(f"Missing columns {sorted(missing)} in {csv_path}.")
-            yield_load = findPrePostSplit(df=df)
+            from Plotting.standardPowerlaw import yield_region_mask
             x_all = df[xAxisCol].to_numpy(dtype=float)
             y_all = df[yAxisCol].to_numpy(dtype=float)
             load = df["load"].to_numpy(dtype=float)
             for post_yield, marker, _ in requested_regimes:
-                regime_mask = load > yield_load if post_yield else load <= yield_load
+                regime_mask = yield_region_mask(df, "post" if post_yield else "pre", load)
                 valid = (
                     regime_mask
                     & np.isfinite(x_all)

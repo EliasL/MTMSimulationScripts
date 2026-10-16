@@ -226,8 +226,8 @@ def _render_history_plot(
             ".-", ms=2, lw=0.7, color="tab:orange",
             label="plastically reduced" if segment_index == 0 else None,
         )
-    axes[0, 0].set_xlabel("x_p")
-    axes[0, 0].set_ylabel("y_p")
+    axes[0, 0].set_xlabel("x_P")
+    axes[0, 0].set_ylabel("y_P")
     axes[0, 0].set_title("Tracked Poincare path")
     axes[0, 0].legend()
     axes[0, 0].set_aspect("equal", adjustable="box")
@@ -236,13 +236,13 @@ def _render_history_plot(
             [value(row, "load") for row in segment],
             [value(row, "reduced_x") for row in segment],
             color="tab:blue",
-            label="x_p" if segment_index == 0 else None,
+            label="x_P" if segment_index == 0 else None,
         )
         axes[0, 1].plot(
             [value(row, "load") for row in segment],
             [value(row, "reduced_y") for row in segment],
             color="tab:orange",
-            label="y_p" if segment_index == 0 else None,
+            label="y_P" if segment_index == 0 else None,
         )
     axes[0, 1].set_xlabel("load")
     axes[0, 1].set_title("Reduced coordinates versus load")

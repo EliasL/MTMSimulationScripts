@@ -62,9 +62,11 @@ controls the settings used while continuing the run.
 
 The supplied dataset contains the completed non-reconnecting `simpleShear`
 size-scaling dump files. It has 80 regime folders in total: 4 sizes × 10
-seeds × 2 regimes. The split is strict: a dump belongs to `pre_yield` when its
-load is at or below the stress-maximum load, and to `post_yield` otherwise.
-The current raw files use the legacy `avg_sigmaxy` column as that proxy. Each
+seeds × 2 regimes. This prepared dataset used the historical stress-maximum
+split. Newly prepared datasets use each run's global `avg_P12` peak +0.01:
+a dump belongs to `post_yield` above that boundary and `pre_yield` otherwise.
+This binary dump-folder split is separate from the power-law extraction's
+buffered pre-yield window (strictly before peak -1e-4). Each
 regime has a matching `config.conf`; the number of dump files depends on the
 completed simulation. If a job's available dump range does not cross its
 yield load, the corresponding regime directory is kept with its config but

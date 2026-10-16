@@ -1,0 +1,349 @@
+{
+  "run_count": 42,
+  "delta_E_S_tangent": "gamma0",
+  "audited_transition_count": 3569997,
+  "usable_transition_count": 2753876,
+  "runs": [
+    {
+      "size": 50,
+      "seed": 0,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s0",
+      "accepted_fragment_count": 38,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 65448
+    },
+    {
+      "size": 50,
+      "seed": 1,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s1",
+      "accepted_fragment_count": 26,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 72285
+    },
+    {
+      "size": 50,
+      "seed": 2,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s2",
+      "accepted_fragment_count": 33,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 73240
+    },
+    {
+      "size": 50,
+      "seed": 3,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s3",
+      "accepted_fragment_count": 38,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 73273
+    },
+    {
+      "size": 50,
+      "seed": 4,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s4",
+      "accepted_fragment_count": 38,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 65187
+    },
+    {
+      "size": 50,
+      "seed": 5,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s5",
+      "accepted_fragment_count": 19,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 67015
+    },
+    {
+      "size": 50,
+      "seed": 6,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s6",
+      "accepted_fragment_count": 19,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 62902
+    },
+    {
+      "size": 50,
+      "seed": 7,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s7",
+      "accepted_fragment_count": 20,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 70606
+    },
+    {
+      "size": 50,
+      "seed": 8,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s8",
+      "accepted_fragment_count": 20,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 70452
+    },
+    {
+      "size": 50,
+      "seed": 9,
+      "run_name": "simpleShear,s50x50l0.15,1e-05,1.0PBCt2LBFGSEpsx1e-06s9",
+      "accepted_fragment_count": 20,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 69598
+    },
+    {
+      "size": 100,
+      "seed": 0,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s0",
+      "accepted_fragment_count": 86,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 70070
+    },
+    {
+      "size": 100,
+      "seed": 1,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s1",
+      "accepted_fragment_count": 83,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 68608
+    },
+    {
+      "size": 100,
+      "seed": 2,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s2",
+      "accepted_fragment_count": 85,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 69200
+    },
+    {
+      "size": 100,
+      "seed": 3,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s3",
+      "accepted_fragment_count": 84,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 70466
+    },
+    {
+      "size": 100,
+      "seed": 4,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s4",
+      "accepted_fragment_count": 84,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 68967
+    },
+    {
+      "size": 100,
+      "seed": 5,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s5",
+      "accepted_fragment_count": 84,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 69114
+    },
+    {
+      "size": 100,
+      "seed": 6,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s6",
+      "accepted_fragment_count": 82,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 66090
+    },
+    {
+      "size": 100,
+      "seed": 7,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s7",
+      "accepted_fragment_count": 85,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 66089
+    },
+    {
+      "size": 100,
+      "seed": 8,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s8",
+      "accepted_fragment_count": 85,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 65022
+    },
+    {
+      "size": 100,
+      "seed": 9,
+      "run_name": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3LBFGSEpsx1e-06s9",
+      "accepted_fragment_count": 81,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 69024
+    },
+    {
+      "size": 150,
+      "seed": 0,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s0",
+      "accepted_fragment_count": 36,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 76632
+    },
+    {
+      "size": 150,
+      "seed": 1,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s1",
+      "accepted_fragment_count": 34,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 76925
+    },
+    {
+      "size": 150,
+      "seed": 2,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s2",
+      "accepted_fragment_count": 60,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 61350
+    },
+    {
+      "size": 150,
+      "seed": 3,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s3",
+      "accepted_fragment_count": 66,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 65069
+    },
+    {
+      "size": 150,
+      "seed": 4,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s4",
+      "accepted_fragment_count": 82,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 59299
+    },
+    {
+      "size": 150,
+      "seed": 5,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s5",
+      "accepted_fragment_count": 79,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 46661
+    },
+    {
+      "size": 150,
+      "seed": 6,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s6",
+      "accepted_fragment_count": 84,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 49055
+    },
+    {
+      "size": 150,
+      "seed": 7,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s7",
+      "accepted_fragment_count": 81,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 51512
+    },
+    {
+      "size": 150,
+      "seed": 8,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s8",
+      "accepted_fragment_count": 65,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 59282
+    },
+    {
+      "size": 150,
+      "seed": 9,
+      "run_name": "simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s9",
+      "accepted_fragment_count": 67,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 61578
+    },
+    {
+      "size": 200,
+      "seed": 4,
+      "run_name": "simpleShear,s200x200l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s4",
+      "accepted_fragment_count": 28,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 73497
+    },
+    {
+      "size": 200,
+      "seed": 5,
+      "run_name": "simpleShear,s200x200l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s5",
+      "accepted_fragment_count": 59,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 54863
+    },
+    {
+      "size": 200,
+      "seed": 6,
+      "run_name": "simpleShear,s200x200l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s6",
+      "accepted_fragment_count": 34,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 75655
+    },
+    {
+      "size": 200,
+      "seed": 7,
+      "run_name": "simpleShear,s200x200l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s7",
+      "accepted_fragment_count": 47,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 60291
+    },
+    {
+      "size": 200,
+      "seed": 8,
+      "run_name": "simpleShear,s200x200l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s8",
+      "accepted_fragment_count": 32,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 69856
+    },
+    {
+      "size": 200,
+      "seed": 9,
+      "run_name": "simpleShear,s200x200l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s9",
+      "accepted_fragment_count": 53,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 55538
+    },
+    {
+      "size": 250,
+      "seed": 0,
+      "run_name": "simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0",
+      "accepted_fragment_count": 26,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 69030
+    },
+    {
+      "size": 250,
+      "seed": 1,
+      "run_name": "simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s1",
+      "accepted_fragment_count": 37,
+      "audited_transition_count": 84999,
+      "usable_transition_count": 65497
+    },
+    {
+      "size": 250,
+      "seed": 2,
+      "run_name": "simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s2",
+      "accepted_fragment_count": 39,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 63553
+    },
+    {
+      "size": 250,
+      "seed": 3,
+      "run_name": "simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s3",
+      "accepted_fragment_count": 41,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 62691
+    },
+    {
+      "size": 250,
+      "seed": 4,
+      "run_name": "simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s4",
+      "accepted_fragment_count": 36,
+      "audited_transition_count": 85000,
+      "usable_transition_count": 60049
+    },
+    {
+      "size": 250,
+      "seed": 5,
+      "run_name": "simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s5",
+      "accepted_fragment_count": 41,
+      "audited_transition_count": 84998,
+      "usable_transition_count": 63337
+    }
+  ],
+  "post_yield_rule": "avg_P12 global maximum per run; load_ip1 > peak_load + 0.01; pre: load_ip1 < peak_load - 0.0001",
+  "established_yield_peak_count": 35,
+  "yield_peak_audit": "yield_peaks.csv",
+  "yield_stress_column": "avg_P12",
+  "source_snapshot": "/Users/eliaslundheim/work/PhD/SimulationScripts/sigma_rescue_interim/snapshots/20260928T120634Z"
+}

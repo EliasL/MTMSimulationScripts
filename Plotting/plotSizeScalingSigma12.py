@@ -10,16 +10,15 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from Management.reconnectionJobSelection import discover_simulation_jobs
 from Plotting.reconnectingEnergyJumpAndElementDistribution import (
-    determine_yield_load,
     read_live_macro_snapshot,
 )
+from Plotting.standardPowerlaw import POST_YIELD_OFFSET, yield_peak_load
 
 
 def plot_sigma12(
@@ -51,7 +50,6 @@ def plot_sigma12(
     colors = plt.get_cmap("tab10")
     for index, job in enumerate(jobs):
         snapshot = read_live_macro_snapshot(job.folder / "macroData.csv")
-        yield_load = determine_yield_load(snapshot)
         maximum = snapshot["avg_sigma12"].idxmax()
         color = colors(index % 10)
         label = f"L={job.size}, seed={job.seed}"
@@ -71,11 +69,8 @@ def plot_sigma12(
             s=22,
             zorder=3,
         )
-        if not np.isclose(yield_load, snapshot.loc[maximum, "load"]):
-            raise RuntimeError(
-                f"Yield-load mismatch for {job.folder.name}: "
-                f"{yield_load} != {snapshot.loc[maximum, 'load']}"
-            )
+        ax.axvline(yield_peak_load(snapshot) + POST_YIELD_OFFSET,
+                   color=color, linestyle="--", linewidth=1)
 
     ax.set_xlabel(r"Load $\gamma$")
     ax.set_ylabel(r"Average stress $\sigma_{12}$")

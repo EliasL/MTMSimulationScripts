@@ -6,8 +6,8 @@ classified with ``kappa_det = mu/(2 rho)`` for ``rho=N/V_0=2``; that event mask 
 ``Delta E_I``/``Delta E_S`` values before positive filtering.  Each size then
 gets one figure containing fitted PDFs and xmin/KS scans for the three drop
 measures, plus a separate PDF showing the reversible/irreversible split.
-The Clauset refit bootstrap and 95% intervals are computed for the standard
-irreversible ``Delta E_S`` fit.
+The Clauset refit bootstrap supplies 95% percentile intervals for xmin, alpha,
+and Lambda. The reference p-value belongs to ``Delta E_S``.
 
 Run from the repository root with::
 
@@ -26,7 +26,6 @@ import matplotlib as mpl
 mpl.use("Agg")
 mpl.rcParams["text.usetex"] = False
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 
@@ -40,6 +39,7 @@ from Plotting.plotPowerLaw import (
 )
 from Plotting.standardPowerlaw import (
     DEFAULT_KAPPA_RHO,
+    SIGMA_RESCUE_POST_YIELD_WINDOW,
     EventDrops,
     kappa_detection_threshold,
     kappa_from_relaxation_energy,
@@ -50,9 +50,9 @@ from Plotting.standardPowerlaw import (
 )
 
 
-DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0")
+DEFAULT_SNAPSHOT = Path("sigma_rescue_interim/current_gamma0_piola_peak")
 DEFAULT_OUTPUT = Path(
-    "Plots/powerLaw/sigma_rescue_size_scaling_individual"
+    "Plots/powerLaw/sigma_rescue_size_scaling_individual_piola_peak"
 )
 PROTOCOLS = ("delta_E_I", "delta_E_R", "delta_E_S")
 PROTOCOL_SYMBOLS = {
@@ -60,6 +60,8 @@ PROTOCOL_SYMBOLS = {
     "delta_E_R": r"$\Delta E_R$",
     "delta_E_S": r"$\Delta E_S$",
 }
+MINIMUM_LINESTYLE = ":"
+MINIMUM_LINEWIDTH = 1.0
 PLOT_DROP_LABELS = {
     "delta_E_I": r"E_I",
     "delta_E_R": r"E_R",
@@ -75,6 +77,7 @@ PVALUE_START_ACCURACY = 0.1
 PVALUE_MAX_ACCURACY = 0.01
 PVALUE_CONFIDENCE = 0.01
 DEFAULT_PVALUE_WORKERS = min(4, os.cpu_count() or 1)
+BOOTSTRAP_CI_LEVEL = 0.95
 
 
 def _positive(values: np.ndarray) -> np.ndarray:
@@ -132,8 +135,11 @@ def _fit_population(
     return fit
 
 
-def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
+def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str,
+                    bootstrap_intervals: tuple[tuple[float, float], ...] | None = None):
     symbol = PROTOCOL_SYMBOLS[protocol]
+    subscript = protocol.rsplit("_", 1)[1]
+    cutoff_symbol = rf"\Delta E_{{{subscript},\min}}^{{\mathrm{{KS}}}}"
     plot_data_pdf(
         ax,
         data,
@@ -147,7 +153,7 @@ def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
         ax,
         fit,
         color="tab:red",
-        label="global-min truncated power law",
+        label=r"Fit: $p(x)\propto x^{-\hat\alpha}e^{-\hat\lambda x}$",
         drop_label=PLOT_DROP_LABELS[protocol],
         drop_sign="positive",
         show_legend=False,
@@ -161,8 +167,8 @@ def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
     ax.axvline(
         global_xmin,
         color="0.2",
-        linestyle=":",
-        linewidth=1.0,
+        linestyle=MINIMUM_LINESTYLE,
+        linewidth=MINIMUM_LINEWIDTH,
         label="global minimum",
     )
     distribution = dist_from_fit(fit)
@@ -187,10 +193,10 @@ def _plot_fit_panel(ax, fit, data: np.ndarray, protocol: str):
         fontsize="x-small",
         bbox={"facecolor": "white", "alpha": 0.78, "edgecolor": "none"},
     )
-    ax.set_title(symbol)
     ax.set_xlabel(symbol)
     ax.set_ylabel(rf"$p({symbol[1:-1]})$")
     ax.grid(alpha=0.18)
+    ax.legend(loc="center left", fontsize="x-small", frameon=True)
 
 
 def _set_pdf_axes(ax, quantity: str) -> None:
@@ -228,8 +234,8 @@ def _save_separation_figure(
             f"got reversible={es_rev.size}, irreversible={es_irrev.size}."
         )
 
-    fig, axes = plt.subplots(1, 3, figsize=(12.8, 3.8), squeeze=False)
-    kappa_ax, er_ax, es_ax = axes[0]
+    panels = [plt.subplots(figsize=(5.5, 4.2)) for _ in range(3)]
+    kappa_ax, er_ax, es_ax = [ax for _, ax in panels]
     plot_data_pdf(
         kappa_ax,
         kappa_all,
@@ -251,7 +257,6 @@ def _save_separation_figure(
         label=rf"$\kappa_{{\det}}={kappa_det:.2e}$",
         zorder=4,
     )
-    kappa_ax.set_title(r"$\kappa$ split")
     kappa_ax.legend(loc="best", fontsize="x-small")
 
     plot_data_pdf(
@@ -282,7 +287,6 @@ def _save_separation_figure(
         show_legend=False,
     )
     _set_pdf_axes(er_ax, r"\Delta E_R")
-    er_ax.set_title(r"$\Delta E_R$ and $\kappa_{\det}$ split")
     er_ax.legend(loc="best", fontsize="x-small")
 
     plot_data_pdf(
@@ -304,16 +308,15 @@ def _save_separation_figure(
         show_legend=False,
     )
     _set_pdf_axes(es_ax, r"\Delta E_S")
-    es_ax.set_title(r"$\Delta E_S$ after $\kappa_{\det}$ split")
     es_ax.legend(loc="best", fontsize="x-small")
 
-    fig.suptitle(rf"Post-yield separation, $L={size}$")
-    fig.subplots_adjust(left=0.06, right=0.99, bottom=0.16, top=0.84, wspace=0.30)
     output_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = output_dir / f"L{size}_post_yield_separation_pdfs.pdf"
-    fig.savefig(pdf_path, bbox_inches="tight")
-    fig.savefig(pdf_path.with_suffix(".png"), dpi=220, bbox_inches="tight")
-    plt.close(fig)
+    for (fig, _), name in zip(panels, ("kappa", "delta_E_R", "delta_E_S")):
+        fig.tight_layout()
+        pdf_path = output_dir / f"L{size}_post_yield_{name}_separation.pdf"
+        fig.savefig(pdf_path, bbox_inches="tight")
+        fig.savefig(pdf_path.with_suffix(".png"), dpi=220, bbox_inches="tight")
+        plt.close(fig)
 
 
 def _draw_full_xmin_scan(
@@ -330,7 +333,7 @@ def _draw_full_xmin_scan(
     force_pvalue: bool,
     skip_pvalue: bool = False,
 ) -> None:
-    """Draw the empirical xmin scan and bootstrap the standard Delta E_S fit."""
+    """Draw the empirical xmin scan and bootstrap the fitted population."""
     if fit.xmin_fitting_results is None:
         raise RuntimeError(f"Missing xmin results for L={size}, {protocol}.")
     parallel = int(pvalue_workers) > 1
@@ -435,11 +438,23 @@ def _save_size_figure(
         hspace=0.44,
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = output_dir / f"L{size}_post_yield_fits_and_xmin_scans.pdf"
-    png_path = pdf_path.with_suffix(".png")
-    fig.savefig(pdf_path, bbox_inches="tight")
-    fig.savefig(png_path, dpi=220, bbox_inches="tight")
-    plt.close(fig)
+    for protocol in protocols:
+        for kind in ("fit", "xmin_scan"):
+            fig, ax = plt.subplots(figsize=(5.5, 4.2))
+            if kind == "fit":
+                _plot_fit_panel(ax, fits[protocol], data[protocol], protocol)
+            else:
+                _draw_full_xmin_scan(
+                    ax, fits[protocol], data[protocol], size=size, protocol=protocol,
+                    output_dir=output_dir, pvalue_workers=pvalue_workers,
+                    bootstrap_xmin_mode=bootstrap_xmin_mode,
+                    pvalue_confidence=pvalue_confidence, force_pvalue=force_pvalue,
+                )
+            fig.tight_layout()
+            pdf_path = output_dir / f"L{size}_post_yield_{protocol}_{kind}.pdf"
+            fig.savefig(pdf_path, bbox_inches="tight")
+            fig.savefig(pdf_path.with_suffix(".png"), dpi=220, bbox_inches="tight")
+            plt.close(fig)
 
 
 def run(
@@ -450,6 +465,7 @@ def run(
     force: bool = False,
     resume: bool = False,
     sizes: tuple[int, ...] | None = None,
+    largest_first: bool = False,
     protocols: tuple[str, ...] = PROTOCOLS,
     pvalue_workers: int = DEFAULT_PVALUE_WORKERS,
     bootstrap_xmin_mode: str = "global",
@@ -491,7 +507,7 @@ def run(
         not force
         and not resume
         and output_dir.exists()
-        and any(output_dir.glob("L*_post_yield_fits_and_xmin_scans.pdf"))
+        and any(output_dir.glob("L*_post_yield_*_fit.pdf"))
     ):
         raise FileExistsError(
             f"Diagnostic output already exists in {output_dir}; use --force to overwrite."
@@ -506,8 +522,7 @@ def run(
     summary = {
         "snapshot_root": str(Path(snapshot_root).resolve()),
         "delta_E_S_tangent": "gamma0",
-        "post_yield_window": "per-run validated sigma12 peak + 0.01, load < 1.0",
-        "yield_peak_audit": str((Path(snapshot_root).resolve() / "tables" / "yield_peaks.csv")),
+        "post_yield_window": SIGMA_RESCUE_POST_YIELD_WINDOW,
         "population": "kappa_det = mu/(2 rho) irreversible event mask, rho=N/V_0=2",
         "kappa_detection": (
             "kappa = Delta E_R/(rho V_0 Delta gamma^2), "
@@ -526,7 +541,7 @@ def run(
                 if bootstrap_xmin_mode == "global"
                 else "rapidGlobal-xmin refitting"
             )
-            + " for every synthetic Delta E_S set; Delta E_I and Delta E_R are cutoff diagnostics"
+            + " for every synthetic set; Delta E_I and Delta E_R remain cutoff diagnostics"
         ),
         "bootstrap_xmin_mode": bootstrap_xmin_mode,
         "bootstrap_xmin_strategy": (
@@ -540,6 +555,7 @@ def run(
         "pvalue_bootstrap_replicates": max(
             1, int(1 / (4 * pvalue_confidence**2))
         ),
+        "bootstrap_ci_level": BOOTSTRAP_CI_LEVEL,
         "protocols": list(protocols),
         "fits": {},
     }
@@ -656,6 +672,7 @@ def main() -> None:
         help="Reuse cached fits and bootstrap samples in an existing output directory.",
     )
     parser.add_argument("--sizes", type=int, nargs="+", default=None)
+    parser.add_argument("--largest-first", action="store_true")
     parser.add_argument(
         "--protocols",
         choices=PROTOCOLS,
@@ -704,6 +721,7 @@ def main() -> None:
         force=args.force,
         resume=args.resume,
         sizes=None if args.sizes is None else tuple(args.sizes),
+        largest_first=args.largest_first,
         protocols=tuple(args.protocols),
         pvalue_workers=args.pvalue_workers,
         bootstrap_xmin_mode=args.bootstrap_xmin_mode,

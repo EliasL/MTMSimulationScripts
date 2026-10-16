@@ -8,8 +8,8 @@ events using ``kappa_det = mu / (2 rho)`` with ``rho = N / V0 = 2``.  Only
 then are finite positive ``Delta E_S`` values fit with the exhaustive global
 KS-minimum cutoff search.
 
-Selected-fit p-values and 95% bootstrap intervals come from the canonical
-per-size diagnostics summary.
+Selected-fit p-values and bootstrap standard deviations come from the
+canonical per-size diagnostics summary.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ import pandas as pd
 
 from Plotting.plotPowerLaw import dist_from_fit, make_fit
 from Plotting.standardPowerlaw import (
+    SIGMA_RESCUE_POST_YIELD_WINDOW,
     DEFAULT_KAPPA_RHO,
     EventDrops,
     kappa_detection_threshold,
@@ -53,7 +54,7 @@ def _load_post_yield(snapshot_root: Path) -> pd.DataFrame:
         raise FileNotFoundError(f"Missing usable rescue table: {table_path}")
     frame = load_sigma_rescue_post_yield(snapshot_root, list(REQUIRED_COLUMNS))
     if frame.empty:
-        raise ValueError("No rows after validated stress peaks.")
+        raise ValueError("No rows after the per-run avg_P12 peak +0.01.")
     for column in REQUIRED_COLUMNS:
         values = frame[column].to_numpy(dtype=float)
         if not np.all(np.isfinite(values)):
@@ -126,7 +127,7 @@ def _fit_size(frame: pd.DataFrame, size: int, cache_dir: Path) -> dict[str, floa
 def _write_summary(records: list[dict[str, float | int]], path: Path) -> None:
     fieldnames = list(records[0])
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("x", newline="") as stream:
+    with path.open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(records)
@@ -140,14 +141,14 @@ def _plot(records: list[dict[str, float | int]], output: Path) -> None:
 
     sizes = np.asarray([row["size"] for row in records], dtype=float)
     alpha = np.asarray([row["alpha"] for row in records], dtype=float)
-    ci_low = np.asarray([row["alpha_ci_low"] for row in records], dtype=float)
-    ci_high = np.asarray([row["alpha_ci_high"] for row in records], dtype=float)
+    ci_low = np.asarray([row["alpha"] - row["alpha_std"] for row in records], dtype=float)
+    ci_high = np.asarray([row["alpha"] + row["alpha_std"] for row in records], dtype=float)
     seeds = np.asarray([row["seed_count"] for row in records], dtype=int)
 
     fig, alpha_ax = plt.subplots(figsize=(5.3, 3.1))
     alpha_ax.plot(sizes, alpha, color="#009E73", marker="o", linewidth=1.3)
     alpha_ax.vlines(sizes, ci_low, ci_high, color="#009E73", alpha=0.65,
-                    label="95% refit interval")
+                    label=r"fit $\pm1$ bootstrap SD")
     for index, (size, value, count) in enumerate(zip(sizes, alpha, seeds)):
         if index == 0:
             horizontal_alignment, horizontal_offset = "left", 5
@@ -163,13 +164,10 @@ def _plot(records: list[dict[str, float | int]], output: Path) -> None:
             ha=horizontal_alignment,
             fontsize=8,
         )
-    alpha_ax.set_ylabel(r"Truncated-law exponent $\alpha$")
-    alpha_ax.set_title(
-        r"Post-yield irreversible $\Delta E_S$; corrected $\sigma_{12}$"
-    )
+    alpha_ax.set_ylabel(r"Truncated-law exponent $\hat\alpha$")
     alpha_ax.margins(x=0.06, y=0.16)
     alpha_ax.grid(alpha=0.2)
-    alpha_ax.legend(frameon=False, fontsize="small")
+    alpha_ax.legend(frameon=True, fontsize="small")
     alpha_ax.set_xlabel(r"System size $L$")
     alpha_ax.set_xticks(sizes.astype(int))
 
@@ -181,14 +179,17 @@ def _plot(records: list[dict[str, float | int]], output: Path) -> None:
 
 
 def run(snapshot_root: Path, output_dir: Path, *, sizes: tuple[int, ...] | None = None,
-        fit_summary_path: Path = Path("Plots/powerLaw/sigma_rescue_size_scaling_individual/summary.json")) -> list[dict[str, float | int]]:
+        largest_first: bool = False,
+        fit_summary_path: Path = Path("Plots/powerLaw/sigma_rescue_size_scaling_individual_piola_peak/summary.json"),
+        force: bool = False) -> list[dict[str, float | int]]:
     output_dir = Path(output_dir)
     summary_path = output_dir / "summary.csv"
-    if summary_path.exists():
+    if summary_path.exists() and not force:
         raise FileExistsError(f"Refusing to overwrite existing summary: {summary_path}")
     frame = _load_post_yield(Path(snapshot_root))
     available = tuple(sorted(frame["size"].unique().astype(int)))
     selected_sizes = available if sizes is None else tuple(sorted(set(sizes)))
+    selected_sizes = tuple(sorted(selected_sizes, reverse=largest_first))
     missing = sorted(set(selected_sizes) - set(available))
     if missing:
         raise ValueError(f"Requested sizes absent from the rescue table: {missing}")
@@ -197,6 +198,7 @@ def run(snapshot_root: Path, output_dir: Path, *, sizes: tuple[int, ...] | None 
     ]
     fit_summary = json.loads(Path(fit_summary_path).read_text())
     if (fit_summary.get("delta_E_S_tangent") != "gamma0"
+            or fit_summary.get("post_yield_window") != SIGMA_RESCUE_POST_YIELD_WINDOW
             or Path(fit_summary["snapshot_root"]).resolve() != Path(snapshot_root).resolve()):
         raise ValueError("Bootstrap summary has the wrong data or Delta E_S convention.")
     if fit_summary.get("bootstrap_xmin_mode") != "global":
@@ -207,10 +209,10 @@ def run(snapshot_root: Path, output_dir: Path, *, sizes: tuple[int, ...] | None 
             raise ValueError(f"Cutoff mismatch for L={record['size']}.")
         record.update(
             pvalue=float(result["clauset_pvalue_v2"]),
-            xmin_ci_low=float(result["bootstrap_xmin_ci_95"][0]),
-            xmin_ci_high=float(result["bootstrap_xmin_ci_95"][1]),
-            alpha_ci_low=float(result["bootstrap_alpha_ci_95"][0]),
-            alpha_ci_high=float(result["bootstrap_alpha_ci_95"][1]),
+            xmin_mean=float(result["bootstrap_xmin_mean"]),
+            xmin_std=float(result["bootstrap_xmin_std"]),
+            alpha_mean=float(result["bootstrap_alpha_mean"]),
+            alpha_std=float(result["bootstrap_alpha_std"]),
         )
         record.update(snapshot_root=str(Path(snapshot_root).resolve()), delta_E_S_tangent="gamma0")
     _write_summary(records, summary_path)
@@ -223,11 +225,14 @@ def main() -> None:
     parser.add_argument("--snapshot-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--sizes", type=int, nargs="+")
+    parser.add_argument("--largest-first", action="store_true")
     parser.add_argument("--fit-summary", type=Path,
-                        default=Path("Plots/powerLaw/sigma_rescue_size_scaling_individual/summary.json"))
+                        default=Path("Plots/powerLaw/sigma_rescue_size_scaling_individual_piola_peak/summary.json"))
+    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
     for record in run(args.snapshot_root, args.output_dir, sizes=args.sizes,
-                      fit_summary_path=args.fit_summary):
+                      largest_first=args.largest_first,
+                      fit_summary_path=args.fit_summary, force=args.force):
         print(record)
 
 

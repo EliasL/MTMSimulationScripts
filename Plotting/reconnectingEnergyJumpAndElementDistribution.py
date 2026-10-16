@@ -121,7 +121,7 @@ class TopologyDecompositionError(ValueError):
 
 
 def read_live_macro_snapshot(
-    csv_path: Path, *, columns: tuple[str, ...] = ("load", "avg_sigma12")
+    csv_path: Path, *, columns: tuple[str, ...] = ("load", "avg_sigma12", "avg_P12")
 ) -> pd.DataFrame:
     """Read selected columns from a fixed, complete-line macro-data snapshot.
 
@@ -176,8 +176,9 @@ def read_live_macro_snapshot(
 
 
 def determine_yield_load(macro_snapshot: pd.DataFrame) -> float:
-    """Reuse the existing stress-maximum split, using sigma12 explicitly."""
-    yield_load = float(findPrePostSplit(df=macro_snapshot))
+    """Return the first-Piola peak +0.01 post-yield boundary."""
+    from Plotting.standardPowerlaw import POST_YIELD_OFFSET
+    yield_load = float(findPrePostSplit(df=macro_snapshot)) + POST_YIELD_OFFSET
     if not np.isfinite(yield_load):
         raise ValueError(f"Non-finite yield load: {yield_load}")
     return yield_load
@@ -1594,7 +1595,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--yield-load",
         type=float,
-        help="Override the stress-maximum yield load inferred from macroData.csv.",
+        help="Use an explicit alternative yield load (default: per-run avg_P12 peak).",
     )
     parser.add_argument("--output-folder", type=Path)
     parser.add_argument(
