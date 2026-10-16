@@ -1,4 +1,6 @@
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace
 
 import matplotlib
 import numpy as np
@@ -10,6 +12,7 @@ from matplotlib.cm import ScalarMappable
 from Plotting.pyplotFunctions import (
     _add_additional_elements,
     _plot_mesh_elements,
+    _plot_periodic_unwrapped_mesh_elements,
     calculate_shifts,
 )
 
@@ -105,6 +108,30 @@ class MeshViewportCullingTests(unittest.TestCase):
         colorbar_ax = fig.axes[-1]
         self.assertGreater(colorbar_ax.get_position().width, colorbar_ax.get_position().height)
         self.assertEqual(colorbar_ax.get_xlabel(), "$E_i$")
+        plt.close(fig)
+
+    def test_unwrapped_tiling_covers_fixed_viewport_at_large_shear(self):
+        nodes = np.array([[0, 0], [1, 0], [12, 1], [13, 1]], dtype=float)
+        triangles = np.array([[0, 1, 2], [1, 3, 2]])
+        data = SimpleNamespace(
+            BC="PBC", load=12.0, size=(1, 1), vtu_file_path="synthetic.vtu",
+            mesh=SimpleNamespace(point_data={"refIndex": np.arange(4)}),
+        )
+        fig, ax = plt.subplots()
+        ax.set(xlim=(-0.05, 1.05), ylim=(-0.05, 1.05))
+        with patch("Plotting.pyplotFunctions._periodic_physical_triangle_polygons",
+                   return_value=nodes[triangles]):
+            collection = _plot_periodic_unwrapped_mesh_elements(
+                ax, nodes, triangles, np.array([0.02, 0.1]),
+                colors.Normalize(0, 0.12), "coolwarm", data, "none",
+                cull_to_view=True,
+            )
+        for x in np.linspace(-0.049, 1.049, 17):
+            for y in np.linspace(-0.047, 1.047, 17):
+                self.assertTrue(any(p.contains_point((x, y), radius=1e-10)
+                                    for p in collection.get_paths()), (x, y))
+        np.testing.assert_allclose(ax.get_xlim(), (-0.05, 1.05))
+        np.testing.assert_allclose(ax.get_ylim(), (-0.05, 1.05))
         plt.close(fig)
 
 

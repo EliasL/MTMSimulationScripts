@@ -676,12 +676,12 @@ def plot_raw_and_xmin(
 
 def plot_collapse(curves, result, protocol, regime, path: Path, xmin_note=None,
                   *, save_quality=True, save_png=True,
-                  parameter_symbols=("x", "D_x"), drop_symbol="s"):
+                  parameter_symbols=("x", "D_x"), drop_symbol="s", exponent_format=".3f"):
     exponent = float(result["x"])
     dimension = float(result["dimension"])
     collapse_fig, ax_collapse = plt.subplots(figsize=(4.4, 3.36))
     exponent_symbol, dimension_symbol = parameter_symbols
-    parameters = rf"${exponent_symbol}={exponent:.3f},\ {dimension_symbol}={dimension:.3f}$"
+    parameters = rf"${exponent_symbol}={exponent:{exponent_format}},\ {dimension_symbol}={dimension:.3f}$"
     figures = [(collapse_fig, path)]
     if save_quality:
         quality_fig, ax_map = plt.subplots(figsize=(4.4, 3.36))
@@ -1013,6 +1013,7 @@ def run(args):
                     analysis_dir / f"{protocol}_{regime}_collapse_fixed_alpha.pdf",
                     save_quality=False, save_png=False,
                     parameter_symbols=(r"\alpha_{250}", r"D_\lambda"),
+                    exponent_format=".2f",
                     drop_symbol=PROTOCOL_DROP_SYMBOLS[protocol],
                 )
                 plot_raw_and_xmin(raw_curves, fits, protocol, regime,
