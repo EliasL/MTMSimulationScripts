@@ -1,0 +1,27 @@
+{
+  "delta_E_S_tangent": "gamma0",
+  "source": "/Users/elias/Downloads/drops_usable.csv.gz",
+  "source_sha256": "6ba278a8ded39cd248eaf4ad09017fc413aec2a41516a5f715a0df682dd64a0b",
+  "verification": "Every downloaded row checked against gamma=0 tangent and starting-step avg_sigma12; Delta E_I/R checked against stored energy changes. Original gamma0 build manifest now supplied and preserved; raw stresses not independently recomputed from VTUs.",
+  "gamma0_tangent": 6.075757575757595,
+  "max_absolute_errors": {
+    "delta_E_I": 0.0,
+    "delta_E_R": 0.0,
+    "delta_E_S": 1.1368683772161603e-13
+  },
+  "usable_transition_count": 2753876,
+  "rows_by_size": {
+    "50": 690006,
+    "100": 682650,
+    "150": 607363,
+    "200": 389700,
+    "250": 384157
+  },
+  "run_count": 42,
+  "established_yield_peak_count": 35,
+  "yield_audit_source": "Recomputed from original all-audited transition table; matches supplied and usable-only yield audits.",
+  "audited_transition_count": 3569997,
+  "stress_coverage_fraction_available": true,
+  "original_build_manifest": "/Users/elias/Downloads/tables/build_manifest.json",
+  "audited_source": "/Users/elias/Downloads/tables/drops_all_audited.csv.gz"
+}

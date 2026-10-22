@@ -11,6 +11,7 @@ up to its size at open time, and its possibly incomplete final line is dropped.
 import argparse
 import csv
 import io
+import json
 import os
 import re
 import sys
@@ -331,10 +332,12 @@ def _edge_flip_element_pairs(
 ) -> np.ndarray:
     """Pair element rows that exchange a quadrilateral's diagonal.
 
-    VTU cell rows follow ``TElement::eIndex``.  MTS2D recreates each selected
-    child at its parent's existing index, so equal row indices are the
-    shortest-node-move (``shortFlip``) lineage and swapping rows within a pair
-    gives ``longFlip``.
+    VTU cell rows follow ``TElement::eIndex``.  Equal row indices follow the
+    child actually stored at its parent's index.  The legacy CSV calls this
+    ``shortFlip`` and calls the swapped child assignment ``longFlip``.  Those
+    names do not establish the transport setting: the historical July 2026
+    simulation selected the longer transport.  Swapping stored children does
+    not recompute the other simulation setting.
     """
     changed = np.flatnonzero(
         np.any(
@@ -817,6 +820,26 @@ def _log_jump_bins(values: np.ndarray) -> np.ndarray:
 _log_shift_bins = _log_jump_bins
 
 
+def _post_yield_energy_stress_frame(summary: pd.DataFrame) -> pd.DataFrame:
+    """Select strictly after each run's stress peak, ignoring cached labels.
+
+    This reconnection diagnostic uses gamma > gamma_peak, without the 0.01
+    buffer used for the separate standard power-law analysis.
+    """
+    missing = {"load", "yield_load"}.difference(summary.columns)
+    if missing:
+        raise ValueError(f"Post-yield selection requires columns: {sorted(missing)}")
+    load = summary["load"].to_numpy(dtype=float)
+    peak = summary["yield_load"].to_numpy(dtype=float)
+    if not np.all(np.isfinite(load) & np.isfinite(peak)):
+        raise ValueError("Post-yield selection requires finite loads and stress peaks.")
+    selected = summary.loc[load > peak].copy()
+    if selected.empty:
+        raise ValueError("No extracted samples lie after the supplied stress peaks.")
+    selected["regime"] = "post-yield"
+    return selected
+
+
 def plot_energy_stress(
     summary: pd.DataFrame,
     output_stem: Path,
@@ -824,7 +847,18 @@ def plot_energy_stress(
     scope: str = "mesh",
     forced_pre_yield_below: Optional[float] = None,
     show_top_row: bool = False,
+    post_yield_only: bool = False,
 ) -> None:
+    if post_yield_only:
+        summary = _post_yield_energy_stress_frame(summary)
+        forced_pre_yield_below = None
+    element_labels = (
+        "",
+        r"Element energy $E^{(e)}$",
+        r"Element stress $\sigma_{12}^{(e)}$",
+        r"$|\Delta E^{(e)}|=|E^{(+e)}-E^{(-e)}|$",
+        r"$|\Delta\sigma_{12}^{(e)}|=|\sigma_{12}^{(+e)}-\sigma_{12}^{(-e)}|$",
+    )
     labels = {
         "mesh": (
             "",
@@ -849,22 +883,8 @@ def plot_energy_stress(
             r"Twin-pair stress jump "
             r"$|\sigma_{12,\mathrm{after}}-\sigma_{12,\mathrm{before}}|$",
         ),
-        "shortFlip": (
-            "",
-            r"Flip element energy $E$",
-            r"Flip element $\sigma_{12}$",
-            r"Flip energy jump $|E_\mathrm{after}-E_\mathrm{before}|$",
-            r"Flip stress jump "
-            r"$|\sigma_{12,\mathrm{after}}-\sigma_{12,\mathrm{before}}|$",
-        ),
-        "longFlip": (
-            "",
-            r"longFlip element energy $E$",
-            r"longFlip element $\sigma_{12}$",
-            r"longFlip energy jump $|E_\mathrm{after}-E_\mathrm{before}|$",
-            r"longFlip stress jump "
-            r"$|\sigma_{12,\mathrm{after}}-\sigma_{12,\mathrm{before}}|$",
-        ),
+        "shortFlip": element_labels,
+        "longFlip": element_labels,
     }
     if scope not in labels:
         raise ValueError(f"Unknown energy/stress plot scope: {scope}")
@@ -961,6 +981,10 @@ def plot_energy_stress(
             total_zero_count += int(values.size - positive.size)
             weights = np.full(positive.size, 1.0 / positive.size)
             label = rf"{regime} ($n={_scientific_count(int(positive.size))}$)"
+            if post_yield_only and scope in {"shortFlip", "longFlip"}:
+                label = (r"$|\Delta E^{(e)}|$" if quantity == "energy"
+                         else r"$|\Delta\sigma_{12}^{(e)}|$")
+                label += rf" ($n={_scientific_count(int(positive.size))}$)"
             ax.hist(
                 positive,
                 bins=edges,
@@ -970,24 +994,18 @@ def plot_energy_stress(
                 color=REGIME_COLORS[regime],
                 label=label,
             )
-        if total_zero_count:
-            ax.plot(
-                [],
-                [],
-                linestyle="none",
-                label=rf"Zeros omitted ($n={total_zero_count}$)",
-            )
         if quantity == "energy":
             reference = SINGLE_ELEMENT_MAX_ENERGY
             reference_label = (
-                rf"single-element $E_\mathrm{{max}}$ "
+                rf"$E_\mathrm{{max}}$ "
                 rf"($\gamma={SINGLE_ELEMENT_REFERENCE_LOAD:g}$)"
             )
         else:
             reference = LOSS_OF_ELLIPTICITY_SIGMA12
             reference_label = (
-                rf"$\sigma_{{12}}$ at loss of ellipticity "
-                rf"($\gamma={LOSS_OF_ELLIPTICITY_LOAD:.4f}$)"
+                rf"$\sigma_{{12}}$ at loss of ellipticity"
+                + ("\n" if post_yield_only else " ")
+                + rf"($\gamma={LOSS_OF_ELLIPTICITY_LOAD:.2f}$)"
             )
         ax.axvline(
             reference,
@@ -996,13 +1014,21 @@ def plot_energy_stress(
             linewidth=1.1,
             label=reference_label,
         )
+        if total_zero_count:
+            ax.plot(
+                [],
+                [],
+                linestyle="none",
+                label=rf"Zeros omitted ($n={total_zero_count}$)",
+            )
         ax.set_xscale("log")
         ax.set_xlabel(xlabel)
         ax.set_ylabel("Probability per logarithmic bin")
         _legend_with_warning(
             ax,
             forced_pre_yield_below,
-            loc="best",
+            **({"loc": "upper left", "fontsize": 8}
+               if post_yield_only else {"loc": "best"}),
         )
     _save_figure(fig, output_stem, formats)
 
@@ -1010,7 +1036,12 @@ def plot_energy_stress(
 def _lineage_plot_frame(lineage: pd.DataFrame, lineage_name: str) -> pd.DataFrame:
     if lineage_name not in {"short", "long"}:
         raise ValueError("lineage_name must be 'short' or 'long'.")
-    result = lineage[["load", "regime", "reconnection_index"]].copy()
+    metadata = ["load", "regime", "reconnection_index"]
+    metadata.extend(
+        key for key in ("yield_load", "simulation_name", "size", "seed")
+        if key in lineage
+    )
+    result = lineage[metadata].copy()
     result["before_total_energy"] = lineage["before_energy"]
     result["after_total_energy"] = lineage[f"{lineage_name}_after_energy"]
     result["energy_shift"] = lineage[f"{lineage_name}_energy_shift"]
@@ -1020,15 +1051,228 @@ def _lineage_plot_frame(lineage: pd.DataFrame, lineage_name: str) -> pd.DataFram
     return result
 
 
+def build_element_lineage_summary(
+    snapshot_root: Path, sample_plan: Path, output_path: Path,
+) -> Path:
+    """Reduce compact checkpoint samples using the existing edge-flip pairing.
+
+    The VTU energy and Cauchy sigma12 fields retain the simulator's precision.
+    Total T = F_e T_p is used to check their physical interpretation; computing
+    small stress differences afresh from rounded VTU matrices would add noise.
+    """
+    snapshot_root, sample_plan = Path(snapshot_root), Path(sample_plan)
+    plan = json.loads(sample_plan.read_text())
+    rows, reports, pending, failed = [], [], [], []
+    seen = set()
+    for job in plan["runs"]:
+        host = job["host"].split(".")[0]
+        folder = snapshot_root / host / "samples" / job["simulation_name"]
+        for dump_name in job["dumps"]:
+            path = folder / (dump_name + ".npz")
+            metadata_path = path.with_suffix(".json")
+            if not metadata_path.is_file():
+                pending.append(str(path))
+                continue
+            metadata = json.loads(metadata_path.read_text())
+            if metadata["status"] == "error":
+                failed.append(metadata)
+                continue
+            if metadata["status"] != "complete":
+                reports.append(metadata)
+                continue
+            load = float(metadata["load"])
+            if not job["yield_load"] < load <= job["max_load"] + 1e-9:
+                raise ValueError(f"Sample outside the post-yield window: {path}")
+            event_key = (job["simulation_name"], metadata["before_vtu"], metadata["after_vtu"])
+            if event_key in seen:
+                reports.append({**metadata, "status": "duplicate_cycle"})
+                continue
+            seen.add(event_key)
+            with np.load(path, allow_pickle=False) as data:
+                try:
+                    pairs = _edge_flip_element_pairs(
+                        data["before_connectivity"], data["after_connectivity"], path, path,
+                    )
+                except TopologyDecompositionError as error:
+                    reports.append({**metadata, "status": "ambiguous_topology", "error": str(error)})
+                    continue
+                stress_error = 0.0
+                for state in ("before", "after"):
+                    total = data[f"{state}_F_E"] @ data[f"{state}_T"]
+                    sigma = ContiEnergy.cauchy_from_F(total)[:, 0, 1]
+                    stress_error = max(stress_error, float(np.max(np.abs(sigma - data[f"{state}_stored_sigma12"]))))
+                reports.append({**metadata, "full_T_sigma12_max_export_difference": stress_error,
+                                "pairs": len(pairs)})
+                min_step = MIN_STEP_PATTERN.search(metadata["before_vtu"])
+                log_step = int(re.search(r"_pre\.(\d+)\.vtu$", metadata["before_vtu"]).group(1))
+                for pair_index, pair in enumerate(pairs, start=1):
+                    for element_in_pair, index in enumerate(pair, start=1):
+                        partner = pair[1 if element_in_pair == 1 else 0]
+                        before_energy, after_energy = float(data["before_energy"][index]), float(data["after_energy"][index])
+                        before_stress, after_stress = float(data["before_stored_sigma12"][index]), float(data["after_stored_sigma12"][index])
+                        swapped_energy, swapped_stress = float(data["after_energy"][partner]), float(data["after_stored_sigma12"][partner])
+                        rows.append({
+                            "simulation_name": job["simulation_name"], "size": job["size"], "seed": job["seed"],
+                            "load": load, "yield_load": job["yield_load"], "regime": "post-yield",
+                            "dump_name": dump_name, "log_step": log_step, "reconnection_index": 1,
+                            "min_iteration": int(min_step.group("iteration")),
+                            "min_function_call": int(min_step.group("call")),
+                            "pair_index": pair_index, "element_in_pair": element_in_pair,
+                            "before_element_index": int(data["element_indices"][index]),
+                            "short_after_element_index": int(data["element_indices"][index]),
+                            "long_after_element_index": int(data["element_indices"][partner]),
+                            "before_energy": before_energy, "short_after_energy": after_energy,
+                            "long_after_energy": swapped_energy, "short_energy_shift": after_energy - before_energy,
+                            "long_energy_shift": swapped_energy - before_energy,
+                            "before_sigma12": before_stress, "short_after_sigma12": after_stress,
+                            "long_after_sigma12": swapped_stress, "short_stress_shift": after_stress - before_stress,
+                            "long_stress_shift": swapped_stress - before_stress,
+                        })
+    report = {"sampling": plan["sampling"], "selected_simulations": len(plan["runs"]),
+              "planned_checkpoints": sum(len(job["dumps"]) for job in plan["runs"]),
+              "pending": pending, "failed": failed, "checkpoints": reports,
+              "stress_source": "stored VTU Cauchy sigma12, checked against full T = F_e T_p",
+              "matching": "actual stored element identities; historical longer transport"}
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.with_suffix(".sampling.json").write_text(json.dumps(report, indent=2) + "\n")
+    if pending or failed:
+        raise RuntimeError(f"Checkpoint extraction incomplete: {len(pending)} pending, {len(failed)} failed.")
+    if not rows:
+        raise ValueError("No uniquely decomposable edge-flip samples were collected.")
+    frame = pd.DataFrame(rows)
+    report["contributing_simulations"] = int(frame["simulation_name"].nunique())
+    report["simulations_without_valid_samples"] = sorted(
+        {job["simulation_name"] for job in plan["runs"]}.difference(frame["simulation_name"])
+    )
+    frame.to_csv(output_path, index=False)
+    output_path.with_suffix(".sampling.json").write_text(json.dumps(report, indent=2) + "\n")
+    return output_path
+
+
+def generate_element_energy_stress_panel(
+    lineage_summary: Path,
+    output_folder: Path,
+    *,
+    yield_summary: Optional[Path] = None,
+    matching: str = "stored",
+    post_yield_only: bool = False,
+    formats: Optional[List[str]] = None,
+    show_top_row: bool = False,
+    completed_only: bool = False,
+    by_size: bool = False,
+) -> Path:
+    """Redraw the element panel from saved samples and optional fresh peaks.
+
+    A yield-summary CSV must contain ``simulation_name`` and ``yield_load``.
+    Runs absent from that CSV are excluded, rather than retaining old peaks.
+    ``stored`` follows actual element identities (legacy shortFlip columns);
+    ``swapped`` only exchanges the two stored children (legacy longFlip).
+    """
+    if matching not in {"stored", "swapped"}:
+        raise ValueError("matching must be 'stored' or 'swapped'.")
+    lineage_summary = Path(lineage_summary).expanduser().resolve()
+    lineage = pd.read_csv(lineage_summary)
+    excluded = []
+    if yield_summary is not None:
+        peaks = pd.read_csv(yield_summary)
+        if peaks["simulation_name"].duplicated().any():
+            raise ValueError("The yield summary contains duplicate simulation names.")
+        if completed_only:
+            peaks = _completed_simulation_peaks(peaks)
+        finite = np.isfinite(peaks["yield_load"].to_numpy(dtype=float))
+        peaks = peaks.loc[finite].set_index("simulation_name")["yield_load"]
+        excluded = sorted(set(lineage["simulation_name"]).difference(peaks.index))
+        lineage = lineage.loc[lineage["simulation_name"].isin(peaks.index)].copy()
+        lineage["yield_load"] = lineage["simulation_name"].map(peaks)
+        if excluded:
+            print(f"Excluded runs without a verified stress peak: {excluded}")
+    elif completed_only:
+        raise ValueError("Completed-only selection requires a yield summary with last_load and max_load.")
+    frame = _lineage_plot_frame(lineage, "short" if matching == "stored" else "long")
+    selected = _post_yield_energy_stress_frame(frame) if post_yield_only else frame
+    output_folder = Path(output_folder).expanduser().resolve()
+    output_folder.mkdir(parents=True, exist_ok=True)
+    stem = lineage_summary.name.removesuffix("_element_lineage_summary.csv")
+    suffix = ("_completed" if completed_only else "")
+    suffix += "_by_size" if by_size else ""
+    suffix += "_post_yield" if post_yield_only else ""
+    output_stem = output_folder / f"{stem}_{matching}_element_energy_stress{suffix}"
+    if by_size:
+        plot_size_comparison_distributions(
+            lineage, output_stem, ["pdf"] if formats is None else formats,
+            post_yield_only=post_yield_only, matching=matching,
+        )
+    else:
+        plot_energy_stress(
+            frame,
+            output_stem,
+            ["pdf"] if formats is None else formats,
+            scope="shortFlip" if matching == "stored" else "longFlip",
+            forced_pre_yield_below=None,
+            show_top_row=show_top_row,
+            post_yield_only=post_yield_only,
+        )
+    metadata = {
+        "lineage_summary": str(lineage_summary),
+        "yield_summary": str(Path(yield_summary).resolve()) if yield_summary else None,
+        "matching": matching,
+        "completed_only": completed_only,
+        "separate_distributions_by_size": by_size,
+        "matching_definition": "actual stored element identity" if matching == "stored"
+        else "swapped stored children; not a resimulation",
+        "post_yield_selection": "load > per-run peak avg_sigma12 load" if post_yield_only else None,
+        "post_yield_buffer": 0.0 if post_yield_only else None,
+        "excluded_simulations": excluded,
+        "element_samples": len(selected),
+        "simulations": int(selected["simulation_name"].nunique()),
+        "samples_by_size": {str(size): int(count) for size, count in selected.groupby("size").size().items()},
+        "simulations_by_size": {str(size): int(count) for size, count in selected.groupby("size")["simulation_name"].nunique().items()},
+        "energy_nonzero_samples": int((selected["energy_shift"] != 0).sum()),
+        "stress_nonzero_samples": int((selected["stress_shift"] != 0).sum()),
+    }
+    sampling_path = lineage_summary.with_suffix(".sampling.json")
+    if sampling_path.is_file():
+        sampling = json.loads(sampling_path.read_text())
+        metadata["sampling"] = sampling["sampling"]
+        metadata["selected_simulations"] = sampling["selected_simulations"]
+        metadata["simulations_without_valid_samples"] = sampling["simulations_without_valid_samples"]
+        metadata["ambiguous_topology_checkpoints"] = sum(
+            r["status"] == "ambiguous_topology" for r in sampling["checkpoints"]
+        )
+    output_stem.with_suffix(".json").write_text(json.dumps(metadata, indent=2) + "\n")
+    print(json.dumps(metadata, indent=2))
+    return output_stem
+
+
+def _completed_simulation_peaks(peaks: pd.DataFrame) -> pd.DataFrame:
+    """Keep verified endpoints, rather than classifying a stopped run as complete."""
+    missing = {"last_load", "max_load"}.difference(peaks.columns)
+    if missing:
+        raise ValueError(f"Completed-only selection requires columns: {sorted(missing)}")
+    last = peaks["last_load"].to_numpy(dtype=float)
+    target = peaks["max_load"].to_numpy(dtype=float)
+    valid = np.isfinite(last) & np.isfinite(target)
+    return peaks.loc[valid & (last >= target - 1e-9)].copy()
+
+
 def plot_size_comparison_distributions(
     lineages: pd.DataFrame,
     output_stem: Path,
     formats: List[str],
     forced_pre_yield_below: Optional[float] = None,
+    *,
+    post_yield_only: bool = False,
+    matching: str = "stored",
 ) -> None:
     """Compare Flip jump distributions across system sizes and regimes."""
     if "size" not in lineages:
         raise KeyError("Size-comparison plots require a 'size' column.")
+    if matching not in {"stored", "swapped"}:
+        raise ValueError("matching must be 'stored' or 'swapped'.")
+    if post_yield_only:
+        lineages = _post_yield_energy_stress_frame(lineages)
+        forced_pre_yield_below = None
     sizes = sorted(
         int(size)
         for size in lineages["size"].dropna().unique()
@@ -1040,12 +1284,15 @@ def plot_size_comparison_distributions(
         size: plt.get_cmap("tab10")(index % 10)
         for index, size in enumerate(sizes)
     }
-    fig, axes = plt.subplots(2, 2, figsize=(10.0, 7.0), constrained_layout=True)
+    regimes = ("post-yield",) if post_yield_only else REGIMES
+    fig, axes = plt.subplots(len(regimes), 2, figsize=(10.0, 3.7 * len(regimes)),
+                             constrained_layout=True, squeeze=False)
+    prefix = "short" if matching == "stored" else "long"
     specs = (
-        ("short_energy_shift", r"Flip energy jump", "energy"),
-        ("short_stress_shift", r"Flip stress jump", "stress"),
+        (f"{prefix}_energy_shift", r"$|\Delta E^{(e)}|=|E^{(+e)}-E^{(-e)}|$", "energy"),
+        (f"{prefix}_stress_shift", r"$|\Delta\sigma_{12}^{(e)}|=|\sigma_{12}^{(+e)}-\sigma_{12}^{(-e)}|$", "stress"),
     )
-    for row, regime in enumerate(REGIMES):
+    for row, regime in enumerate(regimes):
         regime_data = lineages[lineages["regime"] == regime]
         for column, (key, xlabel, quantity) in enumerate(specs):
             ax = axes[row, column]
@@ -1077,24 +1324,18 @@ def plot_size_comparison_distributions(
                     color=size_colors[size],
                     label=rf"L={size} ($n={_scientific_count(int(positive.size))}$)",
                 )
-            if total_zero_count:
-                ax.plot(
-                    [],
-                    [],
-                    linestyle="none",
-                    label=rf"Zeros omitted ($n={total_zero_count}$)",
-                )
             if quantity == "energy":
                 reference = SINGLE_ELEMENT_MAX_ENERGY
                 reference_label = (
-                    rf"single-element $E_\mathrm{{max}}$ "
+                    rf"$E_\mathrm{{max}}$ "
                     rf"($\gamma={SINGLE_ELEMENT_REFERENCE_LOAD:g}$)"
                 )
             else:
                 reference = LOSS_OF_ELLIPTICITY_SIGMA12
                 reference_label = (
-                    rf"$\sigma_{{12}}$ at loss of ellipticity "
-                    rf"($\gamma={LOSS_OF_ELLIPTICITY_LOAD:.4f}$)"
+                    rf"$\sigma_{{12}}$ at loss of ellipticity"
+                    + ("\n" if post_yield_only else " ")
+                    + rf"($\gamma={LOSS_OF_ELLIPTICITY_LOAD:.2f}$)"
                 )
             ax.axvline(
                 reference,
@@ -1103,12 +1344,17 @@ def plot_size_comparison_distributions(
                 linewidth=1.1,
                 label=reference_label,
             )
+            if total_zero_count:
+                ax.plot([], [], linestyle="none",
+                        label=rf"Zeros omitted ($n={total_zero_count}$)")
             ax.set_xscale("log")
             ax.set_xlabel(xlabel)
             ax.set_ylabel("Probability per logarithmic bin")
-            ax.set_title(regime.capitalize())
-            _legend_with_warning(ax, forced_pre_yield_below, loc="best")
-    fig.suptitle("Flip jump distributions by system size")
+            if not post_yield_only:
+                ax.set_title(regime.capitalize())
+            _legend_with_warning(ax, forced_pre_yield_below, loc="upper left", fontsize=8)
+    if not post_yield_only:
+        fig.suptitle("Flip jump distributions by system size")
     _save_figure(fig, output_stem, formats)
 
 
@@ -1296,6 +1542,22 @@ def run_analysis(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--element-snapshots", type=Path,
+                        help="compact checkpoint samples downloaded from the cluster")
+    parser.add_argument("--sample-plan", type=Path,
+                        help="completed-run checkpoint plan for --element-snapshots")
+    parser.add_argument("--lineage-summary", type=Path,
+                        help="redraw only the element energy/stress panel from a saved CSV")
+    parser.add_argument("--yield-summary", type=Path,
+                        help="CSV of fresh per-run simulation_name,yield_load values")
+    parser.add_argument("--element-matching", choices=("stored", "swapped"), default="stored",
+                        help="stored element identity or swapped children (saved-CSV mode)")
+    parser.add_argument("--post-yield-only", action="store_true",
+                        help="show only loads after each supplied stress peak (saved-CSV mode)")
+    parser.add_argument("--completed-only", action="store_true",
+                        help="require last_load >= max_load from --yield-summary (saved-CSV mode)")
+    parser.add_argument("--by-size", action="store_true",
+                        help="draw one separately normalized distribution per system size")
     parser.add_argument(
         "simulation_folder",
         type=Path,
@@ -1375,6 +1637,39 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.element_snapshots is not None:
+        if args.sample_plan is None or args.lineage_summary is not None:
+            raise ValueError("--element-snapshots requires --sample-plan and replaces --lineage-summary")
+        output_folder = args.output_folder or Path("output/pdf/reconnecting_size_scaling")
+        args.lineage_summary = build_element_lineage_summary(
+            args.element_snapshots, args.sample_plan,
+            output_folder / "size_scaling_checkpoint_element_lineage_summary.csv",
+        )
+        if args.yield_summary is None:
+            plan = json.loads(args.sample_plan.read_text())
+            args.yield_summary = output_folder / "completed_run_stress_peaks.csv"
+            pd.DataFrame(plan["runs"])[
+                ["simulation_name", "yield_load", "last_load", "max_load", "size", "seed", "host"]
+            ].to_csv(args.yield_summary, index=False)
+    elif args.sample_plan is not None:
+        raise ValueError("--sample-plan requires --element-snapshots")
+    if args.lineage_summary is not None:
+        if args.simulation_folder is not None or args.job_type is not None or args.size is not None:
+            raise ValueError("--lineage-summary cannot be combined with simulation/job selection")
+        generate_element_energy_stress_panel(
+            args.lineage_summary,
+            args.output_folder or Path("output/pdf/reconnecting_size_scaling"),
+            yield_summary=args.yield_summary,
+            matching=args.element_matching,
+            post_yield_only=args.post_yield_only,
+            formats=args.formats,
+            show_top_row=args.show_top_row,
+            completed_only=args.completed_only,
+            by_size=args.by_size,
+        )
+        return
+    if args.yield_summary is not None or args.post_yield_only or args.completed_only or args.by_size:
+        raise ValueError("Saved-summary plotting options require --lineage-summary")
     if args.job_type is not None:
         if args.simulation_folder is not None:
             raise ValueError("simulation_folder cannot be combined with --job-type")

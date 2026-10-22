@@ -2276,6 +2276,8 @@ def plotPoincareDiskTriangularReconnectionCriteria(
     ``label_positions`` uses Poincare-disk coordinates and may override any of
     ``"lagrange"``, ``"edge"``, and ``"triangular"``.  Keeping these three
     coordinates together makes final manual label placement straightforward.
+    For ``transformation="triangular"``, the axes denote the disk coordinates
+    of Q_triangle^{-T} @ C @ Q_triangle^{-1}, not those of the original C.
     """
     default_label_positions = {
         "lagrange": (-0.28, -0.06),
@@ -2292,6 +2294,9 @@ def plotPoincareDiskTriangularReconnectionCriteria(
     # Make plot of fundamental domain
     if ax is None:
         fig, ax = prepPoincareFig(grid_size=grid_size, withGrid=False, withYieldSurface=False)
+    if isinstance(transformation, str) and transformation == "triangular":
+        ax.set_xlabel(r"$x_p^\triangle$")
+        ax.set_ylabel(r"$y_p^\triangle$")
     zoom = 1
 
     drawPoincareGrid(
@@ -2333,9 +2338,9 @@ def plotPoincareDiskTriangularReconnectionCriteria(
     )
 
     for name, label in (
-        ("lagrange", r"$\mathcal{D}_{L}$"),
-        ("edge", r"$\mathcal{D}_{E}$"),
-        ("triangular", r"$\mathcal{D}_{T}$"),
+        ("lagrange", r"$\mathcal{D}_{\mathcal{L}}$"),
+        ("edge", r"$\mathcal{D}_{\mathcal{E}}$"),
+        ("triangular", r"$\mathcal{D}_{\mathcal{T}}$"),
     ):
         x_disk, y_disk = positions[name]
         ax.text(

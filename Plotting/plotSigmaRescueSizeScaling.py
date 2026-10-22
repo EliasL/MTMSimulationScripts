@@ -239,7 +239,7 @@ def _plot(
         ("alpha", r"$\hat\alpha$", False),
         ("Lambda", r"$\hat\lambda$", True),
         ("event_count", "events used in fit", False),
-        ("xmin", r"$\Delta E_{\min}$", True),
+        ("xmin", r"$\Delta E_{S,\min}^{KS}$ (green)", True),
     )
     sizes = sorted({row["size"] for row in records})
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -268,7 +268,7 @@ def _plot(
                 linewidth=1.2,
                 label="paired irreversible events",
             )
-            ax.margins(y=0.14)
+            ax.margins(y=0.16)
             for size, count in zip(sizes, counts):
                 ax.annotate(f"{seed_counts[size]} seeds", (size, count),
                             xytext=(0, 5), textcoords="offset points",
@@ -340,12 +340,9 @@ def _plot(
                 linewidth=1.1,
                 label=PROTOCOL_LABELS[protocol],
             )
-            if metric in {"alpha", "xmin", "Lambda"}:
-                interval_key = {
-                    "alpha": "alpha_interval_95",
-                    "xmin": "xmin_interval_95",
-                    "Lambda": "Lambda_interval_95",
-                }[metric]
+            if (protocol == "delta_E_S" and metric in {"alpha", "xmin"}
+                    and rows[0]["alpha_ci_95" if metric == "alpha" else "xmin_ci_95"] is not None):
+                interval_key = "alpha_ci_95" if metric == "alpha" else "xmin_ci_95"
                 intervals = np.asarray([row[interval_key] for row in rows], dtype=float)
                 ax.vlines(x, intervals[:, 0], intervals[:, 1],
                           color=COLORS[protocol], alpha=0.55, linewidth=1.5)
@@ -355,15 +352,39 @@ def _plot(
         ax.set_xlabel("System size $L$")
         ax.set_ylabel(ylabel)
         ax.grid(alpha=0.2)
-        handles, labels = ax.get_legend_handles_labels()
-        handles.append(Line2D([], [], color="0.35", marker="|", linestyle="none",
-                              markersize=10, label="95% bootstrap percentile intervals"))
-        labels.append("95% bootstrap percentile intervals")
-        ax.legend(handles, labels, fontsize="small")
-        fig.tight_layout()
-        fig.savefig(path, bbox_inches="tight")
-        fig.savefig(path.with_suffix(".png"), dpi=220, bbox_inches="tight")
-        plt.close(fig)
+    handles = [
+        Line2D(
+            [],
+            [],
+            color=COLORS[protocol],
+            marker=MARKERS[protocol],
+            label=PROTOCOL_LABELS[protocol],
+        )
+        for protocol in PROTOCOLS
+    ]
+    fig.legend(
+        handles=handles,
+        loc="upper center",
+        ncol=3,
+        frameon=False,
+        bbox_to_anchor=(0.5, 0.965),
+        fontsize="small",
+    )
+    es_rows = sorted((row for row in records if row["protocol"] == "delta_E_S"),
+                     key=lambda row: row["size"])
+    if all(row["p"] is not None for row in es_rows):
+        note = r"Green bars: 95% refit intervals for $\Delta E_S$"
+        pvalues = "; ".join(f"L={row['size']}: {row['p']:.3f}" for row in es_rows)
+        fig.text(0.5, 0.015, r"Selected $\Delta E_S$ fit $p$: " + pvalues,
+                 ha="center", fontsize="small")
+    else:
+        note = "Bootstrap omitted: no p-values or uncertainty intervals"
+    fig.text(0.5, 0.925, note, ha="center", fontsize="small")
+    fig.tight_layout(rect=(0, 0.045, 1, 0.93))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, bbox_inches="tight")
+    fig.savefig(output.with_suffix(".png"), dpi=220, bbox_inches="tight")
+    plt.close(fig)
 
 
 def run(
@@ -379,9 +400,9 @@ def run(
         raise ValueError(f"Fit summary uses an obsolete yield selection: {summary_path}")
     if Path(summary["snapshot_root"]).resolve() != Path(snapshot_root).resolve():
         raise ValueError("Fit summary and requested snapshot refer to different data.")
-    if summary.get("bootstrap_xmin_mode") != "global":
+    if summary.get("bootstrap_xmin_mode") not in {"global", "skipped"}:
         raise ValueError(
-            "This plotting wrapper requires a full-global bootstrap summary; "
+            "This plotting wrapper requires a full-global or explicitly skipped bootstrap; "
             f"got {summary.get('bootstrap_xmin_mode')!r}."
         )
     if summary.get("xmin_selection") != "global minimum after exhaustive observed-candidate scan":

@@ -1,22 +1,123 @@
 import tempfile
 import unittest
+import json
+import gzip
+import os
+from unittest.mock import patch
 from pathlib import Path
 
 import meshio
 import numpy as np
+import pandas as pd
 
 from Plotting.reconnectingEnergyJumpAndElementDistribution import (
     _edge_flip_element_pairs,
+    _completed_simulation_peaks,
     _log_shift_bins,
+    _post_yield_energy_stress_frame,
+    build_element_lineage_summary,
     read_live_macro_snapshot,
     read_vtu_pair,
     read_vtu_pair_details,
     select_pairs,
 )
 from Plotting.dataFunctions import get_data_from_name
+from Management.reconnectionElementSnapshot import compact_flip_pair, main, read_dump_load
 
 
 class ReconnectingEnergyJumpTests(unittest.TestCase):
+    def test_dump_selection_reads_precise_strain_across_stream_chunks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "dump_l0.90.xml.gz"
+            with gzip.open(path, "wb") as stream:
+                stream.write(b" " * (1024 * 1024 - 3))
+                stream.write(b"<load>0.90494</load>")
+            self.assertEqual(read_dump_load(path), 0.90494)
+            with gzip.open(path, "wb") as stream:
+                stream.write(b"<load>nan</load>")
+            with self.assertRaisesRegex(ValueError, "Nonfinite"):
+                read_dump_load(path)
+
+    def test_replay_cli_refuses_to_run_outside_slurm(self):
+        args = ["replay", "--manifest", "missing.json", "--executable", "missing",
+                "--output-root", "missing", "--task-index", "0", "--nr-threads", "1"]
+        with patch.dict(os.environ, {}, clear=True), patch("sys.argv", args):
+            with self.assertRaisesRegex(RuntimeError, "must run through Slurm"):
+                main()
+
+    def test_replay_cli_requires_one_cpu_and_one_dump(self):
+        args = ["replay", "--manifest", "missing.json", "--executable", "missing",
+                "--output-root", "missing", "--task-index", "0", "--nr-threads", "1"]
+        with patch.dict(os.environ, {"SLURM_JOB_ID": "1", "SLURM_CPUS_PER_TASK": "2"}, clear=True), patch("sys.argv", args):
+            with self.assertRaisesRegex(RuntimeError, "one dump with one CPU"):
+                main()
+
+    def test_overlapping_checkpoints_do_not_duplicate_a_flip_cycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / "host/samples/run"
+            folder.mkdir(parents=True)
+            dumps = ["dump_l0.7.xml.gz", "dump_l0.8.xml.gz"]
+            metadata = {"status": "complete", "load": 0.81,
+                        "before_vtu": "mesh_load=0.81_minStep=1.2_pre.42.vtu",
+                        "after_vtu": "mesh_load=0.81_minStep=1.2_post.42.vtu"}
+            identity = np.broadcast_to(np.eye(2), (2, 2, 2)).copy()
+            data = {"element_indices": np.array([8, 13]),
+                    "before_connectivity": np.array([[0, 1, 2], [0, 2, 3]]),
+                    "after_connectivity": np.array([[0, 1, 3], [1, 2, 3]]),
+                    "before_energy": np.array([0.2, 0.3]),
+                    "after_energy": np.array([0.25, 0.28]),
+                    "before_stored_sigma12": np.array([0.1, 0.2]),
+                    "after_stored_sigma12": np.array([0.11, 0.19]),
+                    "before_T": identity, "after_T": identity,
+                    "before_F_E": identity, "after_F_E": identity}
+            for dump in dumps:
+                path = folder / (dump + ".npz")
+                np.savez_compressed(path, **data)
+                path.with_suffix(".json").write_text(json.dumps(metadata))
+            plan = root / "plan.json"
+            plan.write_text(json.dumps({"sampling": "test", "runs": [{
+                "simulation_name": "run", "host": "host.example", "size": 10,
+                "seed": 0, "yield_load": 0.6, "max_load": 1, "dumps": dumps,
+            }]}))
+            result = build_element_lineage_summary(root, plan, root / "lineage.csv")
+            frame = pd.read_csv(result)
+            self.assertEqual(len(frame), 2)
+            self.assertEqual(frame["before_element_index"].tolist(), [8, 13])
+            np.testing.assert_allclose(frame["short_energy_shift"], [0.05, -0.02])
+            report = json.loads(result.with_suffix(".sampling.json").read_text())
+            self.assertEqual(report["checkpoints"][1]["status"], "duplicate_cycle")
+
+    def test_completed_runs_require_finite_endpoint_at_configured_target(self):
+        peaks = pd.DataFrame({
+            "simulation_name": ["done", "running", "other_target", "missing"],
+            "last_load": [1.0, 0.95, 0.5, np.nan],
+            "max_load": [1.0, 1.0, 0.5, 1.0],
+        })
+        selected = _completed_simulation_peaks(peaks)
+        self.assertEqual(selected["simulation_name"].tolist(), ["done", "other_target"])
+        with self.assertRaisesRegex(ValueError, "requires columns"):
+            _completed_simulation_peaks(peaks.drop(columns="last_load"))
+
+    def test_post_yield_selection_uses_each_peak_and_replaces_stale_labels(self):
+        frame = pd.DataFrame({
+            "load": [0.4, 0.6, 0.61, 0.7],
+            "yield_load": [0.3, 0.6, 0.6, 0.8],
+            "regime": ["pre-yield", "post-yield", "pre-yield", "post-yield"],
+        })
+        selected = _post_yield_energy_stress_frame(frame)
+        self.assertEqual(selected.index.tolist(), [0, 2])
+        self.assertEqual(selected["regime"].tolist(), ["post-yield", "post-yield"])
+        self.assertEqual(frame.loc[0, "regime"], "pre-yield")
+
+    def test_post_yield_selection_requires_a_valid_peak(self):
+        with self.assertRaisesRegex(ValueError, "requires columns"):
+            _post_yield_energy_stress_frame(pd.DataFrame({"load": [0.7]}))
+        with self.assertRaisesRegex(ValueError, "finite"):
+            _post_yield_energy_stress_frame(pd.DataFrame({
+                "load": [0.7], "yield_load": [np.nan],
+            }))
+
     def test_live_csv_reader_drops_partial_final_line(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "macroData.csv"
@@ -134,6 +235,7 @@ class ReconnectingEnergyJumpTests(unittest.TestCase):
                     point_data={"refIndex": np.arange(4)},
                     cell_data=cell_data([2.5, 3.5], [0.4, 0.6]),
                 ),
+                binary=False,
             )
             meshio.write(
                 after_path,
@@ -143,7 +245,17 @@ class ReconnectingEnergyJumpTests(unittest.TestCase):
                     point_data={"refIndex": np.arange(4)},
                     cell_data=cell_data([2.0, 3.0], [0.3, 0.5]),
                 ),
+                binary=False,
             )
+            compact = compact_flip_pair(before_path, after_path)
+            np.testing.assert_array_equal(compact["element_indices"], [0, 1])
+            np.testing.assert_allclose(compact["before_energy"], [2.5, 3.5])
+            np.testing.assert_allclose(compact["after_energy"], [2.0, 3.0])
+            np.testing.assert_allclose(compact["before_stored_sigma12"], [0.8, 1.2])
+            np.testing.assert_array_equal(compact["before_connectivity"], before_cells[0][1])
+            np.testing.assert_array_equal(compact["after_connectivity"], after_cells[0][1])
+            np.testing.assert_allclose(compact["before_F_E"] @ compact["before_T"],
+                                       [[[1, 1], [0, 1]], [[2, 0], [1, 1]]])
             before, after = read_vtu_pair(
                 before_path, after_path, "C", np.linspace(-1.0, 1.0, 11)
             )

@@ -970,6 +970,7 @@ def _render_pooled_poincare_flow(
     show_arrows: bool = False,
     show_ellipticity_boundary: bool = True,
     density_norm: LogNorm | None = None,
+    figsize: tuple[float, float] = (10.0, 9.4),
 ) -> Path:
     """Render one pooled Poincare flow view at a requested zoom.
 
@@ -977,7 +978,7 @@ def _render_pooled_poincare_flow(
     every populated spatial bin, allowing the bin to contribute two quivers.
     """
 
-    flow_figure = plt.figure(figsize=(10.0, 9.4))
+    flow_figure = plt.figure(figsize=figsize)
     flow_axis = flow_figure.add_axes((0.08, 0.17, 0.84, 0.76))
     density_colorbar_axis = flow_figure.add_axes(
         (0.30, 0.095, 0.40, 0.022) if not show_arrows else (0.10, 0.095, 0.38, 0.022)
