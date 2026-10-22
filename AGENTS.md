@@ -1,3 +1,20 @@
+# MTS2D version compatibility
+
+MTS2D has two actively relevant branches. `main` is **not backwards
+compatible** with the older simulation configuration and checkpoint formats.
+Use `main` for new work that explicitly targets the current simulator, including
+the MAGI curvature benchmark. The legacy PhD branch is named `MTS2D_PhD` in
+Git; use it for older jobs and their existing configurations, dumps, and
+continuations.
+
+Before running, resuming, or diagnosing a job, identify its required MTS2D
+branch and verify the source revision and executable actually used. A legacy
+job failing on `main` may simply need `MTS2D_PhD`; do not "fix" its settings,
+readers, or scientific behavior to accommodate the wrong simulator version.
+Keep branch-specific source/build directories and record the exact revision.
+The current upload/build helpers target a shared `~/simulation/MTS2D`
+directory, so check which version existing jobs need before replacing it.
+
 # Energy-drop power-law analysis
 
 ## Delta E_S convention

@@ -86,7 +86,7 @@ def _most_complete_per_seed(paths: list[Path]) -> list[Path]:
 def default_source_paths() -> dict[str, list[Path]]:
     """Discover the supplied local L=200 file for each minimizer/seed."""
     local = Path("/Volumes/data/MTS2D_output")
-    resumed = Path("/Volumes/data/MTS2D_local_resume")
+    resumed = Path("/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026/2026/minimizer_comparison/local_continuations")
     patterns = {
         "FIRE": [
             (

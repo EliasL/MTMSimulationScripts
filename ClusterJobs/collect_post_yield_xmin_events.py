@@ -53,7 +53,7 @@ from Plotting.real_space_events.xmin_atlas import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUTPUT = Path("/Volumes/data/MTS2D_xmin_collection/post_yield_irreversible")
+DEFAULT_OUTPUT = Path("/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026/2026/selected_event_replays/collection/post_yield_irreversible")
 DEFAULT_DATA_VOLUME = Path("/Volumes/data")
 DEFAULT_SEEDS = (0, 1, 2)  # Seed 3's checkpoint-producing rerun is much slower.
 STEPS = (

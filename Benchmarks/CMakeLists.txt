@@ -1,0 +1,23 @@
+cmake_minimum_required(VERSION 3.14)
+project(MTS2DBenchmarks LANGUAGES C CXX)
+
+set(MTS2D_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../MTS2D" CACHE PATH "MTS2D source checkout")
+if(NOT EXISTS "${MTS2D_SOURCE_DIR}/src/Simulation/simulation.h")
+    message(FATAL_ERROR "Set MTS2D_SOURCE_DIR to an MTS2D source checkout")
+endif()
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+add_subdirectory("${MTS2D_SOURCE_DIR}" mts2d EXCLUDE_FROM_ALL)
+
+# Use the simulator's flags for the timed driver as well as its object files.
+foreach(flag CMAKE_CXX_FLAGS_RELEASE CMAKE_EXE_LINKER_FLAGS_RELEASE)
+    get_directory_property(${flag} DIRECTORY "${MTS2D_SOURCE_DIR}" DEFINITION ${flag})
+endforeach()
+get_directory_property(simulator_options DIRECTORY "${MTS2D_SOURCE_DIR}" COMPILE_OPTIONS)
+get_directory_property(simulator_definitions DIRECTORY "${MTS2D_SOURCE_DIR}" COMPILE_DEFINITIONS)
+add_executable(benchmark_MTS2D force_benchmark.cpp)
+set_target_properties(benchmark_MTS2D PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
+target_compile_options(benchmark_MTS2D PRIVATE ${simulator_options})
+target_compile_definitions(benchmark_MTS2D PRIVATE ${simulator_definitions})
+target_link_libraries(benchmark_MTS2D PRIVATE shared_objs)

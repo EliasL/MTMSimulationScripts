@@ -24,7 +24,7 @@ from typing import BinaryIO
 
 DEFAULT_HOST = "schwartz.pmmh-cluster.espci.fr"
 DEFAULT_REMOTE_ROOT = "/data2/elundheim/MTS2D_output"
-DEFAULT_LOCAL_ROOT = Path("/Volumes/data/MTS2D_local_resume")
+DEFAULT_LOCAL_ROOT = Path("/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026/2026/minimizer_comparison/local_continuations")
 DEFAULT_BINARY = Path("/Users/eliaslundheim/work/PhD/MTS2D/build-release/MTS2D")
 
 JOB_TEMPLATES = {

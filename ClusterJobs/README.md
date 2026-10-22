@@ -112,7 +112,7 @@ MPLCONFIGDIR=/tmp/mpl-cache PYTHONPATH=. ./.venv/bin/python -u \
 
 If the terminal is interrupted after the campaign has created its manifest,
 rerun the same command with `--resume`.  The default output is on
-`/Volumes/data/MTS2D_xmin_collection/post_yield_irreversible`.
+`/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026/2026/selected_event_replays/collection/post_yield_irreversible`.
 
 The primary matched comparison uses `0.5 <= Delta E_S/(V0*xmin) < 1` below
 and `1 <= Delta E_S/(V0*xmin) <= 2` above.  Pass

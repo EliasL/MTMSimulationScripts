@@ -13,3 +13,8 @@ output
 Plots
 data
 generatedData/
+/build-benchmark/
+/build-release/
+!NewSimulationScripts/.gitignore
+!NewSimulationScripts/mtscripts/__init__.py
+!NewSimulationScripts/mtscripts/__main__.py

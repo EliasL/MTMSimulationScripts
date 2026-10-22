@@ -33,7 +33,8 @@ REFERENCE_VTU = SOURCE_RUN / "data/" / (
     "LBFGSEpsg0.0LBFGSEpsx1e-06s0_load=0.69859_nrM=43_.54860.vtu"
 )
 DEFAULT_OUTPUT_ROOT = Path(
-    "/Volumes/data/MTS2D_delayed_reconnection_gamma_0p69859"
+    "/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026/2026/"
+    "delayed_reconnection_gamma_0p69859/final_comparison"
 )
 CONFIG_DIRECTORY = ROOT / "output/delayed_reconnection_gamma_0p69859/configs"
 LOAD_PATTERN = re.compile(r"_load=([-+0-9.eE]+)_")

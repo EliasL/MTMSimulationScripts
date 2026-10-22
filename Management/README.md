@@ -114,6 +114,20 @@ for folder in folders:
 
 ## Gotchas
 
+The local campaign archive is
+`/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026`. Local minimizer continuations,
+Delaunay diagnostics, selected-event replays, supervisor exports, and stress
+repair records are grouped under `2026/`; older ZIPs with unverified production
+years are under `historical_legacy/archives`. The main `MTS2D_output` and
+`remoteData` locations remain in place. The archive's `catalogue/` records move
+maps, duplicate checksums, and preserved original metadata. Identical archived
+files may share APFS storage through independent copy-on-write copies; an
+ordinary copy to another disk can require their full logical size.
+
+The standalone inventory/import tool is `simulationArchive.py`; see
+[SIMULATION_ARCHIVE.md](SIMULATION_ARCHIVE.md) for its local practice workflow,
+source-preservation rules and current limitations.
+
 - `get_csv_files(...)` only gives CSVs. It is not enough if you need VTU files.
 - `get_folders_from_servers(...)` may download large folders.
 - `plot.py` imports `from Management.jobs import *`; there is no top-level
