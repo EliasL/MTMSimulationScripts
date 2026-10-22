@@ -1,0 +1,957 @@
+{
+  "schema_version": 1,
+  "purpose": "Read-only real-data regression sample for archive metadata rules; no simulation execution and no full-data download.",
+  "selection_policy": "Code-era boundaries and independent edge cases, not evenly spaced execution dates.",
+  "provenance_policy": "Resolved config version markers identify candidate code eras; they are not certified executable identities. Dirty and unknown revisions remain explicit.",
+  "roots": {
+    "local_output": {
+      "transport": "directory",
+      "path": "/Volumes/data/MTS2D_output"
+    },
+    "backup": {
+      "transport": "directory",
+      "path": "/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026"
+    },
+    "repository": {
+      "transport": "directory",
+      "path": "/Users/eliaslundheim/work/PhD/SimulationScripts_PhD"
+    },
+    "legacy_old_zip": {
+      "transport": "zip",
+      "path": "/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026/historical_legacy/archives/Old_MTS2D_output.zip"
+    },
+    "legacy_energy_zip": {
+      "transport": "zip",
+      "path": "/Volumes/data/Lundheim_MTM_PhD_backup_2023_2026/historical_legacy/archives/Before_energy_fix_MTS2D_output.zip"
+    },
+    "galois": {
+      "transport": "ssh",
+      "host": "galois.pmmh-cluster.espci.fr",
+      "path": "/data/elundheim/MTS2D_output"
+    }
+  },
+  "cases": [
+    {
+      "id": "01_galois_unversioned",
+      "label": "Unversioned Galois legacy CSV without a row index",
+      "source": {
+        "root": "galois",
+        "path": "simpleShear,s100x100l0.15,1e-05,1.0PBCt6minimizerCGLBFGSEpsg1e-05CGEpsg1e-05eps1e-05s14"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": null,
+        "checkpoint": null
+      },
+      "code_evidence": {
+        "config_marker": "",
+        "scope": "config-writing checkout; actual executable and resumed segments not established"
+      },
+      "coverage": [
+        "remote_access",
+        "unversioned",
+        "legacy_spaced_headers",
+        "missing_load_step_column",
+        "code_era_inference_required"
+      ],
+      "expected_observations": {
+        "macro_header": "Load,Avg energy,Avg energy change,Max energy,Avg RSS,Nr plastic deformations,Nr FIRE iterations,Nr LBFGS iterations,Nr CG iterations,Nr FIRE func evals,Nr LBFGS func evals,Nr CG iterations,FIRE Term reason,LBFGS Term reason,CG Term reason,Run time,Minimization time,Write time,Est time remaining,maxX,minX,maxY,minY,dt_start",
+        "production_year": "unknown; do not infer from server or directory name"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "ee47b6c3eadb4dd7a347d0c778a14b1ed300fd130db2c0a9a12282d1bb8bab9b",
+        "macro": "ca399e140a801173c2b9b50024d30080c8da955e412c68902bf182ec6150b00f"
+      },
+      "expected_tail_sha256": {
+        "macro": "bda1eaee9ec5979b68eb04cde8c6185d808d346b5290e1c3ae91b60175a5c8bd"
+      }
+    },
+    {
+      "id": "02_early_archive_no_config",
+      "label": "Early archived run with no configuration",
+      "source": {
+        "root": "legacy_old_zip",
+        "path": "Old_MTS2D_output/simpleShearFixedBoundary,s150x150l0.15,1e-05,1t4s0"
+      },
+      "files": {
+        "config": null,
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShearFixedBoundary,s150x150l0.15,1e-05,1t4s0_load=0.99692_.199.vtu",
+        "checkpoint": null
+      },
+      "code_evidence": {
+        "config_marker": "",
+        "scope": "config-writing checkout; actual executable and resumed segments not established"
+      },
+      "coverage": [
+        "zip_access",
+        "missing_config",
+        "legacy_four_column_macro",
+        "era_hint_2024_not_verified_code"
+      ],
+      "expected_observations": {
+        "archive_macro_timestamp_hint": [
+          2024,
+          3,
+          25,
+          11,
+          45,
+          48
+        ],
+        "timestamp_is_not_verified_code_era": true
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "macro": "f41f5ef6f14fdd9e021dc54adae915d6136ec17490da24bfae2efaca6dc32dda"
+      },
+      "expected_tail_sha256": {}
+    },
+    {
+      "id": "03_legacy_binary_checkpoint",
+      "label": "Legacy config with inline defaults and binary checkpoints",
+      "source": {
+        "root": "legacy_energy_zip",
+        "path": "Before_energy_fix_MTS2D_output/simpleShear,s100x100l0.1501,1e-05,1PBCt4eps0.01s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShear,s100x100l0.1501,1e-05,1PBCt4eps0.01s0_load=0.49624_nrM=0_.34624.vtu",
+        "checkpoint": "dumps/Dump_l0.392810_12.29~17.05.2024.mtsb"
+      },
+      "code_evidence": {
+        "config_marker": "",
+        "scope": "config-writing checkout; actual executable and resumed segments not established"
+      },
+      "coverage": [
+        "zip_access",
+        "inline_config_comments",
+        "numeric_booleans",
+        "binary_checkpoint",
+        "unversioned",
+        "energy_normalization_unknown"
+      ],
+      "expected_observations": {
+        "archive_macro_timestamp_hint": [
+          2024,
+          5,
+          17,
+          17,
+          46,
+          32
+        ],
+        "timestamp_is_not_verified_code_era": true
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "209ee85041384696a89ecc25c24cc12eff274c211336af3604da705e7e997128",
+        "macro": "d546011ad72e816ba29099c1386f904e8e1072487a1ce2241a196014a803eb86"
+      },
+      "expected_tail_sha256": {}
+    },
+    {
+      "id": "04_dirty_2025",
+      "label": "Dirty 2025 checkout, repeated headers and serialization transition",
+      "source": {
+        "root": "local_output",
+        "path": "simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0 copy"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShear,s100x100l0.15,1e-05,1.0PBCt20LBFGSEpsg1e-08energyDropThreshold1e-10s0_load=0.56386_nrM=58_.41386.vtu",
+        "checkpoint": "dumps/dump_l0.19.mtsb"
+      },
+      "code_evidence": {
+        "config_marker": "f831944-dirty",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "f831944651e0a03184cc95f57baaae36c6a19d17",
+        "commit_date": "2025-01-20",
+        "dirty": true,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_not_ancestor",
+          "cauchy_march_fix": "fix_commit_not_ancestor"
+        }
+      },
+      "coverage": [
+        "dirty_revision",
+        "duplicate_header",
+        "legacy_config",
+        "serialization_transition"
+      ],
+      "expected_observations": {
+        "inventory_flags": [
+          "ValueError: Repeated column names in macro header"
+        ],
+        "config_reconnection": null,
+        "minimum_transport_distance": null,
+        "start_load": "0.15",
+        "load_increment": "1e-05",
+        "target_load": "1.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "d41e3f0b93a25a346c66087ac7cd75b25d1382916e5a39ef6dd0dde16f528630",
+        "macro": "7f5f75b8b21ad9661f5e222202ee66763266d09cdce27b2ca74f774e072178fd"
+      },
+      "expected_tail_sha256": {
+        "macro": "9ccf08ca1a0a36aaffcbbc027e0dd8bfa33510c3d13bdb4484bfad67c2cc516c"
+      }
+    },
+    {
+      "id": "05_decreasing_loading",
+      "label": "Early remeshing with a negative loading increment",
+      "source": {
+        "root": "local_output",
+        "path": "singleDislocationTest,s20x20l0.0,-0.0001,2.0NPBCt3epsR1e-06s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/singleDislocationTest,s20x20l0.0,-0.0001,2.0NPBCt3epsR1e-06s0_load=-0.556_nrM=34_.5561.vtu",
+        "checkpoint": null
+      },
+      "code_evidence": {
+        "config_marker": "cc2cac4",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "cc2cac4c9089f21a0e040b5e33cd91e0d1006066",
+        "commit_date": "2025-02-28",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_not_ancestor",
+          "cauchy_march_fix": "fix_commit_not_ancestor"
+        }
+      },
+      "coverage": [
+        "negative_load_increment",
+        "legacy_remeshing",
+        "protocol_specific_completion"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": null,
+        "minimum_transport_distance": null,
+        "start_load": "0.0",
+        "load_increment": "-0.0001",
+        "target_load": "2.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "8e96421ce02fd3a28841576170543966e2b99a3e55e6c32b5c306309ff5150f2",
+        "macro": "c2ccc31ebbb9c121b72940354828f8b545ab4a3b1ccdfa4bbd0b8bd4e00939d5"
+      },
+      "expected_tail_sha256": {
+        "macro": "a184ad2d9db31a882888682b13cd8d6dbcec9ab0ebb86aaca1380bda16052a38"
+      }
+    },
+    {
+      "id": "06_fire_2025",
+      "label": "2025 FIRE minimizer campaign and initial-energy fields",
+      "source": {
+        "root": "local_output",
+        "path": "simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s6"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShear,s200x200l0.15,1e-05,1.0PBCt3minimizerFIRELBFGSEpsg1e-05CGEpsg1e-05eps1e-05s6_load=0.98249_nrM=0_.83250.vtu",
+        "checkpoint": "dumps/dump_l1.00.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "bf27523",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "bf275230ff65795f834a41c19f5374f910dc28d1",
+        "commit_date": "2025-07-04",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_not_ancestor",
+          "cauchy_march_fix": "fix_commit_not_ancestor"
+        }
+      },
+      "coverage": [
+        "fire_minimizer",
+        "legacy_boolean_reconnection",
+        "initial_energy_convention"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "false",
+        "minimum_transport_distance": null,
+        "start_load": "0.15",
+        "load_increment": "1e-05",
+        "target_load": "1.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "389e4b2bfda0423ba7c462bc0be67ccb4c1746e9bea590b4f87975292565ab81",
+        "macro": "0c6e8b2efcbd2f85df32b90584c360455e71d33e1b3e72ec593ad0c8863de349"
+      },
+      "expected_tail_sha256": {
+        "macro": "76a048cc5aa2f9d8cc0bfddddc5e3e5bc816162919c4bb63c91964234d0d6952"
+      }
+    },
+    {
+      "id": "07_boolean_reconnection",
+      "label": "Early reconnecting run using a boolean instead of an enum",
+      "source": {
+        "root": "local_output",
+        "path": "doubleDislocationTest,s100x100l0.0,0.001,4.0NPBCReCONt3epsR1e-06s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/doubleDislocationTest,s100x100l0.0,0.001,4.0NPBCReCONt3epsR1e-06s0_load=3.855_nrM=0_.3856.vtu",
+        "checkpoint": "dumps/dump_l3.0.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "a626979",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "a6269798240f8766921f00354d04bf48146df2fe",
+        "commit_date": "2025-10-13",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_not_ancestor",
+          "cauchy_march_fix": "fix_commit_not_ancestor"
+        }
+      },
+      "coverage": [
+        "legacy_boolean_reconnection",
+        "reconnection_invariant_deformation",
+        "legacy_vtu_fields"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "true",
+        "minimum_transport_distance": null,
+        "start_load": "0.0",
+        "load_increment": "0.001",
+        "target_load": "4.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "cda97f76f981cdd4e06ad68070fb9ef2fd8196a607ebf2982dd1605e2c928301",
+        "macro": "3bbcd20f904ebecbcd340da5280b924d01374e2de39d2bf480ff3812721602a1"
+      },
+      "expected_tail_sha256": {
+        "macro": "8f64ecd0c7530cfb16eb17ed3869bbfd4ff49cd8f88453f0effe16d3dadb2203"
+      }
+    },
+    {
+      "id": "08_initial_cauchy_export",
+      "label": "First Cauchy-stress export era",
+      "source": {
+        "root": "local_output",
+        "path": "simpleShear,s150x150l0.138,1e-05,1.0PBCt8initialGuessNoise0.04LBFGSEpsx1e-05s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShear,s150x150l0.138,1e-05,1.0PBCt8initialGuessNoise0.04LBFGSEpsx1e-05s0_load=0.99744_nrM=1_.85945.vtu",
+        "checkpoint": "dumps/dump_l0.44.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "cfb09cf",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "cfb09cfbdb57de748bbc8378136d9d0c899795a3",
+        "commit_date": "2026-01-19",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_not_ancestor",
+          "cauchy_march_fix": "fix_commit_not_ancestor"
+        }
+      },
+      "coverage": [
+        "stress_calculation_audit",
+        "initial_stress_fields",
+        "before_later_cauchy_fixes"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "none",
+        "minimum_transport_distance": null,
+        "start_load": "0.138",
+        "load_increment": "1e-05",
+        "target_load": "1.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "3645b75f899660501ecbf540fa96aaae3358ed20f16f4d52fb3f1bcc8468e5ba",
+        "macro": "9884402108c50e292621bbf7c3a3638e9d703e1b78412531370e41bdb76cab51"
+      },
+      "expected_tail_sha256": {
+        "macro": "be062a05a2d2286c2b2343a98d0ca8e7783a86f7672c91a8a50bde5b43f206d5"
+      }
+    },
+    {
+      "id": "09_before_extensive_trigger",
+      "label": "Before the extensive energy-drop output-trigger change",
+      "source": {
+        "root": "local_output",
+        "path": "simpleShear,s300x300l0.15,1e-05,1.0PBCt8epsR1e-05LBFGSEpsg1e-08LBFGSEpsx1e-06s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShear,s300x300l0.15,1e-05,1.0PBCt8epsR1e-05LBFGSEpsg1e-08LBFGSEpsx1e-06s0_load=0.99763_nrM=59_.84764.vtu",
+        "checkpoint": "dumps/dump_l0.45.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "0fefdf2",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "0fefdf2e77ff51d2272232f7dc7b03ef635dad90",
+        "commit_date": "2026-03-11",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_not_ancestor",
+          "cauchy_march_fix": "fix_commit_not_ancestor"
+        }
+      },
+      "coverage": [
+        "before_energy_trigger_fix",
+        "distinguish_trigger_from_energy_normalization"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "none",
+        "minimum_transport_distance": null,
+        "start_load": "0.15",
+        "load_increment": "1e-05",
+        "target_load": "1.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "8f91de6bd88c260a18cd65a0f4dcc7b4021d2fe1dd02e449e657fd8015c2a6c2",
+        "macro": "a5731e83a59a4d343e644a45adfb1eae97b17d66bed96c7eb28bf8e9d01dabf8"
+      },
+      "expected_tail_sha256": {
+        "macro": "759eb037cf2aa7087df4f9049857ca26927a44f0d3b941d83234ad7b4c9d187d"
+      }
+    },
+    {
+      "id": "10_extensive_trigger",
+      "label": "Energy-drop trigger change with a misleading historical folder name",
+      "source": {
+        "root": "local_output",
+        "path": "notCorrectEnergyDrop_simpleShear,s150x150l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06energyDropThreshold0.0001s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShear,s150x150l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06energyDropThreshold0.0001s0_load=0.9996_nrM=142_.84961.vtu",
+        "checkpoint": "dumps/dump_l0.34.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "672288c",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "672288c9193885a08781f1a8225e4e5ee82d90e1",
+        "commit_date": "2026-03-17",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_is_ancestor",
+          "cauchy_march_fix": "fix_commit_not_ancestor"
+        }
+      },
+      "coverage": [
+        "after_energy_trigger_fix",
+        "folder_label_is_not_scientific_evidence"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "none",
+        "minimum_transport_distance": null,
+        "start_load": "0.15",
+        "load_increment": "1e-05",
+        "target_load": "1.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "bc026aae183d93e2097ebd924f085b92ecca77904992af45842b446edd46a150",
+        "macro": "dbadedb1d340e107a74a055be7377500124474c28cdc39da1fce49dd44632d45"
+      },
+      "expected_tail_sha256": {
+        "macro": "6531b62b2e51763dcf0eb33dec820b8d8a240877d13a8d26c25b753a3c726977"
+      }
+    },
+    {
+      "id": "11_cauchy_fix_truncated",
+      "label": "Cauchy/reversibility export changes with a malformed trailing CSV fragment",
+      "source": {
+        "root": "local_output",
+        "path": "simpleShear,s50x50l0.15,1e-05,1.0PBCedgeFlipt8LBFGSEpsx1e-06logDuringMinimization1energyDropThreshold0.0001s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShear,s50x50l0.15,1e-05,1.0PBCedgeFlipt8LBFGSEpsx1e-06logDuringMinimization1energyDropThreshold0.0001s0_load=0.15487_nrM=17_.488.vtu",
+        "checkpoint": null
+      },
+      "code_evidence": {
+        "config_marker": "cf71595",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "cf71595bc076328ccb1a64a25b69baf5a57f0af1",
+        "commit_date": "2026-03-24",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_is_ancestor",
+          "cauchy_march_fix": "fix_commit_is_ancestor"
+        }
+      },
+      "coverage": [
+        "cauchy_fix_era",
+        "malformed_csv",
+        "unterminated_macro",
+        "preserve_raw_rows"
+      ],
+      "expected_observations": {
+        "inventory_flags": [
+          "malformed_macro_rows",
+          "unterminated_macro_line_requires_review"
+        ],
+        "config_reconnection": "edgeFlip",
+        "minimum_transport_distance": null,
+        "start_load": "0.15",
+        "load_increment": "1e-05",
+        "target_load": "1.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "a1cc7b701ba3ecb26dc67a5100eac0b0a974b824532ef8331088247f42f902e8",
+        "macro": "8fe0762bf769324a132a38de3c3e9d48bf5272842c3d2fb4d6c360ce4a9e0755"
+      },
+      "expected_tail_sha256": {
+        "macro": "dc39049e579d0dbcc0c282d278a90cdd2406bcbce9883134dacdf12942ed6127"
+      }
+    },
+    {
+      "id": "12_metric_cauchy",
+      "label": "Metric-representative Cauchy stress era",
+      "source": {
+        "root": "local_output",
+        "path": "reconnectSSTest,s3x3l0.0,0.01,3.0PBCt1GP11.0s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/reconnectSSTest,s3x3l0.0,0.01,3.0PBCt1GP11.0s0_load=2_nrM=0_.201.vtu",
+        "checkpoint": "dumps/dump_l0.2.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "e5f8c03",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "e5f8c03635491e9264f9f62ce17ae33b682915b2",
+        "commit_date": "2026-04-24",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_is_ancestor",
+          "cauchy_march_fix": "fix_commit_is_ancestor"
+        }
+      },
+      "coverage": [
+        "metric_vs_total_deformation",
+        "stress_components_need_audit",
+        "small_mesh_reference"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "none",
+        "minimum_transport_distance": null,
+        "start_load": "0.0",
+        "load_increment": "0.01",
+        "target_load": "3.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "b2592155c7d6f09c0ff0ee91bf2b47c88aefb011a45b60a5583f7516cb6d1189",
+        "macro": "c9c4727b6ca6852f06da46a6a12be9e2ecd548d7ade036f265a4a493083affda"
+      },
+      "expected_tail_sha256": {
+        "macro": "7c870f6838252cca0e5295f8826a11aaea45ee07083336f59af05823b522367f"
+      }
+    },
+    {
+      "id": "13_before_area_weighting",
+      "label": "Reconnecting reversibility run before the area-weighting fix",
+      "source": {
+        "root": "local_output",
+        "path": "reversibilityProtocolTest,s200x200l0.15,1e-05,3.0PBCedgeFlipt2epsR0.0LBFGSEpsg0.0LBFGSEpsx1e-06s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/reversibilityProtocolTest,s200x200l0.15,1e-05,3.0PBCedgeFlipt2epsR0.0LBFGSEpsg0.0LBFGSEpsx1e-06s0_load=0.5822_nrM=407_.43221.vtu",
+        "checkpoint": "dumps/crash_dump_l0.2.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "b5a9f70",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "b5a9f70418d29c4fac348c78edaa8e9982945487",
+        "commit_date": "2026-08-19",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_not_ancestor",
+          "extensive_trigger": "fix_commit_is_ancestor",
+          "cauchy_march_fix": "fix_commit_is_ancestor"
+        }
+      },
+      "coverage": [
+        "before_area_weighting_fix",
+        "reversibility_protocol",
+        "reconnection",
+        "branch_specific_compatibility"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "edgeFlip",
+        "minimum_transport_distance": null,
+        "start_load": "0.15",
+        "load_increment": "1e-05",
+        "target_load": "3.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "36909ad5a7d8ff21783305916ba8cc76afb8a9ff20717a4fa6585bc5e15a73a8",
+        "macro": "c87402974a8e1e80797a41b2935b5dddd0b29820b6bf298a4a676285f7199ffc"
+      },
+      "expected_tail_sha256": {
+        "macro": "65f2795be291f1c9ba578d147ef8fe1cde0f9438d2e94afa92a51d4870dc54ea"
+      }
+    },
+    {
+      "id": "14_after_area_weighting",
+      "label": "Later code era after the area-weighting fix",
+      "source": {
+        "root": "local_output",
+        "path": "simpleShear,s100x100l0.15,1e-05,1.0PBCt3meshDiagonalminorLBFGSEpsx1e-06writeDebugVTUs0s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/simpleShear,s100x100l0.15,1e-05,1.0PBCt3meshDiagonalminorLBFGSEpsx1e-06writeDebugVTUs0s0_load=0.98861_nrM=0_.83862.vtu",
+        "checkpoint": "dumps/dump_l0.92.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "ca81cfb",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "ca81cfb5d256ba22965b0f52fcb4cd655a0adce1",
+        "commit_date": "2026-09-03",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_is_ancestor",
+          "extensive_trigger": "fix_commit_is_ancestor",
+          "cauchy_march_fix": "fix_commit_is_ancestor"
+        }
+      },
+      "coverage": [
+        "after_area_weighting_fix",
+        "fix_applicability_depends_on_configuration",
+        "do_not_infer_executable_from_config_marker"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "none",
+        "minimum_transport_distance": null,
+        "start_load": "0.15",
+        "load_increment": "1e-05",
+        "target_load": "1.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "4ea29afc16ef7e00bcf70601fe3ae2c7508ac43c98c4d86e32d3e5cd3043d5b2",
+        "macro": "45035e68f18b85989be3a609182914f21e9003d79c01556aee03a389aca517c0"
+      },
+      "expected_tail_sha256": {
+        "macro": "f2b35d7dd022d88312824e5cfe9ec63fa287b30fae07b551559a2b4ec44d4a62"
+      }
+    },
+    {
+      "id": "15_transport_disabled",
+      "label": "Minimum transport explicitly disabled despite a late code revision",
+      "source": {
+        "root": "local_output",
+        "path": "doubleDislocationTest,s20x20l0.0,1e-05,4.0NPBCedgeFlipmtd0t2GP31.0epsR0.0LBFGSEpsg0.0LBFGSEpsx1e-06s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/doubleDislocationTest,s20x20l0.0,1e-05,4.0NPBCedgeFlipmtd0t2GP31.0epsR0.0LBFGSEpsg0.0LBFGSEpsx1e-06s0_load=0_nrM=0_.1.vtu",
+        "checkpoint": "dumps/dump_l1.0.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "deb9688",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "deb9688f01b1df51c1e1dbb02dfad157178fd2f6",
+        "commit_date": "2026-09-25",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_is_ancestor",
+          "extensive_trigger": "fix_commit_is_ancestor",
+          "cauchy_march_fix": "fix_commit_is_ancestor"
+        }
+      },
+      "coverage": [
+        "minimum_transport_disabled",
+        "same_revision_different_physics",
+        "name_config_consistency"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "edgeFlip",
+        "minimum_transport_distance": "0",
+        "start_load": "0.0",
+        "load_increment": "1e-05",
+        "target_load": "4.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "e4f6ef882f8f4696e217358f5c9e8504334e9614e7d1f14b35ced6e3dd7bdd8f",
+        "macro": "4ded2eedff450db48950681571ab1ef725fc5b8a5dbbf98c6f33fa46dde23cdb"
+      },
+      "expected_tail_sha256": {
+        "macro": "1758c6477738eb8b6e62f558fe4e76ec1e6c6af08448d9aa0369cf8e224b0fd4"
+      }
+    },
+    {
+      "id": "16_transport_enabled",
+      "label": "Matched configuration with minimum transport enabled",
+      "source": {
+        "root": "local_output",
+        "path": "doubleDislocationTest,s20x20l0.0,1e-05,4.0NPBCedgeFlipt2GP31.0epsR0.0LBFGSEpsg0.0LBFGSEpsx1e-06s0"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": "data/doubleDislocationTest,s20x20l0.0,1e-05,4.0NPBCedgeFlipt2GP31.0epsR0.0LBFGSEpsg0.0LBFGSEpsx1e-06s0_load=0_nrM=0_.1.vtu",
+        "checkpoint": "dumps/dump_l1.0.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "deb9688",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "deb9688f01b1df51c1e1dbb02dfad157178fd2f6",
+        "commit_date": "2026-09-25",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_is_ancestor",
+          "extensive_trigger": "fix_commit_is_ancestor",
+          "cauchy_march_fix": "fix_commit_is_ancestor"
+        }
+      },
+      "coverage": [
+        "minimum_transport_enabled",
+        "same_revision_different_physics",
+        "matched_setting_pair"
+      ],
+      "expected_observations": {
+        "inventory_flags": [],
+        "config_reconnection": "edgeFlip",
+        "minimum_transport_distance": "1",
+        "start_load": "0.0",
+        "load_increment": "1e-05",
+        "target_load": "4.0"
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "9ef883a9164a763eff56397856c382bd9b7c118032b74a99ab2fa52d7af07d6c",
+        "macro": "8ade021cffa9fa71e89069f50d2709046c11efa514b27c478c1ae81100e2726a"
+      },
+      "expected_tail_sha256": {
+        "macro": "3553ce78e4e37c147e992c19f3ba1a87c4be5e12cbc629d27e4cc2e4b9eacd6d"
+      }
+    },
+    {
+      "id": "17_partial_size_scaling",
+      "label": "Partial historical size-scaling source with unknown revision",
+      "source": {
+        "root": "backup",
+        "path": "2026/size_scaling_nonreconnecting/source_download/simpleShear,s200x200l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s3"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": null,
+        "checkpoint": "dumps/dump_l0.15.xml.gz"
+      },
+      "code_evidence": {
+        "config_marker": "unknown",
+        "scope": "config-writing checkout; actual executable and resumed segments not established"
+      },
+      "coverage": [
+        "size_scaling_campaign",
+        "partial_run",
+        "unknown_version",
+        "do_not_require_completion"
+      ],
+      "expected_observations": {
+        "last_load_previously_observed": 0.60454,
+        "must_not_be_discarded_as_incomplete": true
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "f574011bd67c6a113ece836725dafb46d92859802946029958ae55e8badccdef",
+        "macro": "76a7041c295fefcc44c9ba7690da849483dcc0669ec94a61d1f7a97a65a7227e"
+      },
+      "expected_tail_sha256": {
+        "macro": "621b66cdf5a21450b490e1faff712a140dd4dd6a492d71ed36dd1adbab643769"
+      },
+      "expected_schema_metadata_sha256": {
+        "macro": "dca7ad3efcf1f16af800309b311e557215419f6ffff57234906fba54ec024bb3"
+      }
+    },
+    {
+      "id": "18_sigma_rescue_replay",
+      "label": "Short stress-repair replay with an unknown config revision",
+      "source": {
+        "root": "backup",
+        "path": "2026/stress_repair/local_validation/replay/L150_s0_from_0p15466_to_0p16452/simpleShear,s150x150l0.15,1e-05,1.0PBCt4LBFGSEpsx1e-06s0sigmaRescueL150s0from0.15466to0.16452"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "mesh": null,
+        "checkpoint": null
+      },
+      "code_evidence": {
+        "config_marker": "unknown",
+        "scope": "config-writing checkout; actual executable and resumed segments not established"
+      },
+      "coverage": [
+        "repair_replay",
+        "unknown_version",
+        "source_derived_relationship",
+        "repair_correctness_requires_evidence"
+      ],
+      "expected_observations": {
+        "role": "repair_replay_candidate",
+        "do_not_claim_confirmed_scientific_correction": true
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "cc5e27d38797c4df937a794c3f917c2bd4ee955cee3019d7268345f47f1efcbd",
+        "macro": "1b171ab358d25bda62d224366010fff3c8feed171e4f79b5e33b3a890b7a83fd"
+      },
+      "expected_tail_sha256": {
+        "macro": "a799777fe23c30c3e714c9ae71db62cb9d6b14bb57ce180de2e1c31e3d44b311"
+      }
+    },
+    {
+      "id": "19_failed_header_only",
+      "label": "Failed retry: header-only CSV and an individually archived crash checkpoint",
+      "source": {
+        "root": "backup",
+        "path": "2026/delayed_reconnection_gamma_0p69859/earlier_attempts/failed_edgeflip_retry"
+      },
+      "files": {
+        "config": "config.conf",
+        "macro": "macroData.csv",
+        "checkpoint_archive": "payload.tar.gz",
+        "mesh": null,
+        "checkpoint": null
+      },
+      "code_evidence": {
+        "config_marker": "bfa2c85",
+        "scope": "config-writing checkout; actual executable and resumed segments not established",
+        "commit": "bfa2c855876f502cc73c04046783e52caffc4bff",
+        "commit_date": "2026-09-28",
+        "dirty": false,
+        "config_checkout_fix_ancestry": {
+          "area_weighting": "fix_commit_is_ancestor",
+          "extensive_trigger": "fix_commit_is_ancestor",
+          "cauchy_march_fix": "fix_commit_is_ancestor"
+        }
+      },
+      "coverage": [
+        "header_only_macro",
+        "failed_attempt",
+        "preserve_despite_metadata_failure",
+        "tar_gzip_payload"
+      ],
+      "expected_observations": {
+        "macro_has_completed_rows": false,
+        "archival_allowed": true
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "config": "83b91c0d589f92fff939744966753cd298d4767ec075d5ca7f6743b53132843c",
+        "macro": "193e8b301e19ed715201e87aeb2d13d026228b76d0e366d143dac60f87e06a59"
+      },
+      "expected_tail_sha256": {
+        "macro": "193e8b301e19ed715201e87aeb2d13d026228b76d0e366d143dac60f87e06a59"
+      }
+    },
+    {
+      "id": "20_historical_derived_analysis",
+      "label": "Historical corrected macro and audited old analysis conventions",
+      "source": {
+        "root": "repository",
+        "path": "Plots/powerLaw"
+      },
+      "files": {
+        "config": null,
+        "macro": "truncated_powerlaw_flowchart/data/simpleShear,s250x250l0.15,1e-05,1.0PBCt8LBFGSEpsx1e-06s0_fixed.csv",
+        "historical_audit": "panel_f_yield_definition_comparison/historical_audit.json",
+        "mesh": null,
+        "checkpoint": null
+      },
+      "code_evidence": {
+        "config_marker": "",
+        "scope": "config-writing checkout; actual executable and resumed segments not established"
+      },
+      "coverage": [
+        "derived_macro",
+        "historical_analysis_provenance",
+        "energy_drop_convention",
+        "saved_figure_not_current_code"
+      ],
+      "expected_observations": {
+        "original_macro_may_be_reanalysed": true,
+        "associated_saved_fit_is_historical_only": true,
+        "do_not_infer_gamma0_from_column_names": true
+      },
+      "attachments": [],
+      "execution_policy": "metadata_only; never launch a simulator",
+      "expected_probe_sha256": {
+        "macro": "0931ddbde18cedaacccf98384fd10c7fc99c8903e3a09f141d9c602f2e7e1e5e",
+        "historical_audit": "1a0a279e3569b4fd3dad3ea3da0101dd8cba98716b62a66ca4a821f9d6e8970d"
+      },
+      "expected_tail_sha256": {
+        "macro": "1f9eea174567bd979a2347216811ea266d839990431fabb1500e1a4a7aee5769"
+      }
+    }
+  ],
+  "coverage_gaps": [
+    "Current main-branch simulator format is outside these legacy PhD fixtures; no actual main-format run was located for this set.",
+    "A positive gamma0 build-manifest/drop-table fixture still needs locating. The historical analysis case tests provenance rejection, not a valid new standard fit.",
+    "Cyclic loading and additional schema variants may require a small extension after these 20 cases establish the baseline."
+  ],
+  "probe_snapshot_file": "archive_rule_probes.json",
+  "temporal_scope": "Available legacy formats with 2024 archive evidence and resolved 2025\u20132026 config-code revisions. There is no requirement for a 2023 simulation."
+}

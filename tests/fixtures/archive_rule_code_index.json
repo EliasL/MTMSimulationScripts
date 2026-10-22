@@ -1,0 +1,250 @@
+{
+  "schema_version": 1,
+  "rule_version": "1",
+  "milestones": {
+    "element_energy_reference_area": "1f932907dbcaeeedb98712e83546bd5150a4ae32",
+    "cauchy_calculation_defined": "cfb09cfbdb57de748bbc8378136d9d0c899795a3",
+    "cauchy_update_called": "f8af5e01dc0dfab8680bbfc88b600b9e88c90e9a",
+    "snapshot_threshold_extensive": "672288c9193885a08781f1a8225e4e5ee82d90e1",
+    "cauchy_march_formula": "cf71595bc076328ccb1a64a25b69baf5a57f0af1",
+    "cauchy_fixed_reference_formula": "e5f8c03635491e9264f9f62ce17ae33b682915b2",
+    "stress_area_weighting": "54898f7bd81b27496c8be05a29a398612fe2763a",
+    "transport_setting_exposed": "deb9688f01b1df51c1e1dbb02dfad157178fd2f6"
+  },
+  "markers": {
+    "0fefdf2": {
+      "status": "resolved",
+      "commit": "0fefdf2e77ff51d2272232f7dc7b03ef635dad90",
+      "commit_date": "2026-03-11",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": true,
+        "snapshot_threshold_extensive": false,
+        "cauchy_march_formula": false,
+        "cauchy_fixed_reference_formula": false,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  //  Discontinuous yielding of pristine micro-crystals, page 16/215\n  // Calculate piola tensor\n  double J = F_fixed_ref.determinant(); // Jacobian\n  sigma.noalias() = (1.0 / J) * P * F_fixed_ref.transpose();\n}",
+      "source_sha256": "b070f9b08688104515d21ee4459cfbd845ad3ed757f6d4a6f54719187d6372d4"
+    },
+    "672288c": {
+      "status": "resolved",
+      "commit": "672288c9193885a08781f1a8225e4e5ee82d90e1",
+      "commit_date": "2026-03-17",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": true,
+        "snapshot_threshold_extensive": true,
+        "cauchy_march_formula": false,
+        "cauchy_fixed_reference_formula": false,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  //  Discontinuous yielding of pristine micro-crystals, page 16/215\n  // Calculate piola tensor\n  double J = F_fixed_ref.determinant(); // Jacobian\n  sigma.noalias() = (1.0 / J) * P * F_fixed_ref.transpose();\n}",
+      "source_sha256": "b070f9b08688104515d21ee4459cfbd845ad3ed757f6d4a6f54719187d6372d4"
+    },
+    "a626979": {
+      "status": "resolved",
+      "commit": "a6269798240f8766921f00354d04bf48146df2fe",
+      "commit_date": "2025-10-13",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": false,
+        "cauchy_update_called": false,
+        "snapshot_threshold_extensive": false,
+        "cauchy_march_formula": false,
+        "cauchy_fixed_reference_formula": false,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": null,
+      "source_sha256": "89d6a3eb8f9c55e630958ca81cf92621cda5cd2786a133c73de5c600a43813ce"
+    },
+    "b5a9f70": {
+      "status": "resolved",
+      "commit": "b5a9f70418d29c4fac348c78edaa8e9982945487",
+      "commit_date": "2026-08-19",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": true,
+        "snapshot_threshold_extensive": true,
+        "cauchy_march_formula": true,
+        "cauchy_fixed_reference_formula": true,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  // Using the fixed ref is a trick to avoid colapsed reference states.\n  // It also improves element conditioning.\n  double J = F.determinant(); // Jacobian\n  sigma.noalias() = (1.0 / J) * P * F.transpose();\n}",
+      "source_sha256": "3ad80d5e6bde839879f1fe02920a7a5d7724004e2d8c3267f0bf271f28d41a8f"
+    },
+    "bf27523": {
+      "status": "resolved",
+      "commit": "bf275230ff65795f834a41c19f5374f910dc28d1",
+      "commit_date": "2025-07-04",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": false,
+        "cauchy_update_called": false,
+        "snapshot_threshold_extensive": false,
+        "cauchy_march_formula": false,
+        "cauchy_fixed_reference_formula": false,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": null,
+      "source_sha256": "a8b1b59b1d9048526caf4b2d2c8c1e881eb718688ed4954b0bb4e4a9dfe82bda"
+    },
+    "bfa2c85": {
+      "status": "resolved",
+      "commit": "bfa2c855876f502cc73c04046783e52caffc4bff",
+      "commit_date": "2026-09-28",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": true,
+        "snapshot_threshold_extensive": true,
+        "cauchy_march_formula": true,
+        "cauchy_fixed_reference_formula": true,
+        "stress_area_weighting": true,
+        "transport_setting_exposed": true
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  // Using the fixed ref is a trick to avoid colapsed reference states.\n  // It also improves element conditioning.\n  double J = F.determinant(); // Jacobian\n  sigma.noalias() = (1.0 / J) * P * F.transpose();\n}",
+      "source_sha256": "cb5ba264f83916f7bf00e67e47ab833317d7814e2bc1cdd2225752c61a14e91d"
+    },
+    "ca81cfb": {
+      "status": "resolved",
+      "commit": "ca81cfb5d256ba22965b0f52fcb4cd655a0adce1",
+      "commit_date": "2026-09-03",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": true,
+        "snapshot_threshold_extensive": true,
+        "cauchy_march_formula": true,
+        "cauchy_fixed_reference_formula": true,
+        "stress_area_weighting": true,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  // Using the fixed ref is a trick to avoid colapsed reference states.\n  // It also improves element conditioning.\n  double J = F.determinant(); // Jacobian\n  sigma.noalias() = (1.0 / J) * P * F.transpose();\n}",
+      "source_sha256": "ebb9d4253f5d265b629cad77dd71f469f2ab0a7d2bbcb63a2660f07b4a980068"
+    },
+    "cc2cac4": {
+      "status": "resolved",
+      "commit": "cc2cac4c9089f21a0e040b5e33cd91e0d1006066",
+      "commit_date": "2025-02-28",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": false,
+        "cauchy_update_called": false,
+        "snapshot_threshold_extensive": false,
+        "cauchy_march_formula": false,
+        "cauchy_fixed_reference_formula": false,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": null,
+      "source_sha256": "8d191cfd64793ca067a23d619f2606b0ebe88dd96ff4dad0c7f0473140f108b9"
+    },
+    "cf71595": {
+      "status": "resolved",
+      "commit": "cf71595bc076328ccb1a64a25b69baf5a57f0af1",
+      "commit_date": "2026-03-24",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": true,
+        "snapshot_threshold_extensive": true,
+        "cauchy_march_formula": true,
+        "cauchy_fixed_reference_formula": false,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  //  Discontinuous yielding of pristine micro-crystals, page 16/215\n  // Calculate piola tensor\n  double J = F.determinant(); // Jacobian\n  sigma.noalias() = (1.0 / J) * P * F.transpose();\n}",
+      "source_sha256": "0feeac56069018437e20fe147b10cf1e42521f7a6ce98607b0d8284daf57690b"
+    },
+    "cfb09cf": {
+      "status": "resolved",
+      "commit": "cfb09cfbdb57de748bbc8378136d9d0c899795a3",
+      "commit_date": "2026-01-19",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": false,
+        "snapshot_threshold_extensive": false,
+        "cauchy_march_formula": false,
+        "cauchy_fixed_reference_formula": false,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  //  Discontinuous yielding of pristine micro-crystals, page 16/215\n  // Calculate piola tensor\n  double J = F_fixed_ref.determinant(); // Jacobian\n  sigma = (1.0 / J) * P * F_fixed_ref.transpose();\n}",
+      "source_sha256": "47b18807577af3942cf9122fadc5c2f3887a3057de98e5fba1693dbb8cb52217"
+    },
+    "deb9688": {
+      "status": "resolved",
+      "commit": "deb9688f01b1df51c1e1dbb02dfad157178fd2f6",
+      "commit_date": "2026-09-25",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": true,
+        "snapshot_threshold_extensive": true,
+        "cauchy_march_formula": true,
+        "cauchy_fixed_reference_formula": true,
+        "stress_area_weighting": true,
+        "transport_setting_exposed": true
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  // Using the fixed ref is a trick to avoid colapsed reference states.\n  // It also improves element conditioning.\n  double J = F.determinant(); // Jacobian\n  sigma.noalias() = (1.0 / J) * P * F.transpose();\n}",
+      "source_sha256": "ebb9d4253f5d265b629cad77dd71f469f2ab0a7d2bbcb63a2660f07b4a980068"
+    },
+    "e5f8c03": {
+      "status": "resolved",
+      "commit": "e5f8c03635491e9264f9f62ce17ae33b682915b2",
+      "commit_date": "2026-04-24",
+      "dirty": false,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": true,
+        "cauchy_update_called": true,
+        "snapshot_threshold_extensive": true,
+        "cauchy_march_formula": true,
+        "cauchy_fixed_reference_formula": true,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": "void TElement::m_updateCauchyStress() {\n  // Discontinuous yielding of pristine micro-crystals, page 16/215\n  // Using the fixed ref is a trick to avoid colapsed reference states.\n  // It also improves element conditioning.\n  double J = F_fixed_ref.determinant(); // Jacobian\n  sigma.noalias() = (1.0 / J) * P * F_fixed_ref.transpose();\n}",
+      "source_sha256": "e4f4d30d5ba7d8a91634801d877ba49d4997a60cd122f50b58577b815824a888"
+    },
+    "f831944-dirty": {
+      "status": "resolved",
+      "commit": "f831944651e0a03184cc95f57baaae36c6a19d17",
+      "commit_date": "2025-01-20",
+      "dirty": true,
+      "ancestry": {
+        "element_energy_reference_area": true,
+        "cauchy_calculation_defined": false,
+        "cauchy_update_called": false,
+        "snapshot_threshold_extensive": false,
+        "cauchy_march_formula": false,
+        "cauchy_fixed_reference_formula": false,
+        "stress_area_weighting": false,
+        "transport_setting_exposed": false
+      },
+      "cauchy_function": null,
+      "source_sha256": "0755dd0328ea89ad43ba2a697c749a6fac01b9c08fcfca138fd8026493a50bb9"
+    }
+  }
+}
